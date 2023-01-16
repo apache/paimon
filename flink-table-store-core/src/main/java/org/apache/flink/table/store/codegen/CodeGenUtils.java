@@ -18,16 +18,16 @@
 
 package org.apache.flink.table.store.codegen;
 
-import org.apache.flink.table.store.utils.BinaryRowDataUtil;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.util.List;
 
 /** Utils for code generations. */
 public class CodeGenUtils {
 
-    public static final Projection EMPTY_PROJECTION = input -> BinaryRowDataUtil.EMPTY_ROW;
+    public static final Projection EMPTY_PROJECTION = input -> BinaryRow.EMPTY_ROW;
 
     public static Projection newProjection(RowType inputType, int[] mapping) {
         if (mapping.length == 0) {
@@ -40,18 +40,18 @@ public class CodeGenUtils {
     }
 
     public static NormalizedKeyComputer newNormalizedKeyComputer(
-            List<LogicalType> fieldTypes, String name) {
+            List<DataType> fieldTypes, String name) {
         return CodeGenLoader.getCodeGenerator()
                 .generateNormalizedKeyComputer(fieldTypes, name)
                 .newInstance(CodeGenUtils.class.getClassLoader());
     }
 
     public static GeneratedClass<RecordComparator> generateRecordComparator(
-            List<LogicalType> fieldTypes, String name) {
+            List<DataType> fieldTypes, String name) {
         return CodeGenLoader.getCodeGenerator().generateRecordComparator(fieldTypes, name);
     }
 
-    public static RecordComparator newRecordComparator(List<LogicalType> fieldTypes, String name) {
+    public static RecordComparator newRecordComparator(List<DataType> fieldTypes, String name) {
         return generateRecordComparator(fieldTypes, name)
                 .newInstance(CodeGenUtils.class.getClassLoader());
     }

@@ -19,15 +19,15 @@
 package org.apache.flink.table.store.format.orc;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.DecimalDataUtils;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.format.orc.filter.OrcFilters;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.DecimalUtils;
 
 import org.apache.hadoop.conf.Configuration;
 import org.junit.jupiter.api.BeforeAll;
@@ -52,25 +52,29 @@ class OrcReaderFactoryTest {
     protected static final int BATCH_SIZE = 9;
 
     private static final RowType FLAT_FILE_TYPE =
-            RowType.of(
-                    new LogicalType[] {
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.STRING().getLogicalType(),
-                        DataTypes.STRING().getLogicalType(),
-                        DataTypes.STRING().getLogicalType(),
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.STRING().getLogicalType(),
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.INT().getLogicalType()
-                    },
-                    new String[] {
-                        "_col0", "_col1", "_col2", "_col3", "_col4", "_col5", "_col6", "_col7",
-                        "_col8"
-                    });
+            RowType.builder()
+                    .fields(
+                            new DataType[] {
+                                DataTypes.INT(),
+                                DataTypes.STRING(),
+                                DataTypes.STRING(),
+                                DataTypes.STRING(),
+                                DataTypes.INT(),
+                                DataTypes.STRING(),
+                                DataTypes.INT(),
+                                DataTypes.INT(),
+                                DataTypes.INT()
+                            },
+                            new String[] {
+                                "_col0", "_col1", "_col2", "_col3", "_col4", "_col5", "_col6",
+                                "_col7", "_col8"
+                            })
+                    .build();
 
     private static final RowType DECIMAL_FILE_TYPE =
-            RowType.of(new LogicalType[] {new DecimalType(10, 5)}, new String[] {"_col0"});
+            RowType.builder()
+                    .fields(new DataType[] {new DecimalType(10, 5)}, new String[] {"_col0"})
+                    .build();
 
     private static Path flatFile;
     private static Path decimalFile;
@@ -145,9 +149,9 @@ class OrcReaderFactoryTest {
                     if (cnt.get() == 0) {
                         // validate first row
                         assertThat(row).isNotNull();
-                        assertThat(row.getArity()).isEqualTo(1);
+                        assertThat(row.getFieldCount()).isEqualTo(1);
                         assertThat(row.getDecimal(0, 10, 5))
-                                .isEqualTo(DecimalDataUtils.castFrom(-1000.5d, 10, 5));
+                                .isEqualTo(DecimalUtils.castFrom(-1000.5d, 10, 5));
                     } else {
                         if (!row.isNullAt(0)) {
                             assertThat(row.getDecimal(0, 10, 5)).isNotNull();
@@ -174,12 +178,12 @@ class OrcReaderFactoryTest {
                 new Configuration(), formatType, selectedFields, conjunctPredicates, BATCH_SIZE);
     }
 
-    private RecordReader<RowData> createReader(OrcReaderFactory format, Path split)
+    private RecordReader<InternalRow> createReader(OrcReaderFactory format, Path split)
             throws IOException {
         return format.createReader(split);
     }
 
-    private void forEach(OrcReaderFactory format, Path file, Consumer<RowData> action)
+    private void forEach(OrcReaderFactory format, Path file, Consumer<InternalRow> action)
             throws IOException {
         RecordReaderUtils.forEachRemaining(format.createReader(file), action);
     }

@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.DataType;
 
 /** bool_or aggregate a field of a row. */
 public class FieldBoolOrAgg extends FieldAggregator {
-    public FieldBoolOrAgg(LogicalType logicalType) {
-        super(logicalType);
+    public FieldBoolOrAgg(DataType dataType) {
+        super(dataType);
     }
 
     @Override

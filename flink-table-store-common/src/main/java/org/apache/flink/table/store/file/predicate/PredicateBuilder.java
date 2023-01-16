@@ -18,19 +18,20 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.TypeUtils;
 import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
 import java.math.BigDecimal;
 import java.sql.Date;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -40,6 +41,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -97,21 +99,20 @@ public class PredicateBuilder {
     }
 
     public Predicate leaf(NullFalseLeafBinaryFunction function, int idx, Object literal) {
-        RowType.RowField field = rowType.getFields().get(idx);
-        return new LeafPredicate(
-                function, field.getType(), idx, field.getName(), singletonList(literal));
+        DataField field = rowType.getFields().get(idx);
+        return new LeafPredicate(function, field.type(), idx, field.name(), singletonList(literal));
     }
 
     public Predicate leaf(LeafUnaryFunction function, int idx) {
-        RowType.RowField field = rowType.getFields().get(idx);
+        DataField field = rowType.getFields().get(idx);
         return new LeafPredicate(
-                function, field.getType(), idx, field.getName(), Collections.emptyList());
+                function, field.type(), idx, field.name(), Collections.emptyList());
     }
 
     public Predicate in(int idx, List<Object> literals) {
         if (literals.size() > 20) {
-            RowType.RowField field = rowType.getFields().get(idx);
-            return new LeafPredicate(In.INSTANCE, field.getType(), idx, field.getName(), literals);
+            DataField field = rowType.getFields().get(idx);
+            return new LeafPredicate(In.INSTANCE, field.type(), idx, field.name(), literals);
         }
 
         List<Predicate> equals = new ArrayList<>(literals.size());
@@ -192,7 +193,7 @@ public class PredicateBuilder {
         }
     }
 
-    public static Object convertJavaObject(LogicalType literalType, Object o) {
+    public static Object convertJavaObject(DataType literalType, Object o) {
         if (o == null) {
             return null;
         }
@@ -212,7 +213,7 @@ public class PredicateBuilder {
             case FLOAT:
                 return ((Number) o).floatValue();
             case VARCHAR:
-                return StringData.fromString(o.toString());
+                return BinaryString.fromString(o.toString());
             case DATE:
                 // Hive uses `java.sql.Date.valueOf(lit.toString());` to convert a literal to Date
                 // Which uses `java.util.Date()` internally to create the object and that uses the
@@ -220,8 +221,8 @@ public class PredicateBuilder {
                 // To get back the expected date we have to use the LocalDate which gets rid of the
                 // TimeZone misery as it uses the year/month/day to generate the object
                 LocalDate localDate;
-                if (o instanceof Timestamp) {
-                    localDate = ((Timestamp) o).toLocalDateTime().toLocalDate();
+                if (o instanceof java.sql.Timestamp) {
+                    localDate = ((java.sql.Timestamp) o).toLocalDateTime().toLocalDate();
                 } else if (o instanceof Date) {
                     localDate = ((Date) o).toLocalDate();
                 } else if (o instanceof LocalDate) {
@@ -237,20 +238,20 @@ public class PredicateBuilder {
                 DecimalType decimalType = (DecimalType) literalType;
                 int precision = decimalType.getPrecision();
                 int scale = decimalType.getScale();
-                return DecimalData.fromBigDecimal((BigDecimal) o, precision, scale);
+                return Decimal.fromBigDecimal((BigDecimal) o, precision, scale);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                TimestampData timestampData;
-                if (o instanceof Timestamp) {
-                    timestampData = TimestampData.fromTimestamp((Timestamp) o);
+                Timestamp timestamp;
+                if (o instanceof java.sql.Timestamp) {
+                    timestamp = Timestamp.fromSQLTimestamp((java.sql.Timestamp) o);
                 } else if (o instanceof Instant) {
-                    timestampData = TimestampData.fromInstant((Instant) o);
+                    timestamp = Timestamp.fromInstant((Instant) o);
                 } else if (o instanceof LocalDateTime) {
-                    timestampData = TimestampData.fromLocalDateTime((LocalDateTime) o);
+                    timestamp = Timestamp.fromLocalDateTime((LocalDateTime) o);
                 } else {
                     throw new UnsupportedOperationException("Unsupported object: " + o);
                 }
-                return timestampData;
+                return timestamp;
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported predicate leaf type " + literalType.getTypeRoot().name());
@@ -316,5 +317,23 @@ public class PredicateBuilder {
             LeafPredicate leafPredicate = (LeafPredicate) predicate;
             return fields.contains(leafPredicate.fieldName());
         }
+    }
+
+    @Nullable
+    public static Predicate partition(Map<String, String> map, RowType rowType) {
+        // TODO: It is somewhat misleading that an empty map creates a null predicate filter
+        List<String> fieldNames = rowType.getFieldNames();
+        Predicate predicate = null;
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        for (Map.Entry<String, String> entry : map.entrySet()) {
+            int idx = fieldNames.indexOf(entry.getKey());
+            Object literal = TypeUtils.castFromString(entry.getValue(), rowType.getTypeAt(idx));
+            if (predicate == null) {
+                predicate = builder.equal(idx, literal);
+            } else {
+                predicate = PredicateBuilder.and(predicate, builder.equal(idx, literal));
+            }
+        }
+        return predicate;
     }
 }

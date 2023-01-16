@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
@@ -59,7 +59,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Nullable protected IOManager ioManager;
 
-    protected final Map<BinaryRowData, Map<Integer, WriterContainer<T>>> writers;
+    protected final Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers;
     private final ExecutorService compactExecutor;
 
     private boolean overwrite = false;
@@ -84,7 +84,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     protected List<DataFileMeta> scanExistingFileMetas(
-            Long snapshotId, BinaryRowData partition, int bucket) {
+            Long snapshotId, BinaryRow partition, int bucket) {
         List<DataFileMeta> existingFileMetas = new ArrayList<>();
         if (snapshotId != null) {
             // Concat all the DataFileMeta of existing files into existingFileMetas.
@@ -101,20 +101,19 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     @Override
-    public void write(BinaryRowData partition, int bucket, T data) throws Exception {
+    public void write(BinaryRow partition, int bucket, T data) throws Exception {
         RecordWriter<T> writer = getWriterWrapper(partition, bucket).writer;
         writer.write(data);
     }
 
     @Override
-    public void compact(BinaryRowData partition, int bucket, boolean fullCompaction)
-            throws Exception {
+    public void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {
         getWriterWrapper(partition, bucket).writer.compact(fullCompaction);
     }
 
     @Override
     public void notifyNewFiles(
-            long snapshotId, BinaryRowData partition, int bucket, List<DataFileMeta> files) {
+            long snapshotId, BinaryRow partition, int bucket, List<DataFileMeta> files) {
         WriterContainer<T> writerContainer = getWriterWrapper(partition, bucket);
         if (LOG.isDebugEnabled()) {
             LOG.debug(
@@ -159,11 +158,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
         List<FileCommittable> result = new ArrayList<>();
 
-        Iterator<Map.Entry<BinaryRowData, Map<Integer, WriterContainer<T>>>> partIter =
+        Iterator<Map.Entry<BinaryRow, Map<Integer, WriterContainer<T>>>> partIter =
                 writers.entrySet().iterator();
         while (partIter.hasNext()) {
-            Map.Entry<BinaryRowData, Map<Integer, WriterContainer<T>>> partEntry = partIter.next();
-            BinaryRowData partition = partEntry.getKey();
+            Map.Entry<BinaryRow, Map<Integer, WriterContainer<T>>> partEntry = partIter.next();
+            BinaryRow partition = partEntry.getKey();
             Iterator<Map.Entry<Integer, WriterContainer<T>>> bucketIter =
                     partEntry.getValue().entrySet().iterator();
             while (bucketIter.hasNext()) {
@@ -224,7 +223,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         compactExecutor.shutdownNow();
     }
 
-    private WriterContainer<T> getWriterWrapper(BinaryRowData partition, int bucket) {
+    private WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket) {
         Map<Integer, WriterContainer<T>> buckets = writers.get(partition);
         if (buckets == null) {
             buckets = new HashMap<>();
@@ -234,7 +233,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 bucket, k -> createWriterContainer(partition.copy(), bucket));
     }
 
-    private WriterContainer<T> createWriterContainer(BinaryRowData partition, int bucket) {
+    private WriterContainer<T> createWriterContainer(BinaryRow partition, int bucket) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
         }
@@ -251,12 +250,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     /** Create a {@link RecordWriter} from partition and bucket. */
     @VisibleForTesting
     public abstract WriterContainer<T> createWriterContainer(
-            BinaryRowData partition, int bucket, ExecutorService compactExecutor);
+            BinaryRow partition, int bucket, ExecutorService compactExecutor);
 
     /** Create an empty {@link RecordWriter} from partition and bucket. */
     @VisibleForTesting
     public abstract WriterContainer<T> createEmptyWriterContainer(
-            BinaryRowData partition, int bucket, ExecutorService compactExecutor);
+            BinaryRow partition, int bucket, ExecutorService compactExecutor);
 
     /**
      * {@link RecordWriter} with the snapshot id it is created upon and the identifier of its last

@@ -21,10 +21,10 @@ package org.apache.flink.table.store.connector.source;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
@@ -45,11 +45,11 @@ import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
 import org.apache.flink.table.store.table.source.ValueCountRowDataRecordIterator;
+import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
@@ -66,10 +66,10 @@ import static java.util.Collections.singletonList;
 public class TestChangelogDataReadWrite {
 
     private static final RowType KEY_TYPE =
-            new RowType(singletonList(new RowType.RowField("k", new BigIntType())));
+            new RowType(singletonList(new DataField(0, "k", new BigIntType())));
     private static final RowType VALUE_TYPE =
-            new RowType(singletonList(new RowType.RowField("v", new BigIntType())));
-    private static final Comparator<RowData> COMPARATOR =
+            new RowType(singletonList(new DataField(0, "v", new BigIntType())));
+    private static final Comparator<InternalRow> COMPARATOR =
             Comparator.comparingLong(o -> o.getLong(0));
     private static final KeyValueFieldsExtractor EXTRACTOR =
             new KeyValueFieldsExtractor() {
@@ -122,7 +122,9 @@ public class TestChangelogDataReadWrite {
     }
 
     private TableRead createRead(
-            Function<RecordReader.RecordIterator<KeyValue>, RecordReader.RecordIterator<RowData>>
+            Function<
+                            RecordReader.RecordIterator<KeyValue>,
+                            RecordReader.RecordIterator<InternalRow>>
                     rowDataIteratorCreator) {
         KeyValueFileStoreRead read =
                 new KeyValueFileStoreRead(
@@ -147,7 +149,7 @@ public class TestChangelogDataReadWrite {
             }
 
             @Override
-            protected RecordReader.RecordIterator<RowData> rowDataRecordIteratorFromKv(
+            protected RecordReader.RecordIterator<InternalRow> rowDataRecordIteratorFromKv(
                     RecordReader.RecordIterator<KeyValue> kvRecordIterator) {
                 return rowDataIteratorCreator.apply(kvRecordIterator);
             }
@@ -155,7 +157,7 @@ public class TestChangelogDataReadWrite {
     }
 
     public List<DataFileMeta> writeFiles(
-            BinaryRowData partition, int bucket, List<Tuple2<Long, Long>> kvs) throws Exception {
+            BinaryRow partition, int bucket, List<Tuple2<Long, Long>> kvs) throws Exception {
         Preconditions.checkNotNull(
                 service, "ExecutorService must be provided if writeFiles is needed");
         RecordWriter<KeyValue> writer = createMergeTreeWriter(partition, bucket);
@@ -163,16 +165,16 @@ public class TestChangelogDataReadWrite {
             writer.write(
                     new KeyValue()
                             .replace(
-                                    GenericRowData.of(tuple2.f0),
+                                    GenericRow.of(tuple2.f0),
                                     RowKind.INSERT,
-                                    GenericRowData.of(tuple2.f1)));
+                                    GenericRow.of(tuple2.f1)));
         }
         List<DataFileMeta> files = writer.prepareCommit(true).newFilesIncrement().newFiles();
         writer.close();
         return new ArrayList<>(files);
     }
 
-    public RecordWriter<KeyValue> createMergeTreeWriter(BinaryRowData partition, int bucket) {
+    public RecordWriter<KeyValue> createMergeTreeWriter(BinaryRow partition, int bucket) {
         CoreOptions options =
                 new CoreOptions(Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "avro"));
         RecordWriter<KeyValue> writer =

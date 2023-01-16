@@ -28,9 +28,10 @@ import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFuncti
 import org.apache.flink.table.store.file.sort.BinaryInMemorySortBuffer;
 import org.apache.flink.table.store.file.utils.ReusingKeyValue;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -52,11 +53,9 @@ public abstract class SortBufferWriteBufferTestBase {
 
     protected final SortBufferWriteBuffer table =
             new SortBufferWriteBuffer(
+                    new RowType(Collections.singletonList(new DataField(0, "key", new IntType()))),
                     new RowType(
-                            Collections.singletonList(new RowType.RowField("key", new IntType()))),
-                    new RowType(
-                            Collections.singletonList(
-                                    new RowType.RowField("value", new BigIntType()))),
+                            Collections.singletonList(new DataField(1, "value", new BigIntType()))),
                     new HeapMemorySegmentPool(32 * 1024 * 3L, 32 * 1024),
                     false,
                     128,

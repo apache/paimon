@@ -19,20 +19,20 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericArrayData;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericArray;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.BooleanType;
 import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.BooleanType;
-import org.apache.flink.table.types.logical.DoubleType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.DoubleType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.spark.sql.Dataset;
@@ -74,10 +74,10 @@ public abstract class SparkReadTestBase {
         // flink sink
         tablePath1 = new Path(warehousePath, "default.db/t1");
         SimpleTableTestHelper testHelper1 = new SimpleTableTestHelper(tablePath1, rowType1());
-        testHelper1.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
-        testHelper1.write(GenericRowData.of(3, 4L, StringData.fromString("2")));
-        testHelper1.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
-        testHelper1.write(GenericRowData.ofKind(RowKind.DELETE, 3, 4L, StringData.fromString("2")));
+        testHelper1.write(GenericRow.of(1, 2L, BinaryString.fromString("1")));
+        testHelper1.write(GenericRow.of(3, 4L, BinaryString.fromString("2")));
+        testHelper1.write(GenericRow.of(5, 6L, BinaryString.fromString("3")));
+        testHelper1.write(GenericRow.ofKind(RowKind.DELETE, 3, 4L, BinaryString.fromString("2")));
         testHelper1.commit();
 
         // a int not null
@@ -86,44 +86,41 @@ public abstract class SparkReadTestBase {
         tablePath2 = new Path(warehousePath, "default.db/t2");
         SimpleTableTestHelper testHelper2 = new SimpleTableTestHelper(tablePath2, rowType2());
         testHelper2.write(
-                GenericRowData.of(
+                GenericRow.of(
                         1,
-                        new GenericArrayData(
-                                new StringData[] {
-                                    StringData.fromString("AAA"), StringData.fromString("BBB")
+                        new GenericArray(
+                                new BinaryString[] {
+                                    BinaryString.fromString("AAA"), BinaryString.fromString("BBB")
                                 }),
-                        GenericRowData.of(
-                                GenericRowData.of(1.0d, new GenericArrayData(new Boolean[] {null})),
-                                1L)));
+                        GenericRow.of(
+                                GenericRow.of(1.0d, new GenericArray(new Boolean[] {null})), 1L)));
         testHelper2.write(
-                GenericRowData.of(
+                GenericRow.of(
                         2,
-                        new GenericArrayData(
-                                new StringData[] {
-                                    StringData.fromString("CCC"), StringData.fromString("DDD")
+                        new GenericArray(
+                                new BinaryString[] {
+                                    BinaryString.fromString("CCC"), BinaryString.fromString("DDD")
                                 }),
-                        GenericRowData.of(
-                                GenericRowData.of(null, new GenericArrayData(new Boolean[] {true})),
+                        GenericRow.of(
+                                GenericRow.of(null, new GenericArray(new Boolean[] {true})),
                                 null)));
         testHelper2.commit();
 
         testHelper2.write(
-                GenericRowData.of(
+                GenericRow.of(
                         3,
-                        new GenericArrayData(new StringData[] {null, null}),
-                        GenericRowData.of(
-                                GenericRowData.of(
-                                        2.0d, new GenericArrayData(new boolean[] {true, false})),
+                        new GenericArray(new BinaryString[] {null, null}),
+                        GenericRow.of(
+                                GenericRow.of(2.0d, new GenericArray(new boolean[] {true, false})),
                                 2L)));
 
         testHelper2.write(
-                GenericRowData.of(
+                GenericRow.of(
                         4,
-                        new GenericArrayData(new StringData[] {null, StringData.fromString("EEE")}),
-                        GenericRowData.of(
-                                GenericRowData.of(
-                                        3.0d,
-                                        new GenericArrayData(new Boolean[] {true, false, true})),
+                        new GenericArray(new BinaryString[] {null, BinaryString.fromString("EEE")}),
+                        GenericRow.of(
+                                GenericRow.of(
+                                        3.0d, new GenericArray(new Boolean[] {true, false, true})),
                                 3L)));
         testHelper2.commit();
     }
@@ -132,9 +129,9 @@ public abstract class SparkReadTestBase {
         RowType rowType =
                 new RowType(
                         Arrays.asList(
-                                new RowType.RowField("a", new IntType(false)),
-                                new RowType.RowField("b", new BigIntType()),
-                                new RowType.RowField("c", new VarCharType())));
+                                new DataField(0, "a", new IntType(false)),
+                                new DataField(1, "b", new BigIntType()),
+                                new DataField(2, "c", new VarCharType())));
         return new SimpleTableTestHelper(tablePath, rowType);
     }
 
@@ -146,35 +143,40 @@ public abstract class SparkReadTestBase {
     private static RowType rowType1() {
         return new RowType(
                 Arrays.asList(
-                        new RowType.RowField("a", new IntType(false)),
-                        new RowType.RowField("b", new BigIntType()),
-                        new RowType.RowField("c", new VarCharType())));
+                        new DataField(0, "a", new IntType(false)),
+                        new DataField(1, "b", new BigIntType()),
+                        new DataField(2, "c", new VarCharType())));
     }
 
     private static RowType rowType2() {
         return new RowType(
                 Arrays.asList(
-                        new RowType.RowField("a", new IntType(false), "comment about a"),
-                        new RowType.RowField("b", new ArrayType(false, new VarCharType())),
-                        new RowType.RowField(
+                        new DataField(0, "a", new IntType(false), "comment about a"),
+                        new DataField(1, "b", new ArrayType(false, new VarCharType())),
+                        new DataField(
+                                2,
                                 "c",
                                 new RowType(
                                         false,
                                         Arrays.asList(
-                                                new RowType.RowField(
+                                                new DataField(
+                                                        3,
                                                         "c1",
                                                         new RowType(
                                                                 false,
                                                                 Arrays.asList(
-                                                                        new RowType.RowField(
+                                                                        new DataField(
+                                                                                4,
                                                                                 "c11",
                                                                                 new DoubleType()),
-                                                                        new RowType.RowField(
+                                                                        new DataField(
+                                                                                5,
                                                                                 "c12",
                                                                                 new ArrayType(
                                                                                         false,
                                                                                         new BooleanType()))))),
-                                                new RowType.RowField(
+                                                new DataField(
+                                                        6,
                                                         "c2",
                                                         new BigIntType(),
                                                         "comment about c2"))),

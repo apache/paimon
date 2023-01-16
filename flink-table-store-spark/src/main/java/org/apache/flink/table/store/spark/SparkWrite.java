@@ -27,7 +27,7 @@ import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.SerializableCommittable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.spark.api.java.function.Function;
 import org.apache.spark.api.java.function.Function2;
@@ -106,7 +106,7 @@ public class SparkWrite implements V1Write {
 
         @Override
         public Integer call(Row row) {
-            return computer().bucket(new SparkRowData(type, row));
+            return computer().bucket(new SparkRow(type, row));
         }
 
         private void readObject(java.io.ObjectInputStream in)
@@ -139,7 +139,7 @@ public class SparkWrite implements V1Write {
         public List<SerializableCommittable> call(Iterable<Row> iterables) throws Exception {
             try (TableWrite write = table.newWrite(queryId)) {
                 for (Row row : iterables) {
-                    write.write(new SparkRowData(type, row));
+                    write.write(new SparkRow(type, row));
                 }
                 List<FileCommittable> committables = write.prepareCommit(true, commitIdentifier);
                 return committables.stream()

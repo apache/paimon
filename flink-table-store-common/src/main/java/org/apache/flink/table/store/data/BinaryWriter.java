@@ -19,21 +19,14 @@ package org.apache.flink.table.store.data;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.table.data.ArrayData;
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.MapData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.DistinctType;
-import org.apache.flink.table.types.logical.LocalZonedTimestampType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.TimestampType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.LocalZonedTimestampType;
+import org.apache.flink.table.store.types.TimestampType;
 
 import java.io.Serializable;
 
-import static org.apache.flink.table.types.logical.utils.LogicalTypeChecks.getPrecision;
+import static org.apache.flink.table.store.types.DataTypeChecks.getPrecision;
 
 /**
  * Writer to write a composite data format, like row, array. 1. Invoke {@link #reset()}. 2. Write
@@ -63,19 +56,19 @@ public interface BinaryWriter {
 
     void writeDouble(int pos, double value);
 
-    void writeString(int pos, StringData value);
+    void writeString(int pos, BinaryString value);
 
     void writeBinary(int pos, byte[] bytes);
 
-    void writeDecimal(int pos, DecimalData value, int precision);
+    void writeDecimal(int pos, Decimal value, int precision);
 
-    void writeTimestamp(int pos, TimestampData value, int precision);
+    void writeTimestamp(int pos, Timestamp value, int precision);
 
-    void writeArray(int pos, ArrayData value, ArrayDataSerializer serializer);
+    void writeArray(int pos, InternalArray value, ArrayDataSerializer serializer);
 
-    void writeMap(int pos, MapData value, MapDataSerializer serializer);
+    void writeMap(int pos, InternalMap value, MapDataSerializer serializer);
 
-    void writeRow(int pos, RowData value, RowDataSerializer serializer);
+    void writeRow(int pos, InternalRow value, RowDataSerializer serializer);
 
     /** Finally, complete write to set real size to binary. */
     void complete();
@@ -83,16 +76,12 @@ public interface BinaryWriter {
     // --------------------------------------------------------------------------------------------
 
     /**
-     * @deprecated Use {@link #createValueSetter(LogicalType)} for avoiding logical types during
+     * @deprecated Use {@code #createValueSetter(DataType)} for avoiding logical types during
      *     runtime.
      */
     @Deprecated
     static void write(
-            BinaryWriter writer,
-            int pos,
-            Object o,
-            LogicalType type,
-            TypeSerializer<?> serializer) {
+            BinaryWriter writer, int pos, Object o, DataType type, TypeSerializer<?> serializer) {
         switch (type.getTypeRoot()) {
             case BOOLEAN:
                 writer.writeBoolean(pos, (boolean) o);
@@ -106,20 +95,18 @@ public interface BinaryWriter {
             case INTEGER:
             case DATE:
             case TIME_WITHOUT_TIME_ZONE:
-            case INTERVAL_YEAR_MONTH:
                 writer.writeInt(pos, (int) o);
                 break;
             case BIGINT:
-            case INTERVAL_DAY_TIME:
                 writer.writeLong(pos, (long) o);
                 break;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) type;
-                writer.writeTimestamp(pos, (TimestampData) o, timestampType.getPrecision());
+                writer.writeTimestamp(pos, (Timestamp) o, timestampType.getPrecision());
                 break;
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 LocalZonedTimestampType lzTs = (LocalZonedTimestampType) type;
-                writer.writeTimestamp(pos, (TimestampData) o, lzTs.getPrecision());
+                writer.writeTimestamp(pos, (Timestamp) o, lzTs.getPrecision());
                 break;
             case FLOAT:
                 writer.writeFloat(pos, (float) o);
@@ -129,22 +116,21 @@ public interface BinaryWriter {
                 break;
             case CHAR:
             case VARCHAR:
-                writer.writeString(pos, (StringData) o);
+                writer.writeString(pos, (BinaryString) o);
                 break;
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) type;
-                writer.writeDecimal(pos, (DecimalData) o, decimalType.getPrecision());
+                writer.writeDecimal(pos, (Decimal) o, decimalType.getPrecision());
                 break;
             case ARRAY:
-                writer.writeArray(pos, (ArrayData) o, (ArrayDataSerializer) serializer);
+                writer.writeArray(pos, (InternalArray) o, (ArrayDataSerializer) serializer);
                 break;
             case MAP:
             case MULTISET:
-                writer.writeMap(pos, (MapData) o, (MapDataSerializer) serializer);
+                writer.writeMap(pos, (InternalMap) o, (MapDataSerializer) serializer);
                 break;
             case ROW:
-            case STRUCTURED_TYPE:
-                writer.writeRow(pos, (RowData) o, (RowDataSerializer) serializer);
+                writer.writeRow(pos, (InternalRow) o, (RowDataSerializer) serializer);
                 break;
             case BINARY:
             case VARBINARY:
@@ -160,12 +146,12 @@ public interface BinaryWriter {
      *
      * @param elementType the element type of the array
      */
-    static ValueSetter createValueSetter(LogicalType elementType) {
+    static ValueSetter createValueSetter(DataType elementType) {
         // ordered by type root definition
         switch (elementType.getTypeRoot()) {
             case CHAR:
             case VARCHAR:
-                return (writer, pos, value) -> writer.writeString(pos, (StringData) value);
+                return (writer, pos, value) -> writer.writeString(pos, (BinaryString) value);
             case BOOLEAN:
                 return (writer, pos, value) -> writer.writeBoolean(pos, (boolean) value);
             case BINARY:
@@ -174,7 +160,7 @@ public interface BinaryWriter {
             case DECIMAL:
                 final int decimalPrecision = getPrecision(elementType);
                 return (writer, pos, value) ->
-                        writer.writeDecimal(pos, (DecimalData) value, decimalPrecision);
+                        writer.writeDecimal(pos, (Decimal) value, decimalPrecision);
             case TINYINT:
                 return (writer, pos, value) -> writer.writeByte(pos, (byte) value);
             case SMALLINT:
@@ -182,10 +168,8 @@ public interface BinaryWriter {
             case INTEGER:
             case DATE:
             case TIME_WITHOUT_TIME_ZONE:
-            case INTERVAL_YEAR_MONTH:
                 return (writer, pos, value) -> writer.writeInt(pos, (int) value);
             case BIGINT:
-            case INTERVAL_DAY_TIME:
                 return (writer, pos, value) -> writer.writeLong(pos, (long) value);
             case FLOAT:
                 return (writer, pos, value) -> writer.writeFloat(pos, (float) value);
@@ -195,29 +179,26 @@ public interface BinaryWriter {
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 final int timestampPrecision = getPrecision(elementType);
                 return (writer, pos, value) ->
-                        writer.writeTimestamp(pos, (TimestampData) value, timestampPrecision);
-            case TIMESTAMP_WITH_TIME_ZONE:
-                throw new UnsupportedOperationException();
+                        writer.writeTimestamp(pos, (Timestamp) value, timestampPrecision);
             case ARRAY:
-                final TypeSerializer<ArrayData> arraySerializer =
+                final TypeSerializer<InternalArray> arraySerializer =
                         InternalSerializers.create(elementType);
                 return (writer, pos, value) ->
                         writer.writeArray(
-                                pos, (ArrayData) value, (ArrayDataSerializer) arraySerializer);
+                                pos, (InternalArray) value, (ArrayDataSerializer) arraySerializer);
             case MULTISET:
             case MAP:
-                final TypeSerializer<MapData> mapSerializer =
+                final TypeSerializer<InternalMap> mapSerializer =
                         InternalSerializers.create(elementType);
                 return (writer, pos, value) ->
-                        writer.writeMap(pos, (MapData) value, (MapDataSerializer) mapSerializer);
+                        writer.writeMap(
+                                pos, (InternalMap) value, (MapDataSerializer) mapSerializer);
             case ROW:
-            case STRUCTURED_TYPE:
-                final TypeSerializer<RowData> rowSerializer =
+                final TypeSerializer<InternalRow> rowSerializer =
                         InternalSerializers.create(elementType);
                 return (writer, pos, value) ->
-                        writer.writeRow(pos, (RowData) value, (RowDataSerializer) rowSerializer);
-            case DISTINCT_TYPE:
-                return createValueSetter(((DistinctType) elementType).getSourceType());
+                        writer.writeRow(
+                                pos, (InternalRow) value, (RowDataSerializer) rowSerializer);
             default:
                 throw new IllegalArgumentException();
         }

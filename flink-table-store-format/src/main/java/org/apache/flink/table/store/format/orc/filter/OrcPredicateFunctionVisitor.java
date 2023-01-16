@@ -18,11 +18,11 @@
 
 package org.apache.flink.table.store.format.orc.filter;
 
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.predicate.FieldRef;
 import org.apache.flink.table.store.file.predicate.FunctionVisitor;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.util.function.TriFunction;
 
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
@@ -175,18 +175,18 @@ public class OrcPredicateFunctionVisitor
             case STRING:
                 return literalObj.toString();
             case DECIMAL:
-                return ((DecimalData) literalObj).toBigDecimal();
+                return ((Decimal) literalObj).toBigDecimal();
             case DATE:
                 return Date.valueOf(LocalDate.ofEpochDay(((Number) literalObj).longValue()));
             case TIMESTAMP:
-                return ((TimestampData) literalObj).toTimestamp();
+                return ((Timestamp) literalObj).toSQLTimestamp();
             default:
                 return literalObj;
         }
     }
 
     @Nullable
-    private static PredicateLeaf.Type toOrcType(LogicalType type) {
+    private static PredicateLeaf.Type toOrcType(DataType type) {
         switch (type.getTypeRoot()) {
             case TINYINT:
             case SMALLINT:

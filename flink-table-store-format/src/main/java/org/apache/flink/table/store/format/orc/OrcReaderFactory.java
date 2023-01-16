@@ -20,18 +20,18 @@ package org.apache.flink.table.store.format.orc;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.columnar.ColumnVector;
-import org.apache.flink.table.store.data.columnar.ColumnarRowData;
+import org.apache.flink.table.store.data.columnar.ColumnarRow;
 import org.apache.flink.table.store.data.columnar.ColumnarRowIterator;
 import org.apache.flink.table.store.data.columnar.VectorizedColumnBatch;
 import org.apache.flink.table.store.file.utils.RecordReader.RecordIterator;
 import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.format.fs.HadoopReadOnlyFileSystem;
 import org.apache.flink.table.store.format.orc.filter.OrcFilters;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Pool;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
@@ -48,10 +48,10 @@ import java.io.IOException;
 import java.util.List;
 
 import static org.apache.flink.table.store.format.orc.reader.AbstractOrcColumnVector.createFlinkVector;
-import static org.apache.flink.table.store.format.orc.reader.OrcSplitReaderUtil.logicalTypeToOrcType;
+import static org.apache.flink.table.store.format.orc.reader.OrcSplitReaderUtil.toOrcType;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-/** An ORC reader that produces a stream of {@link ColumnarRowData} records. */
+/** An ORC reader that produces a stream of {@link ColumnarRow} records. */
 public class OrcReaderFactory implements FormatReaderFactory {
 
     private static final long serialVersionUID = 1L;
@@ -81,7 +81,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             final List<OrcFilters.Predicate> conjunctPredicates,
             final int batchSize) {
         this.hadoopConfigWrapper = new SerializableHadoopConfigWrapper(checkNotNull(hadoopConfig));
-        this.schema = logicalTypeToOrcType(tableType);
+        this.schema = toOrcType(tableType);
         this.tableType = tableType;
         this.selectedFields = checkNotNull(selectedFields);
         this.conjunctPredicates = checkNotNull(conjunctPredicates);
@@ -114,13 +114,13 @@ public class OrcReaderFactory implements FormatReaderFactory {
     public OrcReaderBatch createReaderBatch(
             VectorizedRowBatch orcBatch, Pool.Recycler<OrcReaderBatch> recycler) {
         List<String> tableFieldNames = tableType.getFieldNames();
-        List<LogicalType> tableFieldTypes = tableType.getChildren();
+        List<DataType> tableFieldTypes = tableType.getFieldTypes();
 
         // create and initialize the row batch
         ColumnVector[] vectors = new ColumnVector[selectedFields.length];
         for (int i = 0; i < vectors.length; i++) {
             String name = tableFieldNames.get(selectedFields[i]);
-            LogicalType type = tableFieldTypes.get(selectedFields[i]);
+            DataType type = tableFieldTypes.get(selectedFields[i]);
             vectors[i] = createFlinkVector(orcBatch.cols[tableFieldNames.indexOf(name)], type);
         }
         VectorizedColumnBatch flinkColumnBatch = new VectorizedColumnBatch(vectors);
@@ -158,8 +158,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             this.orcVectorizedRowBatch = checkNotNull(orcVectorizedRowBatch);
             this.recycler = checkNotNull(recycler);
             this.flinkColumnBatch = flinkColumnBatch;
-            this.result =
-                    new ColumnarRowIterator(new ColumnarRowData(flinkColumnBatch), this::recycle);
+            this.result = new ColumnarRowIterator(new ColumnarRow(flinkColumnBatch), this::recycle);
         }
 
         /**
@@ -175,7 +174,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             return orcVectorizedRowBatch;
         }
 
-        private RecordIterator<RowData> convertAndGetIterator(VectorizedRowBatch orcBatch) {
+        private RecordIterator<InternalRow> convertAndGetIterator(VectorizedRowBatch orcBatch) {
             // no copying from the ORC column vectors to the Flink columns vectors necessary,
             // because they point to the same data arrays internally design
             int batchSize = orcBatch.size;
@@ -201,7 +200,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
      * skipped before.
      */
     private static final class OrcVectorizedReader
-            implements org.apache.flink.table.store.file.utils.RecordReader<RowData> {
+            implements org.apache.flink.table.store.file.utils.RecordReader<InternalRow> {
 
         private final RecordReader orcReader;
         private final Pool<OrcReaderBatch> pool;
@@ -213,7 +212,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
 
         @Nullable
         @Override
-        public RecordIterator<RowData> readBatch() throws IOException {
+        public RecordIterator<InternalRow> readBatch() throws IOException {
             final OrcReaderBatch batch = getCachedEntry();
             final VectorizedRowBatch orcVectorBatch = batch.orcVectorizedRowBatch();
 

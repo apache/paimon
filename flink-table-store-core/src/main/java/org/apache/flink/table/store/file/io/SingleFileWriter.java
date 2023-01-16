@@ -23,7 +23,7 @@ import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.util.IOUtils;
 
@@ -45,9 +45,9 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     private static final Logger LOG = LoggerFactory.getLogger(SingleFileWriter.class);
 
     protected final Path path;
-    private final Function<T, RowData> converter;
+    private final Function<T, InternalRow> converter;
 
-    private final BulkWriter<RowData> writer;
+    private final BulkWriter<InternalRow> writer;
     private FSDataOutputStream out;
 
     private long recordCount;
@@ -55,7 +55,9 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     protected boolean closed;
 
     public SingleFileWriter(
-            BulkWriter.Factory<RowData> factory, Path path, Function<T, RowData> converter) {
+            BulkWriter.Factory<InternalRow> factory,
+            Path path,
+            Function<T, InternalRow> converter) {
         this.path = path;
         this.converter = converter;
 
@@ -87,13 +89,13 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         writeImpl(record);
     }
 
-    protected RowData writeImpl(T record) throws IOException {
+    protected InternalRow writeImpl(T record) throws IOException {
         if (closed) {
             throw new RuntimeException("Writer has already closed!");
         }
 
         try {
-            RowData rowData = converter.apply(record);
+            InternalRow rowData = converter.apply(record);
             writer.addElement(rowData);
             recordCount++;
             return rowData;

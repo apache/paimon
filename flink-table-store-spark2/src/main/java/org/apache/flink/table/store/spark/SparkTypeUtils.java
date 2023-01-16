@@ -18,28 +18,27 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.BinaryType;
-import org.apache.flink.table.types.logical.BooleanType;
-import org.apache.flink.table.types.logical.CharType;
-import org.apache.flink.table.types.logical.DateType;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.DoubleType;
-import org.apache.flink.table.types.logical.FloatType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.LocalZonedTimestampType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.MapType;
-import org.apache.flink.table.types.logical.MultisetType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.RowType.RowField;
-import org.apache.flink.table.types.logical.SmallIntType;
-import org.apache.flink.table.types.logical.TimestampType;
-import org.apache.flink.table.types.logical.TinyIntType;
-import org.apache.flink.table.types.logical.VarBinaryType;
-import org.apache.flink.table.types.logical.VarCharType;
-import org.apache.flink.table.types.logical.utils.LogicalTypeDefaultVisitor;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.BinaryType;
+import org.apache.flink.table.store.types.BooleanType;
+import org.apache.flink.table.store.types.CharType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataTypeDefaultVisitor;
+import org.apache.flink.table.store.types.DateType;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.DoubleType;
+import org.apache.flink.table.store.types.FloatType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.LocalZonedTimestampType;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.MultisetType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.SmallIntType;
+import org.apache.flink.table.store.types.TimestampType;
+import org.apache.flink.table.store.types.TinyIntType;
+import org.apache.flink.table.store.types.VarBinaryType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.DataTypes;
@@ -48,6 +47,7 @@ import org.apache.spark.sql.types.StructType;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /** Utils for Spark {@link DataType}. */
 public class SparkTypeUtils {
@@ -58,11 +58,11 @@ public class SparkTypeUtils {
         return (StructType) fromFlinkType(type);
     }
 
-    public static DataType fromFlinkType(LogicalType type) {
+    public static DataType fromFlinkType(org.apache.flink.table.store.types.DataType type) {
         return type.accept(FlinkToSparkTypeVisitor.INSTANCE);
     }
 
-    private static class FlinkToSparkTypeVisitor extends LogicalTypeDefaultVisitor<DataType> {
+    private static class FlinkToSparkTypeVisitor extends DataTypeDefaultVisitor<DataType> {
 
         private static final FlinkToSparkTypeVisitor INSTANCE = new FlinkToSparkTypeVisitor();
 
@@ -143,7 +143,7 @@ public class SparkTypeUtils {
 
         @Override
         public DataType visit(ArrayType arrayType) {
-            LogicalType elementType = arrayType.getElementType();
+            org.apache.flink.table.store.types.DataType elementType = arrayType.getElementType();
             return DataTypes.createArrayType(elementType.accept(this), elementType.isNullable());
         }
 
@@ -164,21 +164,21 @@ public class SparkTypeUtils {
         @Override
         public DataType visit(RowType rowType) {
             List<StructField> fields = new ArrayList<>(rowType.getFieldCount());
-            for (RowField field : rowType.getFields()) {
+            for (DataField field : rowType.getFields()) {
                 StructField structField =
                         DataTypes.createStructField(
-                                field.getName(),
-                                field.getType().accept(this),
-                                field.getType().isNullable());
+                                field.name(), field.type().accept(this), field.type().isNullable());
                 structField =
-                        field.getDescription().map(structField::withComment).orElse(structField);
+                        Optional.ofNullable(field.description())
+                                .map(structField::withComment)
+                                .orElse(structField);
                 fields.add(structField);
             }
             return DataTypes.createStructType(fields);
         }
 
         @Override
-        protected DataType defaultMethod(LogicalType logicalType) {
+        protected DataType defaultMethod(org.apache.flink.table.store.types.DataType logicalType) {
             throw new UnsupportedOperationException("Unsupported type: " + logicalType);
         }
     }

@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.codegen;
 
-import org.apache.flink.core.memory.MemorySegment;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.memory.MemorySegment;
 
 /**
  * Normalized key computer for {@code SortBuffer}. For performance, subclasses are usually
@@ -28,7 +28,7 @@ import org.apache.flink.table.data.RowData;
 public interface NormalizedKeyComputer {
 
     /** Writes a normalized key for the given record into the target {@link MemorySegment}. */
-    void putKey(RowData record, MemorySegment target, int offset);
+    void putKey(InternalRow record, MemorySegment target, int offset);
 
     /** Compares two normalized keys in respective {@link MemorySegment}. */
     int compareKey(MemorySegment segI, int offsetI, MemorySegment segJ, int offsetJ);

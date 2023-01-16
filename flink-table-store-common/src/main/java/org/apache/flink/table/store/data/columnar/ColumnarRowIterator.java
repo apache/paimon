@@ -18,26 +18,24 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecyclableIterator;
 
 import javax.annotation.Nullable;
 
 /**
- * A {@link RecordReader.RecordIterator} that returns {@link RowData}s. The next row is set by
- * {@link ColumnarRowData#setRowId}.
+ * A {@link RecordReader.RecordIterator} that returns {@link InternalRow}s. The next row is set by
+ * {@link ColumnarRow#setRowId}.
  */
-@Internal
-public class ColumnarRowIterator extends RecyclableIterator<RowData> {
+public class ColumnarRowIterator extends RecyclableIterator<InternalRow> {
 
-    private final ColumnarRowData rowData;
+    private final ColumnarRow rowData;
 
     private int num;
     private int pos;
 
-    public ColumnarRowIterator(ColumnarRowData rowData, @Nullable Runnable recycler) {
+    public ColumnarRowIterator(ColumnarRow rowData, @Nullable Runnable recycler) {
         super(recycler);
         this.rowData = rowData;
     }
@@ -49,7 +47,7 @@ public class ColumnarRowIterator extends RecyclableIterator<RowData> {
 
     @Nullable
     @Override
-    public RowData next() {
+    public InternalRow next() {
         if (pos < num) {
             rowData.setRowId(pos++);
             return rowData;

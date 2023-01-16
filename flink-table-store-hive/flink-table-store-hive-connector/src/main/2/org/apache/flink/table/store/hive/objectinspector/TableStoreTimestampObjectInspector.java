@@ -18,14 +18,12 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.TimestampData;
-
 import org.apache.hadoop.hive.serde2.io.TimestampWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.TimestampObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
-import java.sql.Timestamp;
+import org.apache.flink.table.store.data.Timestamp;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for TIMESTAMP type. */
 public class TableStoreTimestampObjectInspector extends AbstractPrimitiveJavaObjectInspector
@@ -36,24 +34,24 @@ public class TableStoreTimestampObjectInspector extends AbstractPrimitiveJavaObj
     }
 
     @Override
-    public Timestamp getPrimitiveJavaObject(Object o) {
-        return o == null ? null : ((TimestampData) o).toTimestamp();
+    public java.sql.Timestamp getPrimitiveJavaObject(Object o) {
+        return o == null ? null : ((Timestamp) o).toSQLTimestamp();
     }
 
     @Override
     public TimestampWritable getPrimitiveWritableObject(Object o) {
-        Timestamp ts = getPrimitiveJavaObject(o);
+        java.sql.Timestamp ts = getPrimitiveJavaObject(o);
         return ts == null ? null : new TimestampWritable(ts);
     }
 
     @Override
     public Object copyObject(Object o) {
-        if (o instanceof TimestampData) {
-            // TimestampData is immutable
+        if (o instanceof Timestamp) {
+            // immutable
             return o;
-        } else if (o instanceof Timestamp) {
-            Timestamp timestamp = (Timestamp) o;
-            return new Timestamp(timestamp.getTime());
+        } else if (o instanceof java.sql.Timestamp) {
+            java.sql.Timestamp timestamp = (java.sql.Timestamp) o;
+            return new java.sql.Timestamp(timestamp.getTime());
         } else {
             return o;
         }

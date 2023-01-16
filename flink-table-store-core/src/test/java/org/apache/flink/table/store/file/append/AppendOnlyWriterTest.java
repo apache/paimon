@@ -22,21 +22,21 @@ package org.apache.flink.table.store.file.append;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FileFormat;
-import org.apache.flink.table.store.utils.BinaryRowDataUtil;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.VarCharType;
 import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -56,11 +56,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test the correctness for {@link AppendOnlyWriter}. */
 public class AppendOnlyWriterTest {
 
-    private static final RowData EMPTY_ROW = BinaryRowDataUtil.EMPTY_ROW;
+    private static final InternalRow EMPTY_ROW = BinaryRow.EMPTY_ROW;
     private static final RowType SCHEMA =
-            RowType.of(
-                    new LogicalType[] {new IntType(), new VarCharType(), new VarCharType()},
-                    new String[] {"id", "name", "dt"});
+            RowType.builder()
+                    .fields(
+                            new DataType[] {new IntType(), new VarCharType(), new VarCharType()},
+                            new String[] {"id", "name", "dt"})
+                    .build();
     private static final FieldStatsArraySerializer STATS_SERIALIZER =
             new FieldStatsArraySerializer(SCHEMA);
 
@@ -80,7 +82,7 @@ public class AppendOnlyWriterTest {
 
     @Test
     public void testEmptyCommits() throws Exception {
-        RecordWriter<RowData> writer = createEmptyWriter(1024 * 1024L);
+        RecordWriter<InternalRow> writer = createEmptyWriter(1024 * 1024L);
 
         for (int i = 0; i < 3; i++) {
             writer.sync();
@@ -93,7 +95,7 @@ public class AppendOnlyWriterTest {
 
     @Test
     public void testSingleWrite() throws Exception {
-        RecordWriter<RowData> writer = createEmptyWriter(1024 * 1024L);
+        RecordWriter<InternalRow> writer = createEmptyWriter(1024 * 1024L);
         writer.write(row(1, "AAA", PART));
         RecordWriter.CommitIncrement increment = writer.prepareCommit(true);
         writer.close();
@@ -123,7 +125,8 @@ public class AppendOnlyWriterTest {
 
     @Test
     public void testMultipleCommits() throws Exception {
-        RecordWriter<RowData> writer = createWriter(1024 * 1024L, true, Collections.emptyList()).f0;
+        RecordWriter<InternalRow> writer =
+                createWriter(1024 * 1024L, true, Collections.emptyList()).f0;
 
         // Commit 5 continues txn.
         for (int txn = 0; txn < 5; txn += 1) {
@@ -277,11 +280,12 @@ public class AppendOnlyWriterTest {
     }
 
     private FieldStats initStats(String min, String max, long nullCount) {
-        return new FieldStats(StringData.fromString(min), StringData.fromString(max), nullCount);
+        return new FieldStats(
+                BinaryString.fromString(min), BinaryString.fromString(max), nullCount);
     }
 
-    private RowData row(int id, String name, String dt) {
-        return GenericRowData.of(id, StringData.fromString(name), StringData.fromString(dt));
+    private InternalRow row(int id, String name, String dt) {
+        return GenericRow.of(id, BinaryString.fromString(name), BinaryString.fromString(dt));
     }
 
     private DataFilePathFactory createPathFactory() {

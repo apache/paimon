@@ -18,11 +18,11 @@
 
 package org.apache.flink.table.store.datagen;
 
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 
-/** Data generator for Flink's internal {@link RowData} type. */
-public class RowDataGenerator implements DataGenerator<RowData> {
+/** Data generator for Flink's internal {@link InternalRow} type. */
+public class RowDataGenerator implements DataGenerator<InternalRow> {
 
     private final DataGenerator<?>[] fieldGenerators;
 
@@ -48,8 +48,8 @@ public class RowDataGenerator implements DataGenerator<RowData> {
     }
 
     @Override
-    public RowData next() {
-        GenericRowData row = new GenericRowData(fieldGenerators.length);
+    public InternalRow next() {
+        GenericRow row = new GenericRow(fieldGenerators.length);
         for (int i = 0; i < fieldGenerators.length; i++) {
             row.setField(i, fieldGenerators[i].next());
         }

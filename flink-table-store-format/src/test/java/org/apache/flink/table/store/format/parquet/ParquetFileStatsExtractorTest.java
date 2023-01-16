@@ -21,18 +21,18 @@ package org.apache.flink.table.store.format.parquet;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractorTestBase;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.BooleanType;
-import org.apache.flink.table.types.logical.CharType;
-import org.apache.flink.table.types.logical.DateType;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.DoubleType;
-import org.apache.flink.table.types.logical.FloatType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.SmallIntType;
-import org.apache.flink.table.types.logical.TinyIntType;
-import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.BooleanType;
+import org.apache.flink.table.store.types.CharType;
+import org.apache.flink.table.store.types.DateType;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.DoubleType;
+import org.apache.flink.table.store.types.FloatType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.SmallIntType;
+import org.apache.flink.table.store.types.TinyIntType;
+import org.apache.flink.table.store.types.VarCharType;
 
 /** Tests for {@link ParquetFileStatsExtractor}. */
 public class ParquetFileStatsExtractorTest extends FileStatsExtractorTestBase {
@@ -44,18 +44,20 @@ public class ParquetFileStatsExtractorTest extends FileStatsExtractorTestBase {
 
     @Override
     protected RowType rowType() {
-        return RowType.of(
-                new CharType(8),
-                new VarCharType(8),
-                new BooleanType(),
-                new TinyIntType(),
-                new SmallIntType(),
-                new IntType(),
-                new BigIntType(),
-                new FloatType(),
-                new DoubleType(),
-                new DecimalType(5, 2),
-                new DecimalType(38, 18),
-                new DateType());
+        return RowType.builder()
+                .fields(
+                        new CharType(8),
+                        new VarCharType(8),
+                        new BooleanType(),
+                        new TinyIntType(),
+                        new SmallIntType(),
+                        new IntType(),
+                        new BigIntType(),
+                        new FloatType(),
+                        new DoubleType(),
+                        new DecimalType(5, 2),
+                        new DecimalType(38, 18),
+                        new DateType())
+                .build();
     }
 }

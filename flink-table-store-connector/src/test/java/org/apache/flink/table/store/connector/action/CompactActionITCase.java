@@ -22,11 +22,10 @@ import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -45,8 +44,9 @@ import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.test.util.AbstractTestBase;
 
 import org.junit.Assert;
@@ -67,11 +67,8 @@ public class CompactActionITCase extends AbstractTestBase {
 
     private static final RowType ROW_TYPE =
             RowType.of(
-                    new LogicalType[] {
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.STRING().getLogicalType()
+                    new DataType[] {
+                        DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.STRING()
                     },
                     new String[] {"k", "v", "hh", "dt"});
 
@@ -94,14 +91,14 @@ public class CompactActionITCase extends AbstractTestBase {
         TableWrite write = table.newWrite(commitUser);
         TableCommit commit = table.newCommit(commitUser);
 
-        write.write(rowData(1, 100, 15, StringData.fromString("20221208")));
-        write.write(rowData(1, 100, 16, StringData.fromString("20221208")));
-        write.write(rowData(1, 100, 15, StringData.fromString("20221209")));
+        write.write(rowData(1, 100, 15, BinaryString.fromString("20221208")));
+        write.write(rowData(1, 100, 16, BinaryString.fromString("20221208")));
+        write.write(rowData(1, 100, 15, BinaryString.fromString("20221209")));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        write.write(rowData(2, 200, 15, StringData.fromString("20221208")));
-        write.write(rowData(2, 200, 16, StringData.fromString("20221208")));
-        write.write(rowData(2, 200, 15, StringData.fromString("20221209")));
+        write.write(rowData(2, 200, 15, BinaryString.fromString("20221208")));
+        write.write(rowData(2, 200, 16, BinaryString.fromString("20221208")));
+        write.write(rowData(2, 200, 15, BinaryString.fromString("20221209")));
         commit.commit(1, write.prepareCommit(true, 1));
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
@@ -151,9 +148,9 @@ public class CompactActionITCase extends AbstractTestBase {
         TableCommit commit = table.newCommit(commitUser);
 
         // base records
-        write.write(rowData(1, 100, 15, StringData.fromString("20221208")));
-        write.write(rowData(1, 100, 16, StringData.fromString("20221208")));
-        write.write(rowData(1, 100, 15, StringData.fromString("20221209")));
+        write.write(rowData(1, 100, 15, BinaryString.fromString("20221208")));
+        write.write(rowData(1, 100, 16, BinaryString.fromString("20221208")));
+        write.write(rowData(1, 100, 15, BinaryString.fromString("20221209")));
         commit.commit(0, write.prepareCommit(true, 0));
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
@@ -193,9 +190,9 @@ public class CompactActionITCase extends AbstractTestBase {
         Assert.assertEquals(Arrays.asList("+I 1|100|15|20221208", "+I 1|100|15|20221209"), actual);
 
         // incremental records
-        write.write(rowData(1, 101, 15, StringData.fromString("20221208")));
-        write.write(rowData(1, 101, 16, StringData.fromString("20221208")));
-        write.write(rowData(1, 101, 15, StringData.fromString("20221209")));
+        write.write(rowData(1, 101, 15, BinaryString.fromString("20221208")));
+        write.write(rowData(1, 101, 16, BinaryString.fromString("20221208")));
+        write.write(rowData(1, 101, 15, BinaryString.fromString("20221209")));
         commit.commit(1, write.prepareCommit(true, 1));
 
         write.close();
@@ -242,27 +239,27 @@ public class CompactActionITCase extends AbstractTestBase {
         return Arrays.asList(partition1, partition2);
     }
 
-    private GenericRowData rowData(Object... values) {
-        return GenericRowData.of(values);
+    private GenericRow rowData(Object... values) {
+        return GenericRow.of(values);
     }
 
     private List<String> getResult(TableRead read, List<Split> splits) throws Exception {
-        List<ConcatRecordReader.ReaderSupplier<RowData>> readers = new ArrayList<>();
+        List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
         for (Split split : splits) {
             readers.add(() -> read.createReader(split));
         }
-        RecordReader<RowData> recordReader = ConcatRecordReader.create(readers);
-        RecordReaderIterator<RowData> iterator = new RecordReaderIterator<>(recordReader);
+        RecordReader<InternalRow> recordReader = ConcatRecordReader.create(readers);
+        RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(recordReader);
         List<String> result = new ArrayList<>();
         while (iterator.hasNext()) {
-            RowData rowData = iterator.next();
+            InternalRow rowData = iterator.next();
             result.add(rowDataToString(rowData));
         }
         iterator.close();
         return result;
     }
 
-    private String rowDataToString(RowData rowData) {
+    private String rowDataToString(InternalRow rowData) {
         return String.format(
                 "%s %d|%d|%d|%s",
                 rowData.getRowKind().shortString(),

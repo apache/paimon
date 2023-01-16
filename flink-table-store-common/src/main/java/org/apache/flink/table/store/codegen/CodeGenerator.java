@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.codegen;
 
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.util.List;
 
@@ -37,7 +37,7 @@ public interface CodeGenerator {
      *     fields are compared in ascending order.
      */
     GeneratedClass<NormalizedKeyComputer> generateNormalizedKeyComputer(
-            List<LogicalType> fieldTypes, String name);
+            List<DataType> fieldTypes, String name);
 
     /**
      * Generate a {@link RecordComparator}.
@@ -47,5 +47,5 @@ public interface CodeGenerator {
      *     fields are compared in ascending order.
      */
     GeneratedClass<RecordComparator> generateRecordComparator(
-            List<LogicalType> fieldTypes, String name);
+            List<DataType> fieldTypes, String name);
 }

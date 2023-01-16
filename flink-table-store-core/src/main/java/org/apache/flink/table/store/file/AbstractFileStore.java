@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.operation.FileStoreCommitImpl;
@@ -28,7 +28,7 @@ import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.util.Comparator;
 
@@ -123,5 +123,5 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 manifestListFactory());
     }
 
-    public abstract Comparator<RowData> newKeyComparator();
+    public abstract Comparator<InternalRow> newKeyComparator();
 }

@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
 
 import javax.annotation.Nullable;
 
@@ -65,13 +65,10 @@ public class ValueCountMergeFunction implements MergeFunction<KeyValue> {
             reused = new KeyValue();
         }
         return reused.replace(
-                latestKv.key(),
-                latestKv.sequenceNumber(),
-                RowKind.INSERT,
-                GenericRowData.of(total));
+                latestKv.key(), latestKv.sequenceNumber(), RowKind.INSERT, GenericRow.of(total));
     }
 
-    private long count(RowData value) {
+    private long count(InternalRow value) {
         checkArgument(!value.isNullAt(0), "Value count should not be null.");
         return value.getLong(0);
     }

@@ -23,9 +23,9 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.DelegatingConfiguration;
 import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import javax.annotation.Nullable;
 
@@ -62,7 +62,7 @@ public abstract class FileFormat {
             RowType type, int[][] projection, @Nullable List<Predicate> filters);
 
     /** Create a {@link BulkWriter.Factory} from the type. */
-    public abstract BulkWriter.Factory<RowData> createWriterFactory(RowType type);
+    public abstract BulkWriter.Factory<InternalRow> createWriterFactory(RowType type);
 
     public FormatReaderFactory createReaderFactory(RowType rowType) {
         int[][] projection = new int[rowType.getFieldCount()][];

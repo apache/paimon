@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.core.io.SimpleVersionedSerialization;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.table.source.DataSplit;
@@ -30,7 +30,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 
-import static org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManagerTest.row;
+import static org.apache.flink.table.store.file.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for the {@link FileStoreSourceSplitSerializer}. */
@@ -88,13 +88,13 @@ public class FileStoreSourceSplitSerializerTest {
     }
 
     public static FileStoreSourceSplit newSourceSplit(
-            String id, BinaryRowData partition, int bucket, List<DataFileMeta> files) {
+            String id, BinaryRow partition, int bucket, List<DataFileMeta> files) {
         return newSourceSplit(id, partition, bucket, files, false, 0);
     }
 
     public static FileStoreSourceSplit newSourceSplit(
             String id,
-            BinaryRowData partition,
+            BinaryRow partition,
             int bucket,
             List<DataFileMeta> files,
             boolean isIncremental) {
@@ -103,7 +103,7 @@ public class FileStoreSourceSplitSerializerTest {
 
     public static FileStoreSourceSplit newSourceSplit(
             String id,
-            BinaryRowData partition,
+            BinaryRow partition,
             int bucket,
             List<DataFileMeta> files,
             long recordsToSkip) {
@@ -112,7 +112,7 @@ public class FileStoreSourceSplitSerializerTest {
 
     public static FileStoreSourceSplit newSourceSplit(
             String id,
-            BinaryRowData partition,
+            BinaryRow partition,
             int bucket,
             List<DataFileMeta> files,
             boolean isIncremental,

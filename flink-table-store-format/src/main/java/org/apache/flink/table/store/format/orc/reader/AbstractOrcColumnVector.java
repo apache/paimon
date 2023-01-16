@@ -18,11 +18,11 @@
 
 package org.apache.flink.table.store.format.orc.reader;
 
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.LogicalTypeRoot;
-import org.apache.flink.table.types.logical.MapType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypeRoot;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.ColumnVector;
@@ -50,9 +50,9 @@ public abstract class AbstractOrcColumnVector
     }
 
     public static org.apache.flink.table.store.data.columnar.ColumnVector createFlinkVector(
-            ColumnVector vector, LogicalType logicalType) {
+            ColumnVector vector, DataType dataType) {
         if (vector instanceof LongColumnVector) {
-            if (logicalType.getTypeRoot() == LogicalTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE) {
+            if (dataType.getTypeRoot() == DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE) {
                 return new OrcLegacyTimestampColumnVector((LongColumnVector) vector);
             } else {
                 return new OrcLongColumnVector((LongColumnVector) vector);
@@ -66,11 +66,11 @@ public abstract class AbstractOrcColumnVector
         } else if (vector instanceof TimestampColumnVector) {
             return new OrcTimestampColumnVector(vector);
         } else if (vector instanceof ListColumnVector) {
-            return new OrcArrayColumnVector((ListColumnVector) vector, (ArrayType) logicalType);
+            return new OrcArrayColumnVector((ListColumnVector) vector, (ArrayType) dataType);
         } else if (vector instanceof StructColumnVector) {
-            return new OrcRowColumnVector((StructColumnVector) vector, (RowType) logicalType);
+            return new OrcRowColumnVector((StructColumnVector) vector, (RowType) dataType);
         } else if (vector instanceof MapColumnVector) {
-            return new OrcMapColumnVector((MapColumnVector) vector, (MapType) logicalType);
+            return new OrcMapColumnVector((MapColumnVector) vector, (MapType) dataType);
         } else {
             throw new UnsupportedOperationException(
                     "Unsupported vector: " + vector.getClass().getName());

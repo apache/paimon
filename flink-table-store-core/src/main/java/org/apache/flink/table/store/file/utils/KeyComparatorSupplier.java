@@ -18,18 +18,18 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.codegen.GeneratedClass;
 import org.apache.flink.table.store.codegen.RecordComparator;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.util.function.SerializableSupplier;
 
 import java.util.Comparator;
 import java.util.function.Supplier;
 
 /** A {@link Supplier} that returns the comparator for the file store key. */
-public class KeyComparatorSupplier implements SerializableSupplier<Comparator<RowData>> {
+public class KeyComparatorSupplier implements SerializableSupplier<Comparator<InternalRow>> {
 
     private static final long serialVersionUID = 1L;
 
@@ -37,7 +37,7 @@ public class KeyComparatorSupplier implements SerializableSupplier<Comparator<Ro
 
     public KeyComparatorSupplier(RowType keyType) {
         genRecordComparator =
-                CodeGenUtils.generateRecordComparator(keyType.getChildren(), "KeyComparator");
+                CodeGenUtils.generateRecordComparator(keyType.getFieldTypes(), "KeyComparator");
     }
 
     @Override

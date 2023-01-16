@@ -18,11 +18,9 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.data.ArrayData;
+import org.apache.flink.table.store.data.InternalArray;
 
 /** Array column vector. */
-@Internal
 public interface ArrayColumnVector extends ColumnVector {
-    ArrayData getArray(int i);
+    InternalArray getArray(int i);
 }

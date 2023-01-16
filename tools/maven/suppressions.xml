@@ -23,6 +23,8 @@ under the License.
 		"http://www.puppycrawl.com/dtds/suppressions_1_1.dtd">
 
 <suppressions>
+		<suppress files="DataTypes.java" checks="MethodNameCheck"/>
+
 		<!-- target directory is not relevant for checkstyle -->
 		<suppress
 			files="[\\/]target[\\/]"

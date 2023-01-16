@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
@@ -34,7 +34,7 @@ import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.memory.MemorySegmentPool;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.utils.RecordWriter;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -55,7 +55,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private final RowType keyType;
     private final RowType valueType;
     private final CompactManager compactManager;
-    private final Comparator<RowData> keyComparator;
+    private final Comparator<InternalRow> keyComparator;
     private final MergeFunction<KeyValue> mergeFunction;
     private final KeyValueFileWriterFactory writerFactory;
     private final boolean commitForceCompact;
@@ -76,7 +76,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             IOManager ioManager,
             CompactManager compactManager,
             long maxSequenceNumber,
-            Comparator<RowData> keyComparator,
+            Comparator<InternalRow> keyComparator,
             MergeFunction<KeyValue> mergeFunction,
             KeyValueFileWriterFactory writerFactory,
             boolean commitForceCompact,

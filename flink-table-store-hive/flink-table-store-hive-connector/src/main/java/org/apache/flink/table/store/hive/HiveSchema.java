@@ -23,7 +23,7 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.filesystem.FileSystems;
 import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.DataType;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
@@ -56,8 +56,8 @@ public class HiveSchema {
         return tableSchema.fieldNames();
     }
 
-    public List<LogicalType> fieldTypes() {
-        return tableSchema.logicalRowType().getChildren();
+    public List<DataType> fieldTypes() {
+        return tableSchema.logicalRowType().getFieldTypes();
     }
 
     public List<String> fieldComments() {
@@ -118,7 +118,7 @@ public class HiveSchema {
         List<TypeInfo> ddlTypeInfos = new ArrayList<>(typeInfos);
         List<String> schemaNames = tableSchema.fieldNames();
         List<TypeInfo> schemaTypeInfos =
-                tableSchema.logicalRowType().getChildren().stream()
+                tableSchema.logicalRowType().getFieldTypes().stream()
                         .map(HiveTypeUtils::logicalTypeToTypeInfo)
                         .collect(Collectors.toList());
 

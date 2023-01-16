@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.format.orc.reader;
 
 import org.apache.flink.table.store.data.columnar.ColumnVector;
-import org.apache.flink.table.store.data.columnar.ColumnarRowData;
+import org.apache.flink.table.store.data.columnar.ColumnarRow;
 import org.apache.flink.table.store.data.columnar.VectorizedColumnBatch;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.hadoop.hive.ql.exec.vector.StructColumnVector;
 
@@ -29,7 +29,7 @@ import org.apache.hadoop.hive.ql.exec.vector.StructColumnVector;
 public class OrcRowColumnVector extends AbstractOrcColumnVector
         implements org.apache.flink.table.store.data.columnar.RowColumnVector {
 
-    private final ColumnarRowData columnarRowData;
+    private final ColumnarRow columnarRow;
 
     public OrcRowColumnVector(StructColumnVector hiveVector, RowType type) {
         super(hiveVector);
@@ -38,12 +38,12 @@ public class OrcRowColumnVector extends AbstractOrcColumnVector
         for (int i = 0; i < len; i++) {
             flinkVectors[i] = createFlinkVector(hiveVector.fields[i], type.getTypeAt(i));
         }
-        this.columnarRowData = new ColumnarRowData(new VectorizedColumnBatch(flinkVectors));
+        this.columnarRow = new ColumnarRow(new VectorizedColumnBatch(flinkVectors));
     }
 
     @Override
-    public ColumnarRowData getRow(int i) {
-        this.columnarRowData.setRowId(i);
-        return this.columnarRowData;
+    public ColumnarRow getRow(int i) {
+        this.columnarRow.setRowId(i);
+        return this.columnarRow;
     }
 }

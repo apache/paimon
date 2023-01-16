@@ -18,17 +18,17 @@
 
 package org.apache.flink.table.store.format.orc.writer;
 
-import org.apache.flink.table.data.ArrayData;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.MapData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.LocalZonedTimestampType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.MapType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.TimestampType;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalArray;
+import org.apache.flink.table.store.data.InternalMap;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.LocalZonedTimestampType;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.TimestampType;
 
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
@@ -44,26 +44,26 @@ import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 
 import java.sql.Timestamp;
 
-/** A {@link Vectorizer} of {@link RowData} type element. */
-public class RowDataVectorizer extends Vectorizer<RowData> {
+/** A {@link Vectorizer} of {@link InternalRow} type element. */
+public class RowDataVectorizer extends Vectorizer<InternalRow> {
 
-    private final LogicalType[] fieldTypes;
+    private final DataType[] fieldTypes;
 
-    public RowDataVectorizer(String schema, LogicalType[] fieldTypes) {
+    public RowDataVectorizer(String schema, DataType[] fieldTypes) {
         super(schema);
         this.fieldTypes = fieldTypes;
     }
 
     @Override
-    public void vectorize(RowData row, VectorizedRowBatch batch) {
+    public void vectorize(InternalRow row, VectorizedRowBatch batch) {
         int rowId = batch.size++;
-        for (int i = 0; i < row.getArity(); ++i) {
+        for (int i = 0; i < row.getFieldCount(); ++i) {
             setColumn(rowId, batch.cols[i], fieldTypes[i], row, i);
         }
     }
 
     private static void setColumn(
-            int rowId, ColumnVector column, LogicalType type, RowData row, int columnId) {
+            int rowId, ColumnVector column, DataType type, InternalRow row, int columnId) {
         if (row.isNullAt(columnId)) {
             column.noNulls = false;
             column.isNull[rowId] = true;
@@ -146,7 +146,7 @@ public class RowDataVectorizer extends Vectorizer<RowData> {
                 {
                     TimestampType tt = (TimestampType) type;
                     Timestamp timestamp =
-                            row.getTimestamp(columnId, tt.getPrecision()).toTimestamp();
+                            row.getTimestamp(columnId, tt.getPrecision()).toSQLTimestamp();
                     TimestampColumnVector vector = (TimestampColumnVector) column;
                     vector.set(rowId, timestamp);
                     break;
@@ -155,7 +155,7 @@ public class RowDataVectorizer extends Vectorizer<RowData> {
                 {
                     LocalZonedTimestampType lt = (LocalZonedTimestampType) type;
                     Timestamp timestamp =
-                            row.getTimestamp(columnId, lt.getPrecision()).toTimestamp();
+                            row.getTimestamp(columnId, lt.getPrecision()).toSQLTimestamp();
                     TimestampColumnVector vector = (TimestampColumnVector) column;
                     vector.set(rowId, timestamp);
                     break;
@@ -186,10 +186,10 @@ public class RowDataVectorizer extends Vectorizer<RowData> {
     private static void setColumn(
             int rowId,
             ListColumnVector listColumnVector,
-            LogicalType type,
-            RowData row,
+            DataType type,
+            InternalRow row,
             int columnId) {
-        ArrayData arrayData = row.getArray(columnId);
+        InternalArray arrayData = row.getArray(columnId);
         ArrayType arrayType = (ArrayType) type;
         listColumnVector.lengths[rowId] = arrayData.size();
         listColumnVector.offsets[rowId] = listColumnVector.childCount;
@@ -197,7 +197,7 @@ public class RowDataVectorizer extends Vectorizer<RowData> {
         listColumnVector.child.ensureSize(
                 listColumnVector.childCount, listColumnVector.offsets[rowId] != 0);
 
-        RowData convertedRowData = convert(arrayData, arrayType.getElementType());
+        InternalRow convertedRowData = convert(arrayData, arrayType.getElementType());
         for (int i = 0; i < arrayData.size(); i++) {
             setColumn(
                     (int) listColumnVector.offsets[rowId] + i,
@@ -211,13 +211,13 @@ public class RowDataVectorizer extends Vectorizer<RowData> {
     private static void setColumn(
             int rowId,
             MapColumnVector mapColumnVector,
-            LogicalType type,
-            RowData row,
+            DataType type,
+            InternalRow row,
             int columnId) {
-        MapData mapData = row.getMap(columnId);
+        InternalMap mapData = row.getMap(columnId);
         MapType mapType = (MapType) type;
-        ArrayData keyArray = mapData.keyArray();
-        ArrayData valueArray = mapData.valueArray();
+        InternalArray keyArray = mapData.keyArray();
+        InternalArray valueArray = mapData.valueArray();
         mapColumnVector.lengths[rowId] = mapData.size();
         mapColumnVector.offsets[rowId] = mapColumnVector.childCount;
         mapColumnVector.childCount += mapColumnVector.lengths[rowId];
@@ -226,8 +226,8 @@ public class RowDataVectorizer extends Vectorizer<RowData> {
         mapColumnVector.values.ensureSize(
                 mapColumnVector.childCount, mapColumnVector.offsets[rowId] != 0);
 
-        RowData convertedKeyRowData = convert(keyArray, mapType.getKeyType());
-        RowData convertedValueRowData = convert(valueArray, mapType.getValueType());
+        InternalRow convertedKeyRowData = convert(keyArray, mapType.getKeyType());
+        InternalRow convertedValueRowData = convert(valueArray, mapType.getValueType());
         for (int i = 0; i < keyArray.size(); i++) {
             setColumn(
                     (int) mapColumnVector.offsets[rowId] + i,
@@ -247,12 +247,12 @@ public class RowDataVectorizer extends Vectorizer<RowData> {
     private static void setColumn(
             int rowId,
             StructColumnVector structColumnVector,
-            LogicalType type,
-            RowData row,
+            DataType type,
+            InternalRow row,
             int columnId) {
-        RowData structRow = row.getRow(columnId, structColumnVector.fields.length);
+        InternalRow structRow = row.getRow(columnId, structColumnVector.fields.length);
         RowType rowType = (RowType) type;
-        for (int i = 0; i < structRow.getArity(); i++) {
+        for (int i = 0; i < structRow.getFieldCount(); i++) {
             ColumnVector cv = structColumnVector.fields[i];
             setColumn(rowId, cv, rowType.getTypeAt(i), structRow, i);
         }
@@ -260,15 +260,16 @@ public class RowDataVectorizer extends Vectorizer<RowData> {
 
     /**
      * Converting ArrayData to RowData for calling {@link RowDataVectorizer#setColumn(int,
-     * ColumnVector, LogicalType, RowData, int)} recursively with array.
+     * ColumnVector, DataType, InternalRow, int)} recursively with array.
      *
      * @param arrayData input ArrayData.
-     * @param arrayFieldType LogicalType of input ArrayData.
+     * @param arrayFieldType DataType of input ArrayData.
      * @return RowData.
      */
-    private static RowData convert(ArrayData arrayData, LogicalType arrayFieldType) {
-        GenericRowData rowData = new GenericRowData(arrayData.size());
-        ArrayData.ElementGetter elementGetter = ArrayData.createElementGetter(arrayFieldType);
+    private static InternalRow convert(InternalArray arrayData, DataType arrayFieldType) {
+        GenericRow rowData = new GenericRow(arrayData.size());
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(arrayFieldType);
         for (int i = 0; i < arrayData.size(); i++) {
             rowData.setField(i, elementGetter.getElementOrNull(arrayData, i));
         }

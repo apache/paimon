@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.data.columnar.heap;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.store.data.columnar.ColumnarRowData;
+import org.apache.flink.table.store.data.columnar.ColumnarRow;
 import org.apache.flink.table.store.data.columnar.RowColumnVector;
 import org.apache.flink.table.store.data.columnar.VectorizedColumnBatch;
 import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
@@ -41,10 +41,10 @@ public class HeapRowVector extends AbstractHeapVector
     }
 
     @Override
-    public ColumnarRowData getRow(int i) {
-        ColumnarRowData columnarRowData = new ColumnarRowData(new VectorizedColumnBatch(fields));
-        columnarRowData.setRowId(i);
-        return columnarRowData;
+    public ColumnarRow getRow(int i) {
+        ColumnarRow columnarRow = new ColumnarRow(new VectorizedColumnBatch(fields));
+        columnarRow.setRowId(i);
+        return columnarRow;
     }
 
     @Override

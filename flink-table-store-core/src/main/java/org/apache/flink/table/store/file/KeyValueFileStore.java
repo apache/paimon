@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file;
 
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
@@ -28,7 +28,7 @@ import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.KeyComparatorSupplier;
 import org.apache.flink.table.store.format.FileFormatDiscover;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.util.Comparator;
 import java.util.function.Supplier;
@@ -42,7 +42,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final RowType keyType;
     private final RowType valueType;
     private final KeyValueFieldsExtractor keyValueFieldsExtractor;
-    private final Supplier<Comparator<RowData>> keyComparatorSupplier;
+    private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
 
     public KeyValueFileStore(
@@ -116,7 +116,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     }
 
     @Override
-    public Comparator<RowData> newKeyComparator() {
+    public Comparator<InternalRow> newKeyComparator() {
         return keyComparatorSupplier.get();
     }
 }

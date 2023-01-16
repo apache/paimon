@@ -23,9 +23,10 @@ import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsLimitPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.expressions.ResolvedExpression;
+import org.apache.flink.table.store.connector.LogicalTypeConversion;
+import org.apache.flink.table.store.connector.PredicateConverter;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.file.predicate.PredicateConverter;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -65,7 +66,7 @@ public abstract class FlinkTableSource
     @Override
     public Result applyFilters(List<ResolvedExpression> filters) {
         List<Predicate> converted = new ArrayList<>();
-        RowType rowType = table.rowType();
+        RowType rowType = LogicalTypeConversion.toLogicalType(table.rowType());
         for (ResolvedExpression filter : filters) {
             PredicateConverter.convert(rowType, filter).ifPresent(converted::add);
         }

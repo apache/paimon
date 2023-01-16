@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.format.parquet.writer;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.hadoop.ParquetWriter;
@@ -32,8 +32,9 @@ import java.util.HashMap;
 
 import static org.apache.flink.table.store.format.parquet.ParquetSchemaConverter.convertToParquetMessageType;
 
-/** {@link RowData} of {@link ParquetWriter.Builder}. */
-public class ParquetRowDataBuilder extends ParquetWriter.Builder<RowData, ParquetRowDataBuilder> {
+/** {@link InternalRow} of {@link ParquetWriter.Builder}. */
+public class ParquetRowDataBuilder
+        extends ParquetWriter.Builder<InternalRow, ParquetRowDataBuilder> {
 
     private final RowType rowType;
 
@@ -48,11 +49,11 @@ public class ParquetRowDataBuilder extends ParquetWriter.Builder<RowData, Parque
     }
 
     @Override
-    protected WriteSupport<RowData> getWriteSupport(Configuration conf) {
+    protected WriteSupport<InternalRow> getWriteSupport(Configuration conf) {
         return new ParquetWriteSupport();
     }
 
-    private class ParquetWriteSupport extends WriteSupport<RowData> {
+    private class ParquetWriteSupport extends WriteSupport<InternalRow> {
 
         private final MessageType schema = convertToParquetMessageType("flink_schema", rowType);
 
@@ -69,7 +70,7 @@ public class ParquetRowDataBuilder extends ParquetWriter.Builder<RowData, Parque
         }
 
         @Override
-        public void write(RowData record) {
+        public void write(InternalRow record) {
             try {
                 this.writer.write(record);
             } catch (Exception e) {

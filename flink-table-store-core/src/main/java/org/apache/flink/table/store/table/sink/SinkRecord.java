@@ -18,24 +18,24 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.types.RowKind;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** A sink record contains key, row and partition, bucket information. */
 public class SinkRecord {
 
-    private final BinaryRowData partition;
+    private final BinaryRow partition;
 
     private final int bucket;
 
-    private final BinaryRowData primaryKey;
+    private final BinaryRow primaryKey;
 
-    private final RowData row;
+    private final InternalRow row;
 
-    public SinkRecord(BinaryRowData partition, int bucket, BinaryRowData primaryKey, RowData row) {
+    public SinkRecord(BinaryRow partition, int bucket, BinaryRow primaryKey, InternalRow row) {
         checkArgument(partition.getRowKind() == RowKind.INSERT);
         checkArgument(primaryKey.getRowKind() == RowKind.INSERT);
         this.partition = partition;
@@ -44,7 +44,7 @@ public class SinkRecord {
         this.row = row;
     }
 
-    public BinaryRowData partition() {
+    public BinaryRow partition() {
         return partition;
     }
 
@@ -52,11 +52,11 @@ public class SinkRecord {
         return bucket;
     }
 
-    public BinaryRowData primaryKey() {
+    public BinaryRow primaryKey() {
         return primaryKey;
     }
 
-    public RowData row() {
+    public InternalRow row() {
         return row;
     }
 }

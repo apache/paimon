@@ -24,10 +24,11 @@ import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.table.store.utils.ProjectedRowData;
-import org.apache.flink.table.store.utils.Projection;
-import org.apache.flink.table.store.utils.RowDataUtils;
+import org.apache.flink.table.store.connector.ProjectedRowData;
+import org.apache.flink.table.store.connector.Projection;
 import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Collector;
 
@@ -61,24 +62,40 @@ public class KafkaLogDeserializationSchema implements KafkaDeserializationSchema
         this.primaryKey = primaryKey;
         this.primaryKeyDeserializer = primaryKeyDeserializer;
         this.valueDeserializer = valueDeserializer;
-        DataType projectedType =
-                projectFields == null
-                        ? physicalType
-                        : Projection.of(projectFields).project(physicalType);
-        this.producedType = InternalTypeInfo.of(projectedType.getLogicalType());
+        RowType logicalType = (RowType) physicalType.getLogicalType();
+        this.producedType =
+                InternalTypeInfo.of(
+                        projectFields == null
+                                ? logicalType
+                                : Projection.of(projectFields).project(logicalType));
         this.fieldCount = physicalType.getChildren().size();
         this.projectFields = projectFields;
         this.keyFieldGetters =
                 IntStream.range(0, primaryKey.length)
                         .mapToObj(
                                 i ->
-                                        RowDataUtils.createNullCheckingFieldGetter(
+                                        createNullCheckingFieldGetter(
                                                 physicalType
                                                         .getChildren()
                                                         .get(primaryKey[i])
                                                         .getLogicalType(),
                                                 i))
                         .toArray(RowData.FieldGetter[]::new);
+    }
+
+    private static RowData.FieldGetter createNullCheckingFieldGetter(
+            LogicalType dataType, int index) {
+        RowData.FieldGetter getter = RowData.createFieldGetter(dataType, index);
+        if (dataType.isNullable()) {
+            return getter;
+        } else {
+            return row -> {
+                if (row.isNullAt(index)) {
+                    return null;
+                }
+                return getter.getFieldOrNull(row);
+            };
+        }
     }
 
     @Override

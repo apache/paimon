@@ -18,17 +18,15 @@
 
 package org.apache.flink.table.store.data.columnar.writable;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.data.columnar.TimestampColumnVector;
 
 /** Writable {@link TimestampColumnVector}. */
-@Internal
 public interface WritableTimestampVector extends WritableColumnVector, TimestampColumnVector {
 
-    /** Set {@link TimestampData} at rowId with the provided value. */
-    void setTimestamp(int rowId, TimestampData timestamp);
+    /** Set {@link Timestamp} at rowId with the provided value. */
+    void setTimestamp(int rowId, Timestamp timestamp);
 
     /** Fill the column vector with the provided value. */
-    void fill(TimestampData value);
+    void fill(Timestamp value);
 }

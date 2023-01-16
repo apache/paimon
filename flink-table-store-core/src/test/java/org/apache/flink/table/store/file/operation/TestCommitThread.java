@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
@@ -27,7 +27,7 @@ import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.table.sink.FileCommittable;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,10 +58,10 @@ public class TestCommitThread extends Thread {
     private final RowType keyType;
     private final RowType valueType;
     private final boolean enableOverwrite;
-    private final Map<BinaryRowData, List<KeyValue>> data;
-    private final Map<BinaryRowData, List<KeyValue>> result;
-    private final Map<BinaryRowData, MergeTreeWriter> writers;
-    private final Set<BinaryRowData> writtenPartitions;
+    private final Map<BinaryRow, List<KeyValue>> data;
+    private final Map<BinaryRow, List<KeyValue>> result;
+    private final Map<BinaryRow, MergeTreeWriter> writers;
+    private final Set<BinaryRow> writtenPartitions;
 
     private final AbstractFileStoreWrite<KeyValue> write;
     private final FileStoreCommit commit;
@@ -72,7 +72,7 @@ public class TestCommitThread extends Thread {
             RowType keyType,
             RowType valueType,
             boolean enableOverwrite,
-            Map<BinaryRowData, List<KeyValue>> data,
+            Map<BinaryRow, List<KeyValue>> data,
             TestFileStore testStore,
             TestFileStore safeStore) {
         this.keyType = keyType;
@@ -134,7 +134,7 @@ public class TestCommitThread extends Thread {
             writeData();
         }
         ManifestCommittable committable = new ManifestCommittable(commitIdentifier++);
-        for (Map.Entry<BinaryRowData, MergeTreeWriter> entry : writers.entrySet()) {
+        for (Map.Entry<BinaryRow, MergeTreeWriter> entry : writers.entrySet()) {
             RecordWriter.CommitIncrement inc = entry.getValue().prepareCommit(true);
             committable.addFileCommittable(
                     new FileCommittable(
@@ -145,7 +145,7 @@ public class TestCommitThread extends Thread {
     }
 
     private void doOverwrite() throws Exception {
-        BinaryRowData partition = overwriteData();
+        BinaryRow partition = overwriteData();
         ManifestCommittable committable = new ManifestCommittable(commitIdentifier++);
         RecordWriter.CommitIncrement inc = writers.get(partition).prepareCommit(true);
         committable.addFileCommittable(
@@ -165,7 +165,7 @@ public class TestCommitThread extends Thread {
         while (true) {
             try {
                 ManifestCommittable committable = new ManifestCommittable(identifier);
-                for (BinaryRowData partition : writtenPartitions) {
+                for (BinaryRow partition : writtenPartitions) {
                     MergeTreeWriter writer =
                             writers.computeIfAbsent(partition, p -> createWriter(p, false));
                     writer.compact(true);
@@ -208,7 +208,7 @@ public class TestCommitThread extends Thread {
 
     private void writeData() throws Exception {
         List<KeyValue> changes = new ArrayList<>();
-        BinaryRowData partition = pickData(changes);
+        BinaryRow partition = pickData(changes);
         result.computeIfAbsent(partition, p -> new ArrayList<>()).addAll(changes);
         writtenPartitions.add(partition);
 
@@ -226,9 +226,9 @@ public class TestCommitThread extends Thread {
         }
     }
 
-    private BinaryRowData overwriteData() throws Exception {
+    private BinaryRow overwriteData() throws Exception {
         List<KeyValue> changes = new ArrayList<>();
-        BinaryRowData partition = pickData(changes);
+        BinaryRow partition = pickData(changes);
         List<KeyValue> resultOfPartition =
                 result.computeIfAbsent(partition, p -> new ArrayList<>());
         resultOfPartition.clear();
@@ -255,9 +255,9 @@ public class TestCommitThread extends Thread {
         return partition;
     }
 
-    private BinaryRowData pickData(List<KeyValue> changes) {
-        List<BinaryRowData> keys = new ArrayList<>(data.keySet());
-        BinaryRowData partition = keys.get(ThreadLocalRandom.current().nextInt(keys.size()));
+    private BinaryRow pickData(List<KeyValue> changes) {
+        List<BinaryRow> keys = new ArrayList<>(data.keySet());
+        BinaryRow partition = keys.get(ThreadLocalRandom.current().nextInt(keys.size()));
         List<KeyValue> remaining = data.get(partition);
         int numChanges = ThreadLocalRandom.current().nextInt(Math.min(100, remaining.size() + 1));
         changes.addAll(remaining.subList(0, numChanges));
@@ -269,7 +269,7 @@ public class TestCommitThread extends Thread {
         return partition;
     }
 
-    private MergeTreeWriter createWriter(BinaryRowData partition, boolean empty) {
+    private MergeTreeWriter createWriter(BinaryRow partition, boolean empty) {
         ExecutorService service =
                 Executors.newSingleThreadExecutor(
                         r -> {

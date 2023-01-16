@@ -18,12 +18,10 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.FieldsDataType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.utils.TypeConversions;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.util.Preconditions;
 
 import java.lang.reflect.Array;
@@ -36,7 +34,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.apache.flink.table.types.logical.LogicalTypeRoot.ROW;
+import static org.apache.flink.table.store.types.DataTypeRoot.ROW;
 
 /**
  * {@link Projection} represents a list of (possibly nested) indexes that can be used to project
@@ -49,24 +47,7 @@ public abstract class Projection {
     // sealed class
     private Projection() {}
 
-    /**
-     * Projects a (possibly nested) row data type by returning a new data type that only includes
-     * fields of the given index paths.
-     *
-     * <p>When extracting nested fields, the name of the resulting fields is the full path of the
-     * field separated by {@code _}. For example, the field {@code b} inside the row field {@code a}
-     * of the root {@link DataType} is named {@code a_b} in the result {@link DataType}. In case of
-     * naming conflicts the postfix notation '_$%d' is used, where {@code %d} is an arbitrary
-     * number, in order to generate a unique field name. For example if the root {@link DataType}
-     * includes both a field {@code a_b} and a nested row {@code a} with field {@code b}, the result
-     * {@link DataType} will contain one field named {@code a_b} and the other named {@code a_b_1}.
-     */
-    public abstract DataType project(DataType dataType);
-
-    /** Same as {@link #project(DataType)}, but accepting and returning {@link LogicalType}. */
-    public LogicalType project(LogicalType logicalType) {
-        return this.project(TypeConversions.fromLogicalToDataType(logicalType)).getLogicalType();
-    }
+    public abstract RowType project(RowType rowType);
 
     /** Project array. */
     public <T> T[] project(T[] array) {
@@ -104,7 +85,7 @@ public abstract class Projection {
      * </pre>
      *
      * <p>Note how the index {@code 3} in the minuend becomes {@code 2} because it's rescaled to
-     * project correctly a {@link RowData} or arity 3.
+     * project correctly a {@link InternalRow} or arity 3.
      *
      * @param other the subtrahend
      * @throws IllegalArgumentException when {@code other} is nested.
@@ -125,11 +106,6 @@ public abstract class Projection {
      * @throws IllegalStateException if this projection is nested.
      */
     public abstract Projection complement(int fieldsNumber);
-
-    /** Like {@link #complement(int)}, using the {@code dataType} fields count. */
-    public Projection complement(DataType dataType) {
-        return complement(dataType.getLogicalType().getChildren().size());
-    }
 
     /**
      * Convert this instance to a projection of top level indexes. The array represents the mapping
@@ -223,8 +199,8 @@ public abstract class Projection {
         private EmptyProjection() {}
 
         @Override
-        public DataType project(DataType dataType) {
-            return new NestedProjection(toNestedIndexes()).project(dataType);
+        public RowType project(RowType rowType) {
+            return new NestedProjection(toNestedIndexes()).project(rowType);
         }
 
         @Override
@@ -264,39 +240,29 @@ public abstract class Projection {
         }
 
         @Override
-        public DataType project(DataType dataType) {
-            final List<RowType.RowField> updatedFields = new ArrayList<>();
-            final List<DataType> updatedChildren = new ArrayList<>();
+        public RowType project(RowType rowType) {
+            final List<DataField> updatedFields = new ArrayList<>();
             Set<String> nameDomain = new HashSet<>();
             int duplicateCount = 0;
             for (int[] indexPath : this.projection) {
-                DataType fieldType = dataType.getChildren().get(indexPath[0]);
-                LogicalType fieldLogicalType = fieldType.getLogicalType();
+                DataField field = rowType.getFields().get(indexPath[0]);
                 StringBuilder builder =
-                        new StringBuilder(
-                                ((RowType) dataType.getLogicalType())
-                                        .getFieldNames()
-                                        .get(indexPath[0]));
+                        new StringBuilder(rowType.getFieldNames().get(indexPath[0]));
                 for (int index = 1; index < indexPath.length; index++) {
                     Preconditions.checkArgument(
-                            fieldLogicalType.getTypeRoot() == ROW, "Row data type expected.");
-                    RowType rowtype = ((RowType) fieldLogicalType);
+                            field.type().getTypeRoot() == ROW, "Row data type expected.");
+                    RowType rowtype = ((RowType) field.type());
                     builder.append("_").append(rowtype.getFieldNames().get(indexPath[index]));
-                    fieldLogicalType = rowtype.getFields().get(indexPath[index]).getType();
-                    fieldType = fieldType.getChildren().get(indexPath[index]);
+                    field = rowtype.getFields().get(indexPath[index]);
                 }
                 String path = builder.toString();
                 while (nameDomain.contains(path)) {
                     path = builder.append("_$").append(duplicateCount++).toString();
                 }
-                updatedFields.add(new RowType.RowField(path, fieldLogicalType));
-                updatedChildren.add(fieldType);
+                updatedFields.add(field.newName(path));
                 nameDomain.add(path);
             }
-            return new FieldsDataType(
-                    new RowType(dataType.getLogicalType().isNullable(), updatedFields),
-                    dataType.getConversionClass(),
-                    updatedChildren);
+            return new RowType(rowType.isNullable(), updatedFields);
         }
 
         @Override
@@ -380,8 +346,8 @@ public abstract class Projection {
         }
 
         @Override
-        public DataType project(DataType dataType) {
-            return new NestedProjection(toNestedIndexes()).project(dataType);
+        public RowType project(RowType rowType) {
+            return new NestedProjection(toNestedIndexes()).project(rowType);
         }
 
         @Override

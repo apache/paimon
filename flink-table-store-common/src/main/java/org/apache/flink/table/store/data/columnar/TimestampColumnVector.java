@@ -18,11 +18,9 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.Timestamp;
 
 /** Timestamp column vector. */
-@Internal
 public interface TimestampColumnVector extends ColumnVector {
-    TimestampData getTimestamp(int i, int precision);
+    Timestamp getTimestamp(int i, int precision);
 }

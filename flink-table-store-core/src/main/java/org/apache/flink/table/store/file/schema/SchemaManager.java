@@ -35,22 +35,15 @@ import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnType;
 import org.apache.flink.table.store.file.utils.AtomicFileWriter;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
+import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypeCasts;
 import org.apache.flink.table.store.types.DataTypeVisitor;
-import org.apache.flink.table.store.types.LogicalTypeConversion;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.DistinctType;
-import org.apache.flink.table.types.logical.LegacyTypeInformationType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.MapType;
-import org.apache.flink.table.types.logical.NullType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.StructuredType;
-import org.apache.flink.table.types.logical.SymbolType;
-import org.apache.flink.table.types.logical.UnresolvedUserDefinedType;
-import org.apache.flink.table.types.logical.UserDefinedType;
-import org.apache.flink.table.types.logical.utils.LogicalTypeCasts;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.MultisetType;
+import org.apache.flink.table.store.types.ReassignFieldId;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
@@ -70,7 +63,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.utils.FileUtils.listVersionedFiles;
-import static org.apache.flink.table.store.types.LogicalTypeConversion.toLogicalType;
 import static org.apache.flink.util.Preconditions.checkState;
 
 /** Schema Manager to manage schema versions. */
@@ -182,37 +174,26 @@ public class SchemaManager implements Serializable {
 
     private void validatePrimaryKeysType(UpdateSchema updateSchema, List<String> primaryKeys) {
         if (!primaryKeys.isEmpty()) {
-            Map<String, RowType.RowField> rowFields = new HashMap<>();
-            for (RowType.RowField rowField : updateSchema.rowType().getFields()) {
-                rowFields.put(rowField.getName(), rowField);
+            Map<String, DataField> rowFields = new HashMap<>();
+            for (DataField rowField : updateSchema.rowType().getFields()) {
+                rowFields.put(rowField.name(), rowField);
             }
             for (String primaryKeyName : primaryKeys) {
-                RowType.RowField rowField = rowFields.get(primaryKeyName);
-                LogicalType logicalType = rowField.getType();
+                DataField rowField = rowFields.get(primaryKeyName);
+                DataType dataType = rowField.type();
                 if (PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES.stream()
-                        .anyMatch(c -> c.isInstance(logicalType))) {
+                        .anyMatch(c -> c.isInstance(dataType))) {
                     throw new UnsupportedOperationException(
                             String.format(
                                     "The type %s in primary key field %s is unsupported",
-                                    logicalType.getClass().getSimpleName(), primaryKeyName));
+                                    dataType.getClass().getSimpleName(), primaryKeyName));
                 }
             }
         }
     }
 
-    public static final List<Class<? extends LogicalType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
-            Arrays.asList(
-                    MapType.class,
-                    ArrayType.class,
-                    RowType.class,
-                    UserDefinedType.class,
-                    DistinctType.class,
-                    StructuredType.class,
-                    org.apache.flink.table.types.logical.MultisetType.class,
-                    NullType.class,
-                    LegacyTypeInformationType.class,
-                    SymbolType.class,
-                    UnresolvedUserDefinedType.class);
+    public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
+            Arrays.asList(MapType.class, ArrayType.class, RowType.class, MultisetType.class);
 
     /** Create {@link SchemaChange}s. */
     public TableSchema commitChanges(List<SchemaChange> changes) throws Exception {
@@ -241,12 +222,11 @@ public class SchemaManager implements Serializable {
                                         addColumn.fieldName(), tableRoot));
                     }
                     Preconditions.checkArgument(
-                            addColumn.logicalType().isNullable(),
+                            addColumn.dataType().isNullable(),
                             "ADD COLUMN cannot specify NOT NULL.");
                     int id = highestFieldId.incrementAndGet();
                     DataType dataType =
-                            LogicalTypeConversion.toDataType(
-                                    addColumn.logicalType(), highestFieldId);
+                            ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);
                     newFields.add(
                             new DataField(
                                     id, addColumn.fieldName(), dataType, addColumn.description()));
@@ -296,29 +276,23 @@ public class SchemaManager implements Serializable {
                             update.fieldName(),
                             (field) -> {
                                 checkState(
-                                        LogicalTypeCasts.supportsImplicitCast(
-                                                        toLogicalType(field.type()),
-                                                        update.newLogicalType())
+                                        DataTypeCasts.supportsImplicitCast(
+                                                        field.type(), update.newDataType())
                                                 && CastExecutors.resolve(
-                                                                toLogicalType(field.type()),
-                                                                update.newLogicalType())
+                                                                field.type(), update.newDataType())
                                                         != null,
                                         String.format(
                                                 "Column type %s[%s] cannot be converted to %s without loosing information.",
-                                                field.name(),
-                                                toLogicalType(field.type()),
-                                                update.newLogicalType()));
+                                                field.name(), field.type(), update.newDataType()));
                                 AtomicInteger dummyId = new AtomicInteger(0);
-                                DataType newType =
-                                        LogicalTypeConversion.toDataType(
-                                                update.newLogicalType(), new AtomicInteger(0));
                                 if (dummyId.get() != 0) {
                                     throw new RuntimeException(
                                             String.format(
                                                     "Update column to nested row type '%s' is not supported.",
-                                                    update.newLogicalType()));
+                                                    update.newDataType()));
                                 }
-                                return new DataField(field.id(), field.name(), newType);
+                                return new DataField(
+                                        field.id(), field.name(), update.newDataType());
                             });
                 } else if (change instanceof UpdateColumnNullability) {
                     UpdateColumnNullability update = (UpdateColumnNullability) change;

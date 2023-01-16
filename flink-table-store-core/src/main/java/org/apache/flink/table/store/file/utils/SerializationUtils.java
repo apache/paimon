@@ -20,17 +20,17 @@ package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
-import org.apache.flink.core.memory.MemorySegmentFactory;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.types.logical.VarBinaryType;
-import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.flink.table.store.types.VarBinaryType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import static org.apache.flink.table.data.binary.BinarySegmentUtils.copyToBytes;
-import static org.apache.flink.table.data.binary.BinarySegmentUtils.copyToView;
+import static org.apache.flink.table.store.memory.MemorySegmentUtils.copyToBytes;
+import static org.apache.flink.table.store.memory.MemorySegmentUtils.copyToView;
 
 /** Utils for serialization. */
 public class SerializationUtils {
@@ -69,40 +69,38 @@ public class SerializationUtils {
     }
 
     /**
-     * Serialize {@link BinaryRowData}, the difference between this and {@code
-     * BinaryRowDataSerializer} is that arity is also serialized here, so the deserialization is
-     * schemaless.
+     * Serialize {@link BinaryRow}, the difference between this and {@code BinaryRowSerializer} is
+     * that arity is also serialized here, so the deserialization is schemaless.
      */
-    public static byte[] serializeBinaryRow(BinaryRowData row) {
+    public static byte[] serializeBinaryRow(BinaryRow row) {
         byte[] bytes = copyToBytes(row.getSegments(), row.getOffset(), row.getSizeInBytes());
         ByteBuffer buffer = ByteBuffer.allocate(4 + bytes.length);
-        buffer.putInt(row.getArity()).put(bytes);
+        buffer.putInt(row.getFieldCount()).put(bytes);
         return buffer.array();
     }
 
-    /** Schemaless deserialization for {@link BinaryRowData}. */
-    public static BinaryRowData deserializeBinaryRow(byte[] bytes) {
+    /** Schemaless deserialization for {@link BinaryRow}. */
+    public static BinaryRow deserializeBinaryRow(byte[] bytes) {
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
         int arity = buffer.getInt();
-        BinaryRowData row = new BinaryRowData(arity);
-        row.pointTo(MemorySegmentFactory.wrap(bytes), 4, bytes.length - 4);
+        BinaryRow row = new BinaryRow(arity);
+        row.pointTo(MemorySegment.wrap(bytes), 4, bytes.length - 4);
         return row;
     }
 
     /**
-     * Serialize {@link BinaryRowData} to a {@link DataOutputView}.
+     * Serialize {@link BinaryRow} to a {@link DataOutputView}.
      *
-     * @see #serializeBinaryRow(BinaryRowData)
+     * @see #serializeBinaryRow(BinaryRow)
      */
-    public static void serializeBinaryRow(BinaryRowData row, DataOutputView out)
-            throws IOException {
+    public static void serializeBinaryRow(BinaryRow row, DataOutputView out) throws IOException {
         out.writeInt(4 + row.getSizeInBytes());
-        out.writeInt(row.getArity());
+        out.writeInt(row.getFieldCount());
         copyToView(row.getSegments(), row.getOffset(), row.getSizeInBytes(), out);
     }
 
-    /** Schemaless deserialization for {@link BinaryRowData} from a {@link DataInputView}. */
-    public static BinaryRowData deserializeBinaryRow(DataInputView input) throws IOException {
+    /** Schemaless deserialization for {@link BinaryRow} from a {@link DataInputView}. */
+    public static BinaryRow deserializeBinaryRow(DataInputView input) throws IOException {
         return deserializeBinaryRow(deserializedBytes(input));
     }
 }

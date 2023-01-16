@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.DataType;
 
 import java.io.Serializable;
 import java.util.Objects;
@@ -30,9 +30,9 @@ public class FieldRef implements Serializable {
 
     private final int index;
     private final String name;
-    private final LogicalType type;
+    private final DataType type;
 
-    public FieldRef(int index, String name, LogicalType type) {
+    public FieldRef(int index, String name, DataType type) {
         this.index = index;
         this.name = name;
         this.type = type;
@@ -46,7 +46,7 @@ public class FieldRef implements Serializable {
         return name;
     }
 
-    public LogicalType type() {
+    public DataType type() {
         return type;
     }
 

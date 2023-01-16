@@ -18,12 +18,11 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.data.ArrayData;
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.MapData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.InternalArray;
+import org.apache.flink.table.store.data.InternalMap;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.data.columnar.BytesColumnVector.Bytes;
 
 import java.io.Serializable;
@@ -35,7 +34,6 @@ import java.nio.charset.StandardCharsets;
  *
  * <p>{@code VectorizedColumnBatch}s are influenced by Apache Hive VectorizedRowBatch.
  */
-@Internal
 public class VectorizedColumnBatch implements Serializable {
     private static final long serialVersionUID = 8180323238728166155L;
 
@@ -114,23 +112,23 @@ public class VectorizedColumnBatch implements Serializable {
         return new String(byteArray.data, byteArray.offset, byteArray.len, StandardCharsets.UTF_8);
     }
 
-    public DecimalData getDecimal(int rowId, int colId, int precision, int scale) {
+    public Decimal getDecimal(int rowId, int colId, int precision, int scale) {
         return ((DecimalColumnVector) (columns[colId])).getDecimal(rowId, precision, scale);
     }
 
-    public TimestampData getTimestamp(int rowId, int colId, int precision) {
+    public Timestamp getTimestamp(int rowId, int colId, int precision) {
         return ((TimestampColumnVector) (columns[colId])).getTimestamp(rowId, precision);
     }
 
-    public ArrayData getArray(int rowId, int colId) {
+    public InternalArray getArray(int rowId, int colId) {
         return ((ArrayColumnVector) columns[colId]).getArray(rowId);
     }
 
-    public RowData getRow(int rowId, int colId) {
+    public InternalRow getRow(int rowId, int colId) {
         return ((RowColumnVector) columns[colId]).getRow(rowId);
     }
 
-    public MapData getMap(int rowId, int colId) {
+    public InternalMap getMap(int rowId, int colId) {
         return ((MapColumnVector) columns[colId]).getMap(rowId);
     }
 }

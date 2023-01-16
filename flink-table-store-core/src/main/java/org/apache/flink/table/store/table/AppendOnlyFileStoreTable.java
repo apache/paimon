@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.AppendOnlyFileStore;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreRead;
@@ -38,7 +38,7 @@ import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
@@ -108,7 +108,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
             }
 
             @Override
-            public RecordReader<RowData> createReader(Split split) throws IOException {
+            public RecordReader<InternalRow> createReader(Split split) throws IOException {
                 return read.createReader((DataSplit) split);
             }
         };

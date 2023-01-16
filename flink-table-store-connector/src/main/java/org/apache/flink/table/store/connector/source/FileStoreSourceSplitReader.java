@@ -27,7 +27,8 @@ import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.MutableRecordAndPosition;
 import org.apache.flink.connector.file.src.util.Pool;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.connector.FlinkRowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.table.source.TableRead;
 
@@ -39,7 +40,8 @@ import java.util.Queue;
 
 /** The {@link SplitReader} implementation for the file store source. */
 public class FileStoreSourceSplitReader
-        implements SplitReader<RecordAndPosition<RowData>, FileStoreSourceSplit> {
+        implements SplitReader<
+                RecordAndPosition<org.apache.flink.table.data.RowData>, FileStoreSourceSplit> {
 
     private final TableRead tableRead;
 
@@ -49,10 +51,10 @@ public class FileStoreSourceSplitReader
 
     private final Pool<FileStoreRecordIterator> pool;
 
-    @Nullable private RecordReader<RowData> currentReader;
+    @Nullable private RecordReader<InternalRow> currentReader;
     @Nullable private String currentSplitId;
     private long currentNumRead;
-    private RecordReader.RecordIterator<RowData> currentFirstBatch;
+    private RecordReader.RecordIterator<InternalRow> currentFirstBatch;
 
     public FileStoreSourceSplitReader(TableRead tableRead, @Nullable Long limit) {
         this.tableRead = tableRead;
@@ -63,14 +65,15 @@ public class FileStoreSourceSplitReader
     }
 
     @Override
-    public RecordsWithSplitIds<RecordAndPosition<RowData>> fetch() throws IOException {
+    public RecordsWithSplitIds<RecordAndPosition<org.apache.flink.table.data.RowData>> fetch()
+            throws IOException {
         checkSplitOrStartNext();
 
         // pool first, pool size is 1, the underlying implementation does not allow multiple batches
         // to be read at the same time
         FileStoreRecordIterator iterator = pool();
 
-        RecordReader.RecordIterator<RowData> nextBatch;
+        RecordReader.RecordIterator<InternalRow> nextBatch;
         if (currentFirstBatch != null) {
             nextBatch = currentFirstBatch;
             currentFirstBatch = null;
@@ -135,7 +138,7 @@ public class FileStoreSourceSplitReader
 
     private void seek(long toSkip) throws IOException {
         while (true) {
-            RecordReader.RecordIterator<RowData> nextBatch = currentReader.readBatch();
+            RecordReader.RecordIterator<InternalRow> nextBatch = currentReader.readBatch();
             if (nextBatch == null) {
                 throw new RuntimeException(
                         String.format(
@@ -152,25 +155,27 @@ public class FileStoreSourceSplitReader
         }
     }
 
-    private FileRecords<RowData> finishSplit() throws IOException {
+    private FileRecords<org.apache.flink.table.data.RowData> finishSplit() throws IOException {
         if (currentReader != null) {
             currentReader.close();
             currentReader = null;
         }
 
-        final FileRecords<RowData> finishRecords = FileRecords.finishedSplit(currentSplitId);
+        final FileRecords<org.apache.flink.table.data.RowData> finishRecords =
+                FileRecords.finishedSplit(currentSplitId);
         currentSplitId = null;
         return finishRecords;
     }
 
-    private class FileStoreRecordIterator implements BulkFormat.RecordIterator<RowData> {
+    private class FileStoreRecordIterator
+            implements BulkFormat.RecordIterator<org.apache.flink.table.data.RowData> {
 
-        private RecordReader.RecordIterator<RowData> iterator;
+        private RecordReader.RecordIterator<InternalRow> iterator;
 
-        private final MutableRecordAndPosition<RowData> recordAndPosition =
-                new MutableRecordAndPosition<>();
+        private final MutableRecordAndPosition<org.apache.flink.table.data.RowData>
+                recordAndPosition = new MutableRecordAndPosition<>();
 
-        public FileStoreRecordIterator replace(RecordReader.RecordIterator<RowData> iterator) {
+        public FileStoreRecordIterator replace(RecordReader.RecordIterator<InternalRow> iterator) {
             this.iterator = iterator;
             this.recordAndPosition.set(null, RecordAndPosition.NO_OFFSET, currentNumRead);
             return this;
@@ -178,11 +183,11 @@ public class FileStoreSourceSplitReader
 
         @Nullable
         @Override
-        public RecordAndPosition<RowData> next() {
+        public RecordAndPosition<org.apache.flink.table.data.RowData> next() {
             if (limit != null && currentNumRead >= limit) {
                 return null;
             }
-            RowData row;
+            InternalRow row;
             try {
                 row = iterator.next();
             } catch (IOException e) {
@@ -192,7 +197,7 @@ public class FileStoreSourceSplitReader
                 return null;
             }
 
-            recordAndPosition.setNext(row);
+            recordAndPosition.setNext(new FlinkRowData(row));
             currentNumRead++;
             return recordAndPosition;
         }

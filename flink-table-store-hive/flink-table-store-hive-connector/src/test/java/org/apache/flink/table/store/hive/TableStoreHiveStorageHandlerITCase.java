@@ -20,21 +20,21 @@ package org.apache.flink.table.store.hive;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connectors.hive.FlinkEmbeddedHiveRunner;
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.FileStoreTestUtils;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.hive.objectinspector.TableStoreObjectInspectorFactory;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
@@ -113,24 +113,24 @@ public class TableStoreHiveStorageHandlerITCase {
 
     @Test
     public void testReadExternalTableNoPartitionWithPk() throws Exception {
-        List<RowData> data =
+        List<InternalRow> data =
                 Arrays.asList(
-                        GenericRowData.of(1, 10L, StringData.fromString("Hi"), 100L),
-                        GenericRowData.of(1, 20L, StringData.fromString("Hello"), 200L),
-                        GenericRowData.of(2, 30L, StringData.fromString("World"), 300L),
-                        GenericRowData.of(1, 10L, StringData.fromString("Hi Again"), 1000L),
-                        GenericRowData.ofKind(
-                                RowKind.DELETE, 2, 30L, StringData.fromString("World"), 300L),
-                        GenericRowData.of(2, 40L, null, 400L),
-                        GenericRowData.of(3, 50L, StringData.fromString("Store"), 200L));
+                        GenericRow.of(1, 10L, BinaryString.fromString("Hi"), 100L),
+                        GenericRow.of(1, 20L, BinaryString.fromString("Hello"), 200L),
+                        GenericRow.of(2, 30L, BinaryString.fromString("World"), 300L),
+                        GenericRow.of(1, 10L, BinaryString.fromString("Hi Again"), 1000L),
+                        GenericRow.ofKind(
+                                RowKind.DELETE, 2, 30L, BinaryString.fromString("World"), 300L),
+                        GenericRow.of(2, 40L, null, 400L),
+                        GenericRow.of(3, 50L, BinaryString.fromString("Store"), 200L));
         String tableName =
                 createChangelogExternalTable(
                         RowType.of(
-                                new LogicalType[] {
-                                    DataTypes.INT().getLogicalType(),
-                                    DataTypes.BIGINT().getLogicalType(),
-                                    DataTypes.STRING().getLogicalType(),
-                                    DataTypes.BIGINT().getLogicalType()
+                                new DataType[] {
+                                    DataTypes.INT(),
+                                    DataTypes.BIGINT(),
+                                    DataTypes.STRING(),
+                                    DataTypes.BIGINT()
                                 },
                                 new String[] {"a", "b", "c", "d"}),
                         Collections.emptyList(),
@@ -196,24 +196,24 @@ public class TableStoreHiveStorageHandlerITCase {
 
     @Test
     public void testReadExternalTableWithPartitionWithPk() throws Exception {
-        List<RowData> data =
+        List<InternalRow> data =
                 Arrays.asList(
-                        GenericRowData.of(1, 10, 100L, StringData.fromString("Hi")),
-                        GenericRowData.of(2, 10, 200L, StringData.fromString("Hello")),
-                        GenericRowData.of(1, 20, 300L, StringData.fromString("World")),
-                        GenericRowData.of(1, 10, 100L, StringData.fromString("Hi Again")),
-                        GenericRowData.ofKind(
-                                RowKind.DELETE, 1, 20, 300L, StringData.fromString("World")),
-                        GenericRowData.of(2, 20, 100L, null),
-                        GenericRowData.of(1, 30, 200L, StringData.fromString("Store")));
+                        GenericRow.of(1, 10, 100L, BinaryString.fromString("Hi")),
+                        GenericRow.of(2, 10, 200L, BinaryString.fromString("Hello")),
+                        GenericRow.of(1, 20, 300L, BinaryString.fromString("World")),
+                        GenericRow.of(1, 10, 100L, BinaryString.fromString("Hi Again")),
+                        GenericRow.ofKind(
+                                RowKind.DELETE, 1, 20, 300L, BinaryString.fromString("World")),
+                        GenericRow.of(2, 20, 100L, null),
+                        GenericRow.of(1, 30, 200L, BinaryString.fromString("Store")));
         String tableName =
                 createChangelogExternalTable(
                         RowType.of(
-                                new LogicalType[] {
-                                    DataTypes.INT().getLogicalType(),
-                                    DataTypes.INT().getLogicalType(),
-                                    DataTypes.BIGINT().getLogicalType(),
-                                    DataTypes.STRING().getLogicalType()
+                                new DataType[] {
+                                    DataTypes.INT(),
+                                    DataTypes.INT(),
+                                    DataTypes.BIGINT(),
+                                    DataTypes.STRING()
                                 },
                                 new String[] {"pt", "a", "b", "c"}),
                         Collections.singletonList("pt"),
@@ -284,24 +284,24 @@ public class TableStoreHiveStorageHandlerITCase {
 
     @Test
     public void testReadExternalTableNoPartitionWithValueCount() throws Exception {
-        List<RowData> data =
+        List<InternalRow> data =
                 Arrays.asList(
-                        GenericRowData.of(1, 10L, StringData.fromString("Hi"), 100L),
-                        GenericRowData.of(1, 20L, StringData.fromString("Hello"), 200L),
-                        GenericRowData.of(2, 30L, StringData.fromString("World"), 300L),
-                        GenericRowData.of(1, 10L, StringData.fromString("Hi Again"), 1000L),
-                        GenericRowData.ofKind(
-                                RowKind.DELETE, 2, 30L, StringData.fromString("World"), 300L),
-                        GenericRowData.of(2, 40L, null, 400L),
-                        GenericRowData.of(3, 50L, StringData.fromString("Store"), 200L));
+                        GenericRow.of(1, 10L, BinaryString.fromString("Hi"), 100L),
+                        GenericRow.of(1, 20L, BinaryString.fromString("Hello"), 200L),
+                        GenericRow.of(2, 30L, BinaryString.fromString("World"), 300L),
+                        GenericRow.of(1, 10L, BinaryString.fromString("Hi Again"), 1000L),
+                        GenericRow.ofKind(
+                                RowKind.DELETE, 2, 30L, BinaryString.fromString("World"), 300L),
+                        GenericRow.of(2, 40L, null, 400L),
+                        GenericRow.of(3, 50L, BinaryString.fromString("Store"), 200L));
         String tableName =
                 createChangelogExternalTable(
                         RowType.of(
-                                new LogicalType[] {
-                                    DataTypes.INT().getLogicalType(),
-                                    DataTypes.BIGINT().getLogicalType(),
-                                    DataTypes.STRING().getLogicalType(),
-                                    DataTypes.BIGINT().getLogicalType()
+                                new DataType[] {
+                                    DataTypes.INT(),
+                                    DataTypes.BIGINT(),
+                                    DataTypes.STRING(),
+                                    DataTypes.BIGINT()
                                 },
                                 new String[] {"a", "b", "c", "d"}),
                         Collections.emptyList(),
@@ -361,24 +361,24 @@ public class TableStoreHiveStorageHandlerITCase {
 
     @Test
     public void testReadExternalTableWithPartitionWithValueCount() throws Exception {
-        List<RowData> data =
+        List<InternalRow> data =
                 Arrays.asList(
-                        GenericRowData.of(1, 10, 100L, StringData.fromString("Hi")),
-                        GenericRowData.of(2, 10, 200L, StringData.fromString("Hello")),
-                        GenericRowData.of(1, 20, 300L, StringData.fromString("World")),
-                        GenericRowData.of(1, 10, 100L, StringData.fromString("Hi Again")),
-                        GenericRowData.ofKind(
-                                RowKind.DELETE, 1, 20, 300L, StringData.fromString("World")),
-                        GenericRowData.of(2, 20, 400L, null),
-                        GenericRowData.of(1, 30, 500L, StringData.fromString("Store")));
+                        GenericRow.of(1, 10, 100L, BinaryString.fromString("Hi")),
+                        GenericRow.of(2, 10, 200L, BinaryString.fromString("Hello")),
+                        GenericRow.of(1, 20, 300L, BinaryString.fromString("World")),
+                        GenericRow.of(1, 10, 100L, BinaryString.fromString("Hi Again")),
+                        GenericRow.ofKind(
+                                RowKind.DELETE, 1, 20, 300L, BinaryString.fromString("World")),
+                        GenericRow.of(2, 20, 400L, null),
+                        GenericRow.of(1, 30, 500L, BinaryString.fromString("Store")));
         String tableName =
                 createChangelogExternalTable(
                         RowType.of(
-                                new LogicalType[] {
-                                    DataTypes.INT().getLogicalType(),
-                                    DataTypes.INT().getLogicalType(),
-                                    DataTypes.BIGINT().getLogicalType(),
-                                    DataTypes.STRING().getLogicalType()
+                                new DataType[] {
+                                    DataTypes.INT(),
+                                    DataTypes.INT(),
+                                    DataTypes.BIGINT(),
+                                    DataTypes.STRING()
                                 },
                                 new String[] {"pt", "a", "b", "c"}),
                         Collections.singletonList("pt"),
@@ -440,22 +440,22 @@ public class TableStoreHiveStorageHandlerITCase {
 
     @Test
     public void testReadExternalTableNoPartitionAppendOnly() throws Exception {
-        List<RowData> data =
+        List<InternalRow> data =
                 Arrays.asList(
-                        GenericRowData.of(1, 10L, StringData.fromString("Hi"), 100L),
-                        GenericRowData.of(1, 20L, StringData.fromString("Hello"), 200L),
-                        GenericRowData.of(2, 30L, StringData.fromString("World"), 300L),
-                        GenericRowData.of(1, 10L, StringData.fromString("Hi Again"), 1000L),
-                        GenericRowData.of(2, 40L, null, 400L),
-                        GenericRowData.of(3, 50L, StringData.fromString("Store"), 200L));
+                        GenericRow.of(1, 10L, BinaryString.fromString("Hi"), 100L),
+                        GenericRow.of(1, 20L, BinaryString.fromString("Hello"), 200L),
+                        GenericRow.of(2, 30L, BinaryString.fromString("World"), 300L),
+                        GenericRow.of(1, 10L, BinaryString.fromString("Hi Again"), 1000L),
+                        GenericRow.of(2, 40L, null, 400L),
+                        GenericRow.of(3, 50L, BinaryString.fromString("Store"), 200L));
         String tableName =
                 createAppendOnlyExternalTable(
                         RowType.of(
-                                new LogicalType[] {
-                                    DataTypes.INT().getLogicalType(),
-                                    DataTypes.BIGINT().getLogicalType(),
-                                    DataTypes.STRING().getLogicalType(),
-                                    DataTypes.BIGINT().getLogicalType()
+                                new DataType[] {
+                                    DataTypes.INT(),
+                                    DataTypes.BIGINT(),
+                                    DataTypes.STRING(),
+                                    DataTypes.BIGINT()
                                 },
                                 new String[] {"a", "b", "c", "d"}),
                         Collections.emptyList(),
@@ -509,22 +509,22 @@ public class TableStoreHiveStorageHandlerITCase {
 
     @Test
     public void testReadExternalTableWithPartitionAppendOnly() throws Exception {
-        List<RowData> data =
+        List<InternalRow> data =
                 Arrays.asList(
-                        GenericRowData.of(1, 10, 100L, StringData.fromString("Hi")),
-                        GenericRowData.of(2, 10, 200L, StringData.fromString("Hello")),
-                        GenericRowData.of(1, 20, 300L, StringData.fromString("World")),
-                        GenericRowData.of(1, 10, 100L, StringData.fromString("Hi Again")),
-                        GenericRowData.of(2, 20, 400L, null),
-                        GenericRowData.of(1, 30, 500L, StringData.fromString("Store")));
+                        GenericRow.of(1, 10, 100L, BinaryString.fromString("Hi")),
+                        GenericRow.of(2, 10, 200L, BinaryString.fromString("Hello")),
+                        GenericRow.of(1, 20, 300L, BinaryString.fromString("World")),
+                        GenericRow.of(1, 10, 100L, BinaryString.fromString("Hi Again")),
+                        GenericRow.of(2, 20, 400L, null),
+                        GenericRow.of(1, 30, 500L, BinaryString.fromString("Store")));
         String tableName =
                 createAppendOnlyExternalTable(
                         RowType.of(
-                                new LogicalType[] {
-                                    DataTypes.INT().getLogicalType(),
-                                    DataTypes.INT().getLogicalType(),
-                                    DataTypes.BIGINT().getLogicalType(),
-                                    DataTypes.STRING().getLogicalType()
+                                new DataType[] {
+                                    DataTypes.INT(),
+                                    DataTypes.INT(),
+                                    DataTypes.BIGINT(),
+                                    DataTypes.STRING()
                                 },
                                 new String[] {"pt", "a", "b", "c"}),
                         Collections.singletonList("pt"),
@@ -597,7 +597,7 @@ public class TableStoreHiveStorageHandlerITCase {
             RowType rowType,
             List<String> partitionKeys,
             List<String> primaryKeys,
-            List<RowData> data)
+            List<InternalRow> data)
             throws Exception {
         String path = folder.newFolder().toURI().toString();
         Configuration conf = new Configuration();
@@ -611,7 +611,7 @@ public class TableStoreHiveStorageHandlerITCase {
     }
 
     private String createAppendOnlyExternalTable(
-            RowType rowType, List<String> partitionKeys, List<RowData> data) throws Exception {
+            RowType rowType, List<String> partitionKeys, List<InternalRow> data) throws Exception {
         String path = folder.newFolder().toURI().toString();
         Configuration conf = new Configuration();
         conf.setString(CoreOptions.PATH, path);
@@ -625,11 +625,11 @@ public class TableStoreHiveStorageHandlerITCase {
         return writeData(table, path, data);
     }
 
-    private String writeData(FileStoreTable table, String path, List<RowData> data)
+    private String writeData(FileStoreTable table, String path, List<InternalRow> data)
             throws Exception {
         TableWrite write = table.newWrite(commitUser);
         TableCommit commit = table.newCommit(commitUser);
-        for (RowData rowData : data) {
+        for (InternalRow rowData : data) {
             write.write(rowData);
             if (ThreadLocalRandom.current().nextInt(5) == 0) {
                 commit.commit(commitIdentifier, write.prepareCommit(false, commitIdentifier));
@@ -665,11 +665,11 @@ public class TableStoreHiveStorageHandlerITCase {
                         Collections.singletonList("f_int"));
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        List<GenericRowData> input = new ArrayList<>();
+        List<GenericRow> input = new ArrayList<>();
         for (int i = random.nextInt(10); i > 0; i--) {
             while (true) {
                 // pk must not be null
-                GenericRowData rowData = RandomGenericRowDataGenerator.generate();
+                GenericRow rowData = RandomGenericRowDataGenerator.generate();
                 if (!rowData.isNullAt(3)) {
                     input.add(rowData);
                     break;
@@ -679,7 +679,7 @@ public class TableStoreHiveStorageHandlerITCase {
 
         TableWrite write = table.newWrite(commitUser);
         TableCommit commit = table.newCommit(commitUser);
-        for (GenericRowData rowData : input) {
+        for (GenericRow rowData : input) {
             write.write(rowData);
         }
         commit.commit(0, write.prepareCommit(true, 0));
@@ -695,8 +695,8 @@ public class TableStoreHiveStorageHandlerITCase {
         List<Object[]> actual =
                 hiveShell.executeStatement("SELECT * FROM test_table WHERE f_int > 0");
 
-        Map<Integer, GenericRowData> expected = new HashMap<>();
-        for (GenericRowData rowData : input) {
+        Map<Integer, GenericRow> expected = new HashMap<>();
+        for (GenericRow rowData : input) {
             int key = rowData.getInt(3);
             if (key > 0) {
                 expected.put(key, rowData);
@@ -705,8 +705,8 @@ public class TableStoreHiveStorageHandlerITCase {
         for (Object[] actualRow : actual) {
             int key = (int) actualRow[3];
             Assert.assertTrue(expected.containsKey(key));
-            GenericRowData expectedRow = expected.get(key);
-            Assert.assertEquals(expectedRow.getArity(), actualRow.length);
+            GenericRow expectedRow = expected.get(key);
+            Assert.assertEquals(expectedRow.getFieldCount(), actualRow.length);
             for (int i = 0; i < actualRow.length; i++) {
                 if (expectedRow.isNullAt(i)) {
                     Assert.assertNull(actualRow[i]);
@@ -776,9 +776,7 @@ public class TableStoreHiveStorageHandlerITCase {
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
-                        RowType.of(
-                                new LogicalType[] {DataTypes.INT().getLogicalType()},
-                                new String[] {"a"}),
+                        RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"a"}),
                         Collections.emptyList(),
                         Collections.emptyList());
 
@@ -786,17 +784,17 @@ public class TableStoreHiveStorageHandlerITCase {
 
         TableWrite write = table.newWrite(commitUser);
         TableCommit commit = table.newCommit(commitUser);
-        write.write(GenericRowData.of(1));
+        write.write(GenericRow.of(1));
         commit.commit(0, write.prepareCommit(true, 0));
-        write.write(GenericRowData.of((Object) null));
+        write.write(GenericRow.of((Object) null));
         commit.commit(1, write.prepareCommit(true, 1));
-        write.write(GenericRowData.of(2));
-        write.write(GenericRowData.of(3));
-        write.write(GenericRowData.of((Object) null));
+        write.write(GenericRow.of(2));
+        write.write(GenericRow.of(3));
+        write.write(GenericRow.of((Object) null));
         commit.commit(2, write.prepareCommit(true, 2));
-        write.write(GenericRowData.of(4));
-        write.write(GenericRowData.of(5));
-        write.write(GenericRowData.of(6));
+        write.write(GenericRow.of(4));
+        write.write(GenericRow.of(5));
+        write.write(GenericRow.of(6));
         commit.commit(3, write.prepareCommit(true, 3));
         write.close();
 
@@ -868,10 +866,7 @@ public class TableStoreHiveStorageHandlerITCase {
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(
-                                new LogicalType[] {
-                                    DataTypes.DATE().getLogicalType(),
-                                    DataTypes.TIMESTAMP(3).getLogicalType()
-                                },
+                                new DataType[] {DataTypes.DATE(), DataTypes.TIMESTAMP(3)},
                                 new String[] {"dt", "ts"}),
                         Collections.emptyList(),
                         Collections.emptyList());
@@ -879,18 +874,18 @@ public class TableStoreHiveStorageHandlerITCase {
         TableWrite write = table.newWrite(commitUser);
         TableCommit commit = table.newCommit(commitUser);
         write.write(
-                GenericRowData.of(
+                GenericRow.of(
                         375, /* 1971-01-11 */
-                        TimestampData.fromLocalDateTime(
+                        Timestamp.fromLocalDateTime(
                                 LocalDateTime.of(2022, 5, 17, 17, 29, 20, 100_000_000))));
         commit.commit(0, write.prepareCommit(true, 0));
-        write.write(GenericRowData.of(null, null));
+        write.write(GenericRow.of(null, null));
         commit.commit(1, write.prepareCommit(true, 1));
-        write.write(GenericRowData.of(376 /* 1971-01-12 */, null));
+        write.write(GenericRow.of(376 /* 1971-01-12 */, null));
         write.write(
-                GenericRowData.of(
+                GenericRow.of(
                         null,
-                        TimestampData.fromLocalDateTime(
+                        Timestamp.fromLocalDateTime(
                                 LocalDateTime.of(2022, 6, 18, 8, 30, 0, 100_000_000))));
         commit.commit(2, write.prepareCommit(true, 2));
         write.close();

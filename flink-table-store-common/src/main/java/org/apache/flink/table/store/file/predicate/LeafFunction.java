@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.format.FieldStats;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.DataType;
 
 import java.io.Serializable;
 import java.util.List;
@@ -28,10 +28,10 @@ import java.util.Optional;
 /** Function to test a field with literals. */
 public abstract class LeafFunction implements Serializable {
 
-    public abstract boolean test(LogicalType type, Object field, List<Object> literals);
+    public abstract boolean test(DataType type, Object field, List<Object> literals);
 
     public abstract boolean test(
-            LogicalType type, long rowCount, FieldStats fieldStats, List<Object> literals);
+            DataType type, long rowCount, FieldStats fieldStats, List<Object> literals);
 
     public abstract Optional<LeafFunction> negate();
 

@@ -23,6 +23,7 @@ import org.apache.flink.runtime.plugable.SerializationDelegate;
 import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.connector.FlinkRowWrapper;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.sink.BucketComputer;
 
@@ -47,7 +48,8 @@ public class BucketStreamPartitioner extends StreamPartitioner<RowData> {
 
     @Override
     public int selectChannel(SerializationDelegate<StreamRecord<RowData>> record) {
-        return computer.bucket(record.getInstance().getValue()) % numberOfChannels;
+        return computer.bucket(new FlinkRowWrapper(record.getInstance().getValue()))
+                % numberOfChannels;
     }
 
     @Override

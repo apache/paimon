@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
 import org.apache.flink.table.store.file.utils.TestReusingRecordReader;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
 
 import java.io.IOException;
 import java.util.List;
@@ -32,14 +32,16 @@ import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link RecordReader.RecordIterator} of {@link RowData}. */
+/** Tests for {@link RecordReader.RecordIterator} of {@link InternalRow}. */
 public abstract class RowDataRecordIteratorTestBase {
 
     protected void testIterator(
             List<ReusingTestData> input,
-            Function<RecordReader.RecordIterator<KeyValue>, RecordReader.RecordIterator<RowData>>
+            Function<
+                            RecordReader.RecordIterator<KeyValue>,
+                            RecordReader.RecordIterator<InternalRow>>
                     rowDataIteratorSupplier,
-            BiConsumer<RowData, Integer> resultChecker)
+            BiConsumer<InternalRow, Integer> resultChecker)
             throws Exception {
         int cnt = 0;
         TestReusingRecordReader recordReader = new TestReusingRecordReader(input);
@@ -71,9 +73,9 @@ public abstract class RowDataRecordIteratorTestBase {
                         }
                     };
 
-            RecordReader.RecordIterator<RowData> rowDataIterator =
+            RecordReader.RecordIterator<InternalRow> rowDataIterator =
                     rowDataIteratorSupplier.apply(assertKvIterator);
-            RowData rowData;
+            InternalRow rowData;
             while (true) {
                 rowData = rowDataIterator.next();
                 if (rowData == null) {

@@ -26,9 +26,8 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.LogicalTypeConversion;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Projection;
-import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
@@ -94,8 +93,8 @@ public class BulkFormatMapping {
             List<DataField> dataKeyFields = extractor.keyFields(dataSchema);
             List<DataField> dataValueFields = extractor.valueFields(dataSchema);
 
-            RowType keyType = LogicalTypeConversion.toRowType(dataKeyFields);
-            RowType valueType = LogicalTypeConversion.toRowType(dataValueFields);
+            RowType keyType = new RowType(dataKeyFields);
+            RowType valueType = new RowType(dataValueFields);
             RowType dataRecordType = KeyValue.schema(keyType, valueType);
 
             int[][] dataKeyProjection =

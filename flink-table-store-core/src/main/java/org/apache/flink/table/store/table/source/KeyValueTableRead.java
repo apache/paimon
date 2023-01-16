@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -28,7 +28,8 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 
 /**
- * An abstraction layer above {@link KeyValueFileStoreRead} to provide reading of {@link RowData}.
+ * An abstraction layer above {@link KeyValueFileStoreRead} to provide reading of {@link
+ * InternalRow}.
  */
 public abstract class KeyValueTableRead implements TableRead {
 
@@ -39,14 +40,14 @@ public abstract class KeyValueTableRead implements TableRead {
     }
 
     @Override
-    public RecordReader<RowData> createReader(Split split) throws IOException {
+    public RecordReader<InternalRow> createReader(Split split) throws IOException {
         return new RowDataRecordReader(read.createReader((DataSplit) split));
     }
 
-    protected abstract RecordReader.RecordIterator<RowData> rowDataRecordIteratorFromKv(
+    protected abstract RecordReader.RecordIterator<InternalRow> rowDataRecordIteratorFromKv(
             RecordReader.RecordIterator<KeyValue> kvRecordIterator);
 
-    private class RowDataRecordReader implements RecordReader<RowData> {
+    private class RowDataRecordReader implements RecordReader<InternalRow> {
 
         private final RecordReader<KeyValue> wrapped;
 
@@ -56,7 +57,7 @@ public abstract class KeyValueTableRead implements TableRead {
 
         @Nullable
         @Override
-        public RecordIterator<RowData> readBatch() throws IOException {
+        public RecordIterator<InternalRow> readBatch() throws IOException {
             RecordIterator<KeyValue> batch = wrapped.readBatch();
             return batch == null ? null : rowDataRecordIteratorFromKv(batch);
         }

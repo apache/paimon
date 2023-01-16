@@ -19,12 +19,12 @@
 package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.codegen.NormalizedKeyComputer;
 import org.apache.flink.table.store.codegen.RecordComparator;
-import org.apache.flink.table.store.data.BinaryRowDataSerializer;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.BinaryRowSerializer;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.InternalSerializers;
 import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.file.KeyValue;
@@ -36,10 +36,10 @@ import org.apache.flink.table.store.file.mergetree.compact.ReducerMergeFunctionW
 import org.apache.flink.table.store.file.sort.BinaryExternalSortBuffer;
 import org.apache.flink.table.store.file.sort.BinaryInMemorySortBuffer;
 import org.apache.flink.table.store.file.sort.SortBuffer;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.util.MutableObjectIterator;
 
 import javax.annotation.Nullable;
@@ -70,7 +70,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
         this.serializer = new KeyValueSerializer(keyType, valueType);
 
         // user key + sequenceNumber
-        List<LogicalType> sortKeyTypes = new ArrayList<>(keyType.getChildren());
+        List<DataType> sortKeyTypes = new ArrayList<>(keyType.getFieldTypes());
         sortKeyTypes.add(new BigIntType(false));
 
         // for sort binary buffer
@@ -91,7 +91,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
         this.buffer =
                 ioManager != null && spillable
                         ? new BinaryExternalSortBuffer(
-                                new BinaryRowDataSerializer(serializer.getArity()),
+                                new BinaryRowSerializer(serializer.getArity()),
                                 keyComparator,
                                 memoryPool.pageSize(),
                                 inMemorySortBuffer,
@@ -101,7 +101,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
     }
 
     @Override
-    public boolean put(long sequenceNumber, RowKind valueKind, RowData key, RowData value)
+    public boolean put(long sequenceNumber, RowKind valueKind, InternalRow key, InternalRow value)
             throws IOException {
         return buffer.write(serializer.toRow(key, sequenceNumber, valueKind, value));
     }
@@ -123,7 +123,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
 
     @Override
     public void forEach(
-            Comparator<RowData> keyComparator,
+            Comparator<InternalRow> keyComparator,
             MergeFunction<KeyValue> mergeFunction,
             @Nullable KvConsumer rawConsumer,
             KvConsumer mergedConsumer)
@@ -149,24 +149,24 @@ public class SortBufferWriteBuffer implements WriteBuffer {
 
     private class MergeIterator {
         @Nullable private final KvConsumer rawConsumer;
-        private final MutableObjectIterator<BinaryRowData> kvIter;
-        private final Comparator<RowData> keyComparator;
+        private final MutableObjectIterator<BinaryRow> kvIter;
+        private final Comparator<InternalRow> keyComparator;
         private final ReducerMergeFunctionWrapper mergeFunctionWrapper;
 
         // previously read kv
         private KeyValueSerializer previous;
-        private BinaryRowData previousRow;
+        private BinaryRow previousRow;
         // reads the next kv
         private KeyValueSerializer current;
-        private BinaryRowData currentRow;
+        private BinaryRow currentRow;
 
         private KeyValue result;
         private boolean advanced;
 
         private MergeIterator(
                 @Nullable KvConsumer rawConsumer,
-                MutableObjectIterator<BinaryRowData> kvIter,
-                Comparator<RowData> keyComparator,
+                MutableObjectIterator<BinaryRow> kvIter,
+                Comparator<InternalRow> keyComparator,
                 MergeFunction<KeyValue> mergeFunction)
                 throws IOException {
             this.rawConsumer = rawConsumer;
@@ -176,9 +176,9 @@ public class SortBufferWriteBuffer implements WriteBuffer {
 
             int totalFieldCount = keyType.getFieldCount() + 2 + valueType.getFieldCount();
             this.previous = new KeyValueSerializer(keyType, valueType);
-            this.previousRow = new BinaryRowData(totalFieldCount);
+            this.previousRow = new BinaryRow(totalFieldCount);
             this.current = new KeyValueSerializer(keyType, valueType);
-            this.currentRow = new BinaryRowData(totalFieldCount);
+            this.currentRow = new BinaryRow(totalFieldCount);
             readOnce();
             this.advanced = false;
         }
@@ -241,7 +241,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
 
         private void swapSerializers() {
             KeyValueSerializer tmp = previous;
-            BinaryRowData tmpRow = previousRow;
+            BinaryRow tmpRow = previousRow;
             previous = current;
             previousRow = currentRow;
             current = tmp;
@@ -250,17 +250,17 @@ public class SortBufferWriteBuffer implements WriteBuffer {
     }
 
     private class RawIterator implements Iterator<KeyValue> {
-        private final MutableObjectIterator<BinaryRowData> kvIter;
+        private final MutableObjectIterator<BinaryRow> kvIter;
         private final KeyValueSerializer current;
 
-        private BinaryRowData currentRow;
+        private BinaryRow currentRow;
         private boolean advanced;
 
-        private RawIterator(MutableObjectIterator<BinaryRowData> kvIter) {
+        private RawIterator(MutableObjectIterator<BinaryRow> kvIter) {
             this.kvIter = kvIter;
             this.current = new KeyValueSerializer(keyType, valueType);
             this.currentRow =
-                    new BinaryRowData(keyType.getFieldCount() + 2 + valueType.getFieldCount());
+                    new BinaryRow(keyType.getFieldCount() + 2 + valueType.getFieldCount());
             this.advanced = false;
         }
 

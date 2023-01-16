@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 
@@ -39,9 +39,9 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
     }
 
     @Override
-    public RowData convertTo(ManifestFileMeta meta) {
-        return GenericRowData.of(
-                StringData.fromString(meta.fileName()),
+    public InternalRow convertTo(ManifestFileMeta meta) {
+        return GenericRow.of(
+                BinaryString.fromString(meta.fileName()),
                 meta.fileSize(),
                 meta.numAddedFiles(),
                 meta.numDeletedFiles(),
@@ -50,7 +50,7 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
     }
 
     @Override
-    public ManifestFileMeta convertFrom(int version, RowData row) {
+    public ManifestFileMeta convertFrom(int version, InternalRow row) {
         if (version != 2) {
             if (version == 1) {
                 throw new IllegalArgumentException(

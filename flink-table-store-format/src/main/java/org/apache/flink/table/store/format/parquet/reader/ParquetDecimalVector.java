@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.format.parquet.reader;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.data.DecimalData;
+import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.columnar.BytesColumnVector;
 import org.apache.flink.table.store.data.columnar.ColumnVector;
 import org.apache.flink.table.store.data.columnar.DecimalColumnVector;
@@ -43,20 +43,19 @@ public class ParquetDecimalVector implements DecimalColumnVector {
     }
 
     @Override
-    public DecimalData getDecimal(int i, int precision, int scale) {
+    public Decimal getDecimal(int i, int precision, int scale) {
         if (ParquetSchemaConverter.is32BitDecimal(precision) && vector instanceof IntColumnVector) {
-            return DecimalData.fromUnscaledLong(
-                    ((IntColumnVector) vector).getInt(i), precision, scale);
+            return Decimal.fromUnscaledLong(((IntColumnVector) vector).getInt(i), precision, scale);
         } else if (ParquetSchemaConverter.is64BitDecimal(precision)
                 && vector instanceof LongColumnVector) {
-            return DecimalData.fromUnscaledLong(
+            return Decimal.fromUnscaledLong(
                     ((LongColumnVector) vector).getLong(i), precision, scale);
         } else {
             Preconditions.checkArgument(
                     vector instanceof BytesColumnVector,
                     "Reading decimal type occur unsupported vector type: %s",
                     vector.getClass());
-            return DecimalData.fromUnscaledBytes(
+            return Decimal.fromUnscaledBytes(
                     ((BytesColumnVector) vector).getBytes(i).getBytes(), precision, scale);
         }
     }

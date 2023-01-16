@@ -18,32 +18,29 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.data.ArrayData;
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.GenericArrayData;
-import org.apache.flink.table.data.GenericMapData;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.MapData;
-import org.apache.flink.table.data.RawValueData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.data.binary.BinaryArrayData;
-import org.apache.flink.table.data.binary.BinaryMapData;
-import org.apache.flink.table.data.binary.BinaryRawValueData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.binary.BinaryStringData;
-import org.apache.flink.table.data.binary.NestedRowData;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.LocalZonedTimestampType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.LogicalTypeRoot;
-import org.apache.flink.table.types.logical.MapType;
-import org.apache.flink.table.types.logical.MultisetType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.TimestampType;
+import org.apache.flink.table.store.data.BinaryArray;
+import org.apache.flink.table.store.data.BinaryMap;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.GenericArray;
+import org.apache.flink.table.store.data.GenericMap;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalArray;
+import org.apache.flink.table.store.data.InternalMap;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.NestedRow;
+import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypeRoot;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.LocalZonedTimestampType;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.MultisetType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.TimestampType;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -52,20 +49,20 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Utils for {@link RowData} structures. */
+/** Utils for {@link InternalRow} structures. */
 public class RowDataUtils {
 
-    public static RowData copyRowData(RowData row, RowType rowType) {
-        if (row instanceof BinaryRowData) {
-            return ((BinaryRowData) row).copy();
-        } else if (row instanceof NestedRowData) {
-            return ((NestedRowData) row).copy();
+    public static InternalRow copyRowData(InternalRow row, RowType rowType) {
+        if (row instanceof BinaryRow) {
+            return ((BinaryRow) row).copy();
+        } else if (row instanceof NestedRow) {
+            return ((NestedRow) row).copy();
         } else {
-            GenericRowData ret = new GenericRowData(row.getArity());
+            GenericRow ret = new GenericRow(row.getFieldCount());
             ret.setRowKind(row.getRowKind());
 
-            for (int i = 0; i < row.getArity(); ++i) {
-                LogicalType fieldType = rowType.getTypeAt(i);
+            for (int i = 0; i < row.getFieldCount(); ++i) {
+                DataType fieldType = rowType.getTypeAt(i);
                 ret.setField(i, copy(get(row, i, fieldType), fieldType));
             }
 
@@ -73,29 +70,29 @@ public class RowDataUtils {
         }
     }
 
-    public static ArrayData copyArray(ArrayData from, LogicalType eleType) {
-        if (from instanceof BinaryArrayData) {
-            return ((BinaryArrayData) from).copy();
+    public static InternalArray copyArray(InternalArray from, DataType eleType) {
+        if (from instanceof BinaryArray) {
+            return ((BinaryArray) from).copy();
         }
 
         if (!eleType.isNullable()) {
             switch (eleType.getTypeRoot()) {
                 case BOOLEAN:
-                    return new GenericArrayData(from.toBooleanArray());
+                    return new GenericArray(from.toBooleanArray());
                 case TINYINT:
-                    return new GenericArrayData(from.toByteArray());
+                    return new GenericArray(from.toByteArray());
                 case SMALLINT:
-                    return new GenericArrayData(from.toShortArray());
+                    return new GenericArray(from.toShortArray());
                 case INTEGER:
                 case DATE:
                 case TIME_WITHOUT_TIME_ZONE:
-                    return new GenericArrayData(from.toIntArray());
+                    return new GenericArray(from.toIntArray());
                 case BIGINT:
-                    return new GenericArrayData(from.toLongArray());
+                    return new GenericArray(from.toLongArray());
                 case FLOAT:
-                    return new GenericArrayData(from.toFloatArray());
+                    return new GenericArray(from.toFloatArray());
                 case DOUBLE:
-                    return new GenericArrayData(from.toDoubleArray());
+                    return new GenericArray(from.toDoubleArray());
             }
         }
 
@@ -109,57 +106,50 @@ public class RowDataUtils {
             }
         }
 
-        return new GenericArrayData(newArray);
+        return new GenericArray(newArray);
     }
 
-    private static MapData copyMap(MapData map, LogicalType keyType, LogicalType valueType) {
-        if (map instanceof BinaryMapData) {
-            return ((BinaryMapData) map).copy();
+    private static InternalMap copyMap(InternalMap map, DataType keyType, DataType valueType) {
+        if (map instanceof BinaryMap) {
+            return ((BinaryMap) map).copy();
         }
 
         Map<Object, Object> javaMap = new HashMap<>();
-        ArrayData keys = map.keyArray();
-        ArrayData values = map.valueArray();
+        InternalArray keys = map.keyArray();
+        InternalArray values = map.valueArray();
         for (int i = 0; i < keys.size(); i++) {
             javaMap.put(
                     copy(get(keys, i, keyType), keyType),
                     copy(get(values, i, valueType), valueType));
         }
-        return new GenericMapData(javaMap);
+        return new GenericMap(javaMap);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
-    public static Object copy(Object o, LogicalType type) {
-        if (o instanceof StringData) {
-            BinaryStringData string = (BinaryStringData) o;
-            return string.getBinarySection() == null
-                    ? StringData.fromString(string.toString())
-                    : ((BinaryStringData) o).copy();
-        } else if (o instanceof RowData) {
-            return copyRowData((RowData) o, (RowType) type);
-        } else if (o instanceof ArrayData) {
-            return copyArray((ArrayData) o, ((ArrayType) type).getElementType());
-        } else if (o instanceof MapData) {
+    public static Object copy(Object o, DataType type) {
+        if (o instanceof BinaryString) {
+            return ((BinaryString) o).copy();
+        } else if (o instanceof InternalRow) {
+            return copyRowData((InternalRow) o, (RowType) type);
+        } else if (o instanceof InternalArray) {
+            return copyArray((InternalArray) o, ((ArrayType) type).getElementType());
+        } else if (o instanceof InternalMap) {
             if (type instanceof MapType) {
                 return copyMap(
-                        (MapData) o,
+                        (InternalMap) o,
                         ((MapType) type).getKeyType(),
                         ((MapType) type).getValueType());
             } else {
-                return copyMap((MapData) o, ((MultisetType) type).getElementType(), new IntType());
+                return copyMap(
+                        (InternalMap) o, ((MultisetType) type).getElementType(), new IntType());
             }
-        } else if (o instanceof RawValueData) {
-            BinaryRawValueData raw = (BinaryRawValueData) o;
-            if (raw.getBinarySection() != null) {
-                return BinaryRawValueData.fromBytes(raw.toBytes(null));
-            }
-        } else if (o instanceof DecimalData) {
-            return ((DecimalData) o).copy();
+        } else if (o instanceof Decimal) {
+            return ((Decimal) o).copy();
         }
         return o;
     }
 
-    public static Object get(RowData row, int pos, LogicalType fieldType) {
+    public static Object get(InternalRow row, int pos, DataType fieldType) {
         if (row.isNullAt(pos)) {
             return null;
         }
@@ -173,10 +163,8 @@ public class RowDataUtils {
             case INTEGER:
             case DATE:
             case TIME_WITHOUT_TIME_ZONE:
-            case INTERVAL_YEAR_MONTH:
                 return row.getInt(pos);
             case BIGINT:
-            case INTERVAL_DAY_TIME:
                 return row.getLong(pos);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) fieldType;
@@ -204,14 +192,12 @@ public class RowDataUtils {
             case BINARY:
             case VARBINARY:
                 return row.getBinary(pos);
-            case RAW:
-                return row.getRawValue(pos);
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + fieldType);
         }
     }
 
-    public static Object get(ArrayData array, int pos, LogicalType fieldType) {
+    public static Object get(InternalArray array, int pos, DataType fieldType) {
         if (array.isNullAt(pos)) {
             return null;
         }
@@ -225,10 +211,8 @@ public class RowDataUtils {
             case INTEGER:
             case DATE:
             case TIME_WITHOUT_TIME_ZONE:
-            case INTERVAL_YEAR_MONTH:
                 return array.getInt(pos);
             case BIGINT:
-            case INTERVAL_DAY_TIME:
                 return array.getLong(pos);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) fieldType;
@@ -256,18 +240,16 @@ public class RowDataUtils {
             case BINARY:
             case VARBINARY:
                 return array.getBinary(pos);
-            case RAW:
-                return array.getRawValue(pos);
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + fieldType);
         }
     }
 
-    public static ArrayData toStringArrayData(List<String> list) {
-        return new GenericArrayData(list.stream().map(StringData::fromString).toArray());
+    public static InternalArray toStringArrayData(List<String> list) {
+        return new GenericArray(list.stream().map(BinaryString::fromString).toArray());
     }
 
-    public static List<String> fromStringArrayData(ArrayData arrayData) {
+    public static List<String> fromStringArrayData(InternalArray arrayData) {
         List<String> list = new ArrayList<>(arrayData.size());
         for (int i = 0; i < arrayData.size(); i++) {
             list.add(arrayData.isNullAt(i) ? null : arrayData.getString(i).toString());
@@ -275,7 +257,7 @@ public class RowDataUtils {
         return list;
     }
 
-    public static long castToIntegral(DecimalData dec) {
+    public static long castToIntegral(Decimal dec) {
         BigDecimal bd = dec.toBigDecimal();
         // rounding down. This is consistent with float=>int,
         // and consistent with SQLServer, Spark.
@@ -283,18 +265,18 @@ public class RowDataUtils {
         return bd.longValue();
     }
 
-    public static RowData.FieldGetter[] createFieldGetters(List<LogicalType> fieldTypes) {
-        RowData.FieldGetter[] fieldGetters = new RowData.FieldGetter[fieldTypes.size()];
+    public static InternalRow.FieldGetter[] createFieldGetters(List<DataType> fieldTypes) {
+        InternalRow.FieldGetter[] fieldGetters = new InternalRow.FieldGetter[fieldTypes.size()];
         for (int i = 0; i < fieldTypes.size(); i++) {
             fieldGetters[i] = createNullCheckingFieldGetter(fieldTypes.get(i), i);
         }
         return fieldGetters;
     }
 
-    public static RowData.FieldGetter createNullCheckingFieldGetter(
-            LogicalType logicalType, int index) {
-        RowData.FieldGetter getter = RowData.createFieldGetter(logicalType, index);
-        if (logicalType.isNullable()) {
+    public static InternalRow.FieldGetter createNullCheckingFieldGetter(
+            DataType dataType, int index) {
+        InternalRow.FieldGetter getter = InternalRow.createFieldGetter(dataType, index);
+        if (dataType.isNullable()) {
             return getter;
         } else {
             return row -> {
@@ -306,12 +288,12 @@ public class RowDataUtils {
         }
     }
 
-    public static int compare(Object x, Object y, LogicalTypeRoot type) {
+    public static int compare(Object x, Object y, DataTypeRoot type) {
         int ret;
         switch (type) {
             case DECIMAL:
-                DecimalData xDD = (DecimalData) x;
-                DecimalData yDD = (DecimalData) y;
+                Decimal xDD = (Decimal) x;
+                Decimal yDD = (Decimal) y;
                 ret = xDD.compareTo(yDD);
                 break;
             case TINYINT:
@@ -335,12 +317,10 @@ public class RowDataUtils {
                 break;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                TimestampData xDD1 = (TimestampData) x;
-                TimestampData yDD1 = (TimestampData) y;
+                Timestamp xDD1 = (Timestamp) x;
+                Timestamp yDD1 = (Timestamp) y;
                 ret = xDD1.compareTo(yDD1);
                 break;
-            case TIMESTAMP_WITH_TIME_ZONE:
-                throw new UnsupportedOperationException();
             default:
                 throw new IllegalArgumentException();
         }

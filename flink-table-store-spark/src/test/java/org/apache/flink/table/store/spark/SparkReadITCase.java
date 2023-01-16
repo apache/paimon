@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericArrayData;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.binary.BinaryStringData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericArray;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.types.ArrayType;
@@ -350,17 +350,17 @@ public class SparkReadITCase extends SparkReadTestBase {
                                         : Collections.singletonList("order_id")
                                 : Collections.emptyList());
         testHelper.write(
-                GenericRowData.of(
+                GenericRow.of(
                         1L,
                         10L,
-                        new GenericArrayData(
-                                new BinaryStringData[] {
-                                    BinaryStringData.fromString("loyalty_discount"),
-                                    BinaryStringData.fromString("shipping_discount")
+                        new GenericArray(
+                                new BinaryString[] {
+                                    BinaryString.fromString("loyalty_discount"),
+                                    BinaryString.fromString("shipping_discount")
                                 }),
                         199.0d,
-                        BinaryStringData.fromString("2022-07-20"),
-                        BinaryStringData.fromString("12")));
+                        BinaryString.fromString("2022-07-20"),
+                        BinaryString.fromString("12")));
         testHelper.commit();
 
         Dataset<Row> dataset = spark.read().format("tablestore").load(tablePath.toString());

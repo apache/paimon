@@ -18,24 +18,24 @@
 
 package org.apache.flink.table.store.file.casting;
 
-import org.apache.flink.table.data.DecimalDataUtils;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.BinaryType;
-import org.apache.flink.table.types.logical.CharType;
-import org.apache.flink.table.types.logical.DateType;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.DoubleType;
-import org.apache.flink.table.types.logical.FloatType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.SmallIntType;
-import org.apache.flink.table.types.logical.TimeType;
-import org.apache.flink.table.types.logical.TimestampType;
-import org.apache.flink.table.types.logical.TinyIntType;
-import org.apache.flink.table.types.logical.VarBinaryType;
-import org.apache.flink.table.types.logical.VarCharType;
-import org.apache.flink.table.utils.DateTimeUtils;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.BinaryType;
+import org.apache.flink.table.store.types.CharType;
+import org.apache.flink.table.store.types.DateType;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.DoubleType;
+import org.apache.flink.table.store.types.FloatType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.SmallIntType;
+import org.apache.flink.table.store.types.TimeType;
+import org.apache.flink.table.store.types.TimestampType;
+import org.apache.flink.table.store.types.TinyIntType;
+import org.apache.flink.table.store.types.VarBinaryType;
+import org.apache.flink.table.store.types.VarCharType;
+import org.apache.flink.table.store.utils.DateTimeUtils;
+import org.apache.flink.table.store.utils.DecimalUtils;
 
 import org.junit.jupiter.api.Test;
 
@@ -97,50 +97,50 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(new TinyIntType(false), new DecimalType(10, 2)),
                 (byte) 1,
-                DecimalDataUtils.castFrom(1, 10, 2));
+                DecimalUtils.castFrom(1, 10, 2));
         compareCastResult(
                 CastExecutors.resolve(new SmallIntType(false), new DecimalType(10, 2)),
                 (short) 1,
-                DecimalDataUtils.castFrom(1, 10, 2));
+                DecimalUtils.castFrom(1, 10, 2));
         compareCastResult(
                 CastExecutors.resolve(new IntType(false), new DecimalType(10, 2)),
                 1,
-                DecimalDataUtils.castFrom(1, 10, 2));
+                DecimalUtils.castFrom(1, 10, 2));
         compareCastResult(
                 CastExecutors.resolve(new BigIntType(false), new DecimalType(10, 2)),
                 1L,
-                DecimalDataUtils.castFrom(1, 10, 2));
+                DecimalUtils.castFrom(1, 10, 2));
         compareCastResult(
                 CastExecutors.resolve(new FloatType(false), new DecimalType(10, 2)),
                 1.23456F,
-                DecimalDataUtils.castFrom(1.23456D, 10, 2));
+                DecimalUtils.castFrom(1.23456D, 10, 2));
         compareCastResult(
                 CastExecutors.resolve(new DoubleType(false), new DecimalType(10, 2)),
                 1.23456D,
-                DecimalDataUtils.castFrom(1.23456D, 10, 2));
+                DecimalUtils.castFrom(1.23456D, 10, 2));
     }
 
     @Test
     public void testDecimalToDecimal() {
         compareCastResult(
                 CastExecutors.resolve(new DecimalType(10, 4), new DecimalType(10, 2)),
-                DecimalDataUtils.castFrom(1.23456D, 10, 4),
-                DecimalDataUtils.castFrom(1.23456D, 10, 2));
+                DecimalUtils.castFrom(1.23456D, 10, 4),
+                DecimalUtils.castFrom(1.23456D, 10, 2));
         compareCastResult(
                 CastExecutors.resolve(new DecimalType(10, 2), new DecimalType(10, 4)),
-                DecimalDataUtils.castFrom(1.23456D, 10, 2),
-                DecimalDataUtils.castFrom(1.2300D, 10, 4));
+                DecimalUtils.castFrom(1.23456D, 10, 2),
+                DecimalUtils.castFrom(1.2300D, 10, 4));
     }
 
     @Test
     public void testDecimalToNumeric() {
         compareCastResult(
                 CastExecutors.resolve(new DecimalType(10, 4), new FloatType(false)),
-                DecimalDataUtils.castFrom(1.23456D, 10, 4),
+                DecimalUtils.castFrom(1.23456D, 10, 4),
                 1.2346F);
         compareCastResult(
                 CastExecutors.resolve(new DecimalType(10, 2), new DoubleType(false)),
-                DecimalDataUtils.castFrom(1.23456D, 10, 2),
+                DecimalUtils.castFrom(1.23456D, 10, 2),
                 1.23D);
     }
 
@@ -149,50 +149,50 @@ public class CastExecutorTest {
         // varchar(10) to varchar(5)
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(10), new VarCharType(5)),
-                StringData.fromString("1234567890"),
-                StringData.fromString("12345"));
+                BinaryString.fromString("1234567890"),
+                BinaryString.fromString("12345"));
 
         // varchar(10) to varchar(20)
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(10), new VarCharType(20)),
-                StringData.fromString("1234567890"),
-                StringData.fromString("1234567890"));
+                BinaryString.fromString("1234567890"),
+                BinaryString.fromString("1234567890"));
 
         // varchar(10) to char(5)
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(10), new CharType(5)),
-                StringData.fromString("1234567890"),
-                StringData.fromString("12345"));
+                BinaryString.fromString("1234567890"),
+                BinaryString.fromString("12345"));
 
         // varchar(10) to char(20)
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(10), new CharType(20)),
-                StringData.fromString("1234567890"),
-                StringData.fromString("1234567890          "));
+                BinaryString.fromString("1234567890"),
+                BinaryString.fromString("1234567890          "));
 
         // char(10) to varchar(5)
         compareCastResult(
                 CastExecutors.resolve(new CharType(10), new VarCharType(5)),
-                StringData.fromString("1234567890"),
-                StringData.fromString("12345"));
+                BinaryString.fromString("1234567890"),
+                BinaryString.fromString("12345"));
 
         // char(10) to varchar(20)
         compareCastResult(
                 CastExecutors.resolve(new CharType(10), new VarCharType(20)),
-                StringData.fromString("12345678  "),
-                StringData.fromString("12345678  "));
+                BinaryString.fromString("12345678  "),
+                BinaryString.fromString("12345678  "));
 
         // char(10) to char(5)
         compareCastResult(
                 CastExecutors.resolve(new CharType(10), new CharType(5)),
-                StringData.fromString("12345678  "),
-                StringData.fromString("12345"));
+                BinaryString.fromString("12345678  "),
+                BinaryString.fromString("12345"));
 
         // char(10) to char(20)
         compareCastResult(
                 CastExecutors.resolve(new CharType(10), new CharType(20)),
-                StringData.fromString("12345678  "),
-                StringData.fromString("12345678            "));
+                BinaryString.fromString("12345678  "),
+                BinaryString.fromString("12345678            "));
     }
 
     @Test
@@ -200,13 +200,13 @@ public class CastExecutorTest {
         // string(10) to binary(5)
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(10), new VarBinaryType(5)),
-                StringData.fromString("12345678"),
+                BinaryString.fromString("12345678"),
                 "12345".getBytes());
 
         // string(10) to binary(20)
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(10), new VarBinaryType(20)),
-                StringData.fromString("12345678"),
+                BinaryString.fromString("12345678"),
                 "12345678".getBytes());
     }
 
@@ -240,24 +240,24 @@ public class CastExecutorTest {
     @Test
     public void testTimestampData() {
         long mills = System.currentTimeMillis();
-        TimestampData timestampData = TimestampData.fromEpochMillis(mills);
+        Timestamp timestamp = Timestamp.fromEpochMillis(mills);
 
         // timestamp(5) to timestamp(2)
         compareCastResult(
                 CastExecutors.resolve(new TimestampType(5), new TimestampType(2)),
-                timestampData,
-                DateTimeUtils.truncate(TimestampData.fromEpochMillis(mills), 2));
+                timestamp,
+                DateTimeUtils.truncate(Timestamp.fromEpochMillis(mills), 2));
 
         // timestamp to date
         compareCastResult(
                 CastExecutors.resolve(new TimestampType(5), new DateType()),
-                TimestampData.fromEpochMillis(mills),
+                Timestamp.fromEpochMillis(mills),
                 (int) (mills / DateTimeUtils.MILLIS_PER_DAY));
 
         // timestamp to time
         compareCastResult(
                 CastExecutors.resolve(new TimestampType(5), new TimeType(2)),
-                TimestampData.fromEpochMillis(mills),
+                Timestamp.fromEpochMillis(mills),
                 (int) (mills % DateTimeUtils.MILLIS_PER_DAY));
     }
 

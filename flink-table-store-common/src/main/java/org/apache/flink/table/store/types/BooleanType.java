@@ -26,7 +26,7 @@ public class BooleanType extends DataType {
     private static final String FORMAT = "BOOLEAN";
 
     public BooleanType(boolean isNullable) {
-        super(isNullable, DataTypeRoot.INTEGER);
+        super(isNullable, DataTypeRoot.BOOLEAN);
     }
 
     public BooleanType() {

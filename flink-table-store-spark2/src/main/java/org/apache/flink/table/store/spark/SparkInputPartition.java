@@ -18,17 +18,16 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.TypeUtils;
-import org.apache.flink.table.types.logical.RowType;
 
-import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.sources.v2.reader.InputPartition;
 import org.apache.spark.sql.sources.v2.reader.InputPartitionReader;
 
@@ -39,7 +38,8 @@ import java.util.List;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
 
 /** A Spark {@link InputPartition} for table store. */
-public class SparkInputPartition implements InputPartition<InternalRow> {
+public class SparkInputPartition
+        implements InputPartition<org.apache.spark.sql.catalyst.InternalRow> {
 
     private static final long serialVersionUID = 1L;
 
@@ -57,8 +57,8 @@ public class SparkInputPartition implements InputPartition<InternalRow> {
     }
 
     @Override
-    public InputPartitionReader<InternalRow> createPartitionReader() {
-        RecordReader<RowData> recordReader;
+    public InputPartitionReader<org.apache.spark.sql.catalyst.InternalRow> createPartitionReader() {
+        RecordReader<InternalRow> recordReader;
         try {
             TableRead tableRead = table.newRead();
             if (projectedFields != null) {
@@ -71,9 +71,9 @@ public class SparkInputPartition implements InputPartition<InternalRow> {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        RecordReaderIterator<RowData> iterator = new RecordReaderIterator<>(recordReader);
+        RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(recordReader);
         SparkInternalRow row = new SparkInternalRow(readRowType());
-        return new InputPartitionReader<InternalRow>() {
+        return new InputPartitionReader<org.apache.spark.sql.catalyst.InternalRow>() {
 
             @Override
             public boolean next() {
@@ -85,7 +85,7 @@ public class SparkInputPartition implements InputPartition<InternalRow> {
             }
 
             @Override
-            public InternalRow get() {
+            public org.apache.spark.sql.catalyst.InternalRow get() {
                 return row;
             }
 

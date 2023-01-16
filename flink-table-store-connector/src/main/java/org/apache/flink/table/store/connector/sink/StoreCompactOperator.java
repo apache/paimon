@@ -21,12 +21,13 @@ package org.apache.flink.table.store.connector.sink;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.connector.FlinkRowWrapper;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
-import org.apache.flink.table.store.file.utils.OffsetRowData;
+import org.apache.flink.table.store.file.utils.OffsetRow;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.util.Preconditions;
 
@@ -48,7 +49,7 @@ public class StoreCompactOperator extends PrepareCommitOperator {
 
     private transient StoreSinkWrite write;
     private transient RowDataSerializer partitionSerializer;
-    private transient OffsetRowData reusedPartition;
+    private transient OffsetRow reusedPartition;
     private transient DataFileMetaSerializer dataFileMetaSerializer;
 
     public StoreCompactOperator(
@@ -75,7 +76,7 @@ public class StoreCompactOperator extends PrepareCommitOperator {
     public void open() throws Exception {
         super.open();
         partitionSerializer = new RowDataSerializer(table.schema().logicalPartitionType());
-        reusedPartition = new OffsetRowData(partitionSerializer.getArity(), 1);
+        reusedPartition = new OffsetRow(partitionSerializer.getArity(), 1);
         dataFileMetaSerializer = new DataFileMetaSerializer();
     }
 
@@ -85,8 +86,8 @@ public class StoreCompactOperator extends PrepareCommitOperator {
 
         long snapshotId = record.getLong(0);
 
-        reusedPartition.replace(record);
-        BinaryRowData partition = partitionSerializer.toBinaryRow(reusedPartition).copy();
+        reusedPartition.replace(new FlinkRowWrapper(record));
+        BinaryRow partition = partitionSerializer.toBinaryRow(reusedPartition).copy();
 
         int bucket = record.getInt(partitionSerializer.getArity() + 1);
 

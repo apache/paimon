@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 
 import org.apache.hadoop.io.Writable;
 
@@ -27,20 +27,20 @@ import java.io.DataOutput;
 import java.io.IOException;
 
 /**
- * A reusable object to hold {@link RowData}.
+ * A reusable object to hold {@link InternalRow}.
  *
  * <p>NOTE: Although this class implements {@link Writable} it is only to comply with Hive's
  * interface. This class cannot go through network.
  */
 public class RowDataContainer implements Writable {
 
-    private RowData rowData;
+    private InternalRow rowData;
 
-    public RowData get() {
+    public InternalRow get() {
         return rowData;
     }
 
-    public void set(RowData rowData) {
+    public void set(InternalRow rowData) {
         this.rowData = rowData;
     }
 

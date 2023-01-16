@@ -21,11 +21,11 @@ package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FieldStatsCollector;
 import org.apache.flink.table.store.format.FileStatsExtractor;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
@@ -45,9 +45,9 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
     @Nullable private FieldStatsCollector fieldStatsCollector = null;
 
     public StatsCollectingSingleFileWriter(
-            BulkWriter.Factory<RowData> factory,
+            BulkWriter.Factory<InternalRow> factory,
             Path path,
-            Function<T, RowData> converter,
+            Function<T, InternalRow> converter,
             RowType writeSchema,
             @Nullable FileStatsExtractor fileStatsExtractor) {
         super(factory, path, converter);
@@ -59,7 +59,7 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
 
     @Override
     public void write(T record) throws IOException {
-        RowData rowData = writeImpl(record);
+        InternalRow rowData = writeImpl(record);
         if (fieldStatsCollector != null) {
             fieldStatsCollector.collect(rowData);
         }

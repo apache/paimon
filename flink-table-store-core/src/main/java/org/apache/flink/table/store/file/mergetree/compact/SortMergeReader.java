@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.util.Preconditions;
@@ -41,7 +41,7 @@ import java.util.PriorityQueue;
 public class SortMergeReader<T> implements RecordReader<T> {
 
     private final List<RecordReader<KeyValue>> nextBatchReaders;
-    private final Comparator<RowData> userKeyComparator;
+    private final Comparator<InternalRow> userKeyComparator;
     private final MergeFunctionWrapper<T> mergeFunctionWrapper;
 
     private final PriorityQueue<Element> minHeap;
@@ -49,7 +49,7 @@ public class SortMergeReader<T> implements RecordReader<T> {
 
     public SortMergeReader(
             List<RecordReader<KeyValue>> readers,
-            Comparator<RowData> userKeyComparator,
+            Comparator<InternalRow> userKeyComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper) {
         this.nextBatchReaders = new ArrayList<>(readers);
         this.userKeyComparator = userKeyComparator;
@@ -155,7 +155,7 @@ public class SortMergeReader<T> implements RecordReader<T> {
             }
 
             mergeFunctionWrapper.reset();
-            RowData key =
+            InternalRow key =
                     Preconditions.checkNotNull(minHeap.peek(), "Min heap is empty. This is a bug.")
                             .kv
                             .key();

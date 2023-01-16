@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.utils.ProjectedRowData;
+import org.apache.flink.table.store.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -30,15 +30,15 @@ import javax.annotation.Nullable;
  * @param <V> the row type.
  */
 public abstract class AbstractFileRecordIterator<V> implements RecordReader.RecordIterator<V> {
-    @Nullable private final ProjectedRowData projectedRowData;
+    @Nullable private final ProjectedRow projectedRow;
 
     protected AbstractFileRecordIterator(@Nullable int[] indexMapping) {
-        this.projectedRowData = indexMapping == null ? null : ProjectedRowData.from(indexMapping);
+        this.projectedRow = indexMapping == null ? null : ProjectedRow.from(indexMapping);
     }
 
-    protected RowData mappingRowData(RowData rowData) {
-        return projectedRowData == null
+    protected InternalRow mappingRowData(InternalRow rowData) {
+        return projectedRow == null
                 ? rowData
-                : (rowData == null ? null : projectedRowData.replaceRow(rowData));
+                : (rowData == null ? null : projectedRow.replaceRow(rowData));
     }
 }

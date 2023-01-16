@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.DecimalData;
+import org.apache.flink.table.store.data.Decimal;
 
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
@@ -36,7 +36,7 @@ public class TableStoreDecimalObjectInspector extends AbstractPrimitiveJavaObjec
 
     @Override
     public HiveDecimal getPrimitiveJavaObject(Object o) {
-        return o == null ? null : HiveDecimal.create(((DecimalData) o).toBigDecimal());
+        return o == null ? null : HiveDecimal.create(((Decimal) o).toBigDecimal());
     }
 
     @Override
@@ -47,8 +47,8 @@ public class TableStoreDecimalObjectInspector extends AbstractPrimitiveJavaObjec
 
     @Override
     public Object copyObject(Object o) {
-        if (o instanceof DecimalData) {
-            return ((DecimalData) o).copy();
+        if (o instanceof Decimal) {
+            return ((Decimal) o).copy();
         } else if (o instanceof HiveDecimal) {
             HiveDecimal hiveDecimal = (HiveDecimal) o;
             return HiveDecimal.create(hiveDecimal.bigDecimalValue());

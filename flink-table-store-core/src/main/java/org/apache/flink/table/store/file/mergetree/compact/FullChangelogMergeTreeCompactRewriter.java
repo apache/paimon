@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.io.DataFileMeta;
@@ -45,7 +45,7 @@ public class FullChangelogMergeTreeCompactRewriter extends MergeTreeCompactRewri
             int maxLevel,
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
-            Comparator<RowData> keyComparator,
+            Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory) {
         super(readerFactory, writerFactory, keyComparator, mfFactory);
         this.maxLevel = maxLevel;

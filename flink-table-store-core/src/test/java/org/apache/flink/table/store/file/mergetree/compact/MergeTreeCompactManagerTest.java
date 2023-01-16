@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.io.DataFileMeta;
@@ -49,7 +49,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link MergeTreeCompactManager}. */
 public class MergeTreeCompactManagerTest {
 
-    private final Comparator<RowData> comparator = Comparator.comparingInt(o -> o.getInt(0));
+    private final Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
 
     private static ExecutorService service;
 
@@ -212,7 +212,7 @@ public class MergeTreeCompactManagerTest {
         assertThat(outputs).isEqualTo(expected);
     }
 
-    public static BinaryRowData row(int i) {
+    public static BinaryRow row(int i) {
         return DataFileTestUtils.row(i);
     }
 

@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.hive.HiveTypeUtils;
+import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.utils.RowDataUtils;
-import org.apache.flink.table.types.logical.LogicalType;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
@@ -33,7 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/** {@link StructObjectInspector} for {@link RowData}. */
+/** {@link StructObjectInspector} for {@link InternalRow}. */
 public class TableStoreRowDataObjectInspector extends StructObjectInspector {
 
     private final List<TableStoreStructField> structFields;
@@ -41,14 +41,14 @@ public class TableStoreRowDataObjectInspector extends StructObjectInspector {
     private final String typeName;
 
     public TableStoreRowDataObjectInspector(
-            List<String> fieldNames, List<LogicalType> fieldTypes, List<String> fieldComments) {
+            List<String> fieldNames, List<DataType> fieldTypes, List<String> fieldComments) {
         this.structFields = new ArrayList<>();
         this.structFieldMap = new HashMap<>();
         StringBuilder typeNameBuilder = new StringBuilder("struct<");
 
         for (int i = 0; i < fieldNames.size(); i++) {
             String name = fieldNames.get(i);
-            LogicalType logicalType = fieldTypes.get(i);
+            DataType logicalType = fieldTypes.get(i);
             TableStoreStructField structField =
                     new TableStoreStructField(
                             name,
@@ -84,13 +84,13 @@ public class TableStoreRowDataObjectInspector extends StructObjectInspector {
 
     @Override
     public Object getStructFieldData(Object o, StructField structField) {
-        RowData rowData = (RowData) o;
+        InternalRow rowData = (InternalRow) o;
         return ((TableStoreStructField) structField).fieldGetter.getFieldOrNull(rowData);
     }
 
     @Override
     public List<Object> getStructFieldsDataAsList(Object o) {
-        RowData rowData = (RowData) o;
+        InternalRow rowData = (InternalRow) o;
         return structFields.stream()
                 .map(f -> f.fieldGetter.getFieldOrNull(rowData))
                 .collect(Collectors.toList());
@@ -111,14 +111,14 @@ public class TableStoreRowDataObjectInspector extends StructObjectInspector {
         private final String name;
         private final ObjectInspector objectInspector;
         private final int idx;
-        private final RowData.FieldGetter fieldGetter;
+        private final InternalRow.FieldGetter fieldGetter;
         private final String comment;
 
         private TableStoreStructField(
                 String name,
                 ObjectInspector objectInspector,
                 int idx,
-                RowData.FieldGetter fieldGetter,
+                InternalRow.FieldGetter fieldGetter,
                 String comment) {
             this.name = name;
             this.objectInspector = objectInspector;

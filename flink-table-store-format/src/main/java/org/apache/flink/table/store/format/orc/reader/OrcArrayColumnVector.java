@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.format.orc.reader;
 
-import org.apache.flink.table.data.ArrayData;
+import org.apache.flink.table.store.data.InternalArray;
 import org.apache.flink.table.store.data.columnar.ColumnVector;
-import org.apache.flink.table.store.data.columnar.ColumnarArrayData;
-import org.apache.flink.table.types.logical.ArrayType;
+import org.apache.flink.table.store.data.columnar.ColumnarArray;
+import org.apache.flink.table.store.types.ArrayType;
 
 import org.apache.hadoop.hive.ql.exec.vector.ListColumnVector;
 
@@ -39,9 +39,9 @@ public class OrcArrayColumnVector extends AbstractOrcColumnVector
     }
 
     @Override
-    public ArrayData getArray(int i) {
+    public InternalArray getArray(int i) {
         long offset = hiveVector.offsets[i];
         long length = hiveVector.lengths[i];
-        return new ColumnarArrayData(flinkVector, (int) offset, (int) length);
+        return new ColumnarArray(flinkVector, (int) offset, (int) length);
     }
 }

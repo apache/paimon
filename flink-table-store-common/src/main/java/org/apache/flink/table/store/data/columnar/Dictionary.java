@@ -17,11 +17,9 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.Timestamp;
 
 /** The interface for dictionary in AbstractColumnVector to decode dictionary encoded values. */
-@Internal
 public interface Dictionary {
 
     int decodeToInt(int id);
@@ -34,5 +32,5 @@ public interface Dictionary {
 
     byte[] decodeToBinary(int id);
 
-    TimestampData decodeToTimestamp(int id);
+    Timestamp decodeToTimestamp(int id);
 }
