@@ -17,20 +17,15 @@
  */
 package org.apache.flink.table.store.codegen
 
-import org.apache.flink.api.common.ExecutionConfig
-import org.apache.flink.api.common.typeinfo.{AtomicType => AtomicTypeInfo}
-import org.apache.flink.core.memory.MemorySegment
-import org.apache.flink.table.data._
-import org.apache.flink.table.data.binary.{BinaryRawValueData, BinaryRowData, BinaryStringData}
-import org.apache.flink.table.store.data.BinaryRowWriter
-import org.apache.flink.table.types.logical._
-import org.apache.flink.table.types.logical.LogicalTypeRoot._
-import org.apache.flink.table.types.logical.utils.LogicalTypeChecks.{getFieldCount, getFieldTypes, getPrecision, getScale}
+import org.apache.flink.table.store.data._
+import org.apache.flink.table.store.memory.MemorySegment
+import org.apache.flink.table.store.types._
+import org.apache.flink.table.store.types.DataTypeChecks.{getFieldCount, getFieldTypes, getPrecision, getScale}
+import org.apache.flink.table.store.types.DataTypeRoot._
 
-import java.lang.{Boolean => JBoolean, Byte => JByte, Double => JDouble, Float => JFloat, Integer => JInt, Long => JLong, Object => JObject, Short => JShort}
+import java.lang.{Boolean => JBoolean, Byte => JByte, Double => JDouble, Float => JFloat, Integer => JInt, Long => JLong, Short => JShort}
 import java.util.concurrent.atomic.AtomicLong
 
-import scala.annotation.tailrec
 import scala.collection.mutable
 
 /** Utilities to generate code for general purpose. */
@@ -42,15 +37,13 @@ object GenerateUtils {
 
   val DEFAULT_OUT_RECORD_WRITER_TERM = "outWriter"
 
-  val BINARY_RAW_VALUE: String = className[BinaryRawValueData[_]]
+  val ARRAY_DATA: String = className[InternalArray]
 
-  val ARRAY_DATA: String = className[ArrayData]
+  val MAP_DATA: String = className[InternalMap]
 
-  val MAP_DATA: String = className[MapData]
+  val ROW_DATA: String = className[InternalRow]
 
-  val ROW_DATA: String = className[RowData]
-
-  val BINARY_STRING: String = className[BinaryStringData]
+  val BINARY_STRING: String = className[BinaryString]
 
   val SEGMENT: String = className[MemorySegment]
 
@@ -66,29 +59,25 @@ object GenerateUtils {
   }
 
   /** Gets the default value for a primitive type, and null for generic types */
-  @tailrec
-  def primitiveDefaultValue(t: LogicalType): String = t.getTypeRoot match {
+  def primitiveDefaultValue(t: DataType): String = t.getTypeRoot match {
     // ordered by type root definition
     case CHAR | VARCHAR => s"$BINARY_STRING.EMPTY_UTF8"
     case BOOLEAN => "false"
-    case TINYINT | SMALLINT | INTEGER | DATE | TIME_WITHOUT_TIME_ZONE | INTERVAL_YEAR_MONTH => "-1"
-    case BIGINT | INTERVAL_DAY_TIME => "-1L"
+    case TINYINT | SMALLINT | INTEGER | DATE | TIME_WITHOUT_TIME_ZONE => "-1"
+    case BIGINT => "-1L"
     case FLOAT => "-1.0f"
     case DOUBLE => "-1.0d"
-
-    case DISTINCT_TYPE => primitiveDefaultValue(t.asInstanceOf[DistinctType].getSourceType)
 
     case _ => "null"
   }
 
-  @tailrec
   def generateFieldAccess(
       ctx: CodeGeneratorContext,
-      inputType: LogicalType,
+      inputType: DataType,
       inputTerm: String,
       index: Int): GeneratedExpression = inputType.getTypeRoot match {
     // ordered by type root definition
-    case ROW | STRUCTURED_TYPE =>
+    case ROW =>
       val fieldType = getFieldTypes(inputType).get(index)
       val resultTypeTerm = primitiveTypeTermForType(fieldType)
       val defaultValue = primitiveDefaultValue(fieldType)
@@ -107,9 +96,6 @@ object GenerateUtils {
 
       GeneratedExpression(fieldTerm, nullTerm, inputCode, fieldType)
 
-    case DISTINCT_TYPE =>
-      generateFieldAccess(ctx, inputType.asInstanceOf[DistinctType].getSourceType, inputTerm, index)
-
     case _ =>
       val fieldTypeTerm = boxedTypeTermForType(inputType)
       val inputCode = s"($fieldTypeTerm) $inputTerm"
@@ -117,10 +103,9 @@ object GenerateUtils {
   }
 
   /** Generates code for comparing two fields. */
-  @tailrec
   def generateCompare(
       ctx: CodeGeneratorContext,
-      t: LogicalType,
+      t: DataType,
       nullsIsLast: Boolean,
       leftTerm: String,
       rightTerm: String): String = t.getTypeRoot match {
@@ -133,11 +118,8 @@ object GenerateUtils {
       val sortUtil =
         classOf[org.apache.flink.table.store.utils.SortUtil].getCanonicalName
       s"$sortUtil.compareBinary($leftTerm, $rightTerm)"
-    case TINYINT | SMALLINT | INTEGER | BIGINT | FLOAT | DOUBLE | DATE | TIME_WITHOUT_TIME_ZONE |
-        INTERVAL_YEAR_MONTH | INTERVAL_DAY_TIME =>
+    case TINYINT | SMALLINT | INTEGER | BIGINT | FLOAT | DOUBLE | DATE | TIME_WITHOUT_TIME_ZONE =>
       s"($leftTerm > $rightTerm ? 1 : $leftTerm < $rightTerm ? -1 : 0)"
-    case TIMESTAMP_WITH_TIME_ZONE =>
-      throw new UnsupportedOperationException()
     case ARRAY =>
       val at = t.asInstanceOf[ArrayType]
       val compareFunc = newName("compareArray")
@@ -177,7 +159,7 @@ object GenerateUtils {
         """
       ctx.addReusableMember(funcCode)
       s"$compareFunc($leftTerm, $rightTerm)"
-    case ROW | STRUCTURED_TYPE =>
+    case ROW =>
       val fieldCount = getFieldCount(t)
       val comparisons =
         generateRowCompare(ctx, t, getAscendingSortSpec((0 until fieldCount).toArray), "a", "b")
@@ -191,38 +173,7 @@ object GenerateUtils {
         """
       ctx.addReusableMember(funcCode)
       s"$compareFunc($leftTerm, $rightTerm)"
-    case DISTINCT_TYPE =>
-      generateCompare(
-        ctx,
-        t.asInstanceOf[DistinctType].getSourceType,
-        nullsIsLast,
-        leftTerm,
-        rightTerm)
-    case RAW =>
-      t match {
-        case rawType: RawType[_] =>
-          val clazz = rawType.getOriginatingClass
-          if (!classOf[Comparable[_]].isAssignableFrom(clazz)) {
-            throw new CodeGenException(
-              s"Raw type class '$clazz' must implement ${className[Comparable[_]]} to be used " +
-                s"in a comparison of two '${rawType.asSummaryString()}' types.")
-          }
-          val serializer = rawType.getTypeSerializer
-          val serializerTerm = ctx.addReusableObject(serializer, "serializer")
-          s"((${className[Comparable[_]]}) $leftTerm.toObject($serializerTerm))" +
-            s".compareTo($rightTerm.toObject($serializerTerm))"
-
-        case rawType: TypeInformationRawType[_] =>
-          val serializer = rawType.getTypeInformation.createSerializer(new ExecutionConfig)
-          val ser = ctx.addReusableObject(serializer, "serializer")
-          val comp = ctx.addReusableObject(
-            rawType.getTypeInformation
-              .asInstanceOf[AtomicTypeInfo[_]]
-              .createComparator(true, new ExecutionConfig),
-            "comparator")
-          s"$comp.compare($leftTerm.toObject($ser), $rightTerm.toObject($ser))"
-      }
-    case NULL | SYMBOL | UNRESOLVED =>
+    case _ =>
       throw new IllegalArgumentException("Illegal type: " + t)
   }
 
@@ -344,7 +295,7 @@ object GenerateUtils {
   /** Generates code for comparing row keys. */
   def generateRowCompare(
       ctx: CodeGeneratorContext,
-      inputType: LogicalType,
+      inputType: DataType,
       sortSpec: SortSpec,
       leftTerm: String,
       rightTerm: String): String = {
@@ -395,51 +346,42 @@ object GenerateUtils {
   // works, but for boxed types we need this:
   // Float a = 1.0f;
   // Byte b = (byte)(float) a;
-  @tailrec
-  def primitiveTypeTermForType(t: LogicalType): String = t.getTypeRoot match {
+  def primitiveTypeTermForType(t: DataType): String = t.getTypeRoot match {
     // ordered by type root definition
     case BOOLEAN => "boolean"
     case TINYINT => "byte"
     case SMALLINT => "short"
-    case INTEGER | DATE | TIME_WITHOUT_TIME_ZONE | INTERVAL_YEAR_MONTH => "int"
-    case BIGINT | INTERVAL_DAY_TIME => "long"
+    case INTEGER | DATE | TIME_WITHOUT_TIME_ZONE => "int"
+    case BIGINT => "long"
     case FLOAT => "float"
     case DOUBLE => "double"
-    case DISTINCT_TYPE => primitiveTypeTermForType(t.asInstanceOf[DistinctType].getSourceType)
     case _ => boxedTypeTermForType(t)
   }
 
-  @tailrec
-  def boxedTypeTermForType(t: LogicalType): String = t.getTypeRoot match {
+  def boxedTypeTermForType(t: DataType): String = t.getTypeRoot match {
     // ordered by type root definition
     case CHAR | VARCHAR => BINARY_STRING
     case BOOLEAN => className[JBoolean]
     case BINARY | VARBINARY => "byte[]"
-    case DECIMAL => className[DecimalData]
+    case DECIMAL => className[Decimal]
     case TINYINT => className[JByte]
     case SMALLINT => className[JShort]
-    case INTEGER | DATE | TIME_WITHOUT_TIME_ZONE | INTERVAL_YEAR_MONTH => className[JInt]
-    case BIGINT | INTERVAL_DAY_TIME => className[JLong]
+    case INTEGER | DATE | TIME_WITHOUT_TIME_ZONE => className[JInt]
+    case BIGINT => className[JLong]
     case FLOAT => className[JFloat]
     case DOUBLE => className[JDouble]
-    case TIMESTAMP_WITHOUT_TIME_ZONE | TIMESTAMP_WITH_LOCAL_TIME_ZONE => className[TimestampData]
-    case TIMESTAMP_WITH_TIME_ZONE =>
-      throw new UnsupportedOperationException("Unsupported type: " + t)
-    case ARRAY => className[ArrayData]
-    case MULTISET | MAP => className[MapData]
-    case ROW | STRUCTURED_TYPE => className[RowData]
-    case DISTINCT_TYPE => boxedTypeTermForType(t.asInstanceOf[DistinctType].getSourceType)
-    case NULL => className[JObject] // special case for untyped null literals
-    case RAW => className[BinaryRawValueData[_]]
-    case SYMBOL | UNRESOLVED =>
+    case TIMESTAMP_WITHOUT_TIME_ZONE | TIMESTAMP_WITH_LOCAL_TIME_ZONE => className[Timestamp]
+    case ARRAY => className[InternalArray]
+    case MULTISET | MAP => className[InternalMap]
+    case ROW => className[InternalRow]
+    case _ =>
       throw new IllegalArgumentException("Illegal type: " + t)
   }
 
-  def rowFieldReadAccess(index: Int, rowTerm: String, fieldType: LogicalType): String =
+  def rowFieldReadAccess(index: Int, rowTerm: String, fieldType: DataType): String =
     rowFieldReadAccess(index.toString, rowTerm, fieldType)
 
-  @tailrec
-  def rowFieldReadAccess(indexTerm: String, rowTerm: String, t: LogicalType): String =
+  def rowFieldReadAccess(indexTerm: String, rowTerm: String, t: DataType): String =
     t.getTypeRoot match {
       // ordered by type root definition
       case CHAR | VARCHAR =>
@@ -454,9 +396,9 @@ object GenerateUtils {
         s"$rowTerm.getByte($indexTerm)"
       case SMALLINT =>
         s"$rowTerm.getShort($indexTerm)"
-      case INTEGER | DATE | TIME_WITHOUT_TIME_ZONE | INTERVAL_YEAR_MONTH =>
+      case INTEGER | DATE | TIME_WITHOUT_TIME_ZONE =>
         s"$rowTerm.getInt($indexTerm)"
-      case BIGINT | INTERVAL_DAY_TIME =>
+      case BIGINT =>
         s"$rowTerm.getLong($indexTerm)"
       case FLOAT =>
         s"$rowTerm.getFloat($indexTerm)"
@@ -464,19 +406,13 @@ object GenerateUtils {
         s"$rowTerm.getDouble($indexTerm)"
       case TIMESTAMP_WITHOUT_TIME_ZONE | TIMESTAMP_WITH_LOCAL_TIME_ZONE =>
         s"$rowTerm.getTimestamp($indexTerm, ${getPrecision(t)})"
-      case TIMESTAMP_WITH_TIME_ZONE =>
-        throw new UnsupportedOperationException("Unsupported type: " + t)
       case ARRAY =>
         s"$rowTerm.getArray($indexTerm)"
       case MULTISET | MAP =>
         s"$rowTerm.getMap($indexTerm)"
-      case ROW | STRUCTURED_TYPE =>
+      case ROW =>
         s"$rowTerm.getRow($indexTerm, ${getFieldCount(t)})"
-      case DISTINCT_TYPE =>
-        rowFieldReadAccess(indexTerm, rowTerm, t.asInstanceOf[DistinctType].getSourceType)
-      case RAW =>
-        s"(($BINARY_RAW_VALUE) $rowTerm.getRawValue($indexTerm))"
-      case NULL | SYMBOL | UNRESOLVED =>
+      case _ =>
         throw new IllegalArgumentException("Illegal type: " + t)
     }
 
@@ -497,7 +433,7 @@ object GenerateUtils {
    */
   def generateInputFieldUnboxing(
       ctx: CodeGeneratorContext,
-      inputType: LogicalType,
+      inputType: DataType,
       inputTerm: String,
       inputUnboxingTerm: String): GeneratedExpression = {
 
@@ -558,7 +494,7 @@ object GenerateUtils {
 
   def rowSetField(
       ctx: CodeGeneratorContext,
-      rowClass: Class[_ <: RowData],
+      rowClass: Class[_ <: InternalRow],
       rowTerm: String,
       indexTerm: String,
       fieldExpr: GeneratedExpression,
@@ -567,7 +503,7 @@ object GenerateUtils {
     val fieldType = fieldExpr.resultType
     val fieldTerm = fieldExpr.resultTerm
 
-    if (rowClass == classOf[BinaryRowData]) {
+    if (rowClass == classOf[BinaryRow]) {
       binaryRowWriterTerm match {
         case Some(writer) =>
           // use writer to set field
@@ -604,7 +540,7 @@ object GenerateUtils {
       index: Int,
       fieldValTerm: String,
       writerTerm: String,
-      fieldType: LogicalType): String =
+      fieldType: DataType): String =
     binaryWriterWriteField(
       t => ctx.addReusableTypeSerializer(t),
       index.toString,
@@ -617,7 +553,7 @@ object GenerateUtils {
       indexTerm: String,
       fieldValTerm: String,
       writerTerm: String,
-      t: LogicalType): String =
+      t: DataType): String =
     binaryWriterWriteField(
       t => ctx.addReusableTypeSerializer(t),
       indexTerm,
@@ -625,13 +561,12 @@ object GenerateUtils {
       writerTerm,
       t)
 
-  @tailrec
   def binaryWriterWriteField(
-      addSerializer: LogicalType => String,
+      addSerializer: DataType => String,
       indexTerm: String,
       fieldValTerm: String,
       writerTerm: String,
-      t: LogicalType): String = t.getTypeRoot match {
+      t: DataType): String = t.getTypeRoot match {
     // ordered by type root definition
     case CHAR | VARCHAR =>
       s"$writerTerm.writeString($indexTerm, $fieldValTerm)"
@@ -645,9 +580,9 @@ object GenerateUtils {
       s"$writerTerm.writeByte($indexTerm, $fieldValTerm)"
     case SMALLINT =>
       s"$writerTerm.writeShort($indexTerm, $fieldValTerm)"
-    case INTEGER | DATE | TIME_WITHOUT_TIME_ZONE | INTERVAL_YEAR_MONTH =>
+    case INTEGER | DATE | TIME_WITHOUT_TIME_ZONE =>
       s"$writerTerm.writeInt($indexTerm, $fieldValTerm)"
-    case BIGINT | INTERVAL_DAY_TIME =>
+    case BIGINT =>
       s"$writerTerm.writeLong($indexTerm, $fieldValTerm)"
     case FLOAT =>
       s"$writerTerm.writeFloat($indexTerm, $fieldValTerm)"
@@ -655,55 +590,39 @@ object GenerateUtils {
       s"$writerTerm.writeDouble($indexTerm, $fieldValTerm)"
     case TIMESTAMP_WITHOUT_TIME_ZONE | TIMESTAMP_WITH_LOCAL_TIME_ZONE =>
       s"$writerTerm.writeTimestamp($indexTerm, $fieldValTerm, ${getPrecision(t)})"
-    case TIMESTAMP_WITH_TIME_ZONE =>
-      throw new UnsupportedOperationException("Unsupported type: " + t)
     case ARRAY =>
       val ser = addSerializer(t)
       s"$writerTerm.writeArray($indexTerm, $fieldValTerm, $ser)"
     case MULTISET | MAP =>
       val ser = addSerializer(t)
       s"$writerTerm.writeMap($indexTerm, $fieldValTerm, $ser)"
-    case ROW | STRUCTURED_TYPE =>
+    case ROW =>
       val ser = addSerializer(t)
       s"$writerTerm.writeRow($indexTerm, $fieldValTerm, $ser)"
-    case DISTINCT_TYPE =>
-      binaryWriterWriteField(
-        addSerializer,
-        indexTerm,
-        fieldValTerm,
-        writerTerm,
-        t.asInstanceOf[DistinctType].getSourceType)
-    case RAW =>
-      val ser = addSerializer(t)
-      s"$writerTerm.writeRawValue($indexTerm, $fieldValTerm, $ser)"
-    case NULL | SYMBOL | UNRESOLVED =>
+    case _ =>
       throw new IllegalArgumentException("Illegal type: " + t);
   }
 
-  def binaryWriterWriteNull(index: Int, writerTerm: String, t: LogicalType): String =
+  def binaryWriterWriteNull(index: Int, writerTerm: String, t: DataType): String =
     binaryWriterWriteNull(index.toString, writerTerm, t)
 
-  @tailrec
-  def binaryWriterWriteNull(indexTerm: String, writerTerm: String, t: LogicalType): String =
+  def binaryWriterWriteNull(indexTerm: String, writerTerm: String, t: DataType): String =
     t.getTypeRoot match {
       // ordered by type root definition
-      case DECIMAL if !DecimalData.isCompact(getPrecision(t)) =>
+      case DECIMAL if !Decimal.isCompact(getPrecision(t)) =>
         s"$writerTerm.writeDecimal($indexTerm, null, ${getPrecision(t)})"
       case TIMESTAMP_WITHOUT_TIME_ZONE | TIMESTAMP_WITH_LOCAL_TIME_ZONE
-          if !TimestampData.isCompact(getPrecision(t)) =>
+          if !Timestamp.isCompact(getPrecision(t)) =>
         s"$writerTerm.writeTimestamp($indexTerm, null, ${getPrecision(t)})"
-      case DISTINCT_TYPE =>
-        binaryWriterWriteNull(indexTerm, writerTerm, t.asInstanceOf[DistinctType].getSourceType)
       case _ =>
         s"$writerTerm.setNullAt($indexTerm)"
     }
 
-  @tailrec
   def boxedWrapperRowFieldSetAccess(
       rowTerm: String,
       indexTerm: String,
       fieldTerm: String,
-      t: LogicalType): String = t.getTypeRoot match {
+      t: DataType): String = t.getTypeRoot match {
     // ordered by type root definition
     case BOOLEAN =>
       s"$rowTerm.setBoolean($indexTerm, $fieldTerm)"
@@ -711,28 +630,21 @@ object GenerateUtils {
       s"$rowTerm.setByte($indexTerm, $fieldTerm)"
     case SMALLINT =>
       s"$rowTerm.setShort($indexTerm, $fieldTerm)"
-    case INTEGER | DATE | TIME_WITHOUT_TIME_ZONE | INTERVAL_YEAR_MONTH =>
+    case INTEGER | DATE | TIME_WITHOUT_TIME_ZONE =>
       s"$rowTerm.setInt($indexTerm, $fieldTerm)"
-    case BIGINT | INTERVAL_DAY_TIME =>
+    case BIGINT =>
       s"$rowTerm.setLong($indexTerm, $fieldTerm)"
     case FLOAT =>
       s"$rowTerm.setFloat($indexTerm, $fieldTerm)"
     case DOUBLE =>
       s"$rowTerm.setDouble($indexTerm, $fieldTerm)"
-    case DISTINCT_TYPE =>
-      boxedWrapperRowFieldSetAccess(
-        rowTerm,
-        indexTerm,
-        fieldTerm,
-        t.asInstanceOf[DistinctType].getSourceType)
     case _ =>
       s"$rowTerm.setNonPrimitiveValue($indexTerm, $fieldTerm)"
   }
 
   // -------------------------- BinaryArray Set Access -------------------------------
 
-  @tailrec
-  def binaryArraySetNull(index: Int, arrayTerm: String, t: LogicalType): String =
+  def binaryArraySetNull(index: Int, arrayTerm: String, t: DataType): String =
     t.getTypeRoot match {
       // ordered by type root definition
       case BOOLEAN =>
@@ -741,14 +653,12 @@ object GenerateUtils {
         s"$arrayTerm.setNullByte($index)"
       case SMALLINT =>
         s"$arrayTerm.setNullShort($index)"
-      case INTEGER | DATE | TIME_WITHOUT_TIME_ZONE | INTERVAL_YEAR_MONTH =>
+      case INTEGER | DATE | TIME_WITHOUT_TIME_ZONE =>
         s"$arrayTerm.setNullInt($index)"
       case FLOAT =>
         s"$arrayTerm.setNullFloat($index)"
       case DOUBLE =>
         s"$arrayTerm.setNullDouble($index)"
-      case DISTINCT_TYPE =>
-        binaryArraySetNull(index, arrayTerm, t)
       case _ =>
         s"$arrayTerm.setNullLong($index)"
     }
@@ -756,15 +666,14 @@ object GenerateUtils {
   def binaryRowFieldSetAccess(
       index: Int,
       binaryRowTerm: String,
-      fieldType: LogicalType,
+      fieldType: DataType,
       fieldValTerm: String): String =
     binaryRowFieldSetAccess(index.toString, binaryRowTerm, fieldType, fieldValTerm)
 
-  @tailrec
   def binaryRowFieldSetAccess(
       index: String,
       binaryRowTerm: String,
-      t: LogicalType,
+      t: DataType,
       fieldValTerm: String): String = t.getTypeRoot match {
     // ordered by type root definition
     case BOOLEAN =>
@@ -775,9 +684,9 @@ object GenerateUtils {
       s"$binaryRowTerm.setByte($index, $fieldValTerm)"
     case SMALLINT =>
       s"$binaryRowTerm.setShort($index, $fieldValTerm)"
-    case INTEGER | DATE | TIME_WITHOUT_TIME_ZONE | INTERVAL_YEAR_MONTH =>
+    case INTEGER | DATE | TIME_WITHOUT_TIME_ZONE =>
       s"$binaryRowTerm.setInt($index, $fieldValTerm)"
-    case BIGINT | INTERVAL_DAY_TIME =>
+    case BIGINT =>
       s"$binaryRowTerm.setLong($index, $fieldValTerm)"
     case FLOAT =>
       s"$binaryRowTerm.setFloat($index, $fieldValTerm)"
@@ -785,31 +694,22 @@ object GenerateUtils {
       s"$binaryRowTerm.setDouble($index, $fieldValTerm)"
     case TIMESTAMP_WITHOUT_TIME_ZONE | TIMESTAMP_WITH_LOCAL_TIME_ZONE =>
       s"$binaryRowTerm.setTimestamp($index, $fieldValTerm, ${getPrecision(t)})"
-    case DISTINCT_TYPE =>
-      binaryRowFieldSetAccess(
-        index,
-        binaryRowTerm,
-        t.asInstanceOf[DistinctType].getSourceType,
-        fieldValTerm)
     case _ =>
       throw new CodeGenException(
-        "Fail to find binary row field setter method of LogicalType " + t + ".")
+        "Fail to find binary row field setter method of DataType " + t + ".")
   }
 
-  def binaryRowSetNull(index: Int, rowTerm: String, t: LogicalType): String =
+  def binaryRowSetNull(index: Int, rowTerm: String, t: DataType): String =
     binaryRowSetNull(index.toString, rowTerm, t)
 
-  @tailrec
-  def binaryRowSetNull(indexTerm: String, rowTerm: String, t: LogicalType): String =
+  def binaryRowSetNull(indexTerm: String, rowTerm: String, t: DataType): String =
     t.getTypeRoot match {
       // ordered by type root definition
-      case DECIMAL if !DecimalData.isCompact(getPrecision(t)) =>
+      case DECIMAL if !Decimal.isCompact(getPrecision(t)) =>
         s"$rowTerm.setDecimal($indexTerm, null, ${getPrecision(t)})"
       case TIMESTAMP_WITHOUT_TIME_ZONE | TIMESTAMP_WITH_LOCAL_TIME_ZONE
-          if !TimestampData.isCompact(getPrecision(t)) =>
+          if !Timestamp.isCompact(getPrecision(t)) =>
         s"$rowTerm.setTimestamp($indexTerm, null, ${getPrecision(t)})"
-      case DISTINCT_TYPE =>
-        binaryRowSetNull(indexTerm, rowTerm, t.asInstanceOf[DistinctType].getSourceType)
       case _ =>
         s"$rowTerm.setNullAt($indexTerm)"
     }
@@ -831,15 +731,14 @@ object GenerateUtils {
    * @return
    *   the record initialization statement
    */
-  @tailrec
   def generateRecordStatement(
-      t: LogicalType,
+      t: DataType,
       clazz: Class[_],
       recordTerm: String,
       recordWriterTerm: Option[String] = None,
       ctx: CodeGeneratorContext): String = t.getTypeRoot match {
     // ordered by type root definition
-    case ROW | STRUCTURED_TYPE if clazz == classOf[BinaryRowData] =>
+    case ROW if clazz == classOf[BinaryRow] =>
       val writerTerm = recordWriterTerm.getOrElse(
         throw new CodeGenException("No writer is specified when writing BinaryRowData record.")
       )
@@ -851,13 +750,6 @@ object GenerateUtils {
          |$recordTerm = new $typeTerm(${getFieldCount(t)});
          |$writerTerm = new $binaryRowWriter($recordTerm);
          |""".stripMargin.trim
-    case DISTINCT_TYPE =>
-      generateRecordStatement(
-        t.asInstanceOf[DistinctType].getSourceType,
-        clazz,
-        recordTerm,
-        recordWriterTerm,
-        ctx)
     case _ =>
       val typeTerm = boxedTypeTermForType(t)
       ctx.addReusableMember(s"$typeTerm $recordTerm = new $typeTerm();")

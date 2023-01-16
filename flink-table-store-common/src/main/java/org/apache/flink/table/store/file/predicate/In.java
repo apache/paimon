@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.format.FieldStats;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.DataType;
 
 import java.util.List;
 import java.util.Optional;
@@ -36,7 +36,7 @@ public class In extends LeafFunction {
     private In() {}
 
     @Override
-    public boolean test(LogicalType type, Object field, List<Object> literals) {
+    public boolean test(DataType type, Object field, List<Object> literals) {
         if (field == null) {
             return false;
         }
@@ -50,7 +50,7 @@ public class In extends LeafFunction {
 
     @Override
     public boolean test(
-            LogicalType type, long rowCount, FieldStats fieldStats, List<Object> literals) {
+            DataType type, long rowCount, FieldStats fieldStats, List<Object> literals) {
         if (rowCount == fieldStats.nullCount()) {
             return false;
         }

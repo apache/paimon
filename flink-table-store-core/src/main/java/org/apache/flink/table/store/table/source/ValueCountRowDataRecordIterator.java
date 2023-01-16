@@ -18,21 +18,21 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
 
 import java.io.IOException;
 
 /**
- * An {@link RecordReader.RecordIterator} mapping a {@link KeyValue} to several {@link RowData}
- * according to its key. These {@link RowData}s are the same. The number of rows depends on the
+ * An {@link RecordReader.RecordIterator} mapping a {@link KeyValue} to several {@link InternalRow}
+ * according to its key. These {@link InternalRow}s are the same. The number of rows depends on the
  * value of {@link KeyValue}.
  */
 public class ValueCountRowDataRecordIterator extends ResetRowKindRecordIterator {
 
-    private RowData rowData;
+    private InternalRow rowData;
     private long count;
 
     public ValueCountRowDataRecordIterator(RecordReader.RecordIterator<KeyValue> kvIterator) {
@@ -42,7 +42,7 @@ public class ValueCountRowDataRecordIterator extends ResetRowKindRecordIterator 
     }
 
     @Override
-    public RowData next() throws IOException {
+    public InternalRow next() throws IOException {
         while (true) {
             if (count > 0) {
                 count--;

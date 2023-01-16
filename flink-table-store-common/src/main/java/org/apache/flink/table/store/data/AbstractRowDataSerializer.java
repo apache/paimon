@@ -18,21 +18,17 @@
 
 package org.apache.flink.table.store.data;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-
 import java.io.IOException;
 
 /** Row serializer, provided paged serialize paged method. */
-@Internal
-public abstract class AbstractRowDataSerializer<T extends RowData> extends PagedTypeSerializer<T> {
+public abstract class AbstractRowDataSerializer<T extends InternalRow>
+        extends PagedTypeSerializer<T> {
 
     private static final long serialVersionUID = 1L;
 
     /** Get the number of fields. */
     public abstract int getArity();
 
-    /** Convert a {@link RowData} to a {@link BinaryRowData}. */
-    public abstract BinaryRowData toBinaryRow(T rowData) throws IOException;
+    /** Convert a {@link InternalRow} to a {@link BinaryRow}. */
+    public abstract BinaryRow toBinaryRow(T rowData) throws IOException;
 }

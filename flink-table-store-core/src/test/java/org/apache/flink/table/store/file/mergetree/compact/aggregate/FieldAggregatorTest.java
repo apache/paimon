@@ -18,11 +18,10 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.binary.BinaryStringData;
-import org.apache.flink.table.types.logical.BooleanType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.types.BooleanType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import org.junit.jupiter.api.Test;
 
@@ -83,8 +82,8 @@ public class FieldAggregatorTest {
     @Test
     public void testFieldListaggAgg() {
         FieldListaggAgg fieldListaggAgg = new FieldListaggAgg(new VarCharType());
-        StringData accumulator = BinaryStringData.fromString("user1");
-        StringData inputField = BinaryStringData.fromString("user2");
+        BinaryString accumulator = BinaryString.fromString("user1");
+        BinaryString inputField = BinaryString.fromString("user2");
         assertThat(fieldListaggAgg.agg(accumulator, inputField).toString())
                 .isEqualTo("user1,user2");
     }

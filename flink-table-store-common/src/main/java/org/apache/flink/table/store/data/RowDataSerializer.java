@@ -28,40 +28,36 @@ import org.apache.flink.api.java.typeutils.runtime.DataInputViewStream;
 import org.apache.flink.api.java.typeutils.runtime.DataOutputViewStream;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.binary.NestedRowData;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.util.InstantiationUtil;
 
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.stream.IntStream;
 
-/** Serializer for {@link RowData}. */
+/** Serializer for {@link InternalRow}. */
 @Internal
-public class RowDataSerializer extends AbstractRowDataSerializer<RowData> {
+public class RowDataSerializer extends AbstractRowDataSerializer<InternalRow> {
     private static final long serialVersionUID = 1L;
 
-    private final BinaryRowDataSerializer binarySerializer;
-    private final LogicalType[] types;
+    private final BinaryRowSerializer binarySerializer;
+    private final DataType[] types;
     private final TypeSerializer[] fieldSerializers;
-    private final RowData.FieldGetter[] fieldGetters;
+    private final InternalRow.FieldGetter[] fieldGetters;
 
-    private transient BinaryRowData reuseRow;
+    private transient BinaryRow reuseRow;
     private transient BinaryRowWriter reuseWriter;
 
     public RowDataSerializer(RowType rowType) {
         this(
-                rowType.getChildren().toArray(new LogicalType[0]),
-                rowType.getChildren().stream()
+                rowType.getFieldTypes().toArray(new DataType[0]),
+                rowType.getFieldTypes().stream()
                         .map(InternalSerializers::create)
                         .toArray(TypeSerializer[]::new));
     }
 
-    public RowDataSerializer(LogicalType... types) {
+    public RowDataSerializer(DataType... types) {
         this(
                 types,
                 Arrays.stream(types)
@@ -69,18 +65,18 @@ public class RowDataSerializer extends AbstractRowDataSerializer<RowData> {
                         .toArray(TypeSerializer[]::new));
     }
 
-    public RowDataSerializer(LogicalType[] types, TypeSerializer<?>[] fieldSerializers) {
+    public RowDataSerializer(DataType[] types, TypeSerializer<?>[] fieldSerializers) {
         this.types = types;
         this.fieldSerializers = fieldSerializers;
-        this.binarySerializer = new BinaryRowDataSerializer(types.length);
+        this.binarySerializer = new BinaryRowSerializer(types.length);
         this.fieldGetters =
                 IntStream.range(0, types.length)
-                        .mapToObj(i -> RowData.createFieldGetter(types[i], i))
-                        .toArray(RowData.FieldGetter[]::new);
+                        .mapToObj(i -> InternalRow.createFieldGetter(types[i], i))
+                        .toArray(InternalRow.FieldGetter[]::new);
     }
 
     @Override
-    public TypeSerializer<RowData> duplicate() {
+    public TypeSerializer<InternalRow> duplicate() {
         TypeSerializer<?>[] duplicateFieldSerializers = new TypeSerializer[fieldSerializers.length];
         for (int i = 0; i < fieldSerializers.length; i++) {
             duplicateFieldSerializers[i] = fieldSerializers[i].duplicate();
@@ -89,79 +85,82 @@ public class RowDataSerializer extends AbstractRowDataSerializer<RowData> {
     }
 
     @Override
-    public RowData createInstance() {
+    public InternalRow createInstance() {
         // default use binary row to deserializer
-        return new BinaryRowData(types.length);
+        return new BinaryRow(types.length);
     }
 
     @Override
-    public void serialize(RowData row, DataOutputView target) throws IOException {
+    public void serialize(InternalRow row, DataOutputView target) throws IOException {
         binarySerializer.serialize(toBinaryRow(row), target);
     }
 
     @Override
-    public RowData deserialize(DataInputView source) throws IOException {
+    public InternalRow deserialize(DataInputView source) throws IOException {
         return binarySerializer.deserialize(source);
     }
 
     @Override
-    public RowData deserialize(RowData reuse, DataInputView source) throws IOException {
-        if (reuse instanceof BinaryRowData) {
-            return binarySerializer.deserialize((BinaryRowData) reuse, source);
+    public InternalRow deserialize(InternalRow reuse, DataInputView source) throws IOException {
+        if (reuse instanceof BinaryRow) {
+            return binarySerializer.deserialize((BinaryRow) reuse, source);
         } else {
             return binarySerializer.deserialize(source);
         }
     }
 
     @Override
-    public RowData copy(RowData from) {
-        if (from.getArity() != types.length) {
+    public InternalRow copy(InternalRow from) {
+        if (from.getFieldCount() != types.length) {
             throw new IllegalArgumentException(
-                    "Row arity: " + from.getArity() + ", but serializer arity: " + types.length);
+                    "Row arity: "
+                            + from.getFieldCount()
+                            + ", but serializer arity: "
+                            + types.length);
         }
-        if (from instanceof BinaryRowData) {
-            return ((BinaryRowData) from).copy();
-        } else if (from instanceof NestedRowData) {
-            return ((NestedRowData) from).copy();
+        if (from instanceof BinaryRow) {
+            return ((BinaryRow) from).copy();
+        } else if (from instanceof NestedRow) {
+            return ((NestedRow) from).copy();
         } else {
-            return copyRowData(from, new GenericRowData(from.getArity()));
+            return copyRowData(from, new GenericRow(from.getFieldCount()));
         }
     }
 
     @Override
-    public RowData copy(RowData from, RowData reuse) {
-        if (from.getArity() != types.length || reuse.getArity() != types.length) {
+    public InternalRow copy(InternalRow from, InternalRow reuse) {
+        if (from.getFieldCount() != types.length || reuse.getFieldCount() != types.length) {
             throw new IllegalArgumentException(
                     "Row arity: "
-                            + from.getArity()
+                            + from.getFieldCount()
                             + ", reuse Row arity: "
-                            + reuse.getArity()
+                            + reuse.getFieldCount()
                             + ", but serializer arity: "
                             + types.length);
         }
-        if (from instanceof BinaryRowData) {
-            return reuse instanceof BinaryRowData
-                    ? ((BinaryRowData) from).copy((BinaryRowData) reuse)
-                    : ((BinaryRowData) from).copy();
-        } else if (from instanceof NestedRowData) {
-            return reuse instanceof NestedRowData
-                    ? ((NestedRowData) from).copy(reuse)
-                    : ((NestedRowData) from).copy();
+        if (from instanceof BinaryRow) {
+            return reuse instanceof BinaryRow
+                    ? ((BinaryRow) from).copy((BinaryRow) reuse)
+                    : ((BinaryRow) from).copy();
+        } else if (from instanceof NestedRow) {
+            return reuse instanceof NestedRow
+                    ? ((NestedRow) from).copy(reuse)
+                    : ((NestedRow) from).copy();
         } else {
             return copyRowData(from, reuse);
         }
     }
 
     @SuppressWarnings("unchecked")
-    private RowData copyRowData(RowData from, RowData reuse) {
-        GenericRowData ret;
-        if (reuse instanceof GenericRowData) {
-            ret = (GenericRowData) reuse;
+    private InternalRow copyRowData(InternalRow from, InternalRow reuse) {
+        GenericRow ret;
+        if (reuse instanceof GenericRow) {
+            ret = (GenericRow) reuse;
         } else {
-            ret = new GenericRowData(from.getArity());
+            ret = new GenericRow(from.getFieldCount());
         }
         ret.setRowKind(from.getRowKind());
-        for (int i = 0; i < from.getArity(); i++) {
+        for (int i = 0; i < from.getFieldCount(); i++) {
             if (!from.isNullAt(i)) {
                 ret.setField(i, fieldSerializers[i].copy((fieldGetters[i].getFieldOrNull(from))));
             } else {
@@ -181,14 +180,14 @@ public class RowDataSerializer extends AbstractRowDataSerializer<RowData> {
         return types.length;
     }
 
-    /** Convert {@link RowData} into {@link BinaryRowData}. TODO modify it to code gen. */
+    /** Convert {@link InternalRow} into {@link BinaryRow}. TODO modify it to code gen. */
     @Override
-    public BinaryRowData toBinaryRow(RowData row) {
-        if (row instanceof BinaryRowData) {
-            return (BinaryRowData) row;
+    public BinaryRow toBinaryRow(InternalRow row) {
+        if (row instanceof BinaryRow) {
+            return (BinaryRow) row;
         }
         if (reuseRow == null) {
-            reuseRow = new BinaryRowData(types.length);
+            reuseRow = new BinaryRow(types.length);
             reuseWriter = new BinaryRowWriter(reuseRow);
         }
         reuseWriter.reset();
@@ -210,25 +209,27 @@ public class RowDataSerializer extends AbstractRowDataSerializer<RowData> {
     }
 
     @Override
-    public int serializeToPages(RowData row, AbstractPagedOutputView target) throws IOException {
+    public int serializeToPages(InternalRow row, AbstractPagedOutputView target)
+            throws IOException {
         return binarySerializer.serializeToPages(toBinaryRow(row), target);
     }
 
     @Override
-    public RowData deserializeFromPages(AbstractPagedInputView source) throws IOException {
+    public InternalRow deserializeFromPages(AbstractPagedInputView source) throws IOException {
         throw new UnsupportedOperationException("Not support!");
     }
 
     @Override
-    public RowData deserializeFromPages(RowData reuse, AbstractPagedInputView source)
+    public InternalRow deserializeFromPages(InternalRow reuse, AbstractPagedInputView source)
             throws IOException {
         throw new UnsupportedOperationException("Not support!");
     }
 
     @Override
-    public RowData mapFromPages(RowData reuse, AbstractPagedInputView source) throws IOException {
-        if (reuse instanceof BinaryRowData) {
-            return binarySerializer.mapFromPages((BinaryRowData) reuse, source);
+    public InternalRow mapFromPages(InternalRow reuse, AbstractPagedInputView source)
+            throws IOException {
+        if (reuse instanceof BinaryRow) {
+            return binarySerializer.mapFromPages((BinaryRow) reuse, source);
         } else {
             throw new UnsupportedOperationException("Not support!");
         }
@@ -265,15 +266,16 @@ public class RowDataSerializer extends AbstractRowDataSerializer<RowData> {
     }
 
     @Override
-    public TypeSerializerSnapshot<RowData> snapshotConfiguration() {
+    public TypeSerializerSnapshot<InternalRow> snapshotConfiguration() {
         return new RowDataSerializerSnapshot(types, fieldSerializers);
     }
 
-    /** {@link TypeSerializerSnapshot} for {@link BinaryRowDataSerializer}. */
-    public static final class RowDataSerializerSnapshot implements TypeSerializerSnapshot<RowData> {
+    /** {@link TypeSerializerSnapshot} for {@link BinaryRowSerializer}. */
+    public static final class RowDataSerializerSnapshot
+            implements TypeSerializerSnapshot<InternalRow> {
         private static final int CURRENT_VERSION = 3;
 
-        private LogicalType[] previousTypes;
+        private DataType[] previousTypes;
         private NestedSerializersSnapshotDelegate nestedSerializersSnapshotDelegate;
 
         @SuppressWarnings("unused")
@@ -281,7 +283,7 @@ public class RowDataSerializer extends AbstractRowDataSerializer<RowData> {
             // this constructor is used when restoring from a checkpoint/savepoint.
         }
 
-        RowDataSerializerSnapshot(LogicalType[] types, TypeSerializer[] serializers) {
+        RowDataSerializerSnapshot(DataType[] types, TypeSerializer[] serializers) {
             this.previousTypes = types;
             this.nestedSerializersSnapshotDelegate =
                     new NestedSerializersSnapshotDelegate(serializers);
@@ -296,7 +298,7 @@ public class RowDataSerializer extends AbstractRowDataSerializer<RowData> {
         public void writeSnapshot(DataOutputView out) throws IOException {
             out.writeInt(previousTypes.length);
             DataOutputViewStream stream = new DataOutputViewStream(out);
-            for (LogicalType previousType : previousTypes) {
+            for (DataType previousType : previousTypes) {
                 InstantiationUtil.serializeObject(stream, previousType);
             }
             nestedSerializersSnapshotDelegate.writeNestedSerializerSnapshots(out);
@@ -307,7 +309,7 @@ public class RowDataSerializer extends AbstractRowDataSerializer<RowData> {
                 throws IOException {
             int length = in.readInt();
             DataInputViewStream stream = new DataInputViewStream(in);
-            previousTypes = new LogicalType[length];
+            previousTypes = new DataType[length];
             for (int i = 0; i < length; i++) {
                 try {
                     previousTypes[i] =
@@ -329,8 +331,8 @@ public class RowDataSerializer extends AbstractRowDataSerializer<RowData> {
         }
 
         @Override
-        public TypeSerializerSchemaCompatibility<RowData> resolveSchemaCompatibility(
-                TypeSerializer<RowData> newSerializer) {
+        public TypeSerializerSchemaCompatibility<InternalRow> resolveSchemaCompatibility(
+                TypeSerializer<InternalRow> newSerializer) {
             if (!(newSerializer instanceof RowDataSerializer)) {
                 return TypeSerializerSchemaCompatibility.incompatible();
             }
@@ -340,7 +342,7 @@ public class RowDataSerializer extends AbstractRowDataSerializer<RowData> {
                 return TypeSerializerSchemaCompatibility.incompatible();
             }
 
-            CompositeTypeSerializerUtil.IntermediateCompatibilityResult<RowData>
+            CompositeTypeSerializerUtil.IntermediateCompatibilityResult<InternalRow>
                     intermediateResult =
                             CompositeTypeSerializerUtil.constructIntermediateCompatibilityResult(
                                     newRowSerializer.fieldSerializers,

@@ -23,5 +23,5 @@ import org.apache.flink.annotation.Internal;
 /** Row column vector. */
 @Internal
 public interface RowColumnVector extends ColumnVector {
-    ColumnarRowData getRow(int i);
+    ColumnarRow getRow(int i);
 }

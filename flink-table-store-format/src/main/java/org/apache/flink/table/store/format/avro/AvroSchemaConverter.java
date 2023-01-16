@@ -19,16 +19,16 @@
 package org.apache.flink.table.store.format.avro;
 
 import org.apache.flink.api.java.typeutils.RowTypeInfo;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.LogicalTypeRoot;
-import org.apache.flink.table.types.logical.MapType;
-import org.apache.flink.table.types.logical.MultisetType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.TimeType;
-import org.apache.flink.table.types.logical.TimestampType;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypeRoot;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.MultisetType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.TimeType;
+import org.apache.flink.table.store.types.TimestampType;
 
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
@@ -48,7 +48,7 @@ public class AvroSchemaConverter {
     }
 
     /**
-     * Converts Flink SQL {@link LogicalType} (can be nested) into an Avro schema.
+     * Converts Flink SQL {@link DataType} (can be nested) into an Avro schema.
      *
      * <p>Use "org.apache.flink.avro.generated.record" as the type name.
      *
@@ -56,26 +56,24 @@ public class AvroSchemaConverter {
      *     nested type
      * @return Avro's {@link Schema} matching this logical type.
      */
-    public static Schema convertToSchema(LogicalType schema) {
+    public static Schema convertToSchema(DataType schema) {
         return convertToSchema(schema, "org.apache.flink.avro.generated.record");
     }
 
     /**
-     * Converts Flink SQL {@link LogicalType} (can be nested) into an Avro schema.
+     * Converts Flink SQL {@link DataType} (can be nested) into an Avro schema.
      *
      * <p>The "{rowName}_" is used as the nested row type name prefix in order to generate the right
      * schema. Nested record type that only differs with type name is still compatible.
      *
-     * @param logicalType logical type
+     * @param dataType logical type
      * @param rowName the record name
      * @return Avro's {@link Schema} matching this logical type.
      */
-    public static Schema convertToSchema(LogicalType logicalType, String rowName) {
+    public static Schema convertToSchema(DataType dataType, String rowName) {
         int precision;
-        boolean nullable = logicalType.isNullable();
-        switch (logicalType.getTypeRoot()) {
-            case NULL:
-                return SchemaBuilder.builder().nullType();
+        boolean nullable = dataType.isNullable();
+        switch (dataType.getTypeRoot()) {
             case BOOLEAN:
                 Schema bool = SchemaBuilder.builder().booleanType();
                 return nullable ? nullableSchema(bool) : bool;
@@ -103,7 +101,7 @@ public class AvroSchemaConverter {
                 return nullable ? nullableSchema(binary) : binary;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 // use long to represents Timestamp
-                final TimestampType timestampType = (TimestampType) logicalType;
+                final TimestampType timestampType = (TimestampType) dataType;
                 precision = timestampType.getPrecision();
                 org.apache.avro.LogicalType avroLogicalType;
                 if (precision <= 3) {
@@ -122,7 +120,7 @@ public class AvroSchemaConverter {
                 Schema date = LogicalTypes.date().addToSchema(SchemaBuilder.builder().intType());
                 return nullable ? nullableSchema(date) : date;
             case TIME_WITHOUT_TIME_ZONE:
-                precision = ((TimeType) logicalType).getPrecision();
+                precision = ((TimeType) dataType).getPrecision();
                 if (precision > 3) {
                     throw new IllegalArgumentException(
                             "Avro does not support TIME type with precision: "
@@ -134,21 +132,21 @@ public class AvroSchemaConverter {
                         LogicalTypes.timeMillis().addToSchema(SchemaBuilder.builder().intType());
                 return nullable ? nullableSchema(time) : time;
             case DECIMAL:
-                DecimalType decimalType = (DecimalType) logicalType;
+                DecimalType decimalType = (DecimalType) dataType;
                 // store BigDecimal as byte[]
                 Schema decimal =
                         LogicalTypes.decimal(decimalType.getPrecision(), decimalType.getScale())
                                 .addToSchema(SchemaBuilder.builder().bytesType());
                 return nullable ? nullableSchema(decimal) : decimal;
             case ROW:
-                RowType rowType = (RowType) logicalType;
+                RowType rowType = (RowType) dataType;
                 List<String> fieldNames = rowType.getFieldNames();
                 // we have to make sure the record name is different in a Schema
                 SchemaBuilder.FieldAssembler<Schema> builder =
                         SchemaBuilder.builder().record(rowName).fields();
                 for (int i = 0; i < rowType.getFieldCount(); i++) {
                     String fieldName = fieldNames.get(i);
-                    LogicalType fieldType = rowType.getTypeAt(i);
+                    DataType fieldType = rowType.getTypeAt(i);
                     SchemaBuilder.GenericDefault<Schema> fieldBuilder =
                             builder.name(fieldName)
                                     .type(convertToSchema(fieldType, rowName + "_" + fieldName));
@@ -168,26 +166,24 @@ public class AvroSchemaConverter {
                                 .map()
                                 .values(
                                         convertToSchema(
-                                                extractValueTypeToAvroMap(logicalType), rowName));
+                                                extractValueTypeToAvroMap(dataType), rowName));
                 return nullable ? nullableSchema(map) : map;
             case ARRAY:
-                ArrayType arrayType = (ArrayType) logicalType;
+                ArrayType arrayType = (ArrayType) dataType;
                 Schema array =
                         SchemaBuilder.builder()
                                 .array()
                                 .items(convertToSchema(arrayType.getElementType(), rowName));
                 return nullable ? nullableSchema(array) : array;
-            case RAW:
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
             default:
                 throw new UnsupportedOperationException(
-                        "Unsupported to derive Schema for type: " + logicalType);
+                        "Unsupported to derive Schema for type: " + dataType);
         }
     }
 
-    public static LogicalType extractValueTypeToAvroMap(LogicalType type) {
-        LogicalType keyType;
-        LogicalType valueType;
+    public static DataType extractValueTypeToAvroMap(DataType type) {
+        DataType keyType;
+        DataType valueType;
         if (type instanceof MapType) {
             MapType mapType = (MapType) type;
             keyType = mapType.getKeyType();
@@ -197,12 +193,12 @@ public class AvroSchemaConverter {
             keyType = multisetType.getElementType();
             valueType = new IntType();
         }
-        if (keyType.getTypeRoot() != LogicalTypeRoot.VARCHAR
-                && keyType.getTypeRoot() != LogicalTypeRoot.CHAR) {
+        if (keyType.getTypeRoot() != DataTypeRoot.VARCHAR
+                && keyType.getTypeRoot() != DataTypeRoot.CHAR) {
             throw new UnsupportedOperationException(
                     "Avro format doesn't support non-string as key type of map. "
                             + "The key type is: "
-                            + keyType.asSummaryString());
+                            + keyType.asSQLString());
         }
         return valueType;
     }

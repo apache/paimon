@@ -27,7 +27,7 @@ import java.lang.reflect.Array;
 import static org.apache.flink.table.store.memory.MemorySegment.UNSAFE;
 
 /**
- * A binary implementation of {@link ArrayData} which is backed by {@link MemorySegment}s.
+ * A binary implementation of {@link InternalArray} which is backed by {@link MemorySegment}s.
  *
  * <p>For fields that hold fixed-length primitive types, such as long, double or int, they are
  * stored compacted in bytes, just like the original java array.
@@ -38,7 +38,7 @@ import static org.apache.flink.table.store.memory.MemorySegment.UNSAFE;
  * [size(int)] + [null bits(4-byte word boundaries)] + [values or offset&length] + [variable length part].
  * </pre>
  */
-public final class BinaryArray extends BinarySection implements ArrayData, DataSetters {
+public final class BinaryArray extends BinarySection implements InternalArray, DataSetters {
 
     /** Offset for Arrays. */
     private static final int BYTE_ARRAY_BASE_OFFSET = UNSAFE.arrayBaseOffset(byte[].class);
@@ -87,8 +87,9 @@ public final class BinaryArray extends BinarySection implements ArrayData, DataS
             case FLOAT:
             case DATE:
             case TIME_WITHOUT_TIME_ZONE:
+                return 4;
             default:
-                throw new IllegalArgumentException();
+                throw new IllegalArgumentException("Unsupported type: " + type);
         }
     }
 
@@ -206,11 +207,11 @@ public final class BinaryArray extends BinarySection implements ArrayData, DataS
     }
 
     @Override
-    public TimestampData getTimestamp(int pos, int precision) {
+    public Timestamp getTimestamp(int pos, int precision) {
         assertIndexIsValid(pos);
 
-        if (TimestampData.isCompact(precision)) {
-            return TimestampData.fromEpochMillis(
+        if (Timestamp.isCompact(precision)) {
+            return Timestamp.fromEpochMillis(
                     MemorySegmentUtils.getLong(segments, getElementOffset(pos, 8)));
         }
 
@@ -228,19 +229,19 @@ public final class BinaryArray extends BinarySection implements ArrayData, DataS
     }
 
     @Override
-    public ArrayData getArray(int pos) {
+    public InternalArray getArray(int pos) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readArrayData(segments, offset, getLong(pos));
     }
 
     @Override
-    public MapData getMap(int pos) {
+    public InternalMap getMap(int pos) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readMapData(segments, offset, getLong(pos));
     }
 
     @Override
-    public RowData getRow(int pos, int numFields) {
+    public InternalRow getRow(int pos, int numFields) {
         assertIndexIsValid(pos);
         int fieldOffset = getElementOffset(pos, 8);
         final long offsetAndSize = MemorySegmentUtils.getLong(segments, fieldOffset);
@@ -374,10 +375,10 @@ public final class BinaryArray extends BinarySection implements ArrayData, DataS
     }
 
     @Override
-    public void setTimestamp(int pos, TimestampData value, int precision) {
+    public void setTimestamp(int pos, Timestamp value, int precision) {
         assertIndexIsValid(pos);
 
-        if (TimestampData.isCompact(precision)) {
+        if (Timestamp.isCompact(precision)) {
             setLong(pos, value.getMillisecond());
         } else {
             int fieldOffset = getElementOffset(pos, 8);
@@ -479,8 +480,8 @@ public final class BinaryArray extends BinarySection implements ArrayData, DataS
 
     @SuppressWarnings("unchecked")
     public <T> T[] toObjectArray(DataType elementType) {
-        Class<T> elementClass = (Class<T>) RowData.getDataClass(elementType);
-        ArrayData.ElementGetter elementGetter = ArrayData.createElementGetter(elementType);
+        Class<T> elementClass = (Class<T>) InternalRow.getDataClass(elementType);
+        InternalArray.ElementGetter elementGetter = InternalArray.createElementGetter(elementType);
         T[] values = (T[]) Array.newInstance(elementClass, size);
         for (int i = 0; i < size; i++) {
             if (!isNullAt(i)) {

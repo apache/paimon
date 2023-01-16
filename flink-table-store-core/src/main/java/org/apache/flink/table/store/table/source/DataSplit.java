@@ -22,7 +22,7 @@ import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.SerializationUtils;
@@ -40,14 +40,14 @@ public class DataSplit implements Split {
     private static final long serialVersionUID = 2L;
 
     private long snapshotId;
-    private BinaryRowData partition;
+    private BinaryRow partition;
     private int bucket;
     private List<DataFileMeta> files;
     private boolean isIncremental;
 
     public DataSplit(
             long snapshotId,
-            BinaryRowData partition,
+            BinaryRow partition,
             int bucket,
             List<DataFileMeta> files,
             boolean isIncremental) {
@@ -56,7 +56,7 @@ public class DataSplit implements Split {
 
     private void init(
             long snapshotId,
-            BinaryRowData partition,
+            BinaryRow partition,
             int bucket,
             List<DataFileMeta> files,
             boolean isIncremental) {
@@ -71,7 +71,7 @@ public class DataSplit implements Split {
         return snapshotId;
     }
 
-    public BinaryRowData partition() {
+    public BinaryRow partition() {
         return partition;
     }
 
@@ -139,7 +139,7 @@ public class DataSplit implements Split {
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
         long snapshotId = in.readLong();
-        BinaryRowData partition = SerializationUtils.deserializeBinaryRow(in);
+        BinaryRow partition = SerializationUtils.deserializeBinaryRow(in);
         int bucket = in.readInt();
         int fileNumber = in.readInt();
         List<DataFileMeta> files = new ArrayList<>(fileNumber);

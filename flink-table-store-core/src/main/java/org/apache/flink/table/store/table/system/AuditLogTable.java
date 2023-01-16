@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.table.system;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -35,11 +35,11 @@ import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.utils.ProjectedRowData;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.RowType.RowField;
-import org.apache.flink.table.types.logical.VarCharType;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.VarCharType;
+import org.apache.flink.table.store.utils.ProjectedRow;
 
 import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
 
@@ -88,8 +88,8 @@ public class AuditLogTable implements DataTable {
 
     @Override
     public RowType rowType() {
-        List<RowField> fields = new ArrayList<>();
-        fields.add(new RowField(ROW_KIND, new VarCharType(VarCharType.MAX_LENGTH)));
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, ROW_KIND, new VarCharType(VarCharType.MAX_LENGTH)));
         fields.addAll(dataTable.rowType().getFields());
         return new RowType(fields);
     }
@@ -234,19 +234,19 @@ public class AuditLogTable implements DataTable {
         }
 
         @Override
-        public RecordReader<RowData> createReader(Split split) throws IOException {
+        public RecordReader<InternalRow> createReader(Split split) throws IOException {
             return transform(dataRead.createReader(split), this::convertRow);
         }
 
-        private RowData convertRow(RowData data) {
-            return new AuditLogRowData(readProjection, data);
+        private InternalRow convertRow(InternalRow data) {
+            return new AuditLogRow(readProjection, data);
         }
     }
 
-    /** A {@link ProjectedRowData} which returns row kind when mapping index is negative. */
-    private static class AuditLogRowData extends ProjectedRowData {
+    /** A {@link ProjectedRow} which returns row kind when mapping index is negative. */
+    private static class AuditLogRow extends ProjectedRow {
 
-        private AuditLogRowData(int[] indexMapping, RowData row) {
+        private AuditLogRow(int[] indexMapping, InternalRow row) {
             super(indexMapping);
             replaceRow(row);
         }
@@ -272,9 +272,9 @@ public class AuditLogTable implements DataTable {
         }
 
         @Override
-        public StringData getString(int pos) {
+        public BinaryString getString(int pos) {
             if (indexMapping[pos] < 0) {
-                return StringData.fromString(row.getRowKind().shortString());
+                return BinaryString.fromString(row.getRowKind().shortString());
             }
             return super.getString(pos);
         }

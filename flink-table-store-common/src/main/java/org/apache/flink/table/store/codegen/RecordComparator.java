@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.codegen;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 
 import java.io.Serializable;
 import java.util.Comparator;
@@ -27,8 +27,8 @@ import java.util.Comparator;
  * Record comparator for {@code BinaryInMemorySortBuffer}. For performance, subclasses are usually
  * implemented through CodeGenerator. A new interface for helping JVM inline. Copied from Flink.
  */
-public interface RecordComparator extends Comparator<RowData>, Serializable {
+public interface RecordComparator extends Comparator<InternalRow>, Serializable {
 
     @Override
-    int compare(RowData o1, RowData o2);
+    int compare(InternalRow o1, InternalRow o2);
 }

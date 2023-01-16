@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
@@ -43,7 +43,7 @@ public class MergeTreeReaders {
             List<List<SortedRun>> sections,
             boolean dropDelete,
             KeyValueFileReaderFactory readerFactory,
-            Comparator<RowData> userKeyComparator,
+            Comparator<InternalRow> userKeyComparator,
             MergeFunction<KeyValue> mergeFunction)
             throws IOException {
         List<ConcatRecordReader.ReaderSupplier<KeyValue>> readers = new ArrayList<>();
@@ -66,7 +66,7 @@ public class MergeTreeReaders {
     public static RecordReader<KeyValue> readerForSection(
             List<SortedRun> section,
             KeyValueFileReaderFactory readerFactory,
-            Comparator<RowData> userKeyComparator,
+            Comparator<InternalRow> userKeyComparator,
             MergeFunctionWrapper<KeyValue> mergeFunctionWrapper)
             throws IOException {
         List<RecordReader<KeyValue>> readers = new ArrayList<>();

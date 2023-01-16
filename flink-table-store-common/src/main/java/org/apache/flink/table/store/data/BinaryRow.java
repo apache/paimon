@@ -31,8 +31,8 @@ import java.nio.ByteOrder;
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /**
- * An implementation of {@link RowData} which is backed by {@link MemorySegment} instead of Object.
- * It can significantly reduce the serialization/deserialization of Java objects.
+ * An implementation of {@link InternalRow} which is backed by {@link MemorySegment} instead of
+ * Object. It can significantly reduce the serialization/deserialization of Java objects.
  *
  * <p>A Row has two part: Fixed-length part and variable-length part.
  *
@@ -50,12 +50,20 @@ import static org.apache.flink.util.Preconditions.checkArgument;
  *
  * <p>Variable-length part may fall into multiple MemorySegments.
  */
-public final class BinaryRow extends BinarySection implements RowData, DataSetters {
+public final class BinaryRow extends BinarySection implements InternalRow, DataSetters {
 
     public static final boolean LITTLE_ENDIAN =
             (ByteOrder.nativeOrder() == ByteOrder.LITTLE_ENDIAN);
     private static final long FIRST_BYTE_ZERO = LITTLE_ENDIAN ? ~0xFFL : ~(0xFFL << 56L);
     public static final int HEADER_SIZE_IN_BITS = 8;
+
+    public static final BinaryRow EMPTY_ROW = new BinaryRow(0);
+
+    static {
+        int size = EMPTY_ROW.getFixedLengthPartSize();
+        byte[] bytes = new byte[size];
+        EMPTY_ROW.pointTo(MemorySegment.wrap(bytes), 0, size);
+    }
 
     public static int calculateBitSetWidthInBytes(int arity) {
         return ((arity + 63 + HEADER_SIZE_IN_BITS) / 64) * 8;
@@ -66,7 +74,7 @@ public final class BinaryRow extends BinarySection implements RowData, DataSette
     }
 
     /**
-     * If it is a fixed-length field, we can call this BinaryRowData's setXX method for in-place
+     * If it is a fixed-length field, we can call this BinaryRow's setXX method for in-place
      * updates. If it is variable-length field, can't use this method, because the underlying data
      * is stored continuously.
      */
@@ -85,9 +93,9 @@ public final class BinaryRow extends BinarySection implements RowData, DataSette
             case DECIMAL:
                 return Decimal.isCompact(((DecimalType) type).getPrecision());
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-                return TimestampData.isCompact(((TimestampType) type).getPrecision());
+                return Timestamp.isCompact(((TimestampType) type).getPrecision());
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return TimestampData.isCompact(((LocalZonedTimestampType) type).getPrecision());
+                return Timestamp.isCompact(((LocalZonedTimestampType) type).getPrecision());
             default:
                 return false;
         }
@@ -213,10 +221,10 @@ public final class BinaryRow extends BinarySection implements RowData, DataSette
     }
 
     @Override
-    public void setTimestamp(int pos, TimestampData value, int precision) {
+    public void setTimestamp(int pos, Timestamp value, int precision) {
         assertIndexIsValid(pos);
 
-        if (TimestampData.isCompact(precision)) {
+        if (Timestamp.isCompact(precision)) {
             setLong(pos, value.getMillisecond());
         } else {
             int fieldOffset = getFieldOffset(pos);
@@ -331,11 +339,11 @@ public final class BinaryRow extends BinarySection implements RowData, DataSette
     }
 
     @Override
-    public TimestampData getTimestamp(int pos, int precision) {
+    public Timestamp getTimestamp(int pos, int precision) {
         assertIndexIsValid(pos);
 
-        if (TimestampData.isCompact(precision)) {
-            return TimestampData.fromEpochMillis(segments[0].getLong(getFieldOffset(pos)));
+        if (Timestamp.isCompact(precision)) {
+            return Timestamp.fromEpochMillis(segments[0].getLong(getFieldOffset(pos)));
         }
 
         int fieldOffset = getFieldOffset(pos);
@@ -352,19 +360,19 @@ public final class BinaryRow extends BinarySection implements RowData, DataSette
     }
 
     @Override
-    public ArrayData getArray(int pos) {
+    public InternalArray getArray(int pos) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readArrayData(segments, offset, getLong(pos));
     }
 
     @Override
-    public MapData getMap(int pos) {
+    public InternalMap getMap(int pos) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readMapData(segments, offset, getLong(pos));
     }
 
     @Override
-    public RowData getRow(int pos, int numFields) {
+    public InternalRow getRow(int pos, int numFields) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readRowData(segments, numFields, offset, getLong(pos));
     }
@@ -417,7 +425,7 @@ public final class BinaryRow extends BinarySection implements RowData, DataSette
         if (this == o) {
             return true;
         }
-        // both BinaryRowData and NestedRowData have the same memory format
+        // both BinaryRow and NestedRow have the same memory format
         if (!(o instanceof BinaryRow || o instanceof NestedRow)) {
             return false;
         }

@@ -19,12 +19,10 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.conversion.RowRowConverter;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -45,10 +43,11 @@ import org.apache.flink.table.store.table.source.snapshot.FullStartingScanner;
 import org.apache.flink.table.store.table.source.snapshot.InputChangelogFollowUpScanner;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
 import org.apache.flink.table.store.table.system.AuditLogTable;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.CompatibilityTestUtils;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.types.RowKind;
 import org.apache.flink.util.function.FunctionWithException;
 
 import org.junit.jupiter.api.Test;
@@ -61,6 +60,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
+import static org.apache.flink.table.store.data.DataFormatTestUtil.rowDataToString;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ChangelogWithKeyFileStoreTable}. */
@@ -68,16 +68,16 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     protected static final RowType COMPATIBILITY_ROW_TYPE =
             RowType.of(
-                    new LogicalType[] {
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.BIGINT().getLogicalType(),
-                        DataTypes.BINARY(1).getLogicalType(),
-                        DataTypes.VARBINARY(1).getLogicalType()
+                    new DataType[] {
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.BIGINT(),
+                        DataTypes.BINARY(1),
+                        DataTypes.VARBINARY(1)
                     },
                     new String[] {"pt", "a", "b", "c", "d"});
 
-    protected static final Function<RowData, String> COMPATIBILITY_BATCH_ROW_TO_STRING =
+    protected static final Function<InternalRow, String> COMPATIBILITY_BATCH_ROW_TO_STRING =
             rowData ->
                     rowData.getInt(0)
                             + "|"
@@ -89,7 +89,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                             + "|"
                             + new String(rowData.getBinary(4));
 
-    protected static final Function<RowData, String> COMPATIBILITY_CHANGELOG_ROW_TO_STRING =
+    protected static final Function<InternalRow, String> COMPATIBILITY_CHANGELOG_ROW_TO_STRING =
             rowData ->
                     rowData.getRowKind().shortString()
                             + " "
@@ -639,14 +639,15 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         commit.close();
 
         AuditLogTable auditLogTable = new AuditLogTable(table);
-        RowRowConverter converter =
-                RowRowConverter.create(
-                        DataTypes.ROW(
-                                DataTypes.STRING(),
-                                DataTypes.INT(),
-                                DataTypes.INT(),
-                                DataTypes.BIGINT()));
-        Function<RowData, String> rowDataToString = row -> converter.toExternal(row).toString();
+        Function<InternalRow, String> rowDataToString =
+                row ->
+                        rowDataToString(
+                                row,
+                                DataTypes.ROW(
+                                        DataTypes.STRING(),
+                                        DataTypes.INT(),
+                                        DataTypes.INT(),
+                                        DataTypes.BIGINT()));
         PredicateBuilder predicateBuilder = new PredicateBuilder(auditLogTable.rowType());
 
         // Read all
@@ -658,7 +659,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                         "+I[+I, 2, 20, 200]", "+I[+U, 1, 30, 300]", "+I[+I, 1, 10, 100]");
 
         // Read by filter row kind (No effect)
-        Predicate rowKindEqual = predicateBuilder.equal(0, StringData.fromString("+I"));
+        Predicate rowKindEqual = predicateBuilder.equal(0, BinaryString.fromString("+I"));
         scan = auditLogTable.newScan().withFilter(rowKindEqual);
         read = auditLogTable.newRead().withFilter(rowKindEqual);
         result = getResult(read, scan.plan().splits(), rowDataToString);
@@ -675,11 +676,12 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         // Read by projection
         scan = auditLogTable.newScan();
         read = auditLogTable.newRead().withProjection(new int[] {2, 0, 1});
-        RowRowConverter projConverter1 =
-                RowRowConverter.create(
-                        DataTypes.ROW(DataTypes.INT(), DataTypes.STRING(), DataTypes.INT()));
-        Function<RowData, String> projectToString1 =
-                row -> projConverter1.toExternal(row).toString();
+        Function<InternalRow, String> projectToString1 =
+                row ->
+                        rowDataToString(
+                                row,
+                                DataTypes.ROW(
+                                        DataTypes.INT(), DataTypes.STRING(), DataTypes.INT()));
         result = getResult(read, scan.plan().splits(), projectToString1);
         assertThat(result)
                 .containsExactlyInAnyOrder("+I[20, +I, 2]", "+I[30, +U, 1]", "+I[10, +I, 1]");
@@ -687,10 +689,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         // Read by projection without row kind
         scan = auditLogTable.newScan();
         read = auditLogTable.newRead().withProjection(new int[] {2, 1});
-        RowRowConverter projConverter2 =
-                RowRowConverter.create(DataTypes.ROW(DataTypes.INT(), DataTypes.INT()));
-        Function<RowData, String> projectToString2 =
-                row -> projConverter2.toExternal(row).toString();
+        Function<InternalRow, String> projectToString2 =
+                row -> rowDataToString(row, DataTypes.ROW(DataTypes.INT(), DataTypes.INT()));
         result = getResult(read, scan.plan().splits(), projectToString2);
         assertThat(result).containsExactlyInAnyOrder("+I[20, 2]", "+I[30, 1]", "+I[10, 1]");
     }

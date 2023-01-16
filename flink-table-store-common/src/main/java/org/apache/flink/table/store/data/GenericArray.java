@@ -29,12 +29,12 @@ import java.util.Objects;
  * An internal data structure representing data of {@link ArrayType}.
  *
  * <p>Note: All elements of this data structure must be internal data structures and must be of the
- * same type. See {@link RowData} for more information about internal data structures.
+ * same type. See {@link InternalRow} for more information about internal data structures.
  *
- * <p>{@link GenericArray} is a generic implementation of {@link ArrayData} which wraps regular Java
- * arrays.
+ * <p>{@link GenericArray} is a generic implementation of {@link InternalArray} which wraps regular
+ * Java arrays.
  */
-public final class GenericArray implements ArrayData {
+public final class GenericArray implements InternalArray {
 
     private final Object array;
     private final int size;
@@ -209,23 +209,23 @@ public final class GenericArray implements ArrayData {
     }
 
     @Override
-    public TimestampData getTimestamp(int pos, int precision) {
-        return (TimestampData) getObject(pos);
+    public Timestamp getTimestamp(int pos, int precision) {
+        return (Timestamp) getObject(pos);
     }
 
     @Override
-    public RowData getRow(int pos, int numFields) {
-        return (RowData) getObject(pos);
+    public InternalRow getRow(int pos, int numFields) {
+        return (InternalRow) getObject(pos);
     }
 
     @Override
-    public ArrayData getArray(int pos) {
-        return (ArrayData) getObject(pos);
+    public InternalArray getArray(int pos) {
+        return (InternalArray) getObject(pos);
     }
 
     @Override
-    public MapData getMap(int pos) {
-        return (MapData) getObject(pos);
+    public InternalMap getMap(int pos) {
+        return (InternalMap) getObject(pos);
     }
 
     private Object getObject(int pos) {

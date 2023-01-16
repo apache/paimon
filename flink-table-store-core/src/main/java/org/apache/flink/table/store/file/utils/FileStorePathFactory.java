@@ -21,10 +21,10 @@ package org.apache.flink.table.store.file.utils;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.utils.PartitionPathUtils;
 import org.apache.flink.util.Preconditions;
 
@@ -58,7 +58,7 @@ public class FileStorePathFactory {
     public FileStorePathFactory(Path root) {
         this(
                 root,
-                RowType.of(),
+                RowType.builder().build(),
                 PARTITION_DEFAULT_NAME.defaultValue(),
                 CoreOptions.FILE_FORMAT.defaultValue());
     }
@@ -109,17 +109,17 @@ public class FileStorePathFactory {
         return new Path(root + "/manifest/" + manifestListName);
     }
 
-    public DataFilePathFactory createDataFilePathFactory(BinaryRowData partition, int bucket) {
+    public DataFilePathFactory createDataFilePathFactory(BinaryRow partition, int bucket) {
         return new DataFilePathFactory(
                 root, getPartitionString(partition), bucket, formatIdentifier);
     }
 
-    public Path bucketPath(BinaryRowData partition, int bucket) {
+    public Path bucketPath(BinaryRow partition, int bucket) {
         return DataFilePathFactory.bucketPath(root, getPartitionString(partition), bucket);
     }
 
     /** IMPORTANT: This method is NOT THREAD SAFE. */
-    public String getPartitionString(BinaryRowData partition) {
+    public String getPartitionString(BinaryRow partition) {
         return PartitionPathUtils.generatePartitionPath(
                 partitionComputer.generatePartValues(
                         Preconditions.checkNotNull(

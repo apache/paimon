@@ -17,7 +17,7 @@
 
 package org.apache.flink.table.store.format.parquet.reader;
 
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.Timestamp;
 
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.column.Dictionary;
@@ -106,12 +106,12 @@ public final class ParquetDataColumnReaderFactory {
         }
 
         @Override
-        public TimestampData readTimestamp() {
+        public Timestamp readTimestamp() {
             throw new RuntimeException("Unsupported operation");
         }
 
         @Override
-        public TimestampData readTimestamp(int id) {
+        public Timestamp readTimestamp(int id) {
             throw new RuntimeException("Unsupported operation");
         }
 
@@ -184,7 +184,7 @@ public final class ParquetDataColumnReaderFactory {
             this.isUtcTimestamp = isUtcTimestamp;
         }
 
-        private TimestampData convert(Binary binary) {
+        private Timestamp convert(Binary binary) {
             ByteBuffer buf = binary.toByteBuffer();
             buf.order(ByteOrder.LITTLE_ENDIAN);
             long timeOfDayNanos = buf.getLong();
@@ -194,12 +194,12 @@ public final class ParquetDataColumnReaderFactory {
         }
 
         @Override
-        public TimestampData readTimestamp(int id) {
+        public Timestamp readTimestamp(int id) {
             return convert(dict.decodeToBinary(id));
         }
 
         @Override
-        public TimestampData readTimestamp() {
+        public Timestamp readTimestamp() {
             return convert(valuesReader.readBytes());
         }
     }

@@ -21,7 +21,7 @@ package org.apache.flink.table.store.connector.lookup;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputSerializer;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 
 import org.apache.flink.shaded.guava30.com.google.common.cache.Cache;
 import org.apache.flink.shaded.guava30.com.google.common.cache.CacheBuilder;
@@ -44,9 +44,9 @@ public abstract class RocksDBState<CacheV> {
 
     protected final ColumnFamilyHandle columnFamily;
 
-    protected final TypeSerializer<RowData> keySerializer;
+    protected final TypeSerializer<InternalRow> keySerializer;
 
-    protected final TypeSerializer<RowData> valueSerializer;
+    protected final TypeSerializer<InternalRow> valueSerializer;
 
     protected final DataOutputSerializer keyOutView;
 
@@ -59,8 +59,8 @@ public abstract class RocksDBState<CacheV> {
     public RocksDBState(
             RocksDB db,
             ColumnFamilyHandle columnFamily,
-            TypeSerializer<RowData> keySerializer,
-            TypeSerializer<RowData> valueSerializer,
+            TypeSerializer<InternalRow> keySerializer,
+            TypeSerializer<InternalRow> valueSerializer,
             long lruCacheSize) {
         this.db = db;
         this.columnFamily = columnFamily;
@@ -73,7 +73,7 @@ public abstract class RocksDBState<CacheV> {
         this.cache = CacheBuilder.newBuilder().maximumSize(lruCacheSize).build();
     }
 
-    protected byte[] serializeKey(RowData key) throws IOException {
+    protected byte[] serializeKey(InternalRow key) throws IOException {
         keyOutView.clear();
         keySerializer.serialize(key, keyOutView);
         return keyOutView.getCopyOfBuffer();

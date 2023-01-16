@@ -19,15 +19,16 @@
 package org.apache.flink.table.store.format.orc.filter;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.store.format.orc.OrcReaderFactory;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.DateTimeUtils;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;
@@ -69,8 +70,8 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
             return IntStream.range(0, rowType.getFieldCount())
                     .mapToObj(
                             i -> {
-                                RowType.RowField field = rowType.getFields().get(i);
-                                int fieldIdx = columnNames.indexOf(field.getName());
+                                DataField field = rowType.getFields().get(i);
+                                int fieldIdx = columnNames.indexOf(field.name());
                                 int colId = columnTypes.get(fieldIdx).getId();
                                 return toFieldStats(field, columnStatistics[colId], rowCount);
                             })
@@ -78,7 +79,7 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
         }
     }
 
-    private FieldStats toFieldStats(RowType.RowField field, ColumnStatistics stats, long rowCount) {
+    private FieldStats toFieldStats(DataField field, ColumnStatistics stats, long rowCount) {
         long nullCount = rowCount - stats.getNumberOfValues();
         if (nullCount == rowCount) {
             // all nulls
@@ -92,14 +93,14 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
                         + stats.hasNull()
                         + "!");
 
-        switch (field.getType().getTypeRoot()) {
+        switch (field.type().getTypeRoot()) {
             case CHAR:
             case VARCHAR:
                 assertStatsClass(field, stats, StringColumnStatistics.class);
                 StringColumnStatistics stringStats = (StringColumnStatistics) stats;
                 return new FieldStats(
-                        StringData.fromString(stringStats.getMinimum()),
-                        StringData.fromString(stringStats.getMaximum()),
+                        BinaryString.fromString(stringStats.getMinimum()),
+                        BinaryString.fromString(stringStats.getMaximum()),
                         nullCount);
             case BOOLEAN:
                 assertStatsClass(field, stats, BooleanColumnStatistics.class);
@@ -109,13 +110,13 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
             case DECIMAL:
                 assertStatsClass(field, stats, DecimalColumnStatistics.class);
                 DecimalColumnStatistics decimalStats = (DecimalColumnStatistics) stats;
-                DecimalType decimalType = (DecimalType) (field.getType());
+                DecimalType decimalType = (DecimalType) (field.type());
                 int precision = decimalType.getPrecision();
                 int scale = decimalType.getScale();
                 return new FieldStats(
-                        DecimalData.fromBigDecimal(
+                        Decimal.fromBigDecimal(
                                 decimalStats.getMinimum().bigDecimalValue(), precision, scale),
-                        DecimalData.fromBigDecimal(
+                        Decimal.fromBigDecimal(
                                 decimalStats.getMaximum().bigDecimalValue(), precision, scale),
                         nullCount);
             case TINYINT:
@@ -165,8 +166,8 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
                 assertStatsClass(field, stats, TimestampColumnStatistics.class);
                 TimestampColumnStatistics timestampStats = (TimestampColumnStatistics) stats;
                 return new FieldStats(
-                        TimestampData.fromTimestamp(timestampStats.getMinimum()),
-                        TimestampData.fromTimestamp(timestampStats.getMaximum()),
+                        Timestamp.fromSQLTimestamp(timestampStats.getMinimum()),
+                        Timestamp.fromSQLTimestamp(timestampStats.getMaximum()),
                         nullCount);
             default:
                 return new FieldStats(null, null, nullCount);
@@ -174,7 +175,7 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
     }
 
     private void assertStatsClass(
-            RowType.RowField field,
+            DataField field,
             ColumnStatistics stats,
             Class<? extends ColumnStatistics> expectedClass) {
         if (!expectedClass.isInstance(stats)) {
@@ -182,7 +183,7 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
                     "Expecting "
                             + expectedClass.getName()
                             + " for field "
-                            + field.asSummaryString()
+                            + field.asSQLString()
                             + " but found "
                             + stats.getClass().getName());
         }

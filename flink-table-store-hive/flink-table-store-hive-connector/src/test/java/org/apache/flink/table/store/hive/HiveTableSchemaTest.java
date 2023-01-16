@@ -19,10 +19,11 @@
 package org.apache.flink.table.store.hive;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.junit.jupiter.api.Test;
@@ -42,14 +43,9 @@ public class HiveTableSchemaTest {
     private static final RowType ROW_TYPE =
             new RowType(
                     Arrays.asList(
-                            new RowType.RowField(
-                                    "a", DataTypes.INT().getLogicalType(), "first comment"),
-                            new RowType.RowField(
-                                    "b", DataTypes.STRING().getLogicalType(), "second comment"),
-                            new RowType.RowField(
-                                    "c",
-                                    DataTypes.DECIMAL(5, 3).getLogicalType(),
-                                    "last comment")));
+                            new DataField(0, "a", DataTypes.INT(), "first comment"),
+                            new DataField(1, "b", DataTypes.STRING(), "second comment"),
+                            new DataField(2, "c", DataTypes.DECIMAL(5, 3), "last comment")));
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -74,9 +70,7 @@ public class HiveTableSchemaTest {
         assertThat(schema.fieldTypes())
                 .isEqualTo(
                         Arrays.asList(
-                                DataTypes.INT().getLogicalType(),
-                                DataTypes.STRING().getLogicalType(),
-                                DataTypes.DECIMAL(5, 3).getLogicalType()));
+                                DataTypes.INT(), DataTypes.STRING(), DataTypes.DECIMAL(5, 3)));
         assertThat(schema.fieldComments())
                 .isEqualTo(Arrays.asList("first comment", "second comment", "last comment"));
     }
@@ -95,9 +89,7 @@ public class HiveTableSchemaTest {
         assertThat(schema.fieldTypes())
                 .isEqualTo(
                         Arrays.asList(
-                                DataTypes.INT().getLogicalType(),
-                                DataTypes.STRING().getLogicalType(),
-                                DataTypes.DECIMAL(5, 3).getLogicalType()));
+                                DataTypes.INT(), DataTypes.STRING(), DataTypes.DECIMAL(5, 3)));
         assertThat(schema.fieldComments())
                 .isEqualTo(Arrays.asList("first comment", "second comment", "last comment"));
     }

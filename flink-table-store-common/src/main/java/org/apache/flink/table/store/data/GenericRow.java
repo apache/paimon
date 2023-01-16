@@ -29,18 +29,18 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 /**
  * An internal data structure representing data of {@link RowType}.
  *
- * <p>{@link GenericRow} is a generic implementation of {@link RowData} which is backed by an array
- * of Java {@link Object}. A {@link GenericRow} can have an arbitrary number of fields of different
- * types. The fields in a row can be accessed by position (0-based) using either the generic {@link
- * #getField(int)} or type-specific getters (such as {@link #getInt(int)}). A field can be updated
- * by the generic {@link #setField(int, Object)}.
+ * <p>{@link GenericRow} is a generic implementation of {@link InternalRow} which is backed by an
+ * array of Java {@link Object}. A {@link GenericRow} can have an arbitrary number of fields of
+ * different types. The fields in a row can be accessed by position (0-based) using either the
+ * generic {@link #getField(int)} or type-specific getters (such as {@link #getInt(int)}). A field
+ * can be updated by the generic {@link #setField(int, Object)}.
  *
- * <p>Note: All fields of this data structure must be internal data structures. See {@link RowData}
- * for more information about internal data structures.
+ * <p>Note: All fields of this data structure must be internal data structures. See {@link
+ * InternalRow} for more information about internal data structures.
  *
  * <p>The fields in {@link GenericRow} can be null for representing nullability.
  */
-public final class GenericRow implements RowData {
+public final class GenericRow implements InternalRow {
 
     /** The array to store the actual internal format values. */
     private final Object[] fields;
@@ -82,7 +82,7 @@ public final class GenericRow implements RowData {
      * Sets the field value at the given position.
      *
      * <p>Note: The given field value must be an internal data structures. Otherwise the {@link
-     * GenericRow} is corrupted and may throw exception when processing. See {@link RowData} for
+     * GenericRow} is corrupted and may throw exception when processing. See {@link InternalRow} for
      * more information about internal data structures.
      *
      * <p>The field value can be null for representing nullability.
@@ -94,7 +94,7 @@ public final class GenericRow implements RowData {
     /**
      * Returns the field value at the given position.
      *
-     * <p>Note: The returned value is in internal data structure. See {@link RowData} for more
+     * <p>Note: The returned value is in internal data structure. See {@link InternalRow} for more
      * information about internal data structures.
      *
      * <p>The returned field value can be null for representing nullability.
@@ -170,8 +170,8 @@ public final class GenericRow implements RowData {
     }
 
     @Override
-    public TimestampData getTimestamp(int pos, int precision) {
-        return (TimestampData) this.fields[pos];
+    public Timestamp getTimestamp(int pos, int precision) {
+        return (Timestamp) this.fields[pos];
     }
 
     @Override
@@ -180,18 +180,18 @@ public final class GenericRow implements RowData {
     }
 
     @Override
-    public ArrayData getArray(int pos) {
-        return (ArrayData) this.fields[pos];
+    public InternalArray getArray(int pos) {
+        return (InternalArray) this.fields[pos];
     }
 
     @Override
-    public MapData getMap(int pos) {
-        return (MapData) this.fields[pos];
+    public InternalMap getMap(int pos) {
+        return (InternalMap) this.fields[pos];
     }
 
     @Override
-    public RowData getRow(int pos, int numFields) {
-        return (RowData) this.fields[pos];
+    public InternalRow getRow(int pos, int numFields) {
+        return (InternalRow) this.fields[pos];
     }
 
     @Override

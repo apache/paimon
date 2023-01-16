@@ -26,7 +26,7 @@ import org.apache.flink.table.factories.DynamicTableFactory.Context;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import org.apache.flink.table.store.CoreOptions.LogConsistency;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -153,14 +153,14 @@ public class KafkaLogITCase extends KafkaTableTestBase {
 
             // delete, upsert mode
             if (changelogMode == LogChangelogMode.UPSERT) {
-                assertRow(records.get(0), RowKind.DELETE, 1, null);
+                assertRow(records.get(0), org.apache.flink.types.RowKind.DELETE, 1, null);
             } else {
-                assertRow(records.get(0), RowKind.DELETE, 1, 2);
+                assertRow(records.get(0), org.apache.flink.types.RowKind.DELETE, 1, 2);
             }
             // inserts
-            assertRow(records.get(1), RowKind.INSERT, 3, 4);
-            assertRow(records.get(2), RowKind.INSERT, 5, 6);
-            assertRow(records.get(3), RowKind.INSERT, 7, 8);
+            assertRow(records.get(1), org.apache.flink.types.RowKind.INSERT, 3, 4);
+            assertRow(records.get(2), org.apache.flink.types.RowKind.INSERT, 5, 6);
+            assertRow(records.get(3), org.apache.flink.types.RowKind.INSERT, 7, 8);
 
             // 3 read with projection
             records =
@@ -172,14 +172,14 @@ public class KafkaLogITCase extends KafkaTableTestBase {
 
             // delete, upsert mode
             if (changelogMode == LogChangelogMode.UPSERT) {
-                assertValue(records.get(0), RowKind.DELETE, null);
+                assertValue(records.get(0), org.apache.flink.types.RowKind.DELETE, null);
             } else {
-                assertValue(records.get(0), RowKind.DELETE, 2);
+                assertValue(records.get(0), org.apache.flink.types.RowKind.DELETE, 2);
             }
             // inserts
-            assertValue(records.get(1), RowKind.INSERT, 4);
-            assertValue(records.get(2), RowKind.INSERT, 6);
-            assertValue(records.get(3), RowKind.INSERT, 8);
+            assertValue(records.get(1), org.apache.flink.types.RowKind.INSERT, 4);
+            assertValue(records.get(2), org.apache.flink.types.RowKind.INSERT, 6);
+            assertValue(records.get(3), org.apache.flink.types.RowKind.INSERT, 8);
         } finally {
             factory.onDropTable(context, true);
         }
@@ -202,13 +202,14 @@ public class KafkaLogITCase extends KafkaTableTestBase {
         env.enableCheckpointing(1000);
     }
 
-    private void assertRow(RowData row, RowKind rowKind, Integer k, Integer v) {
+    private void assertRow(
+            RowData row, org.apache.flink.types.RowKind rowKind, Integer k, Integer v) {
         Assert.assertEquals(rowKind, row.getRowKind());
         Assert.assertEquals(k, row.isNullAt(0) ? null : row.getInt(0));
         Assert.assertEquals(v, row.isNullAt(1) ? null : row.getInt(1));
     }
 
-    private void assertValue(RowData row, RowKind rowKind, Integer v) {
+    private void assertValue(RowData row, org.apache.flink.types.RowKind rowKind, Integer v) {
         Assert.assertEquals(rowKind, row.getRowKind());
         Assert.assertEquals(v, row.isNullAt(0) ? null : row.getInt(0));
     }

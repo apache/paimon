@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.connector.lookup;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.InternalSerializers;
-import org.apache.flink.table.store.utils.KeyProjectedRowData;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.InternalSerializers;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.KeyProjectedRow;
 import org.apache.flink.table.store.utils.TypeUtils;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.types.RowKind;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -36,20 +36,20 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
 
     private final RocksDBSetState indexState;
 
-    private final KeyProjectedRowData secKeyRow;
+    private final KeyProjectedRow secKeyRow;
 
     public SecondaryIndexLookupTable(
             RocksDBStateFactory stateFactory,
             RowType rowType,
             List<String> primaryKey,
             List<String> secKey,
-            Predicate<RowData> recordFilter,
+            Predicate<InternalRow> recordFilter,
             long lruCacheSize)
             throws IOException {
         super(stateFactory, rowType, primaryKey, recordFilter, lruCacheSize / 2);
         List<String> fieldNames = rowType.getFieldNames();
         int[] secKeyMapping = secKey.stream().mapToInt(fieldNames::indexOf).toArray();
-        this.secKeyRow = new KeyProjectedRowData(secKeyMapping);
+        this.secKeyRow = new KeyProjectedRow(secKeyMapping);
         this.indexState =
                 stateFactory.setState(
                         "sec-index",
@@ -59,11 +59,11 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
     }
 
     @Override
-    public List<RowData> get(RowData key) throws IOException {
-        List<RowData> pks = indexState.get(key);
-        List<RowData> values = new ArrayList<>(pks.size());
-        for (RowData pk : pks) {
-            RowData value = tableState.get(pk);
+    public List<InternalRow> get(InternalRow key) throws IOException {
+        List<InternalRow> pks = indexState.get(key);
+        List<InternalRow> values = new ArrayList<>(pks.size());
+        for (InternalRow pk : pks) {
+            InternalRow value = tableState.get(pk);
             if (value != null) {
                 values.add(value);
             }
@@ -72,12 +72,12 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
     }
 
     @Override
-    public void refresh(Iterator<RowData> incremental) throws IOException {
+    public void refresh(Iterator<InternalRow> incremental) throws IOException {
         while (incremental.hasNext()) {
-            RowData row = incremental.next();
+            InternalRow row = incremental.next();
             primaryKey.replaceRow(row);
             if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
-                RowData previous = tableState.get(primaryKey);
+                InternalRow previous = tableState.get(primaryKey);
                 if (previous != null) {
                     indexState.retract(secKeyRow.replaceRow(previous), primaryKey);
                 }

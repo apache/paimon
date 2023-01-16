@@ -20,8 +20,8 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
-import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -67,7 +67,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
         Random random = new Random();
         List<String> expected = new ArrayList<>();
         for (int i = 0; i < 10_000; i++) {
-            GenericRowData row = rowData(singlePartition ? 0 : random.nextInt(5), i, i * 10L);
+            GenericRow row = rowData(singlePartition ? 0 : random.nextInt(5), i, i * 10L);
             write.write(row);
             expected.add(BATCH_ROW_TO_STRING.apply(row));
         }

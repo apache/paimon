@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.format.parquet.writer;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
@@ -30,8 +30,8 @@ import org.apache.parquet.io.OutputFile;
 
 import java.io.IOException;
 
-/** A {@link ParquetBuilder} for {@link RowData}. */
-public class RowDataParquetBuilder implements ParquetBuilder<RowData> {
+/** A {@link ParquetBuilder} for {@link InternalRow}. */
+public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
 
     private final RowType rowType;
     private final Configuration conf;
@@ -42,7 +42,7 @@ public class RowDataParquetBuilder implements ParquetBuilder<RowData> {
     }
 
     @Override
-    public ParquetWriter<RowData> createWriter(OutputFile out) throws IOException {
+    public ParquetWriter<InternalRow> createWriter(OutputFile out) throws IOException {
         return new ParquetRowDataBuilder(out, rowType)
                 .withCompressionCodec(
                         CompressionCodecName.fromConf(

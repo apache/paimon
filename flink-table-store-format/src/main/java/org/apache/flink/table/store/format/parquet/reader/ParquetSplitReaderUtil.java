@@ -32,11 +32,11 @@ import org.apache.flink.table.store.data.columnar.heap.HeapShortVector;
 import org.apache.flink.table.store.data.columnar.heap.HeapTimestampVector;
 import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
 import org.apache.flink.table.store.format.parquet.ParquetSchemaConverter;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.MapType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.parquet.ParquetRuntimeException;
 import org.apache.parquet.column.ColumnDescriptor;
@@ -58,7 +58,7 @@ public class ParquetSplitReaderUtil {
 
     @SuppressWarnings("rawtypes")
     public static ColumnReader createColumnReader(
-            LogicalType fieldType,
+            DataType fieldType,
             Type type,
             List<ColumnDescriptor> columnDescriptors,
             PageReadStore pages,
@@ -162,7 +162,7 @@ public class ParquetSplitReaderUtil {
 
     public static WritableColumnVector createWritableColumnVector(
             int batchSize,
-            LogicalType fieldType,
+            DataType fieldType,
             Type type,
             List<ColumnDescriptor> columnDescriptors,
             int depth) {

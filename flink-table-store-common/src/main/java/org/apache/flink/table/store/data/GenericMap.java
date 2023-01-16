@@ -27,16 +27,16 @@ import java.util.Objects;
 /**
  * An internal data structure representing data of {@link MapType} or {@link MultisetType}.
  *
- * <p>{@link GenericMap} is a generic implementation of {@link MapData} which wraps regular Java
+ * <p>{@link GenericMap} is a generic implementation of {@link InternalMap} which wraps regular Java
  * maps.
  *
  * <p>Note: All keys and values of this data structure must be internal data structures. All keys
- * must be of the same type; same for values. See {@link RowData} for more information about
+ * must be of the same type; same for values. See {@link InternalRow} for more information about
  * internal data structures.
  *
  * <p>Both keys and values can contain null for representing nullability.
  */
-public final class GenericMap implements MapData {
+public final class GenericMap implements InternalMap {
 
     private final Map<?, ?> map;
 
@@ -63,13 +63,13 @@ public final class GenericMap implements MapData {
     }
 
     @Override
-    public ArrayData keyArray() {
+    public InternalArray keyArray() {
         Object[] keys = map.keySet().toArray();
         return new GenericArray(keys);
     }
 
     @Override
-    public ArrayData valueArray() {
+    public InternalArray valueArray() {
         Object[] values = map.values().toArray();
         return new GenericArray(values);
     }

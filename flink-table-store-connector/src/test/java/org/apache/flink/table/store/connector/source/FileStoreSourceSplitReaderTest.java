@@ -24,8 +24,8 @@ import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -51,6 +51,7 @@ import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.flink.table.store.connector.LogicalTypeConversion.toDataType;
 import static org.apache.flink.table.store.connector.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
 import static org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -79,11 +80,12 @@ public class FileStoreSourceSplitReaderTest {
         SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
         schemaManager.commitNewVersion(
                 new UpdateSchema(
-                        new RowType(
-                                Arrays.asList(
-                                        new RowType.RowField("k", new BigIntType()),
-                                        new RowType.RowField("v", new BigIntType()),
-                                        new RowType.RowField("default", new IntType()))),
+                        toDataType(
+                                new RowType(
+                                        Arrays.asList(
+                                                new RowType.RowField("k", new BigIntType()),
+                                                new RowType.RowField("v", new BigIntType()),
+                                                new RowType.RowField("default", new IntType())))),
                         Collections.singletonList("default"),
                         Arrays.asList("k", "default"),
                         Collections.emptyMap(),
@@ -165,13 +167,16 @@ public class FileStoreSourceSplitReaderTest {
             writer.write(
                     new KeyValue()
                             .replace(
-                                    GenericRowData.of(tuple2.f0),
-                                    RowKind.INSERT,
-                                    GenericRowData.of(tuple2.f1)));
+                                    GenericRow.of(tuple2.f0),
+                                    org.apache.flink.table.store.types.RowKind.INSERT,
+                                    GenericRow.of(tuple2.f1)));
         }
         writer.write(
                 new KeyValue()
-                        .replace(GenericRowData.of(222L), RowKind.DELETE, GenericRowData.of(333L)));
+                        .replace(
+                                GenericRow.of(222L),
+                                org.apache.flink.table.store.types.RowKind.DELETE,
+                                GenericRow.of(333L)));
         List<DataFileMeta> files = writer.prepareCommit(true).newFilesIncrement().newFiles();
         writer.close();
 

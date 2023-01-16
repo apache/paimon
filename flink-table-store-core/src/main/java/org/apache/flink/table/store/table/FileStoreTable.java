@@ -18,16 +18,17 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.sink.BucketComputer;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.util.List;
 import java.util.Map;
 
 /**
  * An abstraction layer above {@link org.apache.flink.table.store.file.FileStore} to provide reading
- * and writing of {@link org.apache.flink.table.data.RowData}.
+ * and writing of {@link InternalRow}.
  */
 public interface FileStoreTable extends DataTable, SupportsPartition, SupportsWrite {
 

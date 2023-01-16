@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.compact.CompactFutureManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactUnit;
@@ -46,7 +46,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     private final ExecutorService executor;
     private final Levels levels;
     private final CompactStrategy strategy;
-    private final Comparator<RowData> keyComparator;
+    private final Comparator<InternalRow> keyComparator;
     private final long minFileSize;
     private final int numSortedRunStopTrigger;
     private final CompactRewriter rewriter;
@@ -55,7 +55,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             ExecutorService executor,
             Levels levels,
             CompactStrategy strategy,
-            Comparator<RowData> keyComparator,
+            Comparator<InternalRow> keyComparator,
             long minFileSize,
             int numSortedRunStopTrigger,
             CompactRewriter rewriter) {

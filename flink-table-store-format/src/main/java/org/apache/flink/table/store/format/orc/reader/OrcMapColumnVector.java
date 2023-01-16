@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.format.orc.reader;
 
-import org.apache.flink.table.data.MapData;
+import org.apache.flink.table.store.data.InternalMap;
 import org.apache.flink.table.store.data.columnar.ColumnVector;
-import org.apache.flink.table.store.data.columnar.ColumnarMapData;
-import org.apache.flink.table.types.logical.MapType;
+import org.apache.flink.table.store.data.columnar.ColumnarMap;
+import org.apache.flink.table.store.types.MapType;
 
 import org.apache.hadoop.hive.ql.exec.vector.MapColumnVector;
 
@@ -41,9 +41,9 @@ public class OrcMapColumnVector extends AbstractOrcColumnVector
     }
 
     @Override
-    public MapData getMap(int i) {
+    public InternalMap getMap(int i) {
         long offset = hiveVector.offsets[i];
         long length = hiveVector.lengths[i];
-        return new ColumnarMapData(keyFlinkVector, valueFlinkVector, (int) offset, (int) length);
+        return new ColumnarMap(keyFlinkVector, valueFlinkVector, (int) offset, (int) length);
     }
 }

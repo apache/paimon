@@ -127,7 +127,7 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
         // TODO pass lock
         try {
             new SchemaManager(path)
-                    .commitNewVersion(UpdateSchema.fromCatalogTable(context.getCatalogTable()));
+                    .commitNewVersion(FlinkCatalog.fromCatalogTable(context.getCatalogTable()));
         } catch (IllegalStateException e) {
             throw e;
         } catch (Exception e) {

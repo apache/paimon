@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.data;
 
-import org.apache.flink.table.types.logical.DecimalType;
+import org.apache.flink.table.store.types.DecimalType;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -38,7 +38,7 @@ import static org.apache.flink.util.Preconditions.checkArgument;
 public final class Decimal implements Comparable<Decimal> {
 
     // member fields and static fields are package-visible,
-    // in order to be accessible for DecimalDataUtils
+    // in order to be accessible for DecimalUtils
 
     static final int MAX_COMPACT_PRECISION = 18;
 

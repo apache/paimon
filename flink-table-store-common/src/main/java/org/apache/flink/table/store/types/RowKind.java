@@ -18,10 +18,7 @@
 
 package org.apache.flink.table.store.types;
 
-import org.apache.flink.annotation.PublicEvolving;
-
 /** Lists all kinds of changes that a row can describe in a changelog. */
-@PublicEvolving
 public enum RowKind {
 
     // Note: Enums have no stable hash code across different JVMs, use toByteValue() for
@@ -67,8 +64,6 @@ public enum RowKind {
     /**
      * Returns a short string representation of this {@link RowKind}.
      *
-     * <p>
-     *
      * <ul>
      *   <li>"+I" represents {@link #INSERT}.
      *   <li>"-U" represents {@link #UPDATE_BEFORE}.
@@ -83,8 +78,6 @@ public enum RowKind {
     /**
      * Returns the byte value representation of this {@link RowKind}. The byte value is used for
      * serialization and deserialization.
-     *
-     * <p>
      *
      * <ul>
      *   <li>"0" represents {@link #INSERT}.

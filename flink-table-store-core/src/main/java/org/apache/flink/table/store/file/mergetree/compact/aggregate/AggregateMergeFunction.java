@@ -19,14 +19,14 @@
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.utils.Projection;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
 
@@ -44,14 +44,15 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  */
 public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
-    private final RowData.FieldGetter[] getters;
+    private final InternalRow.FieldGetter[] getters;
     private final RowAggregator rowAggregator;
 
     private KeyValue latestKv;
-    private GenericRowData row;
+    private GenericRow row;
     private KeyValue reused;
 
-    protected AggregateMergeFunction(RowData.FieldGetter[] getters, RowAggregator rowAggregator) {
+    protected AggregateMergeFunction(
+            InternalRow.FieldGetter[] getters, RowAggregator rowAggregator) {
         this.getters = getters;
         this.rowAggregator = rowAggregator;
     }
@@ -59,7 +60,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     @Override
     public void reset() {
         this.latestKv = null;
-        this.row = new GenericRowData(getters.length);
+        this.row = new GenericRow(getters.length);
     }
 
     @Override
@@ -100,12 +101,12 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         public RowAggregator(
                 Configuration sqlConf,
                 List<String> fieldNames,
-                List<LogicalType> fieldTypes,
+                List<DataType> fieldTypes,
                 List<String> primaryKeys) {
             fieldAggregators = new FieldAggregator[fieldNames.size()];
             for (int i = 0; i < fieldNames.size(); i++) {
                 String fieldName = fieldNames.get(i);
-                LogicalType fieldType = fieldTypes.get(i);
+                DataType fieldType = fieldTypes.get(i);
                 // aggregate by primary keys, so they do not aggregate
                 boolean isPrimaryKey = primaryKeys.contains(fieldName);
                 String strAggFunc =
@@ -128,7 +129,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     public static MergeFunctionFactory<KeyValue> factory(
             Configuration conf,
             List<String> tableNames,
-            List<LogicalType> tableTypes,
+            List<DataType> tableTypes,
             List<String> primaryKeys) {
         return new Factory(conf, tableNames, tableTypes, primaryKeys);
     }
@@ -139,13 +140,13 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
         private final Configuration conf;
         private final List<String> tableNames;
-        private final List<LogicalType> tableTypes;
+        private final List<DataType> tableTypes;
         private final List<String> primaryKeys;
 
         private Factory(
                 Configuration conf,
                 List<String> tableNames,
-                List<LogicalType> tableTypes,
+                List<DataType> tableTypes,
                 List<String> primaryKeys) {
             this.conf = conf;
             this.tableNames = tableNames;
@@ -156,7 +157,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
             List<String> fieldNames = tableNames;
-            List<LogicalType> fieldTypes = tableTypes;
+            List<DataType> fieldTypes = tableTypes;
             if (projection != null) {
                 Projection project = Projection.of(projection);
                 fieldNames = project.project(tableNames);

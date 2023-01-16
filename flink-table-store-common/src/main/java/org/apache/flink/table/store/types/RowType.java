@@ -30,6 +30,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -166,6 +167,87 @@ public final class RowType extends DataType {
             }
             fieldIds.add(field.id());
             field.type().collectFieldIds(fieldIds);
+        }
+    }
+
+    public static RowType of(DataType... types) {
+        return of(true, types);
+    }
+
+    public static RowType of(boolean isNullable, DataType... types) {
+        final List<DataField> fields = new ArrayList<>();
+        for (int i = 0; i < types.length; i++) {
+            fields.add(new DataField(i, "f" + i, types[i]));
+        }
+        return new RowType(isNullable, fields);
+    }
+
+    public static RowType of(DataType[] types, String[] names) {
+        return of(true, types, names);
+    }
+
+    public static RowType of(boolean nullable, DataType[] types, String[] names) {
+        List<DataField> fields = new ArrayList<>();
+        for (int i = 0; i < types.length; i++) {
+            fields.add(new DataField(i, names[i], types[i]));
+        }
+        return new RowType(nullable, fields);
+    }
+
+    public static Builder builder() {
+        return builder(true, new AtomicInteger(-1));
+    }
+
+    public static Builder builder(boolean isNullable, AtomicInteger fieldId) {
+        return new Builder(isNullable, fieldId);
+    }
+
+    /** Builder of {@link RowType}. */
+    public static class Builder {
+
+        private final List<DataField> fields = new ArrayList<>();
+
+        private final boolean isNullable;
+        private final AtomicInteger fieldId;
+
+        private Builder(boolean isNullable, AtomicInteger fieldId) {
+            this.isNullable = isNullable;
+            this.fieldId = fieldId;
+        }
+
+        public Builder field(String name, DataType type) {
+            fields.add(new DataField(fieldId.incrementAndGet(), name, type));
+            return this;
+        }
+
+        public Builder field(String name, DataType type, String description) {
+            fields.add(new DataField(fieldId.incrementAndGet(), name, type, description));
+            return this;
+        }
+
+        public Builder fields(List<DataType> types) {
+            for (int i = 0; i < types.size(); i++) {
+                field("f" + i, types.get(i));
+            }
+            return this;
+        }
+
+        public Builder fields(DataType... types) {
+            for (int i = 0; i < types.length; i++) {
+                field("f" + i, types[i]);
+            }
+            return this;
+        }
+
+        public Builder fields(DataType[] types, String[] names) {
+            for (int i = 0; i < types.length; i++) {
+                field(names[i], types[i]);
+            }
+            return this;
+        }
+
+        public RowType build() {
+            return new RowType(isNullable, fields);
         }
     }
 }

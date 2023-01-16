@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactTask;
 import org.apache.flink.table.store.file.compact.CompactUnit;
@@ -46,7 +46,7 @@ public class MergeTreeCompactTask extends CompactTask {
     private int upgradeFilesNum;
 
     public MergeTreeCompactTask(
-            Comparator<RowData> keyComparator,
+            Comparator<InternalRow> keyComparator,
             long minFileSize,
             CompactRewriter rewriter,
             CompactUnit unit,

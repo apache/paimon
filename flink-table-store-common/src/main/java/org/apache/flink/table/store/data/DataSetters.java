@@ -56,5 +56,5 @@ public interface DataSetters {
      * null. Otherwise: can not call {@link #setNullAt} when TimestampData value is null, must call
      * {@code setTimestamp(pos, null, precision)} because we need to update var-length-part.
      */
-    void setTimestamp(int pos, TimestampData value, int precision);
+    void setTimestamp(int pos, Timestamp value, int precision);
 }

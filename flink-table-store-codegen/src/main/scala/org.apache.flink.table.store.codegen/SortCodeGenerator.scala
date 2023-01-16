@@ -17,12 +17,11 @@
  */
 package org.apache.flink.table.store.codegen
 
-import org.apache.flink.table.data.{DecimalData, TimestampData}
-import org.apache.flink.table.data.binary.BinaryRowData
 import org.apache.flink.table.store.codegen.GenerateUtils.{newName, ROW_DATA, SEGMENT}
+import org.apache.flink.table.store.data.{BinaryRow, Decimal, Timestamp}
+import org.apache.flink.table.store.types.{DataType, DecimalType, RowType, TimestampType}
+import org.apache.flink.table.store.types.DataTypeRoot._
 import org.apache.flink.table.store.utils.{SortUtil, TypeUtils}
-import org.apache.flink.table.types.logical.{DecimalType, LogicalType, RowType, TimestampType}
-import org.apache.flink.table.types.logical.LogicalTypeRoot._
 
 import scala.collection.mutable
 
@@ -276,7 +275,7 @@ class SortCodeGenerator(val input: RowType, val sortSpec: SortSpec) {
      */
     val reverseKeys = new mutable.ArrayBuffer[String]
     // If it is big endian, it would be better, no reverse.
-    if (BinaryRowData.LITTLE_ENDIAN) {
+    if (BinaryRow.LITTLE_ENDIAN) {
       var reverseOffset = 0
       for (chunk <- chunks) {
         val operator = BYTE_OPERATOR_MAPPING(chunk)
@@ -364,7 +363,7 @@ class SortCodeGenerator(val input: RowType, val sortSpec: SortSpec) {
     swapKeys
   }
 
-  def getter(t: LogicalType, index: Int): String = {
+  def getter(t: DataType, index: Int): String = {
     val prefix = prefixGetFromBinaryRow(t)
     t match {
       case dt: DecimalType =>
@@ -377,10 +376,10 @@ class SortCodeGenerator(val input: RowType, val sortSpec: SortSpec) {
   }
 
   /** For put${prefix}NormalizedKey() and compare$prefix() of [[SortUtil]]. */
-  def prefixPutNormalizedKey(t: LogicalType): String = prefixGetFromBinaryRow(t)
+  def prefixPutNormalizedKey(t: DataType): String = prefixGetFromBinaryRow(t)
 
   /** For get$prefix() of TypeGetterSetters. */
-  def prefixGetFromBinaryRow(t: LogicalType): String = t.getTypeRoot match {
+  def prefixGetFromBinaryRow(t: DataType): String = t.getTypeRoot match {
     case INTEGER => "Int"
     case BIGINT => "Long"
     case SMALLINT => "Short"
@@ -394,8 +393,6 @@ class SortCodeGenerator(val input: RowType, val sortSpec: SortSpec) {
     case DATE => "Int"
     case TIME_WITHOUT_TIME_ZONE => "Int"
     case TIMESTAMP_WITHOUT_TIME_ZONE => "Timestamp"
-    case INTERVAL_YEAR_MONTH => "Int"
-    case INTERVAL_DAY_TIME => "Long"
     case _ => null
   }
 
@@ -409,19 +406,19 @@ class SortCodeGenerator(val input: RowType, val sortSpec: SortSpec) {
     }
   }
 
-  def supportNormalizedKey(t: LogicalType): Boolean = {
+  def supportNormalizedKey(t: DataType): Boolean = {
     t.getTypeRoot match {
       case _ if TypeUtils.isPrimitive(t) => true
       case VARCHAR | CHAR | VARBINARY | BINARY | DATE | TIME_WITHOUT_TIME_ZONE => true
       case TIMESTAMP_WITHOUT_TIME_ZONE =>
         // TODO: support normalize key for non-compact timestamp
-        TimestampData.isCompact(t.asInstanceOf[TimestampType].getPrecision)
-      case DECIMAL => DecimalData.isCompact(t.asInstanceOf[DecimalType].getPrecision)
+        Timestamp.isCompact(t.asInstanceOf[TimestampType].getPrecision)
+      case DECIMAL => Decimal.isCompact(t.asInstanceOf[DecimalType].getPrecision)
       case _ => false
     }
   }
 
-  def getNormalizeKeyLen(t: LogicalType): Int = {
+  def getNormalizeKeyLen(t: DataType): Int = {
     t.getTypeRoot match {
       case BOOLEAN => 1
       case TINYINT => 1
@@ -431,13 +428,11 @@ class SortCodeGenerator(val input: RowType, val sortSpec: SortSpec) {
       case DOUBLE => 8
       case BIGINT => 8
       case TIMESTAMP_WITHOUT_TIME_ZONE
-          if TimestampData.isCompact(t.asInstanceOf[TimestampType].getPrecision) =>
+          if Timestamp.isCompact(t.asInstanceOf[TimestampType].getPrecision) =>
         8
-      case INTERVAL_YEAR_MONTH => 4
-      case INTERVAL_DAY_TIME => 8
       case DATE => 4
       case TIME_WITHOUT_TIME_ZONE => 4
-      case DECIMAL if DecimalData.isCompact(t.asInstanceOf[DecimalType].getPrecision) => 8
+      case DECIMAL if Decimal.isCompact(t.asInstanceOf[DecimalType].getPrecision) => 8
       case VARCHAR | CHAR | VARBINARY | BINARY => Int.MaxValue
     }
   }

@@ -22,12 +22,12 @@ package org.apache.flink.table.store.file.io;
 import org.apache.flink.api.common.accumulators.LongCounter;
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.format.FileStatsExtractor;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import javax.annotation.Nullable;
 
@@ -35,17 +35,17 @@ import java.io.IOException;
 import java.util.function.Function;
 
 /**
- * A {@link StatsCollectingSingleFileWriter} to write data files containing {@link RowData}. Also
- * produces {@link DataFileMeta} after writing a file.
+ * A {@link StatsCollectingSingleFileWriter} to write data files containing {@link InternalRow}.
+ * Also produces {@link DataFileMeta} after writing a file.
  */
-public class RowDataFileWriter extends StatsCollectingSingleFileWriter<RowData, DataFileMeta> {
+public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalRow, DataFileMeta> {
 
     private final long schemaId;
     private final LongCounter seqNumCounter;
     private final FieldStatsArraySerializer statsArraySerializer;
 
     public RowDataFileWriter(
-            BulkWriter.Factory<RowData> factory,
+            BulkWriter.Factory<InternalRow> factory,
             Path path,
             RowType writeSchema,
             @Nullable FileStatsExtractor fileStatsExtractor,
@@ -58,7 +58,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<RowData, 
     }
 
     @Override
-    public void write(RowData row) throws IOException {
+    public void write(InternalRow row) throws IOException {
         super.write(row);
         seqNumCounter.add(1L);
     }

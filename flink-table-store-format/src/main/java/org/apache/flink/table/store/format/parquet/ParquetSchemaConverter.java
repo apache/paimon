@@ -18,11 +18,11 @@
 
 package org.apache.flink.table.store.format.parquet;
 
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.MapType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.parquet.schema.ConversionPatterns;
 import org.apache.parquet.schema.GroupType;
@@ -49,12 +49,12 @@ public class ParquetSchemaConverter {
         return new MessageType(name, types);
     }
 
-    public static Type convertToParquetType(String name, LogicalType type) {
+    public static Type convertToParquetType(String name, DataType type) {
         return convertToParquetType(name, type, Type.Repetition.OPTIONAL);
     }
 
     private static Type convertToParquetType(
-            String name, LogicalType type, Type.Repetition repetition) {
+            String name, DataType type, Type.Repetition repetition) {
         switch (type.getTypeRoot()) {
             case CHAR:
             case VARCHAR:
@@ -149,7 +149,7 @@ public class ParquetSchemaConverter {
         return numBytes;
     }
 
-    // From DecimalDataUtils
+    // From Decimal.Utils
     public static boolean is32BitDecimal(int precision) {
         return precision <= 9;
     }

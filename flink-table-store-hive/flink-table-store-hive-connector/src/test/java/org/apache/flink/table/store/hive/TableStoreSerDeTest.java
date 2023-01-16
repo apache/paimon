@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.hive;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.RowDataContainer;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.hive.objectinspector.TableStoreRowDataObjectInspector;
@@ -52,7 +52,7 @@ public class TableStoreSerDeTest {
         ObjectInspector o = serDe.getObjectInspector();
         assertThat(o).isInstanceOf(TableStoreRowDataObjectInspector.class);
         TableStoreRowDataObjectInspector oi = (TableStoreRowDataObjectInspector) o;
-        GenericRowData rowData = generate();
+        GenericRow rowData = generate();
         List<? extends StructField> structFields = oi.getAllStructFieldRefs();
         for (int i = 0; i < structFields.size(); i++) {
             assertThat(oi.getStructFieldData(rowData, structFields.get(i)))
@@ -65,7 +65,7 @@ public class TableStoreSerDeTest {
     @Test
     public void testDeserialize() throws Exception {
         TableStoreSerDe serDe = createInitializedSerDe();
-        GenericRowData rowData = generate();
+        GenericRow rowData = generate();
         RowDataContainer container = new RowDataContainer();
         container.set(rowData);
         assertThat(serDe.deserialize(container)).isEqualTo(rowData);

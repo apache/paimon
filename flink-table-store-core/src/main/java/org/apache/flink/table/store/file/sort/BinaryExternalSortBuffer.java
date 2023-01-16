@@ -20,10 +20,10 @@ package org.apache.flink.table.store.file.sort;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.MemorySize;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.codegen.RecordComparator;
-import org.apache.flink.table.store.data.BinaryRowDataSerializer;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.BinaryRowSerializer;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.compression.BlockCompressionFactory;
 import org.apache.flink.table.store.file.compression.Lz4BlockCompressionFactory;
 import org.apache.flink.table.store.file.disk.ChannelWithMeta;
@@ -40,7 +40,7 @@ import java.util.List;
 /** A spillable {@link SortBuffer}. */
 public class BinaryExternalSortBuffer implements SortBuffer {
 
-    private final BinaryRowDataSerializer serializer;
+    private final BinaryRowSerializer serializer;
     private final BinaryInMemorySortBuffer inMemorySortBuffer;
     private final IOManager ioManager;
     private SpillChannelManager channelManager;
@@ -55,7 +55,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
     private int numRecords = 0;
 
     public BinaryExternalSortBuffer(
-            BinaryRowDataSerializer serializer,
+            BinaryRowSerializer serializer,
             RecordComparator comparator,
             int pageSize,
             BinaryInMemorySortBuffer inMemorySortBuffer,
@@ -74,7 +74,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
                         pageSize,
                         maxNumFileHandles,
                         channelManager,
-                        (BinaryRowDataSerializer) serializer.duplicate(),
+                        (BinaryRowSerializer) serializer.duplicate(),
                         comparator,
                         compressionCodecFactory,
                         compressionBlockSize);
@@ -110,15 +110,15 @@ public class BinaryExternalSortBuffer implements SortBuffer {
     }
 
     @VisibleForTesting
-    public void write(MutableObjectIterator<BinaryRowData> iterator) throws IOException {
-        BinaryRowData row = serializer.createInstance();
+    public void write(MutableObjectIterator<BinaryRow> iterator) throws IOException {
+        BinaryRow row = serializer.createInstance();
         while ((row = iterator.next(row)) != null) {
             write(row);
         }
     }
 
     @Override
-    public boolean write(RowData record) throws IOException {
+    public boolean write(InternalRow record) throws IOException {
         while (true) {
             boolean success = inMemorySortBuffer.write(record);
             if (success) {
@@ -141,31 +141,31 @@ public class BinaryExternalSortBuffer implements SortBuffer {
     }
 
     @Override
-    public final MutableObjectIterator<BinaryRowData> sortedIterator() throws IOException {
+    public final MutableObjectIterator<BinaryRow> sortedIterator() throws IOException {
         if (spillChannelIDs.isEmpty()) {
             return inMemorySortBuffer.sortedIterator();
         }
         return spilledIterator();
     }
 
-    private MutableObjectIterator<BinaryRowData> spilledIterator() throws IOException {
+    private MutableObjectIterator<BinaryRow> spilledIterator() throws IOException {
         spill();
 
         List<FileIOChannel> openChannels = new ArrayList<>();
-        BinaryMergeIterator<BinaryRowData> iterator =
+        BinaryMergeIterator<BinaryRow> iterator =
                 merger.getMergingIterator(spillChannelIDs, openChannels);
         channelManager.addOpenChannels(openChannels);
 
-        return new MutableObjectIterator<BinaryRowData>() {
+        return new MutableObjectIterator<BinaryRow>() {
             @Override
-            public BinaryRowData next(BinaryRowData reuse) throws IOException {
+            public BinaryRow next(BinaryRow reuse) throws IOException {
                 // BinaryMergeIterator ignore reuse object argument, use its own reusing object
                 return next();
             }
 
             @Override
-            public BinaryRowData next() throws IOException {
-                BinaryRowData row = iterator.next();
+            public BinaryRow next() throws IOException {
+                BinaryRow row = iterator.next();
                 // BinaryMergeIterator reuse object anyway, here we need to copy it to do compaction
                 return row == null ? null : row.copy();
             }

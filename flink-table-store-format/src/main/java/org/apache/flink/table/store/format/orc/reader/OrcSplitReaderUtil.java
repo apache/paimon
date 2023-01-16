@@ -18,14 +18,14 @@
 
 package org.apache.flink.table.store.format.orc.reader;
 
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.CharType;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.MapType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.CharType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import org.apache.orc.TypeDescription;
 
@@ -33,7 +33,7 @@ import org.apache.orc.TypeDescription;
 public class OrcSplitReaderUtil {
 
     /** See {@code org.apache.flink.table.catalog.hive.util.HiveTypeUtil}. */
-    public static TypeDescription logicalTypeToOrcType(LogicalType type) {
+    public static TypeDescription toOrcType(DataType type) {
         type = type.copy(true);
         switch (type.getTypeRoot()) {
             case CHAR:
@@ -48,7 +48,7 @@ public class OrcSplitReaderUtil {
             case BOOLEAN:
                 return TypeDescription.createBoolean();
             case VARBINARY:
-                if (type.equals(DataTypes.BYTES().getLogicalType())) {
+                if (type.equals(DataTypes.BYTES())) {
                     return TypeDescription.createBinary();
                 } else {
                     throw new UnsupportedOperationException(
@@ -77,19 +77,17 @@ public class OrcSplitReaderUtil {
                 return TypeDescription.createTimestamp();
             case ARRAY:
                 ArrayType arrayType = (ArrayType) type;
-                return TypeDescription.createList(logicalTypeToOrcType(arrayType.getElementType()));
+                return TypeDescription.createList(toOrcType(arrayType.getElementType()));
             case MAP:
                 MapType mapType = (MapType) type;
                 return TypeDescription.createMap(
-                        logicalTypeToOrcType(mapType.getKeyType()),
-                        logicalTypeToOrcType(mapType.getValueType()));
+                        toOrcType(mapType.getKeyType()), toOrcType(mapType.getValueType()));
             case ROW:
                 RowType rowType = (RowType) type;
                 TypeDescription struct = TypeDescription.createStruct();
                 for (int i = 0; i < rowType.getFieldCount(); i++) {
                     struct.addField(
-                            rowType.getFieldNames().get(i),
-                            logicalTypeToOrcType(rowType.getChildren().get(i)));
+                            rowType.getFieldNames().get(i), toOrcType(rowType.getTypeAt(i)));
                 }
                 return struct;
             default:

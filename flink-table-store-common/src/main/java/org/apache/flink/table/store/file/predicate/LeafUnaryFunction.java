@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.format.FieldStats;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.DataType;
 
 import java.util.List;
 
@@ -28,18 +28,18 @@ public abstract class LeafUnaryFunction extends LeafFunction {
 
     private static final long serialVersionUID = 1L;
 
-    public abstract boolean test(LogicalType type, Object value);
+    public abstract boolean test(DataType type, Object value);
 
-    public abstract boolean test(LogicalType type, long rowCount, FieldStats fieldStats);
+    public abstract boolean test(DataType type, long rowCount, FieldStats fieldStats);
 
     @Override
-    public boolean test(LogicalType type, Object value, List<Object> literals) {
+    public boolean test(DataType type, Object value, List<Object> literals) {
         return test(type, value);
     }
 
     @Override
     public boolean test(
-            LogicalType type, long rowCount, FieldStats fieldStats, List<Object> literals) {
+            DataType type, long rowCount, FieldStats fieldStats, List<Object> literals) {
         return test(type, rowCount, fieldStats);
     }
 }

@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.table.system;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -33,9 +33,10 @@ import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
-import org.apache.flink.table.store.utils.ProjectedRowData;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.ProjectedRow;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 
@@ -58,16 +59,14 @@ public class SchemasTable implements Table {
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
-                            new RowType.RowField("schema_id", new BigIntType(false)),
-                            new RowType.RowField("fields", SerializationUtils.newStringType(false)),
-                            new RowType.RowField(
-                                    "partition_keys", SerializationUtils.newStringType(false)),
-                            new RowType.RowField(
-                                    "primary_keys", SerializationUtils.newStringType(false)),
-                            new RowType.RowField(
-                                    "options", SerializationUtils.newStringType(false)),
-                            new RowType.RowField(
-                                    "comment", SerializationUtils.newStringType(true))));
+                            new DataField(0, "schema_id", new BigIntType(false)),
+                            new DataField(1, "fields", SerializationUtils.newStringType(false)),
+                            new DataField(
+                                    2, "partition_keys", SerializationUtils.newStringType(false)),
+                            new DataField(
+                                    3, "primary_keys", SerializationUtils.newStringType(false)),
+                            new DataField(4, "options", SerializationUtils.newStringType(false)),
+                            new DataField(5, "comment", SerializationUtils.newStringType(true))));
 
     private final Path location;
 
@@ -169,33 +168,33 @@ public class SchemasTable implements Table {
         }
 
         @Override
-        public RecordReader<RowData> createReader(Split split) throws IOException {
+        public RecordReader<InternalRow> createReader(Split split) throws IOException {
             if (!(split instanceof SchemasSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((SchemasSplit) split).location;
             Iterator<TableSchema> schemas = new SchemaManager(location).listAll().iterator();
-            Iterator<RowData> rows = Iterators.transform(schemas, this::toRow);
+            Iterator<InternalRow> rows = Iterators.transform(schemas, this::toRow);
             if (projection != null) {
                 rows =
                         Iterators.transform(
-                                rows, row -> ProjectedRowData.from(projection).replaceRow(row));
+                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
         }
 
-        private RowData toRow(TableSchema schema) {
-            return GenericRowData.of(
+        private InternalRow toRow(TableSchema schema) {
+            return GenericRow.of(
                     schema.id(),
                     toJson(schema.fields()),
                     toJson(schema.partitionKeys()),
                     toJson(schema.primaryKeys()),
                     toJson(schema.options()),
-                    StringData.fromString(schema.comment()));
+                    BinaryString.fromString(schema.comment()));
         }
 
-        private StringData toJson(Object obj) {
-            return StringData.fromString(JsonSerdeUtil.toFlatJson(obj));
+        private BinaryString toJson(Object obj) {
+            return BinaryString.fromString(JsonSerdeUtil.toFlatJson(obj));
         }
     }
 }

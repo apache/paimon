@@ -18,19 +18,18 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.MapType;
-import org.apache.flink.table.types.logical.MultisetType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.InternalArray;
+import org.apache.flink.table.store.data.InternalMap;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.MultisetType;
+import org.apache.flink.table.store.types.RowType;
 
-import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.util.ArrayBasedMapData;
 import org.apache.spark.sql.catalyst.util.ArrayData;
 import org.apache.spark.sql.catalyst.util.DateTimeUtils;
@@ -43,25 +42,25 @@ import org.apache.spark.unsafe.types.UTF8String;
 import static org.apache.flink.table.store.utils.RowDataUtils.copyRowData;
 import static org.apache.flink.table.store.utils.TypeUtils.timestampPrecision;
 
-/** Spark {@link InternalRow} to wrap {@link RowData}. */
-public class SparkInternalRow extends InternalRow {
+/** Spark {@link org.apache.spark.sql.catalyst.InternalRow} to wrap {@link InternalRow}. */
+public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow {
 
     private final RowType rowType;
 
-    private RowData row;
+    private InternalRow row;
 
     public SparkInternalRow(RowType rowType) {
         this.rowType = rowType;
     }
 
-    public SparkInternalRow replace(RowData row) {
+    public SparkInternalRow replace(InternalRow row) {
         this.row = row;
         return this;
     }
 
     @Override
     public int numFields() {
-        return row.getArity();
+        return row.getFieldCount();
     }
 
     @Override
@@ -75,7 +74,7 @@ public class SparkInternalRow extends InternalRow {
     }
 
     @Override
-    public InternalRow copy() {
+    public org.apache.spark.sql.catalyst.InternalRow copy() {
         return new SparkInternalRow(rowType).replace(copyRowData(row, rowType));
     }
 
@@ -114,7 +113,7 @@ public class SparkInternalRow extends InternalRow {
     }
 
     private long getTimestampMicros(int ordinal) {
-        LogicalType type = rowType.getTypeAt(ordinal);
+        org.apache.flink.table.store.types.DataType type = rowType.getTypeAt(ordinal);
         return fromFlink(row.getTimestamp(ordinal, timestampPrecision(type)));
     }
 
@@ -130,7 +129,8 @@ public class SparkInternalRow extends InternalRow {
 
     @Override
     public Decimal getDecimal(int ordinal, int precision, int scale) {
-        DecimalData decimal = row.getDecimal(ordinal, precision, scale);
+        org.apache.flink.table.store.data.Decimal decimal =
+                row.getDecimal(ordinal, precision, scale);
         return fromFlink(decimal);
     }
 
@@ -150,7 +150,7 @@ public class SparkInternalRow extends InternalRow {
     }
 
     @Override
-    public InternalRow getStruct(int ordinal, int numFields) {
+    public org.apache.spark.sql.catalyst.InternalRow getStruct(int ordinal, int numFields) {
         return fromFlink(row.getRow(ordinal, numFields), (RowType) rowType.getTypeAt(ordinal));
     }
 
@@ -169,60 +169,61 @@ public class SparkInternalRow extends InternalRow {
         return SpecializedGettersReader.read(this, ordinal, dataType);
     }
 
-    public static Object fromFlink(Object o, LogicalType type) {
+    public static Object fromFlink(Object o, org.apache.flink.table.store.types.DataType type) {
         if (o == null) {
             return null;
         }
         switch (type.getTypeRoot()) {
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return fromFlink((TimestampData) o);
+                return fromFlink((Timestamp) o);
             case CHAR:
             case VARCHAR:
-                return fromFlink((StringData) o);
+                return fromFlink((BinaryString) o);
             case DECIMAL:
-                return fromFlink((DecimalData) o);
+                return fromFlink((org.apache.flink.table.store.data.Decimal) o);
             case ARRAY:
-                return fromFlink((org.apache.flink.table.data.ArrayData) o, (ArrayType) type);
+                return fromFlink((InternalArray) o, (ArrayType) type);
             case MAP:
             case MULTISET:
-                return fromFlink((org.apache.flink.table.data.MapData) o, type);
+                return fromFlink((InternalMap) o, type);
             case ROW:
-                return fromFlink((RowData) o, (RowType) type);
+                return fromFlink((InternalRow) o, (RowType) type);
             default:
                 return o;
         }
     }
 
-    public static UTF8String fromFlink(StringData string) {
+    public static UTF8String fromFlink(BinaryString string) {
         return UTF8String.fromBytes(string.toBytes());
     }
 
-    public static Decimal fromFlink(DecimalData decimal) {
+    public static Decimal fromFlink(org.apache.flink.table.store.data.Decimal decimal) {
         return Decimal.apply(decimal.toBigDecimal());
     }
 
-    public static InternalRow fromFlink(RowData row, RowType rowType) {
+    public static org.apache.spark.sql.catalyst.InternalRow fromFlink(
+            InternalRow row, RowType rowType) {
         return new SparkInternalRow(rowType).replace(row);
     }
 
-    public static long fromFlink(TimestampData timestamp) {
-        return DateTimeUtils.fromJavaTimestamp(timestamp.toTimestamp());
+    public static long fromFlink(Timestamp timestamp) {
+        return DateTimeUtils.fromJavaTimestamp(timestamp.toSQLTimestamp());
     }
 
-    public static ArrayData fromFlink(
-            org.apache.flink.table.data.ArrayData array, ArrayType arrayType) {
+    public static ArrayData fromFlink(InternalArray array, ArrayType arrayType) {
         return fromFlinkArrayElementType(array, arrayType.getElementType());
     }
 
     private static ArrayData fromFlinkArrayElementType(
-            org.apache.flink.table.data.ArrayData array, LogicalType elementType) {
+            InternalArray array, org.apache.flink.table.store.types.DataType elementType) {
         return new SparkArrayData(elementType).replace(array);
     }
 
-    public static MapData fromFlink(org.apache.flink.table.data.MapData map, LogicalType mapType) {
-        LogicalType keyType;
-        LogicalType valueType;
+    public static MapData fromFlink(
+            InternalMap map, org.apache.flink.table.store.types.DataType mapType) {
+        org.apache.flink.table.store.types.DataType keyType;
+        org.apache.flink.table.store.types.DataType valueType;
         if (mapType instanceof MapType) {
             keyType = ((MapType) mapType).getKeyType();
             valueType = ((MapType) mapType).getValueType();

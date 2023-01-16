@@ -38,7 +38,6 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
@@ -1074,7 +1073,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         path.getFileSystem().mkdirs(path);
         // update schema
         new SchemaManager(path)
-                .commitNewVersion(UpdateSchema.fromCatalogTable(context.getCatalogTable()));
+                .commitNewVersion(FlinkCatalog.fromCatalogTable(context.getCatalogTable()));
 
         DynamicTableSink tableSink =
                 new TableStoreSink(

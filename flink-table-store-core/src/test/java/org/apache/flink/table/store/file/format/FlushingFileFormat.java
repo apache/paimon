@@ -20,11 +20,11 @@ package org.apache.flink.table.store.file.format;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FormatReaderFactory;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import javax.annotation.Nullable;
 
@@ -48,13 +48,13 @@ public class FlushingFileFormat extends FileFormat {
     }
 
     @Override
-    public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
+    public BulkWriter.Factory<InternalRow> createWriterFactory(RowType type) {
         return fsDataOutputStream -> {
-            BulkWriter<RowData> wrapped =
+            BulkWriter<InternalRow> wrapped =
                     format.createWriterFactory(type).create(fsDataOutputStream);
-            return new BulkWriter<RowData>() {
+            return new BulkWriter<InternalRow>() {
                 @Override
-                public void addElement(RowData rowData) throws IOException {
+                public void addElement(InternalRow rowData) throws IOException {
                     wrapped.addElement(rowData);
                     wrapped.flush();
                 }

@@ -21,8 +21,8 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.FileKind;
@@ -32,13 +32,13 @@ import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateConverter;
+import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.utils.AtomicFileWriter;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.FileCommittable;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
-import org.apache.flink.table.types.logical.RowType;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -96,7 +96,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final int numBucket;
     private final MemorySize manifestTargetSize;
     private final int manifestMergeMinCount;
-    @Nullable private final Comparator<RowData> keyComparator;
+    @Nullable private final Comparator<InternalRow> keyComparator;
 
     @Nullable private Lock lock;
     private boolean createEmptyCommit;
@@ -113,7 +113,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             int numBucket,
             MemorySize manifestTargetSize,
             int manifestMergeMinCount,
-            @Nullable Comparator<RowData> keyComparator) {
+            @Nullable Comparator<InternalRow> keyComparator) {
         this.schemaId = schemaId;
         this.commitUser = commitUser;
         this.partitionType = partitionType;
@@ -279,7 +279,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         // sanity check, all changes must be done within the given partition
-        Predicate partitionFilter = PredicateConverter.fromMap(partition, partitionType);
+        Predicate partitionFilter = PredicateBuilder.partition(partition, partitionType);
         if (partitionFilter != null) {
             for (ManifestEntry entry : appendTableFiles) {
                 if (!partitionFilter.test(partitionObjectConverter.convert(entry.partition()))) {
@@ -599,7 +599,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @SafeVarargs
     private final List<ManifestEntry> readAllEntriesFromChangedPartitions(
             long snapshotId, List<ManifestEntry>... changes) {
-        List<BinaryRowData> changedPartitions =
+        List<BinaryRow> changedPartitions =
                 Arrays.stream(changes)
                         .flatMap(Collection::stream)
                         .map(ManifestEntry::partition)
@@ -734,11 +734,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private static class LevelIdentifier {
 
-        private final BinaryRowData partition;
+        private final BinaryRow partition;
         private final int bucket;
         private final int level;
 
-        private LevelIdentifier(BinaryRowData partition, int bucket, int level) {
+        private LevelIdentifier(BinaryRow partition, int bucket, int level) {
             this.partition = partition;
             this.bucket = bucket;
             this.level = level;

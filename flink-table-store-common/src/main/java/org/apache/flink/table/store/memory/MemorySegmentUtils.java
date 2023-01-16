@@ -19,16 +19,19 @@
 package org.apache.flink.table.store.memory;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.table.store.data.ArrayData;
+import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.table.store.data.BinaryArray;
 import org.apache.flink.table.store.data.BinaryMap;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.Decimal;
-import org.apache.flink.table.store.data.MapData;
+import org.apache.flink.table.store.data.InternalArray;
+import org.apache.flink.table.store.data.InternalMap;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.NestedRow;
-import org.apache.flink.table.store.data.RowData;
-import org.apache.flink.table.store.data.TimestampData;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.utils.MurmurHashUtils;
+
+import java.io.IOException;
 
 import static org.apache.flink.table.store.data.BinarySection.HIGHEST_FIRST_BIT;
 import static org.apache.flink.table.store.data.BinarySection.HIGHEST_SECOND_TO_EIGHTH_BIT;
@@ -89,6 +92,47 @@ public class MemorySegmentUtils {
         }
 
         return chars;
+    }
+
+    /**
+     * Copy bytes of segments to output view.
+     *
+     * <p>Note: It just copies the data in, not include the length.
+     *
+     * @param segments source segments
+     * @param offset offset for segments
+     * @param sizeInBytes size in bytes
+     * @param target target output view
+     */
+    public static void copyToView(
+            MemorySegment[] segments, int offset, int sizeInBytes, DataOutputView target)
+            throws IOException {
+        for (MemorySegment sourceSegment : segments) {
+            int curSegRemain = sourceSegment.size() - offset;
+            if (curSegRemain > 0) {
+                int copySize = Math.min(curSegRemain, sizeInBytes);
+
+                byte[] bytes = allocateReuseBytes(copySize);
+                sourceSegment.get(offset, bytes, 0, copySize);
+                target.write(bytes, 0, copySize);
+
+                sizeInBytes -= copySize;
+                offset = 0;
+            } else {
+                offset -= sourceSegment.size();
+            }
+
+            if (sizeInBytes == 0) {
+                return;
+            }
+        }
+
+        if (sizeInBytes != 0) {
+            throw new RuntimeException(
+                    "No copy finished, this should be a bug, "
+                            + "The remaining length is: "
+                            + sizeInBytes);
+        }
     }
 
     /**
@@ -1002,19 +1046,19 @@ public class MemorySegmentUtils {
     }
 
     /**
-     * Gets an instance of {@link TimestampData} from underlying {@link MemorySegment}.
+     * Gets an instance of {@link Timestamp} from underlying {@link MemorySegment}.
      *
      * @param segments the underlying MemorySegments
      * @param baseOffset the base offset of current instance of {@code TimestampData}
      * @param offsetAndNanos the offset of milli-seconds part and nanoseconds
-     * @return an instance of {@link TimestampData}
+     * @return an instance of {@link Timestamp}
      */
-    public static TimestampData readTimestampData(
+    public static Timestamp readTimestampData(
             MemorySegment[] segments, int baseOffset, long offsetAndNanos) {
         final int nanoOfMillisecond = (int) offsetAndNanos;
         final int subOffset = (int) (offsetAndNanos >> 32);
         final long millisecond = getLong(segments, baseOffset + subOffset);
-        return TimestampData.fromEpochMillis(millisecond, nanoOfMillisecond);
+        return Timestamp.fromEpochMillis(millisecond, nanoOfMillisecond);
     }
 
     /**
@@ -1077,8 +1121,8 @@ public class MemorySegmentUtils {
         }
     }
 
-    /** Gets an instance of {@link MapData} from underlying {@link MemorySegment}. */
-    public static MapData readMapData(
+    /** Gets an instance of {@link InternalMap} from underlying {@link MemorySegment}. */
+    public static InternalMap readMapData(
             MemorySegment[] segments, int baseOffset, long offsetAndSize) {
         final int size = ((int) offsetAndSize);
         int offset = (int) (offsetAndSize >> 32);
@@ -1087,8 +1131,8 @@ public class MemorySegmentUtils {
         return map;
     }
 
-    /** Gets an instance of {@link ArrayData} from underlying {@link MemorySegment}. */
-    public static ArrayData readArrayData(
+    /** Gets an instance of {@link InternalArray} from underlying {@link MemorySegment}. */
+    public static InternalArray readArrayData(
             MemorySegment[] segments, int baseOffset, long offsetAndSize) {
         final int size = ((int) offsetAndSize);
         int offset = (int) (offsetAndSize >> 32);
@@ -1097,8 +1141,8 @@ public class MemorySegmentUtils {
         return array;
     }
 
-    /** Gets an instance of {@link RowData} from underlying {@link MemorySegment}. */
-    public static RowData readRowData(
+    /** Gets an instance of {@link InternalRow} from underlying {@link MemorySegment}. */
+    public static InternalRow readRowData(
             MemorySegment[] segments, int numFields, int baseOffset, long offsetAndSize) {
         final int size = ((int) offsetAndSize);
         int offset = (int) (offsetAndSize >> 32);

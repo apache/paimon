@@ -18,14 +18,12 @@
 
 package org.apache.flink.table.store.data.columnar.heap;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.data.columnar.writable.WritableTimestampVector;
 
 import java.util.Arrays;
 
 /** This class represents a nullable byte column vector. */
-@Internal
 public class HeapTimestampVector extends AbstractHeapVector implements WritableTimestampVector {
 
     private static final long serialVersionUID = 1L;
@@ -40,22 +38,22 @@ public class HeapTimestampVector extends AbstractHeapVector implements WritableT
     }
 
     @Override
-    public TimestampData getTimestamp(int i, int precision) {
+    public Timestamp getTimestamp(int i, int precision) {
         if (dictionary == null) {
-            return TimestampData.fromEpochMillis(milliseconds[i], nanoOfMilliseconds[i]);
+            return Timestamp.fromEpochMillis(milliseconds[i], nanoOfMilliseconds[i]);
         } else {
             return dictionary.decodeToTimestamp(dictionaryIds.vector[i]);
         }
     }
 
     @Override
-    public void setTimestamp(int i, TimestampData timestamp) {
+    public void setTimestamp(int i, Timestamp timestamp) {
         milliseconds[i] = timestamp.getMillisecond();
         nanoOfMilliseconds[i] = timestamp.getNanoOfMillisecond();
     }
 
     @Override
-    public void fill(TimestampData value) {
+    public void fill(Timestamp value) {
         Arrays.fill(milliseconds, value.getMillisecond());
         Arrays.fill(nanoOfMilliseconds, value.getNanoOfMillisecond());
     }

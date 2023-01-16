@@ -18,15 +18,15 @@
 
 package org.apache.flink.table.store.format.avro;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.data.ArrayData;
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.MapData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.InternalArray;
+import org.apache.flink.table.store.data.InternalMap;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
@@ -42,8 +42,7 @@ import java.util.Map;
 
 import static org.apache.flink.table.store.format.avro.AvroSchemaConverter.extractValueTypeToAvroMap;
 
-/** Tool class used to convert from {@link RowData} to Avro {@link GenericRecord}. */
-@Internal
+/** Tool class used to convert from {@link InternalRow} to Avro {@link GenericRecord}. */
 public class RowDataToAvroConverters {
 
     // --------------------------------------------------------------------------------
@@ -70,20 +69,9 @@ public class RowDataToAvroConverters {
      * Creates a runtime converter according to the given logical type that converts objects of
      * Flink Table & SQL internal data structures to corresponding Avro data structures.
      */
-    public static RowDataToAvroConverter createConverter(LogicalType type) {
+    public static RowDataToAvroConverter createConverter(DataType type) {
         final RowDataToAvroConverter converter;
         switch (type.getTypeRoot()) {
-            case NULL:
-                converter =
-                        new RowDataToAvroConverter() {
-                            private static final long serialVersionUID = 1L;
-
-                            @Override
-                            public Object convert(Schema schema, Object object) {
-                                return null;
-                            }
-                        };
-                break;
             case TINYINT:
                 converter =
                         new RowDataToAvroConverter() {
@@ -108,9 +96,7 @@ public class RowDataToAvroConverters {
                 break;
             case BOOLEAN: // boolean
             case INTEGER: // int
-            case INTERVAL_YEAR_MONTH: // long
             case BIGINT: // long
-            case INTERVAL_DAY_TIME: // long
             case FLOAT: // float
             case DOUBLE: // double
             case TIME_WITHOUT_TIME_ZONE: // int
@@ -156,7 +142,7 @@ public class RowDataToAvroConverters {
 
                             @Override
                             public Object convert(Schema schema, Object object) {
-                                return ((TimestampData) object).toInstant().toEpochMilli();
+                                return ((Timestamp) object).toInstant().toEpochMilli();
                             }
                         };
                 break;
@@ -167,7 +153,7 @@ public class RowDataToAvroConverters {
 
                             @Override
                             public Object convert(Schema schema, Object object) {
-                                return ByteBuffer.wrap(((DecimalData) object).toUnscaledBytes());
+                                return ByteBuffer.wrap(((Decimal) object).toUnscaledBytes());
                             }
                         };
                 break;
@@ -181,7 +167,6 @@ public class RowDataToAvroConverters {
             case MULTISET:
                 converter = createMapConverter(type);
                 break;
-            case RAW:
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + type);
         }
@@ -219,16 +204,15 @@ public class RowDataToAvroConverters {
 
     private static RowDataToAvroConverter createRowConverter(RowType rowType) {
         final RowDataToAvroConverter[] fieldConverters =
-                rowType.getChildren().stream()
+                rowType.getFieldTypes().stream()
                         .map(RowDataToAvroConverters::createConverter)
                         .toArray(RowDataToAvroConverter[]::new);
-        final LogicalType[] fieldTypes =
-                rowType.getFields().stream()
-                        .map(RowType.RowField::getType)
-                        .toArray(LogicalType[]::new);
-        final RowData.FieldGetter[] fieldGetters = new RowData.FieldGetter[fieldTypes.length];
+        final DataType[] fieldTypes =
+                rowType.getFields().stream().map(DataField::type).toArray(DataType[]::new);
+        final InternalRow.FieldGetter[] fieldGetters =
+                new InternalRow.FieldGetter[fieldTypes.length];
         for (int i = 0; i < fieldTypes.length; i++) {
-            fieldGetters[i] = RowData.createFieldGetter(fieldTypes[i], i);
+            fieldGetters[i] = InternalRow.createFieldGetter(fieldTypes[i], i);
         }
         final int length = rowType.getFieldCount();
 
@@ -237,7 +221,7 @@ public class RowDataToAvroConverters {
 
             @Override
             public Object convert(Schema schema, Object object) {
-                final RowData row = (RowData) object;
+                final InternalRow row = (InternalRow) object;
                 final List<Schema.Field> fields = schema.getFields();
                 final GenericRecord record = new GenericData.Record(schema);
                 for (int i = 0; i < length; ++i) {
@@ -260,8 +244,9 @@ public class RowDataToAvroConverters {
     }
 
     private static RowDataToAvroConverter createArrayConverter(ArrayType arrayType) {
-        LogicalType elementType = arrayType.getElementType();
-        final ArrayData.ElementGetter elementGetter = ArrayData.createElementGetter(elementType);
+        DataType elementType = arrayType.getElementType();
+        final InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementType);
         final RowDataToAvroConverter elementConverter = createConverter(arrayType.getElementType());
 
         return new RowDataToAvroConverter() {
@@ -270,7 +255,7 @@ public class RowDataToAvroConverters {
             @Override
             public Object convert(Schema schema, Object object) {
                 final Schema elementSchema = schema.getElementType();
-                ArrayData arrayData = (ArrayData) object;
+                InternalArray arrayData = (InternalArray) object;
                 List<Object> list = new ArrayList<>();
                 for (int i = 0; i < arrayData.size(); ++i) {
                     list.add(
@@ -282,9 +267,10 @@ public class RowDataToAvroConverters {
         };
     }
 
-    private static RowDataToAvroConverter createMapConverter(LogicalType type) {
-        LogicalType valueType = extractValueTypeToAvroMap(type);
-        final ArrayData.ElementGetter valueGetter = ArrayData.createElementGetter(valueType);
+    private static RowDataToAvroConverter createMapConverter(DataType type) {
+        DataType valueType = extractValueTypeToAvroMap(type);
+        final InternalArray.ElementGetter valueGetter =
+                InternalArray.createElementGetter(valueType);
         final RowDataToAvroConverter valueConverter = createConverter(valueType);
 
         return new RowDataToAvroConverter() {
@@ -293,9 +279,9 @@ public class RowDataToAvroConverters {
             @Override
             public Object convert(Schema schema, Object object) {
                 final Schema valueSchema = schema.getValueType();
-                final MapData mapData = (MapData) object;
-                final ArrayData keyArray = mapData.keyArray();
-                final ArrayData valueArray = mapData.valueArray();
+                final InternalMap mapData = (InternalMap) object;
+                final InternalArray keyArray = mapData.keyArray();
+                final InternalArray valueArray = mapData.valueArray();
                 final Map<Object, Object> map = new HashMap<>(mapData.size());
                 for (int i = 0; i < mapData.size(); ++i) {
                     final String key = keyArray.getString(i).toString();

@@ -18,27 +18,25 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.core.memory.MemorySegmentFactory;
-import org.apache.flink.core.memory.MemoryUtils;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.memory.MemorySegment;
 
 /**
- * Utilities for {@link BinaryRowData}. Many of the methods in this class are used in code
- * generation.
+ * Utilities for {@link BinaryRow}. Many of the methods in this class are used in code generation.
  *
- * <p>This is directly copied from {@link org.apache.flink.table.data.binary.BinaryRowDataUtil}.
+ * <p>This is directly copied from {@link BinaryRowDataUtil}.
  */
 public class BinaryRowDataUtil {
 
-    public static final sun.misc.Unsafe UNSAFE = MemoryUtils.UNSAFE;
+    public static final sun.misc.Unsafe UNSAFE = MemorySegment.UNSAFE;
     public static final int BYTE_ARRAY_BASE_OFFSET = UNSAFE.arrayBaseOffset(byte[].class);
 
-    public static final BinaryRowData EMPTY_ROW = new BinaryRowData(0);
+    public static final BinaryRow EMPTY_ROW = new BinaryRow(0);
 
     static {
         int size = EMPTY_ROW.getFixedLengthPartSize();
         byte[] bytes = new byte[size];
-        EMPTY_ROW.pointTo(MemorySegmentFactory.wrap(bytes), 0, size);
+        EMPTY_ROW.pointTo(MemorySegment.wrap(bytes), 0, size);
     }
 
     public static boolean byteArrayEquals(byte[] left, byte[] right, int length) {

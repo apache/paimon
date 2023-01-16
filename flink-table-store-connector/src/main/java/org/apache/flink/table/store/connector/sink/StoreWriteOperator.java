@@ -33,6 +33,7 @@ import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
 import org.apache.flink.streaming.util.functions.StreamingFunctionUtils;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.connector.FlinkRowWrapper;
 import org.apache.flink.table.store.log.LogWriteCallback;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.LogSinkFunction;
@@ -123,7 +124,7 @@ public class StoreWriteOperator extends PrepareCommitOperator {
 
         SinkRecord record;
         try {
-            record = write.write(element.getValue());
+            record = write.write(new FlinkRowWrapper(element.getValue()));
         } catch (Exception e) {
             throw new IOException(e);
         }

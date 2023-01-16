@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.file.stats;
 
-import org.apache.flink.table.data.GenericArrayData;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.GenericArray;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.format.FieldStats;
 
 import javax.annotation.Nullable;
@@ -36,24 +36,23 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 /** A serialized row bytes to cache {@link FieldStats}. */
 public class BinaryTableStats {
 
-    @Nullable private RowData row;
+    @Nullable private InternalRow row;
     @Nullable private FieldStats[] cacheArray;
-    @Nullable private BinaryRowData cacheMin;
-    @Nullable private BinaryRowData cacheMax;
+    @Nullable private BinaryRow cacheMin;
+    @Nullable private BinaryRow cacheMax;
     @Nullable private long[] cacheNullCounts;
 
-    public BinaryTableStats(RowData row) {
+    public BinaryTableStats(InternalRow row) {
         this.row = row;
     }
 
-    public BinaryTableStats(
-            BinaryRowData cacheMin, BinaryRowData cacheMax, long[] cacheNullCounts) {
+    public BinaryTableStats(BinaryRow cacheMin, BinaryRow cacheMax, long[] cacheNullCounts) {
         this(cacheMin, cacheMax, cacheNullCounts, null);
     }
 
     public BinaryTableStats(
-            BinaryRowData cacheMin,
-            BinaryRowData cacheMax,
+            BinaryRow cacheMin,
+            BinaryRow cacheMax,
             long[] cacheNullCounts,
             @Nullable FieldStats[] cacheArray) {
         this.cacheMin = cacheMin;
@@ -73,7 +72,7 @@ public class BinaryTableStats {
         return cacheArray;
     }
 
-    public BinaryRowData min() {
+    public BinaryRow min() {
         if (cacheMin == null) {
             checkNotNull(row);
             cacheMin = deserializeBinaryRow(this.row.getBinary(0));
@@ -81,7 +80,7 @@ public class BinaryTableStats {
         return cacheMin;
     }
 
-    public BinaryRowData max() {
+    public BinaryRow max() {
         if (cacheMax == null) {
             checkNotNull(row);
             cacheMax = deserializeBinaryRow(this.row.getBinary(1));
@@ -97,16 +96,16 @@ public class BinaryTableStats {
         return cacheNullCounts;
     }
 
-    public RowData toRowData() {
+    public InternalRow toRowData() {
         return row == null
-                ? GenericRowData.of(
+                ? GenericRow.of(
                         serializeBinaryRow(min()),
                         serializeBinaryRow(max()),
-                        new GenericArrayData(nullCounts()))
+                        new GenericArray(nullCounts()))
                 : row;
     }
 
-    public static BinaryTableStats fromRowData(RowData row) {
+    public static BinaryTableStats fromRowData(InternalRow row) {
         return new BinaryTableStats(row);
     }
 

@@ -19,14 +19,14 @@
 package org.apache.flink.table.store.file;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.TinyIntType;
 import org.apache.flink.table.store.utils.RowDataUtils;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.TinyIntType;
-import org.apache.flink.types.RowKind;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,19 +46,20 @@ public class KeyValue {
     public static final long UNKNOWN_SEQUENCE = -1;
     public static final int UNKNOWN_LEVEL = -1;
 
-    private RowData key;
+    private InternalRow key;
     // determined after written into memory table or read from file
     private long sequenceNumber;
     private RowKind valueKind;
-    private RowData value;
+    private InternalRow value;
     // determined after read from file
     private int level;
 
-    public KeyValue replace(RowData key, RowKind valueKind, RowData value) {
+    public KeyValue replace(InternalRow key, RowKind valueKind, InternalRow value) {
         return replace(key, UNKNOWN_SEQUENCE, valueKind, value);
     }
 
-    public KeyValue replace(RowData key, long sequenceNumber, RowKind valueKind, RowData value) {
+    public KeyValue replace(
+            InternalRow key, long sequenceNumber, RowKind valueKind, InternalRow value) {
         this.key = key;
         this.sequenceNumber = sequenceNumber;
         this.valueKind = valueKind;
@@ -67,12 +68,12 @@ public class KeyValue {
         return this;
     }
 
-    public KeyValue replaceKey(RowData key) {
+    public KeyValue replaceKey(InternalRow key) {
         this.key = key;
         return this;
     }
 
-    public RowData key() {
+    public InternalRow key() {
         return key;
     }
 
@@ -84,7 +85,7 @@ public class KeyValue {
         return valueKind;
     }
 
-    public RowData value() {
+    public InternalRow value() {
         return value;
     }
 
@@ -98,9 +99,9 @@ public class KeyValue {
     }
 
     public static RowType schema(RowType keyType, RowType valueType) {
-        List<RowType.RowField> fields = new ArrayList<>(keyType.getFields());
-        fields.add(new RowType.RowField(SEQUENCE_NUMBER, new BigIntType(false)));
-        fields.add(new RowType.RowField(VALUE_KIND, new TinyIntType(false)));
+        List<DataField> fields = new ArrayList<>(keyType.getFields());
+        fields.add(new DataField(0, SEQUENCE_NUMBER, new BigIntType(false)));
+        fields.add(new DataField(1, VALUE_KIND, new TinyIntType(false)));
         fields.addAll(valueType.getFields());
         return new RowType(fields);
     }
@@ -205,7 +206,7 @@ public class KeyValue {
                 valueKind.name(), sequenceNumber, keyString, valueString, level);
     }
 
-    public static String rowDataToString(RowData row, RowType type) {
+    public static String rowDataToString(InternalRow row, RowType type) {
         return IntStream.range(0, type.getFieldCount())
                 .mapToObj(
                         i ->

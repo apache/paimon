@@ -17,14 +17,14 @@
  */
 package org.apache.flink.table.store.codegen
 
-import org.apache.flink.table.data.RowData
-import org.apache.flink.table.data.binary.BinaryRowData
 import org.apache.flink.table.store.codegen.GeneratedExpression.{NEVER_NULL, NO_CODE}
 import org.apache.flink.table.store.codegen.GenerateUtils.{generateRecordStatement, newName, DEFAULT_INPUT1_TERM, DEFAULT_OUT_RECORD_TERM, DEFAULT_OUT_RECORD_WRITER_TERM, ROW_DATA}
-import org.apache.flink.table.types.logical.RowType
+import org.apache.flink.table.store.data.{BinaryRow, InternalRow}
+import org.apache.flink.table.store.types.RowType
 
 /**
- * CodeGenerator for projection, Take out some fields of [[RowData]] to generate a new [[RowData]].
+ * CodeGenerator for projection, Take out some fields of [[InternalRow]] to generate a new
+ * [[InternalRow]].
  */
 object ProjectionCodeGenerator {
 
@@ -33,7 +33,7 @@ object ProjectionCodeGenerator {
       inType: RowType,
       outType: RowType,
       inputMapping: Array[Int],
-      outClass: Class[_ <: RowData] = classOf[BinaryRowData],
+      outClass: Class[_ <: InternalRow] = classOf[BinaryRow],
       inputTerm: String = DEFAULT_INPUT1_TERM,
       outRecordTerm: String = DEFAULT_OUT_RECORD_TERM,
       outRecordWriterTerm: String = DEFAULT_OUT_RECORD_WRITER_TERM,
@@ -80,7 +80,7 @@ object ProjectionCodeGenerator {
       inType: RowType,
       outType: RowType,
       inputMapping: Array[Int],
-      outClass: Class[_ <: RowData] = classOf[BinaryRowData],
+      outClass: Class[_ <: InternalRow] = classOf[BinaryRow],
       inputTerm: String = DEFAULT_INPUT1_TERM,
       outRecordTerm: String = DEFAULT_OUT_RECORD_TERM,
       outRecordWriterTerm: String = DEFAULT_OUT_RECORD_WRITER_TERM,

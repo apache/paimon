@@ -20,9 +20,8 @@ package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -30,8 +29,9 @@ import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.util.CloseableIterator;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -51,10 +51,7 @@ public abstract class CommitterOperatorTestBase {
 
     private static final RowType ROW_TYPE =
             RowType.of(
-                    new LogicalType[] {
-                        DataTypes.INT().getLogicalType(), DataTypes.BIGINT().getLogicalType()
-                    },
-                    new String[] {"a", "b"});
+                    new DataType[] {DataTypes.INT(), DataTypes.BIGINT()}, new String[] {"a", "b"});
 
     @TempDir public java.nio.file.Path tempDir;
     protected Path tablePath;
@@ -73,11 +70,11 @@ public abstract class CommitterOperatorTestBase {
                 .forEach(
                         s -> {
                             try {
-                                RecordReader<RowData> recordReader = read.createReader(s);
-                                CloseableIterator<RowData> it =
+                                RecordReader<InternalRow> recordReader = read.createReader(s);
+                                CloseableIterator<InternalRow> it =
                                         new RecordReaderIterator<>(recordReader);
                                 while (it.hasNext()) {
-                                    RowData row = it.next();
+                                    InternalRow row = it.next();
                                     actual.add(row.getInt(0) + ", " + row.getLong(1));
                                 }
                                 it.close();

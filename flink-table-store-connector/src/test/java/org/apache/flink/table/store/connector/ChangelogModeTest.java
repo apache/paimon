@@ -31,8 +31,8 @@ import org.apache.flink.table.store.kafka.KafkaLogStoreFactory;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

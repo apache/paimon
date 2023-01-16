@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
@@ -62,7 +62,8 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                             table.newScan()
                                     .withFilter(
                                             new PredicateBuilder(table.schema().logicalRowType())
-                                                    .greaterOrEqual(1, StringData.fromString("0")))
+                                                    .greaterOrEqual(
+                                                            1, BinaryString.fromString("0")))
                                     .plan();
                     checkFilterRowCount(plan, 6L);
 
@@ -246,18 +247,18 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
         assertThat(statsArray[0].minValue()).isEqualTo((statsArray[0].maxValue())).isEqualTo(2);
         assertThat(statsArray[1].minValue())
                 .isEqualTo(statsArray[1].maxValue())
-                .isEqualTo(StringData.fromString("400"));
+                .isEqualTo(BinaryString.fromString("400"));
         assertThat(statsArray[2].minValue())
                 .isEqualTo(statsArray[2].maxValue())
-                .isEqualTo(StringData.fromString("401"));
+                .isEqualTo(BinaryString.fromString("401"));
         assertThat((Double) statsArray[3].minValue())
                 .isEqualTo((Double) statsArray[3].maxValue())
                 .isEqualTo(402D);
         assertThat((Integer) statsArray[4].minValue())
                 .isEqualTo(statsArray[4].maxValue())
                 .isEqualTo(403);
-        assertThat(((DecimalData) statsArray[5].minValue()).toBigDecimal().intValue())
-                .isEqualTo(((DecimalData) statsArray[5].maxValue()).toBigDecimal().intValue())
+        assertThat(((Decimal) statsArray[5].minValue()).toBigDecimal().intValue())
+                .isEqualTo(((Decimal) statsArray[5].maxValue()).toBigDecimal().intValue())
                 .isEqualTo(404);
         assertThat((Float) statsArray[6].minValue())
                 .isEqualTo(statsArray[6].maxValue())
@@ -265,8 +266,8 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
         assertThat((Double) statsArray[7].minValue())
                 .isEqualTo(statsArray[7].maxValue())
                 .isEqualTo(406D);
-        assertThat(((DecimalData) statsArray[8].minValue()).toBigDecimal().doubleValue())
-                .isEqualTo(((DecimalData) statsArray[8].maxValue()).toBigDecimal().doubleValue())
+        assertThat(((Decimal) statsArray[8].minValue()).toBigDecimal().doubleValue())
+                .isEqualTo(((Decimal) statsArray[8].maxValue()).toBigDecimal().doubleValue())
                 .isEqualTo(407D);
         assertThat(statsArray[9].minValue()).isEqualTo(statsArray[9].maxValue()).isEqualTo(408);
         assertThat(statsArray[10].minValue()).isEqualTo(statsArray[10].maxValue()).isEqualTo(409);
@@ -294,11 +295,11 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
         assertThat(statsArray[0].minValue()).isEqualTo(2);
         assertThat(statsArray[0].maxValue()).isEqualTo(2);
 
-        assertThat(statsArray[1].minValue()).isEqualTo(StringData.fromString("200       "));
-        assertThat(statsArray[1].maxValue()).isEqualTo(StringData.fromString("300       "));
+        assertThat(statsArray[1].minValue()).isEqualTo(BinaryString.fromString("200       "));
+        assertThat(statsArray[1].maxValue()).isEqualTo(BinaryString.fromString("300       "));
 
-        assertThat(statsArray[2].minValue()).isEqualTo(StringData.fromString("201"));
-        assertThat(statsArray[2].maxValue()).isEqualTo(StringData.fromString("301"));
+        assertThat(statsArray[2].minValue()).isEqualTo(BinaryString.fromString("201"));
+        assertThat(statsArray[2].maxValue()).isEqualTo(BinaryString.fromString("301"));
 
         assertThat((Double) statsArray[3].minValue()).isEqualTo(202D);
         assertThat((Double) statsArray[3].maxValue()).isEqualTo(302D);
@@ -306,10 +307,8 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
         assertThat((Integer) statsArray[4].minValue()).isEqualTo(203);
         assertThat((Integer) statsArray[4].maxValue()).isEqualTo(303);
 
-        assertThat(((DecimalData) statsArray[5].minValue()).toBigDecimal().intValue())
-                .isEqualTo(204);
-        assertThat(((DecimalData) statsArray[5].maxValue()).toBigDecimal().intValue())
-                .isEqualTo(304);
+        assertThat(((Decimal) statsArray[5].minValue()).toBigDecimal().intValue()).isEqualTo(204);
+        assertThat(((Decimal) statsArray[5].maxValue()).toBigDecimal().intValue()).isEqualTo(304);
 
         assertThat((Float) statsArray[6].minValue()).isEqualTo(205F);
         assertThat((Float) statsArray[6].maxValue()).isEqualTo(305F);
@@ -317,9 +316,9 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
         assertThat((Double) statsArray[7].minValue()).isEqualTo(206D);
         assertThat((Double) statsArray[7].maxValue()).isEqualTo(306D);
 
-        assertThat(((DecimalData) statsArray[8].minValue()).toBigDecimal().doubleValue())
+        assertThat(((Decimal) statsArray[8].minValue()).toBigDecimal().doubleValue())
                 .isEqualTo(207D);
-        assertThat(((DecimalData) statsArray[8].maxValue()).toBigDecimal().doubleValue())
+        assertThat(((Decimal) statsArray[8].maxValue()).toBigDecimal().doubleValue())
                 .isEqualTo(307D);
 
         assertThat(statsArray[9].minValue()).isEqualTo(208);

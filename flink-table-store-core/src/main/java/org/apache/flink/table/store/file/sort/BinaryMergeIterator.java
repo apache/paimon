@@ -50,7 +50,7 @@ public class BinaryMergeIterator<Entry> implements MutableObjectIterator<Entry> 
 
     @Override
     public Entry next(Entry reuse) throws IOException {
-        // Ignore reuse, because each HeadStream has its own reuse BinaryRowData.
+        // Ignore reuse, because each HeadStream has its own reuse BinaryRow.
         return next();
     }
 

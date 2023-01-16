@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.format.orc.reader;
 
-import org.apache.flink.table.data.DecimalData;
+import org.apache.flink.table.store.data.Decimal;
 
 import org.apache.hadoop.hive.ql.exec.vector.DecimalColumnVector;
 
@@ -38,9 +38,9 @@ public class OrcDecimalColumnVector extends AbstractOrcColumnVector
     }
 
     @Override
-    public DecimalData getDecimal(int i, int precision, int scale) {
+    public Decimal getDecimal(int i, int precision, int scale) {
         BigDecimal data =
                 vector.vector[vector.isRepeating ? 0 : i].getHiveDecimal().bigDecimalValue();
-        return DecimalData.fromBigDecimal(data, precision, scale);
+        return Decimal.fromBigDecimal(data, precision, scale);
     }
 }

@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 
 import org.junit.jupiter.api.Test;
@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link Levels}. */
 public class LevelsTest {
 
-    private final Comparator<RowData> comparator = Comparator.comparingInt(o -> o.getInt(0));
+    private final Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
 
     @Test
     public void testNonEmptyHighestLevelNo() {

@@ -60,23 +60,23 @@ public interface DataGetters {
      * Returns the timestamp value at the given position.
      *
      * <p>The precision is required to determine whether the timestamp value was stored in a compact
-     * representation (see {@link TimestampData}).
+     * representation (see {@link Timestamp}).
      */
-    TimestampData getTimestamp(int pos, int precision);
+    Timestamp getTimestamp(int pos, int precision);
 
     /** Returns the binary value at the given position. */
     byte[] getBinary(int pos);
 
     /** Returns the array value at the given position. */
-    ArrayData getArray(int pos);
+    InternalArray getArray(int pos);
 
     /** Returns the map value at the given position. */
-    MapData getMap(int pos);
+    InternalMap getMap(int pos);
 
     /**
      * Returns the row value at the given position.
      *
      * <p>The number of fields is required to correctly extract the row.
      */
-    RowData getRow(int pos, int numFields);
+    InternalRow getRow(int pos, int numFields);
 }

@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.util.Preconditions;
 
@@ -36,13 +36,14 @@ import static org.apache.flink.util.Preconditions.checkArgument;
 /** A class which stores all level files of merge tree. */
 public class Levels {
 
-    private final Comparator<RowData> keyComparator;
+    private final Comparator<InternalRow> keyComparator;
 
     private final TreeSet<DataFileMeta> level0;
 
     private final List<SortedRun> levels;
 
-    public Levels(Comparator<RowData> keyComparator, List<DataFileMeta> inputFiles, int numLevels) {
+    public Levels(
+            Comparator<InternalRow> keyComparator, List<DataFileMeta> inputFiles, int numLevels) {
         this.keyComparator = keyComparator;
 
         // in case the num of levels is not specified explicitly

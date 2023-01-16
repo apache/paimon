@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.utils.JoinedRowData;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.JoinedRow;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,8 +38,8 @@ public abstract class VersionedObjectSerializer<T> extends ObjectSerializer<T> {
     }
 
     public static RowType versionType(RowType rowType) {
-        List<RowType.RowField> fields = new ArrayList<>();
-        fields.add(new RowType.RowField("_VERSION", new IntType(false)));
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(-1, "_VERSION", new IntType(false)));
         fields.addAll(rowType.getFields());
         return new RowType(fields);
     }
@@ -50,17 +51,17 @@ public abstract class VersionedObjectSerializer<T> extends ObjectSerializer<T> {
      */
     public abstract int getVersion();
 
-    public abstract RowData convertTo(T record);
+    public abstract InternalRow convertTo(T record);
 
-    public abstract T convertFrom(int version, RowData row);
+    public abstract T convertFrom(int version, InternalRow row);
 
     @Override
-    public final RowData toRow(T record) {
-        return new JoinedRowData().replace(GenericRowData.of(getVersion()), convertTo(record));
+    public final InternalRow toRow(T record) {
+        return new JoinedRow().replace(GenericRow.of(getVersion()), convertTo(record));
     }
 
     @Override
-    public final T fromRow(RowData row) {
-        return convertFrom(row.getInt(0), new OffsetRowData(row.getArity() - 1, 1).replace(row));
+    public final T fromRow(InternalRow row) {
+        return convertFrom(row.getInt(0), new OffsetRow(row.getFieldCount() - 1, 1).replace(row));
     }
 }

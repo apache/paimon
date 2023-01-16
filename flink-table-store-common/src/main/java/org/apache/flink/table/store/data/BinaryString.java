@@ -18,18 +18,18 @@
 
 package org.apache.flink.table.store.data;
 
-import org.apache.flink.table.data.binary.BinarySegmentUtils;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentUtils;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
-import static org.apache.flink.table.data.binary.BinarySegmentUtils.allocateReuseBytes;
-import static org.apache.flink.table.data.binary.BinarySegmentUtils.allocateReuseChars;
+import static org.apache.flink.table.store.memory.MemorySegmentUtils.allocateReuseBytes;
+import static org.apache.flink.table.store.memory.MemorySegmentUtils.allocateReuseChars;
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** A string which is backed by {@link MemorySegment}s. */
@@ -52,7 +52,11 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
         return new BinaryString(segments, offset, numBytes);
     }
 
+    @Nullable
     public static BinaryString fromString(String str) {
+        if (str == null) {
+            return null;
+        }
         return fromBytes(encodeUTF8(str));
     }
 
@@ -66,7 +70,7 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
      * bytes.
      */
     public static BinaryString fromBytes(byte[] bytes, int offset, int numBytes) {
-        return new BinaryString(new MemorySegment[] {MemorySegment.wrap(bytes)}, 0, bytes.length);
+        return new BinaryString(new MemorySegment[] {MemorySegment.wrap(bytes)}, offset, numBytes);
     }
 
     /** Creates a {@link BinaryString} instance that contains `length` spaces. */
@@ -82,7 +86,7 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
 
     @Override
     public String toString() {
-        byte[] bytes = BinarySegmentUtils.allocateReuseBytes(sizeInBytes);
+        byte[] bytes = allocateReuseBytes(sizeInBytes);
         MemorySegmentUtils.copyToBytes(segments, offset, bytes, 0, sizeInBytes);
         return decodeUTF8(bytes, 0, sizeInBytes);
     }
@@ -192,7 +196,7 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
     }
 
     // ------------------------------------------------------------------------------------------
-    // Public methods on BinaryStringData
+    // Public methods on BinaryString
     // ------------------------------------------------------------------------------------------
 
     /** Returns the number of UTF-8 code points in the string. */
@@ -241,7 +245,7 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
         }
     }
 
-    /** Copy a new {@code BinaryStringData}. */
+    /** Copy a new {@code BinaryString}. */
     public BinaryString copy() {
         byte[] copy = MemorySegmentUtils.copyToBytes(segments, offset, sizeInBytes);
         return BinaryString.fromBytes(copy);
@@ -326,11 +330,11 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
     }
 
     /**
-     * Returns true if and only if this BinaryStringData contains the specified sequence of bytes
+     * Returns true if and only if this BinaryString contains the specified sequence of bytes
      * values.
      *
      * @param s the sequence to search for
-     * @return true if this BinaryStringData contains {@code s}, false otherwise
+     * @return true if this BinaryString contains {@code s}, false otherwise
      */
     public boolean contains(final BinaryString s) {
         if (s.sizeInBytes == 0) {
@@ -343,26 +347,26 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
     }
 
     /**
-     * Tests if this BinaryStringData starts with the specified prefix.
+     * Tests if this BinaryString starts with the specified prefix.
      *
      * @param prefix the prefix.
      * @return {@code true} if the bytes represented by the argument is a prefix of the bytes
      *     represented by this string; {@code false} otherwise. Note also that {@code true} will be
-     *     returned if the argument is an empty BinaryStringData or is equal to this {@code
-     *     BinaryStringData} object as determined by the {@link #equals(Object)} method.
+     *     returned if the argument is an empty BinaryString or is equal to this {@code
+     *     BinaryString} object as determined by the {@link #equals(Object)} method.
      */
     public boolean startsWith(final BinaryString prefix) {
         return matchAt(prefix, 0);
     }
 
     /**
-     * Tests if this BinaryStringData ends with the specified suffix.
+     * Tests if this BinaryString ends with the specified suffix.
      *
      * @param suffix the suffix.
      * @return {@code true} if the bytes represented by the argument is a suffix of the bytes
      *     represented by this object; {@code false} otherwise. Note that the result will be {@code
-     *     true} if the argument is the empty string or is equal to this {@code BinaryStringData}
-     *     object as determined by the {@link #equals(Object)} method.
+     *     true} if the argument is the empty string or is equal to this {@code BinaryString} object
+     *     as determined by the {@link #equals(Object)} method.
      */
     public boolean endsWith(final BinaryString suffix) {
         return matchAt(suffix, sizeInBytes - suffix.sizeInBytes);
@@ -493,9 +497,9 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
     }
 
     /**
-     * Converts all of the characters in this {@code BinaryStringData} to upper case.
+     * Converts all of the characters in this {@code BinaryString} to upper case.
      *
-     * @return the {@code BinaryStringData}, converted to uppercase.
+     * @return the {@code BinaryString}, converted to uppercase.
      */
     public BinaryString toUpperCase() {
         if (sizeInBytes == 0) {
@@ -527,9 +531,9 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
     }
 
     /**
-     * Converts all of the characters in this {@code BinaryStringData} to lower case.
+     * Converts all of the characters in this {@code BinaryString} to lower case.
      *
-     * @return the {@code BinaryStringData}, converted to lowercase.
+     * @return the {@code BinaryString}, converted to lowercase.
      */
     public BinaryString toLowerCase() {
         if (sizeInBytes == 0) {
@@ -561,7 +565,7 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
     }
 
     // ------------------------------------------------------------------------------------------
-    // Internal methods on BinaryStringData
+    // Internal methods on BinaryString
     // ------------------------------------------------------------------------------------------
 
     byte getByteOneSegment(int i) {

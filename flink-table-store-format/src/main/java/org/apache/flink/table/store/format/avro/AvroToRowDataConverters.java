@@ -19,19 +19,19 @@
 package org.apache.flink.table.store.format.avro;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.GenericArrayData;
-import org.apache.flink.table.data.GenericMapData;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.utils.LogicalTypeUtils;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.GenericArray;
+import org.apache.flink.table.store.data.GenericMap;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.avro.generic.GenericFixed;
 import org.apache.avro.generic.GenericRecord;
@@ -50,7 +50,7 @@ import java.util.Map;
 
 import static org.apache.flink.table.store.format.avro.AvroSchemaConverter.extractValueTypeToAvroMap;
 
-/** Tool class used to convert from Avro {@link GenericRecord} to {@link RowData}. * */
+/** Tool class used to convert from Avro {@link GenericRecord} to {@link InternalRow}. * */
 @Internal
 public class AvroToRowDataConverters {
 
@@ -70,14 +70,14 @@ public class AvroToRowDataConverters {
     public static AvroToRowDataConverter createRowConverter(RowType rowType) {
         final AvroToRowDataConverter[] fieldConverters =
                 rowType.getFields().stream()
-                        .map(RowType.RowField::getType)
+                        .map(DataField::type)
                         .map(AvroToRowDataConverters::createNullableConverter)
                         .toArray(AvroToRowDataConverter[]::new);
         final int arity = rowType.getFieldCount();
 
         return avroObject -> {
             IndexedRecord record = (IndexedRecord) avroObject;
-            GenericRowData row = new GenericRowData(arity);
+            GenericRow row = new GenericRow(arity);
             for (int i = 0; i < arity; ++i) {
                 // avro always deserialize successfully even though the type isn't matched
                 // so no need to throw exception about which field can't be deserialized
@@ -88,7 +88,7 @@ public class AvroToRowDataConverters {
     }
 
     /** Creates a runtime converter which is null safe. */
-    private static AvroToRowDataConverter createNullableConverter(LogicalType type) {
+    private static AvroToRowDataConverter createNullableConverter(DataType type) {
         final AvroToRowDataConverter converter = createConverter(type);
         return avroObject -> {
             if (avroObject == null) {
@@ -99,19 +99,15 @@ public class AvroToRowDataConverters {
     }
 
     /** Creates a runtime converter which assuming input object is not null. */
-    private static AvroToRowDataConverter createConverter(LogicalType type) {
+    private static AvroToRowDataConverter createConverter(DataType type) {
         switch (type.getTypeRoot()) {
-            case NULL:
-                return avroObject -> null;
             case TINYINT:
                 return avroObject -> ((Integer) avroObject).byteValue();
             case SMALLINT:
                 return avroObject -> ((Integer) avroObject).shortValue();
             case BOOLEAN: // boolean
             case INTEGER: // int
-            case INTERVAL_YEAR_MONTH: // long
             case BIGINT: // long
-            case INTERVAL_DAY_TIME: // long
             case FLOAT: // float
             case DOUBLE: // double
                 return avroObject -> avroObject;
@@ -123,7 +119,7 @@ public class AvroToRowDataConverters {
                 return AvroToRowDataConverters::convertToTimestamp;
             case CHAR:
             case VARCHAR:
-                return avroObject -> StringData.fromString(avroObject.toString());
+                return avroObject -> BinaryString.fromString(avroObject.toString());
             case BINARY:
             case VARBINARY:
                 return AvroToRowDataConverters::convertToBytes;
@@ -136,7 +132,6 @@ public class AvroToRowDataConverters {
             case MAP:
             case MULTISET:
                 return createMapConverter(type);
-            case RAW:
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + type);
         }
@@ -156,15 +151,14 @@ public class AvroToRowDataConverters {
             } else {
                 bytes = (byte[]) avroObject;
             }
-            return DecimalData.fromUnscaledBytes(bytes, precision, scale);
+            return Decimal.fromUnscaledBytes(bytes, precision, scale);
         };
     }
 
     private static AvroToRowDataConverter createArrayConverter(ArrayType arrayType) {
         final AvroToRowDataConverter elementConverter =
                 createNullableConverter(arrayType.getElementType());
-        final Class<?> elementClass =
-                LogicalTypeUtils.toInternalConversionClass(arrayType.getElementType());
+        final Class<?> elementClass = InternalRow.getDataClass(arrayType.getElementType());
 
         return avroObject -> {
             final List<?> list = (List<?>) avroObject;
@@ -173,13 +167,12 @@ public class AvroToRowDataConverters {
             for (int i = 0; i < length; ++i) {
                 array[i] = elementConverter.convert(list.get(i));
             }
-            return new GenericArrayData(array);
+            return new GenericArray(array);
         };
     }
 
-    private static AvroToRowDataConverter createMapConverter(LogicalType type) {
-        final AvroToRowDataConverter keyConverter =
-                createConverter(DataTypes.STRING().getLogicalType());
+    private static AvroToRowDataConverter createMapConverter(DataType type) {
+        final AvroToRowDataConverter keyConverter = createConverter(DataTypes.STRING());
         final AvroToRowDataConverter valueConverter =
                 createNullableConverter(extractValueTypeToAvroMap(type));
 
@@ -191,11 +184,11 @@ public class AvroToRowDataConverters {
                 Object value = valueConverter.convert(entry.getValue());
                 result.put(key, value);
             }
-            return new GenericMapData(result);
+            return new GenericMap(result);
         };
     }
 
-    private static TimestampData convertToTimestamp(Object object) {
+    private static Timestamp convertToTimestamp(Object object) {
         final long millis;
         if (object instanceof Long) {
             millis = (Long) object;
@@ -210,7 +203,7 @@ public class AvroToRowDataConverters {
                         "Unexpected object type for TIMESTAMP logical type. Received: " + object);
             }
         }
-        return TimestampData.fromEpochMillis(millis);
+        return Timestamp.fromEpochMillis(millis);
     }
 
     private static int convertToDate(Object object) {

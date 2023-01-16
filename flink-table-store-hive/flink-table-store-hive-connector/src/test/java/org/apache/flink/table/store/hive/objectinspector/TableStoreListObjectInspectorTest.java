@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.GenericArrayData;
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericArray;
+import org.apache.flink.table.store.types.DataTypes;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.junit.jupiter.api.Test;
@@ -34,8 +34,7 @@ public class TableStoreListObjectInspectorTest {
 
     @Test
     public void testCategoryAndTypeName() {
-        TableStoreListObjectInspector oi =
-                new TableStoreListObjectInspector(DataTypes.STRING().getLogicalType());
+        TableStoreListObjectInspector oi = new TableStoreListObjectInspector(DataTypes.STRING());
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.LIST);
         assertThat(oi.getTypeName()).isEqualTo("array<string>");
@@ -43,17 +42,16 @@ public class TableStoreListObjectInspectorTest {
 
     @Test
     public void testGetListAndElement() {
-        TableStoreListObjectInspector oi =
-                new TableStoreListObjectInspector(DataTypes.STRING().getLogicalType());
+        TableStoreListObjectInspector oi = new TableStoreListObjectInspector(DataTypes.STRING());
 
-        StringData[] stringDataArray =
-                new StringData[] {
-                    StringData.fromString("Hi"),
-                    StringData.fromString("Hello"),
+        BinaryString[] stringDataArray =
+                new BinaryString[] {
+                    BinaryString.fromString("Hi"),
+                    BinaryString.fromString("Hello"),
                     null,
-                    StringData.fromString("Test")
+                    BinaryString.fromString("Test")
                 };
-        GenericArrayData arrayData = new GenericArrayData(stringDataArray);
+        GenericArray arrayData = new GenericArray(stringDataArray);
         assertThat(oi.getListLength(arrayData)).isEqualTo(4);
         for (int i = 0; i < 4; i++) {
             assertThat(oi.getListElement(arrayData, i)).isEqualTo(stringDataArray[i]);

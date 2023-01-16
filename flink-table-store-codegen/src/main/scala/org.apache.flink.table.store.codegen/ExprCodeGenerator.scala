@@ -17,12 +17,11 @@
  */
 package org.apache.flink.table.store.codegen
 
-import org.apache.flink.table.data.RowData
-import org.apache.flink.table.data.binary.BinaryRowData
 import org.apache.flink.table.store.codegen.GeneratedExpression.{NEVER_NULL, NO_CODE}
 import org.apache.flink.table.store.codegen.GenerateUtils.{generateRecordStatement, rowSetField, DEFAULT_OUT_RECORD_TERM, DEFAULT_OUT_RECORD_WRITER_TERM}
+import org.apache.flink.table.store.data.{BinaryRow, InternalRow}
+import org.apache.flink.table.store.types.{RowType, TimestampType}
 import org.apache.flink.table.store.utils.TypeUtils.isInteroperable
-import org.apache.flink.table.types.logical._
 
 class ExprCodeGenerator(ctx: CodeGeneratorContext) {
 
@@ -49,7 +48,7 @@ class ExprCodeGenerator(ctx: CodeGeneratorContext) {
   def generateResultExpression(
       fieldExprs: Seq[GeneratedExpression],
       returnType: RowType,
-      returnTypeClazz: Class[_ <: RowData],
+      returnTypeClazz: Class[_ <: InternalRow],
       outRow: String = DEFAULT_OUT_RECORD_TERM,
       outRowWriter: Option[String] = Some(DEFAULT_OUT_RECORD_WRITER_TERM),
       reusedOutRow: Boolean = true,
@@ -92,7 +91,7 @@ class ExprCodeGenerator(ctx: CodeGeneratorContext) {
       fieldExprs: Seq[GeneratedExpression],
       fieldExprIdxToOutputRowPosMap: Map[Int, Int],
       returnType: RowType,
-      returnTypeClazz: Class[_ <: RowData],
+      returnTypeClazz: Class[_ <: InternalRow],
       outRow: String,
       outRowWriter: Option[String],
       reusedOutRow: Boolean,
@@ -111,13 +110,8 @@ class ExprCodeGenerator(ctx: CodeGeneratorContext) {
     // type check
     fieldExprs.zipWithIndex.foreach {
       // timestamp type(Include TimeIndicator) and generic type can compatible with each other.
-      case (fieldExpr, i)
-          if fieldExpr.resultType.isInstanceOf[TypeInformationRawType[_]] ||
-            fieldExpr.resultType.isInstanceOf[TimestampType] =>
-        if (
-          returnType.getTypeAt(i).getClass != fieldExpr.resultType.getClass
-          && !returnType.getTypeAt(i).isInstanceOf[TypeInformationRawType[_]]
-        ) {
+      case (fieldExpr, i) if fieldExpr.resultType.isInstanceOf[TimestampType] =>
+        if (returnType.getTypeAt(i).getClass != fieldExpr.resultType.getClass) {
           throw new CodeGenException(
             s"Incompatible types of expression and result type, Expression[$fieldExpr] type is " +
               s"[${fieldExpr.resultType}], result type is [${returnType.getTypeAt(i)}]")
@@ -150,7 +144,7 @@ class ExprCodeGenerator(ctx: CodeGeneratorContext) {
       NO_CODE
     }
 
-    val code = if (returnTypeClazz == classOf[BinaryRowData] && outRowWriter.isDefined) {
+    val code = if (returnTypeClazz == classOf[BinaryRow] && outRowWriter.isDefined) {
       val writer = outRowWriter.get
       val resetWriter = s"$writer.reset();"
       val completeWriter: String = s"$writer.complete();"

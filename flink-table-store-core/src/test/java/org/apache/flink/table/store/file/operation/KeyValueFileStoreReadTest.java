@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.TestFileStore;
@@ -36,13 +36,13 @@ import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.source.DataSplit;
+import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -83,28 +83,25 @@ public class KeyValueFileStoreReadTest {
             data.add(
                     new KeyValue()
                             .replace(
-                                    GenericRowData.of(a, b, c),
+                                    GenericRow.of(a, b, c),
                                     i,
                                     RowKind.INSERT,
-                                    GenericRowData.of(delta)));
+                                    GenericRow.of(delta)));
         }
         // remove zero occurrence, it might be merged and discarded by the merge tree
         expected.entrySet().removeIf(e -> e.getValue() == 0);
 
-        RowType partitionType =
-                RowType.of(new LogicalType[] {new IntType(false)}, new String[] {"c"});
+        RowType partitionType = RowType.of(new DataType[] {new IntType(false)}, new String[] {"c"});
         RowDataSerializer partitionSerializer = new RowDataSerializer(partitionType);
         List<String> keyNames = Arrays.asList("a", "b", "c");
         RowType keyType =
                 RowType.of(
-                        new LogicalType[] {
-                            new IntType(false), new IntType(false), new IntType(false)
-                        },
+                        new DataType[] {new IntType(false), new IntType(false), new IntType(false)},
                         keyNames.toArray(new String[0]));
         RowType projectedKeyType = RowType.of(new IntType(false), new IntType(false));
         RowDataSerializer projectedKeySerializer = new RowDataSerializer(projectedKeyType);
         RowType valueType =
-                RowType.of(new LogicalType[] {new BigIntType(false)}, new String[] {"count"});
+                RowType.of(new DataType[] {new BigIntType(false)}, new String[] {"count"});
         RowDataSerializer valueSerializer = new RowDataSerializer(valueType);
 
         TestFileStore store =
@@ -143,11 +140,11 @@ public class KeyValueFileStoreReadTest {
                         store,
                         kv ->
                                 partitionSerializer
-                                        .toBinaryRow(GenericRowData.of(kv.key().getInt(2)))
+                                        .toBinaryRow(GenericRow.of(kv.key().getInt(2)))
                                         .copy());
         Map<Integer, Long> actual = new HashMap<>();
         for (KeyValue kv : readData) {
-            assertThat(kv.key().getArity()).isEqualTo(2);
+            assertThat(kv.key().getFieldCount()).isEqualTo(2);
             int key = kv.key().getInt(0) * 10 + kv.key().getInt(1);
             long delta = kv.value().getLong(0);
             actual.compute(key, (k, v) -> v == null ? delta : v + delta);
@@ -180,12 +177,12 @@ public class KeyValueFileStoreReadTest {
                         new BigIntType(),
                         new VarCharType(false, 8),
                         new IntType(false));
-        Map<BinaryRowData, BinaryRowData> expected = store.toKvMap(data);
+        Map<BinaryRow, BinaryRow> expected = store.toKvMap(data);
         expected.replaceAll(
                 (k, v) ->
                         projectedValueSerializer
                                 .toBinaryRow(
-                                        GenericRowData.of(
+                                        GenericRow.of(
                                                 v.getInt(2),
                                                 v.isNullAt(4) ? null : v.getLong(4),
                                                 v.getString(0),
@@ -202,9 +199,9 @@ public class KeyValueFileStoreReadTest {
                         store,
                         gen::getPartition);
         for (KeyValue kv : readData) {
-            assertThat(kv.value().getArity()).isEqualTo(4);
-            BinaryRowData key = TestKeyValueGenerator.KEY_SERIALIZER.toBinaryRow(kv.key());
-            BinaryRowData value = projectedValueSerializer.toBinaryRow(kv.value());
+            assertThat(kv.value().getFieldCount()).isEqualTo(4);
+            BinaryRow key = TestKeyValueGenerator.KEY_SERIALIZER.toBinaryRow(kv.key());
+            BinaryRow value = projectedValueSerializer.toBinaryRow(kv.value());
             assertThat(expected).containsKey(key);
             assertThat(value).isEqualTo(expected.get(key));
         }
@@ -217,12 +214,12 @@ public class KeyValueFileStoreReadTest {
             RowDataSerializer projectedKeySerializer,
             RowDataSerializer projectedValueSerializer,
             TestFileStore store,
-            Function<KeyValue, BinaryRowData> partitionCalculator)
+            Function<KeyValue, BinaryRow> partitionCalculator)
             throws Exception {
         store.commitData(data, partitionCalculator, kv -> 0);
         FileStoreScan scan = store.newScan();
         Long snapshotId = store.snapshotManager().latestSnapshotId();
-        Map<BinaryRowData, List<ManifestEntry>> filesGroupedByPartition =
+        Map<BinaryRow, List<ManifestEntry>> filesGroupedByPartition =
                 scan.withSnapshot(snapshotId).plan().files().stream()
                         .collect(Collectors.groupingBy(ManifestEntry::partition));
         KeyValueFileStoreRead read = store.newRead();
@@ -234,8 +231,7 @@ public class KeyValueFileStoreReadTest {
         }
 
         List<KeyValue> result = new ArrayList<>();
-        for (Map.Entry<BinaryRowData, List<ManifestEntry>> entry :
-                filesGroupedByPartition.entrySet()) {
+        for (Map.Entry<BinaryRow, List<ManifestEntry>> entry : filesGroupedByPartition.entrySet()) {
             RecordReader<KeyValue> reader =
                     read.createReader(
                             new DataSplit(

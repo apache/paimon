@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.data.GenericMapData;
 import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.types.DataTypes;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.junit.jupiter.api.Test;
@@ -36,8 +36,7 @@ public class TableStoreMapObjectInspectorTest {
     @Test
     public void testCategoryAndTypeName() {
         TableStoreMapObjectInspector oi =
-                new TableStoreMapObjectInspector(
-                        DataTypes.STRING().getLogicalType(), DataTypes.BIGINT().getLogicalType());
+                new TableStoreMapObjectInspector(DataTypes.STRING(), DataTypes.BIGINT());
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.MAP);
         assertThat(oi.getTypeName()).isEqualTo("map<string,bigint>");
@@ -46,8 +45,7 @@ public class TableStoreMapObjectInspectorTest {
     @Test
     public void testGetMapAndValue() {
         TableStoreMapObjectInspector oi =
-                new TableStoreMapObjectInspector(
-                        DataTypes.STRING().getLogicalType(), DataTypes.BIGINT().getLogicalType());
+                new TableStoreMapObjectInspector(DataTypes.STRING(), DataTypes.BIGINT());
 
         StringData[] keyArray =
                 new StringData[] {

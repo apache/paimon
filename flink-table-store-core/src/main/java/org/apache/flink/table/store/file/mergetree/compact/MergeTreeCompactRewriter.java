@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.io.DataFileMeta;
@@ -38,13 +38,13 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
 
     protected final KeyValueFileReaderFactory readerFactory;
     protected final KeyValueFileWriterFactory writerFactory;
-    protected final Comparator<RowData> keyComparator;
+    protected final Comparator<InternalRow> keyComparator;
     protected final MergeFunctionFactory<KeyValue> mfFactory;
 
     public MergeTreeCompactRewriter(
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
-            Comparator<RowData> keyComparator,
+            Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory) {
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;

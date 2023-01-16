@@ -22,10 +22,11 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.format.FlushingFileFormat;
@@ -50,10 +51,9 @@ import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.table.SchemaEvolutionTableTestBase;
 import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.utils.BinaryRowDataUtil;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -89,7 +89,7 @@ public class MergeTreeTest {
     private static ExecutorService service;
     private Path path;
     private FileStorePathFactory pathFactory;
-    private Comparator<RowData> comparator;
+    private Comparator<InternalRow> comparator;
 
     private CoreOptions options;
     private KeyValueFileReaderFactory readerFactory;
@@ -130,8 +130,8 @@ public class MergeTreeTest {
         configuration.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
         configuration.set(CoreOptions.TARGET_FILE_SIZE, new MemorySize(targetFileSize));
         options = new CoreOptions(configuration);
-        RowType keyType = new RowType(singletonList(new RowType.RowField("k", new IntType())));
-        RowType valueType = new RowType(singletonList(new RowType.RowField("v", new IntType())));
+        RowType keyType = new RowType(singletonList(new DataField(0, "k", new IntType())));
+        RowType valueType = new RowType(singletonList(new DataField(0, "v", new IntType())));
 
         FileFormat flushingAvro = new FlushingFileFormat("avro");
         KeyValueFileReaderFactory.Builder readerFactoryBuilder =
@@ -163,13 +163,13 @@ public class MergeTreeTest {
                                                         false)));
                             }
                         });
-        readerFactory = readerFactoryBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
-        compactReaderFactory = readerFactoryBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
+        readerFactory = readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
+        compactReaderFactory = readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
         KeyValueFileWriterFactory.Builder writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
                         0, keyType, valueType, flushingAvro, pathFactory, options.targetFileSize());
-        writerFactory = writerFactoryBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
-        compactWriterFactory = writerFactoryBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
+        writerFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
+        compactWriterFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
         writer = createMergeTreeWriter(Collections.emptyList());
     }
 
@@ -427,8 +427,8 @@ public class MergeTreeTest {
         return records;
     }
 
-    private RowData row(int i) {
-        return GenericRowData.of(i);
+    private InternalRow row(int i) {
+        return GenericRow.of(i);
     }
 
     private List<TestRecord> generateRandom(int perBatch) {

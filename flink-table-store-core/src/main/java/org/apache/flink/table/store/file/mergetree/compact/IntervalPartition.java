@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 
@@ -33,9 +33,9 @@ import java.util.stream.Collectors;
 public class IntervalPartition {
 
     private final List<DataFileMeta> files;
-    private final Comparator<RowData> keyComparator;
+    private final Comparator<InternalRow> keyComparator;
 
-    public IntervalPartition(List<DataFileMeta> inputFiles, Comparator<RowData> keyComparator) {
+    public IntervalPartition(List<DataFileMeta> inputFiles, Comparator<InternalRow> keyComparator) {
         this.files = new ArrayList<>(inputFiles);
         this.files.sort(
                 (o1, o2) -> {
@@ -67,7 +67,7 @@ public class IntervalPartition {
     public List<List<SortedRun>> partition() {
         List<List<SortedRun>> result = new ArrayList<>();
         List<DataFileMeta> section = new ArrayList<>();
-        BinaryRowData bound = null;
+        BinaryRow bound = null;
 
         for (DataFileMeta meta : files) {
             if (!section.isEmpty() && keyComparator.compare(meta.minKey(), bound) > 0) {

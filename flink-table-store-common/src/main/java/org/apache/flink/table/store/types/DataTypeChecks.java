@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.types;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.flink.table.store.types.DataTypeRoot.ROW;
@@ -39,6 +41,8 @@ public final class DataTypeChecks {
 
     private static final FieldTypesExtractor FIELD_TYPES_EXTRACTOR = new FieldTypesExtractor();
 
+    private static final NestedTypesExtractor NESTED_TYPES_EXTRACTOR = new NestedTypesExtractor();
+
     /**
      * Checks if the given type is a composite type.
      *
@@ -51,47 +55,51 @@ public final class DataTypeChecks {
         return dataType.getTypeRoot() == ROW;
     }
 
-    public static int getLength(DataType DataType) {
-        return DataType.accept(LENGTH_EXTRACTOR);
+    public static int getLength(DataType dataType) {
+        return dataType.accept(LENGTH_EXTRACTOR);
     }
 
-    public static boolean hasLength(DataType DataType, int length) {
-        return getLength(DataType) == length;
+    public static boolean hasLength(DataType dataType, int length) {
+        return getLength(dataType) == length;
     }
 
     /** Returns the precision of all types that define a precision implicitly or explicitly. */
-    public static int getPrecision(DataType DataType) {
-        return DataType.accept(PRECISION_EXTRACTOR);
+    public static int getPrecision(DataType dataType) {
+        return dataType.accept(PRECISION_EXTRACTOR);
     }
 
     /** Checks the precision of a type that defines a precision implicitly or explicitly. */
-    public static boolean hasPrecision(DataType DataType, int precision) {
-        return getPrecision(DataType) == precision;
+    public static boolean hasPrecision(DataType dataType, int precision) {
+        return getPrecision(dataType) == precision;
     }
 
     /** Returns the scale of all types that define a scale implicitly or explicitly. */
-    public static int getScale(DataType DataType) {
-        return DataType.accept(SCALE_EXTRACTOR);
+    public static int getScale(DataType dataType) {
+        return dataType.accept(SCALE_EXTRACTOR);
     }
 
     /** Checks the scale of all types that define a scale implicitly or explicitly. */
-    public static boolean hasScale(DataType DataType, int scale) {
-        return getScale(DataType) == scale;
+    public static boolean hasScale(DataType dataType, int scale) {
+        return getScale(dataType) == scale;
     }
 
     /** Returns the field count of row and structured types. Other types return 1. */
-    public static int getFieldCount(DataType DataType) {
-        return DataType.accept(FIELD_COUNT_EXTRACTOR);
+    public static int getFieldCount(DataType dataType) {
+        return dataType.accept(FIELD_COUNT_EXTRACTOR);
     }
 
     /** Returns the field names of row and structured types. */
-    public static List<String> getFieldNames(DataType DataType) {
-        return DataType.accept(FIELD_NAMES_EXTRACTOR);
+    public static List<String> getFieldNames(DataType dataType) {
+        return dataType.accept(FIELD_NAMES_EXTRACTOR);
     }
 
     /** Returns the field types of row and structured types. */
-    public static List<DataType> getFieldTypes(DataType DataType) {
-        return DataType.accept(FIELD_TYPES_EXTRACTOR);
+    public static List<DataType> getFieldTypes(DataType dataType) {
+        return dataType.accept(FIELD_TYPES_EXTRACTOR);
+    }
+
+    public static List<DataType> getNestedTypes(DataType dataType) {
+        return dataType.accept(NESTED_TYPES_EXTRACTOR);
     }
 
     /**
@@ -102,8 +110,8 @@ public final class DataTypeChecks {
      * <p>Note: This method might not be necessary anymore, once we have implemented a utility that
      * can convert any internal data structure to a well-defined string representation.
      */
-    public static boolean hasWellDefinedString(DataType DataType) {
-        switch (DataType.getTypeRoot()) {
+    public static boolean hasWellDefinedString(DataType dataType) {
+        switch (dataType.getTypeRoot()) {
             case CHAR:
             case VARCHAR:
             case BOOLEAN:
@@ -128,11 +136,11 @@ public final class DataTypeChecks {
     /** Extracts an attribute of logical types that define that attribute. */
     private static class Extractor<T> extends DataTypeDefaultVisitor<T> {
         @Override
-        protected T defaultMethod(DataType DataType) {
+        protected T defaultMethod(DataType dataType) {
             throw new IllegalArgumentException(
                     String.format(
                             "Invalid use of extractor %s. Called on logical type: %s",
-                            this.getClass().getName(), DataType));
+                            this.getClass().getName(), dataType));
         }
     }
 
@@ -218,7 +226,7 @@ public final class DataTypeChecks {
         }
 
         @Override
-        protected Integer defaultMethod(DataType DataType) {
+        protected Integer defaultMethod(DataType dataType) {
             return 1;
         }
     }
@@ -232,6 +240,29 @@ public final class DataTypeChecks {
     }
 
     private static class FieldTypesExtractor extends Extractor<List<DataType>> {
+
+        @Override
+        public List<DataType> visit(RowType rowType) {
+            return rowType.getFieldTypes();
+        }
+    }
+
+    private static class NestedTypesExtractor extends Extractor<List<DataType>> {
+
+        @Override
+        public List<DataType> visit(ArrayType arrayType) {
+            return Collections.singletonList(arrayType.getElementType());
+        }
+
+        @Override
+        public List<DataType> visit(MultisetType multisetType) {
+            return Collections.singletonList(multisetType.getElementType());
+        }
+
+        @Override
+        public List<DataType> visit(MapType mapType) {
+            return Arrays.asList(mapType.getKeyType(), mapType.getValueType());
+        }
 
         @Override
         public List<DataType> visit(RowType rowType) {

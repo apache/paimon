@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.util.Preconditions;
 
@@ -61,7 +61,7 @@ public class SortedRun {
     }
 
     public static SortedRun fromUnsorted(
-            List<DataFileMeta> unsortedFiles, Comparator<RowData> keyComparator) {
+            List<DataFileMeta> unsortedFiles, Comparator<InternalRow> keyComparator) {
         unsortedFiles.sort((o1, o2) -> keyComparator.compare(o1.minKey(), o2.minKey()));
         SortedRun run = new SortedRun(unsortedFiles);
         run.validate(keyComparator);
@@ -81,7 +81,7 @@ public class SortedRun {
     }
 
     @VisibleForTesting
-    public void validate(Comparator<RowData> comparator) {
+    public void validate(Comparator<InternalRow> comparator) {
         for (int i = 1; i < files.size(); i++) {
             Preconditions.checkState(
                     comparator.compare(files.get(i).minKey(), files.get(i - 1).maxKey()) > 0,

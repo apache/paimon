@@ -18,17 +18,18 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
 
 import java.io.IOException;
 
 /**
  * A {@link RecordReader.RecordIterator} which resets {@link RowKind#INSERT} to previous key value.
  */
-public abstract class ResetRowKindRecordIterator implements RecordReader.RecordIterator<RowData> {
+public abstract class ResetRowKindRecordIterator
+        implements RecordReader.RecordIterator<InternalRow> {
 
     private final RecordReader.RecordIterator<KeyValue> kvIterator;
 

@@ -21,13 +21,13 @@ package org.apache.flink.table.store.file.io;
 import org.apache.flink.api.common.accumulators.LongCounter;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.format.FileFormat;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class RollingFileWriterTest {
 
     private static final RowType SCHEMA =
-            RowType.of(new LogicalType[] {new IntType()}, new String[] {"id"});
+            RowType.of(new DataType[] {new IntType()}, new String[] {"id"});
 
     /**
      * Set a very small target file size, so that we will roll over to a new file even if writing
@@ -52,7 +52,7 @@ public class RollingFileWriterTest {
 
     @TempDir java.nio.file.Path tempDir;
 
-    private RollingFileWriter<RowData, DataFileMeta> rollingFileWriter;
+    private RollingFileWriter<InternalRow, DataFileMeta> rollingFileWriter;
 
     @BeforeEach
     public void beforeEach() {
@@ -78,7 +78,7 @@ public class RollingFileWriterTest {
     @Test
     public void testRolling() throws IOException {
         for (int i = 0; i < 3000; i++) {
-            rollingFileWriter.write(GenericRowData.of(i));
+            rollingFileWriter.write(GenericRow.of(i));
             if (i < 1000) {
                 assertFileNum(1);
             } else if (i < 2000) {

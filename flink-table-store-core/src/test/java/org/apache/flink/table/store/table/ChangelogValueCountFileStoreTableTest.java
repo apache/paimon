@@ -33,7 +33,7 @@ import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
 
 import org.junit.jupiter.api.Test;
 

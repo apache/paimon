@@ -75,6 +75,7 @@ import java.util.stream.Stream;
 import static org.apache.flink.table.store.CoreOptions.BUCKET;
 import static org.apache.flink.table.store.CoreOptions.FILE_FORMAT;
 import static org.apache.flink.table.store.CoreOptions.PATH;
+import static org.apache.flink.table.store.connector.LogicalTypeConversion.toDataType;
 import static org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -373,7 +374,7 @@ public class FileStoreITCase extends AbstractTestBase {
         Path tablePath = new CoreOptions(options).path();
         UpdateSchema updateSchema =
                 new UpdateSchema(
-                        TABLE_TYPE,
+                        toDataType(TABLE_TYPE),
                         Arrays.stream(partitions)
                                 .mapToObj(i -> TABLE_TYPE.getFieldNames().get(i))
                                 .collect(Collectors.toList()),

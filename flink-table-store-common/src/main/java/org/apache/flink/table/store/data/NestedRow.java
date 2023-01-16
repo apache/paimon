@@ -31,7 +31,7 @@ import static org.apache.flink.util.Preconditions.checkArgument;
  * NestedRow} has a possibility to cross the boundary of a segment, while the fixed-length part of
  * {@link BinaryRow} must fit into its first memory segment.
  */
-public final class NestedRow extends BinarySection implements RowData, DataSetters {
+public final class NestedRow extends BinarySection implements InternalRow, DataSetters {
 
     private final int arity;
     private final int nullBitsSizeInBytes;
@@ -133,10 +133,10 @@ public final class NestedRow extends BinarySection implements RowData, DataSette
     }
 
     @Override
-    public void setTimestamp(int pos, TimestampData value, int precision) {
+    public void setTimestamp(int pos, Timestamp value, int precision) {
         assertIndexIsValid(pos);
 
-        if (TimestampData.isCompact(precision)) {
+        if (Timestamp.isCompact(precision)) {
             setLong(pos, value.getMillisecond());
         } else {
             int fieldOffset = getFieldOffset(pos);
@@ -256,11 +256,11 @@ public final class NestedRow extends BinarySection implements RowData, DataSette
     }
 
     @Override
-    public TimestampData getTimestamp(int pos, int precision) {
+    public Timestamp getTimestamp(int pos, int precision) {
         assertIndexIsValid(pos);
 
-        if (TimestampData.isCompact(precision)) {
-            return TimestampData.fromEpochMillis(
+        if (Timestamp.isCompact(precision)) {
+            return Timestamp.fromEpochMillis(
                     MemorySegmentUtils.getLong(segments, getFieldOffset(pos)));
         }
 
@@ -278,19 +278,19 @@ public final class NestedRow extends BinarySection implements RowData, DataSette
     }
 
     @Override
-    public RowData getRow(int pos, int numFields) {
+    public InternalRow getRow(int pos, int numFields) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readRowData(segments, numFields, offset, getLong(pos));
     }
 
     @Override
-    public ArrayData getArray(int pos) {
+    public InternalArray getArray(int pos) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readArrayData(segments, offset, getLong(pos));
     }
 
     @Override
-    public MapData getMap(int pos) {
+    public InternalMap getMap(int pos) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readMapData(segments, offset, getLong(pos));
     }
@@ -299,7 +299,7 @@ public final class NestedRow extends BinarySection implements RowData, DataSette
         return copy(new NestedRow(arity));
     }
 
-    public NestedRow copy(RowData reuse) {
+    public NestedRow copy(InternalRow reuse) {
         return copyInternal((NestedRow) reuse);
     }
 
@@ -314,7 +314,7 @@ public final class NestedRow extends BinarySection implements RowData, DataSette
         if (this == o) {
             return true;
         }
-        // both BinaryRowData and NestedRowData have the same memory format
+        // both BinaryRow and NestedRow have the same memory format
         if (!(o instanceof NestedRow || o instanceof BinaryRow)) {
             return false;
         }

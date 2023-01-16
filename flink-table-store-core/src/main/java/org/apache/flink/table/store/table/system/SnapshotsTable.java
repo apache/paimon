@@ -19,10 +19,10 @@
 package org.apache.flink.table.store.table.system;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.IteratorRecordReader;
@@ -33,10 +33,11 @@ import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
-import org.apache.flink.table.store.utils.ProjectedRowData;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.TimestampType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.TimestampType;
+import org.apache.flink.table.store.utils.ProjectedRow;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 
@@ -62,14 +63,14 @@ public class SnapshotsTable implements Table {
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
-                            new RowType.RowField("snapshot_id", new BigIntType(false)),
-                            new RowType.RowField("schema_id", new BigIntType(false)),
-                            new RowType.RowField(
-                                    "commit_user", SerializationUtils.newStringType(false)),
-                            new RowType.RowField("commit_identifier", new BigIntType(false)),
-                            new RowType.RowField(
-                                    "commit_kind", SerializationUtils.newStringType(false)),
-                            new RowType.RowField("commit_time", new TimestampType(false, 3))));
+                            new DataField(0, "snapshot_id", new BigIntType(false)),
+                            new DataField(1, "schema_id", new BigIntType(false)),
+                            new DataField(
+                                    2, "commit_user", SerializationUtils.newStringType(false)),
+                            new DataField(3, "commit_identifier", new BigIntType(false)),
+                            new DataField(
+                                    4, "commit_kind", SerializationUtils.newStringType(false)),
+                            new DataField(5, "commit_time", new TimestampType(false, 3))));
 
     private final Path location;
 
@@ -175,29 +176,29 @@ public class SnapshotsTable implements Table {
         }
 
         @Override
-        public RecordReader<RowData> createReader(Split split) throws IOException {
+        public RecordReader<InternalRow> createReader(Split split) throws IOException {
             if (!(split instanceof SnapshotsSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((SnapshotsSplit) split).location;
             Iterator<Snapshot> snapshots = new SnapshotManager(location).snapshots();
-            Iterator<RowData> rows = Iterators.transform(snapshots, this::toRow);
+            Iterator<InternalRow> rows = Iterators.transform(snapshots, this::toRow);
             if (projection != null) {
                 rows =
                         Iterators.transform(
-                                rows, row -> ProjectedRowData.from(projection).replaceRow(row));
+                                rows, row -> ProjectedRow.from(projection).replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
         }
 
-        private RowData toRow(Snapshot snapshot) {
-            return GenericRowData.of(
+        private InternalRow toRow(Snapshot snapshot) {
+            return GenericRow.of(
                     snapshot.id(),
                     snapshot.schemaId(),
-                    StringData.fromString(snapshot.commitUser()),
+                    BinaryString.fromString(snapshot.commitUser()),
                     snapshot.commitIdentifier(),
-                    StringData.fromString(snapshot.commitKind().toString()),
-                    TimestampData.fromLocalDateTime(
+                    BinaryString.fromString(snapshot.commitKind().toString()),
+                    Timestamp.fromLocalDateTime(
                             LocalDateTime.ofInstant(
                                     Instant.ofEpochMilli(snapshot.timeMillis()),
                                     ZoneId.systemDefault())));

@@ -18,23 +18,23 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.CharType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypeDefaultVisitor;
+import org.apache.flink.table.store.types.DateType;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.DoubleType;
+import org.apache.flink.table.store.types.FloatType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.LocalZonedTimestampType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.SmallIntType;
+import org.apache.flink.table.store.types.TimestampType;
+import org.apache.flink.table.store.types.TinyIntType;
+import org.apache.flink.table.store.types.VarCharType;
 import org.apache.flink.table.store.utils.RowDataUtils;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.CharType;
-import org.apache.flink.table.types.logical.DateType;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.DoubleType;
-import org.apache.flink.table.types.logical.FloatType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.LocalZonedTimestampType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.SmallIntType;
-import org.apache.flink.table.types.logical.TimestampType;
-import org.apache.flink.table.types.logical.TinyIntType;
-import org.apache.flink.table.types.logical.VarCharType;
-import org.apache.flink.table.types.logical.utils.LogicalTypeDefaultVisitor;
 
 /** Generate sequence number. */
 public class SequenceGenerator {
@@ -53,15 +53,15 @@ public class SequenceGenerator {
         generator = rowType.getTypeAt(index).accept(new SequenceGeneratorVisitor());
     }
 
-    public long generate(RowData row) {
+    public long generate(InternalRow row) {
         return generator.generate(row, index);
     }
 
     private interface Generator {
-        long generate(RowData row, int i);
+        long generate(InternalRow row, int i);
     }
 
-    private static class SequenceGeneratorVisitor extends LogicalTypeDefaultVisitor<Generator> {
+    private static class SequenceGeneratorVisitor extends DataTypeDefaultVisitor<Generator> {
 
         @Override
         public Generator visit(CharType charType) {
@@ -86,22 +86,22 @@ public class SequenceGenerator {
 
         @Override
         public Generator visit(TinyIntType tinyIntType) {
-            return RowData::getByte;
+            return InternalRow::getByte;
         }
 
         @Override
         public Generator visit(SmallIntType smallIntType) {
-            return RowData::getShort;
+            return InternalRow::getShort;
         }
 
         @Override
         public Generator visit(IntType intType) {
-            return RowData::getInt;
+            return InternalRow::getInt;
         }
 
         @Override
         public Generator visit(BigIntType bigIntType) {
-            return RowData::getLong;
+            return InternalRow::getLong;
         }
 
         @Override
@@ -116,7 +116,7 @@ public class SequenceGenerator {
 
         @Override
         public Generator visit(DateType dateType) {
-            return RowData::getInt;
+            return InternalRow::getInt;
         }
 
         @Override
@@ -131,8 +131,8 @@ public class SequenceGenerator {
         }
 
         @Override
-        protected Generator defaultMethod(LogicalType logicalType) {
-            throw new UnsupportedOperationException("Unsupported type: " + logicalType);
+        protected Generator defaultMethod(DataType dataType) {
+            throw new UnsupportedOperationException("Unsupported type: " + dataType);
         }
     }
 }

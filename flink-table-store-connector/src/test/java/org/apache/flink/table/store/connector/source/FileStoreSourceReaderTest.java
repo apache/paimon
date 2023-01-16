@@ -22,9 +22,10 @@ import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,9 +50,9 @@ public class FileStoreSourceReaderTest {
                 new UpdateSchema(
                         new RowType(
                                 Arrays.asList(
-                                        new RowType.RowField("k", new BigIntType()),
-                                        new RowType.RowField("v", new BigIntType()),
-                                        new RowType.RowField("default", new IntType()))),
+                                        new DataField(0, "k", new BigIntType()),
+                                        new DataField(1, "v", new BigIntType()),
+                                        new DataField(2, "default", new IntType()))),
                         Collections.singletonList("default"),
                         Arrays.asList("k", "default"),
                         Collections.emptyMap(),

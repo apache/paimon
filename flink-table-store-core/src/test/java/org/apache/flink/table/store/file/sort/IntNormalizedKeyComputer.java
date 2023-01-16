@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.sort;
 
-import org.apache.flink.core.memory.MemorySegment;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.codegen.NormalizedKeyComputer;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.utils.SortUtil;
 
 /** Example for int {@link NormalizedKeyComputer}. */
@@ -29,7 +29,7 @@ public class IntNormalizedKeyComputer implements NormalizedKeyComputer {
     public static final IntNormalizedKeyComputer INSTANCE = new IntNormalizedKeyComputer();
 
     @Override
-    public void putKey(RowData record, MemorySegment target, int offset) {
+    public void putKey(InternalRow record, MemorySegment target, int offset) {
         // write first null byte.
         if (record.isNullAt(0)) {
             SortUtil.minNormalizedKey(target, offset, 5);

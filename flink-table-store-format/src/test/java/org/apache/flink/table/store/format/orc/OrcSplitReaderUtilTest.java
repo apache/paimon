@@ -18,20 +18,20 @@
 
 package org.apache.flink.table.store.format.orc;
 
-import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.store.format.orc.reader.OrcSplitReaderUtil;
-import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
-import static org.apache.flink.table.store.format.orc.reader.OrcSplitReaderUtil.logicalTypeToOrcType;
+import static org.apache.flink.table.store.format.orc.reader.OrcSplitReaderUtil.toOrcType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link OrcSplitReaderUtil}. */
 class OrcSplitReaderUtilTest {
 
     @Test
-    void testLogicalTypeToOrcType() {
+    void testDataTypeToOrcType() {
         test("boolean", DataTypes.BOOLEAN());
         test("char(123)", DataTypes.CHAR(123));
         test("varchar(123)", DataTypes.VARCHAR(123));
@@ -50,18 +50,19 @@ class OrcSplitReaderUtilTest {
         test(
                 "struct<int0:int,str1:string,double2:double,row3:struct<int0:int,int1:int>>",
                 DataTypes.ROW(
-                        DataTypes.FIELD("int0", DataTypes.INT()),
-                        DataTypes.FIELD("str1", DataTypes.STRING()),
-                        DataTypes.FIELD("double2", DataTypes.DOUBLE()),
+                        DataTypes.FIELD(0, "int0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "str1", DataTypes.STRING()),
+                        DataTypes.FIELD(2, "double2", DataTypes.DOUBLE()),
                         DataTypes.FIELD(
+                                3,
                                 "row3",
                                 DataTypes.ROW(
-                                        DataTypes.FIELD("int0", DataTypes.INT()),
-                                        DataTypes.FIELD("int1", DataTypes.INT())))));
+                                        DataTypes.FIELD(4, "int0", DataTypes.INT()),
+                                        DataTypes.FIELD(5, "int1", DataTypes.INT())))));
         test("decimal(4,2)", DataTypes.DECIMAL(4, 2));
     }
 
     private void test(String expected, DataType type) {
-        assertThat(logicalTypeToOrcType(type.getLogicalType())).hasToString(expected);
+        assertThat(toOrcType(type)).hasToString(expected);
     }
 }

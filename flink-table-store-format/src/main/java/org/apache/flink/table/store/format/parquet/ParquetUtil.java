@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.format.parquet;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.DataField;
 
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.statistics.Statistics;
@@ -77,13 +77,13 @@ public class ParquetUtil {
     }
 
     static void assertStatsClass(
-            RowType.RowField field, Statistics stats, Class<? extends Statistics> expectedClass) {
+            DataField field, Statistics stats, Class<? extends Statistics> expectedClass) {
         if (!expectedClass.isInstance(stats)) {
             throw new IllegalArgumentException(
                     "Expecting "
                             + expectedClass.getName()
                             + " for field "
-                            + field.asSummaryString()
+                            + field.asSQLString()
                             + " but found "
                             + stats.getClass().getName());
         }

@@ -21,13 +21,12 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.GenericMapData;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.writer.BinaryRowWriter;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.BinaryRowWriter;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericMap;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
@@ -44,9 +43,10 @@ import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -80,18 +80,18 @@ public abstract class FileStoreTableTestBase {
 
     protected static final RowType ROW_TYPE =
             RowType.of(
-                    new LogicalType[] {
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.BIGINT().getLogicalType(),
-                        DataTypes.BINARY(1).getLogicalType(),
-                        DataTypes.VARBINARY(1).getLogicalType(),
-                        DataTypes.MAP(DataTypes.VARCHAR(8), DataTypes.VARCHAR(8)).getLogicalType(),
-                        DataTypes.MULTISET(DataTypes.VARCHAR(8)).getLogicalType()
+                    new DataType[] {
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.BIGINT(),
+                        DataTypes.BINARY(1),
+                        DataTypes.VARBINARY(1),
+                        DataTypes.MAP(DataTypes.VARCHAR(8), DataTypes.VARCHAR(8)),
+                        DataTypes.MULTISET(DataTypes.VARCHAR(8))
                     },
                     new String[] {"pt", "a", "b", "c", "d", "e", "f"});
     protected static final int[] PROJECTION = new int[] {2, 1};
-    protected static final Function<RowData, String> BATCH_ROW_TO_STRING =
+    protected static final Function<InternalRow, String> BATCH_ROW_TO_STRING =
             rowData ->
                     rowData.getInt(0)
                             + "|"
@@ -109,17 +109,17 @@ public abstract class FileStoreTableTestBase {
                                     rowData.getMap(5).valueArray().getString(0))
                             + "|"
                             + rowData.getMap(6).keyArray().getString(0).toString();
-    protected static final Function<RowData, String> BATCH_PROJECTED_ROW_TO_STRING =
+    protected static final Function<InternalRow, String> BATCH_PROJECTED_ROW_TO_STRING =
             rowData -> rowData.getLong(0) + "|" + rowData.getInt(1);
-    protected static final Function<RowData, String> STREAMING_ROW_TO_STRING =
+    protected static final Function<InternalRow, String> STREAMING_ROW_TO_STRING =
             rowData ->
                     (rowData.getRowKind() == RowKind.INSERT ? "+" : "-")
                             + BATCH_ROW_TO_STRING.apply(rowData);
-    protected static final Function<RowData, String> STREAMING_PROJECTED_ROW_TO_STRING =
+    protected static final Function<InternalRow, String> STREAMING_PROJECTED_ROW_TO_STRING =
             rowData ->
                     (rowData.getRowKind() == RowKind.INSERT ? "+" : "-")
                             + BATCH_PROJECTED_ROW_TO_STRING.apply(rowData);
-    protected static final Function<RowData, String> CHANGELOG_ROW_TO_STRING =
+    protected static final Function<InternalRow, String> CHANGELOG_ROW_TO_STRING =
             rowData ->
                     rowData.getRowKind().shortString() + " " + BATCH_ROW_TO_STRING.apply(rowData);
 
@@ -360,32 +360,32 @@ public abstract class FileStoreTableTestBase {
     protected List<String> getResult(
             TableRead read,
             List<Split> splits,
-            BinaryRowData partition,
+            BinaryRow partition,
             int bucket,
-            Function<RowData, String> rowDataToString)
+            Function<InternalRow, String> rowDataToString)
             throws Exception {
         return getResult(read, getSplitsFor(splits, partition, bucket), rowDataToString);
     }
 
     protected List<String> getResult(
-            TableRead read, List<Split> splits, Function<RowData, String> rowDataToString)
+            TableRead read, List<Split> splits, Function<InternalRow, String> rowDataToString)
             throws Exception {
-        List<ReaderSupplier<RowData>> readers = new ArrayList<>();
+        List<ReaderSupplier<InternalRow>> readers = new ArrayList<>();
         for (Split split : splits) {
             readers.add(() -> read.createReader(split));
         }
-        RecordReader<RowData> recordReader = ConcatRecordReader.create(readers);
-        RecordReaderIterator<RowData> iterator = new RecordReaderIterator<>(recordReader);
+        RecordReader<InternalRow> recordReader = ConcatRecordReader.create(readers);
+        RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(recordReader);
         List<String> result = new ArrayList<>();
         while (iterator.hasNext()) {
-            RowData rowData = iterator.next();
+            InternalRow rowData = iterator.next();
             result.add(rowDataToString.apply(rowData));
         }
         iterator.close();
         return result;
     }
 
-    private List<Split> getSplitsFor(List<Split> splits, BinaryRowData partition, int bucket) {
+    private List<Split> getSplitsFor(List<Split> splits, BinaryRow partition, int bucket) {
         List<Split> result = new ArrayList<>();
         for (Split split : splits) {
             DataSplit dataSplit = (DataSplit) split;
@@ -396,39 +396,41 @@ public abstract class FileStoreTableTestBase {
         return result;
     }
 
-    protected BinaryRowData binaryRow(int a) {
-        BinaryRowData b = new BinaryRowData(1);
+    protected BinaryRow binaryRow(int a) {
+        BinaryRow b = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(b);
         writer.writeInt(0, a);
         writer.complete();
         return b;
     }
 
-    protected GenericRowData rowData(Object... values) {
-        return GenericRowData.of(
+    protected GenericRow rowData(Object... values) {
+        return GenericRow.of(
                 values[0],
                 values[1],
                 values[2],
                 "binary".getBytes(),
                 "varbinary".getBytes(),
-                new GenericMapData(
+                new GenericMap(
                         Collections.singletonMap(
-                                StringData.fromString("mapKey"), StringData.fromString("mapVal"))),
-                new GenericMapData(Collections.singletonMap(StringData.fromString("multiset"), 1)));
+                                BinaryString.fromString("mapKey"),
+                                BinaryString.fromString("mapVal"))),
+                new GenericMap(Collections.singletonMap(BinaryString.fromString("multiset"), 1)));
     }
 
-    protected GenericRowData rowDataWithKind(RowKind rowKind, Object... values) {
-        return GenericRowData.ofKind(
+    protected GenericRow rowDataWithKind(RowKind rowKind, Object... values) {
+        return GenericRow.ofKind(
                 rowKind,
                 values[0],
                 values[1],
                 values[2],
                 "binary".getBytes(),
                 "varbinary".getBytes(),
-                new GenericMapData(
+                new GenericMap(
                         Collections.singletonMap(
-                                StringData.fromString("mapKey"), StringData.fromString("mapVal"))),
-                new GenericMapData(Collections.singletonMap(StringData.fromString("multiset"), 1)));
+                                BinaryString.fromString("mapKey"),
+                                BinaryString.fromString("mapVal"))),
+                new GenericMap(Collections.singletonMap(BinaryString.fromString("multiset"), 1)));
     }
 
     protected FileStoreTable createFileStoreTable(int numOfBucket) throws Exception {

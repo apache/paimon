@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.data;
 
-import org.apache.flink.core.memory.MemorySegment;
-import org.apache.flink.core.memory.MemorySegmentSource;
+import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.flink.table.store.memory.MemorySegmentSource;
 import org.apache.flink.util.MathUtils;
 
 import java.io.EOFException;

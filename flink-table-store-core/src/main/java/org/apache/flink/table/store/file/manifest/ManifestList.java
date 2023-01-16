@@ -22,13 +22,13 @@ import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FormatReaderFactory;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.io.IOException;
 import java.util.List;
@@ -41,13 +41,13 @@ public class ManifestList {
 
     private final ManifestFileMetaSerializer serializer;
     private final FormatReaderFactory readerFactory;
-    private final BulkWriter.Factory<RowData> writerFactory;
+    private final BulkWriter.Factory<InternalRow> writerFactory;
     private final FileStorePathFactory pathFactory;
 
     private ManifestList(
             ManifestFileMetaSerializer serializer,
             FormatReaderFactory readerFactory,
-            BulkWriter.Factory<RowData> writerFactory,
+            BulkWriter.Factory<InternalRow> writerFactory,
             FileStorePathFactory pathFactory) {
         this.serializer = serializer;
         this.readerFactory = readerFactory;
@@ -84,7 +84,7 @@ public class ManifestList {
         FileSystem fs = path.getFileSystem();
         try (FSDataOutputStream out = fs.create(path, FileSystem.WriteMode.NO_OVERWRITE)) {
             // Initialize the bulk writer to accept the ManifestFileMeta.
-            BulkWriter<RowData> writer = writerFactory.create(out);
+            BulkWriter<InternalRow> writer = writerFactory.create(out);
             try {
                 for (ManifestFileMeta manifest : metas) {
                     writer.addElement(serializer.toRow(manifest));

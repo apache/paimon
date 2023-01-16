@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.connector.lookup;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.InternalSerializers;
-import org.apache.flink.table.store.utils.KeyProjectedRowData;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.InternalSerializers;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.KeyProjectedRow;
 import org.apache.flink.table.store.utils.TypeUtils;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.types.RowKind;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -36,22 +36,22 @@ public class PrimaryKeyLookupTable implements LookupTable {
 
     protected final RocksDBValueState tableState;
 
-    protected final Predicate<RowData> recordFilter;
+    protected final Predicate<InternalRow> recordFilter;
 
     protected int[] primaryKeyMapping;
 
-    protected final KeyProjectedRowData primaryKey;
+    protected final KeyProjectedRow primaryKey;
 
     public PrimaryKeyLookupTable(
             RocksDBStateFactory stateFactory,
             RowType rowType,
             List<String> primaryKey,
-            Predicate<RowData> recordFilter,
+            Predicate<InternalRow> recordFilter,
             long lruCacheSize)
             throws IOException {
         List<String> fieldNames = rowType.getFieldNames();
         this.primaryKeyMapping = primaryKey.stream().mapToInt(fieldNames::indexOf).toArray();
-        this.primaryKey = new KeyProjectedRowData(primaryKeyMapping);
+        this.primaryKey = new KeyProjectedRow(primaryKeyMapping);
         this.tableState =
                 stateFactory.valueState(
                         "table",
@@ -62,15 +62,15 @@ public class PrimaryKeyLookupTable implements LookupTable {
     }
 
     @Override
-    public List<RowData> get(RowData key) throws IOException {
-        RowData value = tableState.get(key);
+    public List<InternalRow> get(InternalRow key) throws IOException {
+        InternalRow value = tableState.get(key);
         return value == null ? Collections.emptyList() : Collections.singletonList(value);
     }
 
     @Override
-    public void refresh(Iterator<RowData> incremental) throws IOException {
+    public void refresh(Iterator<InternalRow> incremental) throws IOException {
         while (incremental.hasNext()) {
-            RowData row = incremental.next();
+            InternalRow row = incremental.next();
             primaryKey.replaceRow(row);
             if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
                 if (recordFilter.test(row)) {

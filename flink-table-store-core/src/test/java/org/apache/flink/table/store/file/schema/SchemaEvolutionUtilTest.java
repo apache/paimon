@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.store.file.predicate.IsNotNull;
 import org.apache.flink.table.store.file.predicate.IsNull;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.utils.Projection;
 
@@ -160,27 +160,15 @@ public class SchemaEvolutionUtilTest {
         List<Predicate> predicates = new ArrayList<>();
         predicates.add(
                 new LeafPredicate(
-                        IsNull.INSTANCE,
-                        DataTypes.INT().getLogicalType(),
-                        0,
-                        "c",
-                        Collections.emptyList()));
+                        IsNull.INSTANCE, DataTypes.INT(), 0, "c", Collections.emptyList()));
         // Field 9->e is not exist in data
         predicates.add(
                 new LeafPredicate(
-                        IsNotNull.INSTANCE,
-                        DataTypes.INT().getLogicalType(),
-                        9,
-                        "e",
-                        Collections.emptyList()));
+                        IsNotNull.INSTANCE, DataTypes.INT(), 9, "e", Collections.emptyList()));
         // Field 7->a is not exist in data
         predicates.add(
                 new LeafPredicate(
-                        IsNull.INSTANCE,
-                        DataTypes.INT().getLogicalType(),
-                        7,
-                        "a",
-                        Collections.emptyList()));
+                        IsNull.INSTANCE, DataTypes.INT(), 7, "a", Collections.emptyList()));
 
         List<Predicate> filters =
                 SchemaEvolutionUtil.createDataFilters(tableFields2, dataFields, predicates);
