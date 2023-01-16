@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
 
@@ -39,9 +39,9 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
     }
 
     @Override
-    public RowData toRow(DataFileMeta meta) {
-        return GenericRowData.of(
-                StringData.fromString(meta.fileName()),
+    public InternalRow toRow(DataFileMeta meta) {
+        return GenericRow.of(
+                BinaryString.fromString(meta.fileName()),
                 meta.fileSize(),
                 meta.rowCount(),
                 serializeBinaryRow(meta.minKey()),
@@ -56,7 +56,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
     }
 
     @Override
-    public DataFileMeta fromRow(RowData row) {
+    public DataFileMeta fromRow(InternalRow row) {
         return new DataFileMeta(
                 row.getString(0).toString(),
                 row.getLong(1),

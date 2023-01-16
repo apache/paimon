@@ -22,11 +22,10 @@ import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.store.connector.source.CompactorSourceBuilder;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -38,8 +37,9 @@ import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.test.util.AbstractTestBase;
 
 import org.junit.Assert;
@@ -59,11 +59,8 @@ public class CompactorSinkITCase extends AbstractTestBase {
 
     private static final RowType ROW_TYPE =
             RowType.of(
-                    new LogicalType[] {
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.STRING().getLogicalType()
+                    new DataType[] {
+                        DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.STRING()
                     },
                     new String[] {"k", "v", "hh", "dt"});
 
@@ -83,14 +80,14 @@ public class CompactorSinkITCase extends AbstractTestBase {
         TableWrite write = table.newWrite(commitUser);
         TableCommit commit = table.newCommit(commitUser);
 
-        write.write(rowData(1, 100, 15, StringData.fromString("20221208")));
-        write.write(rowData(1, 100, 16, StringData.fromString("20221208")));
-        write.write(rowData(1, 100, 15, StringData.fromString("20221209")));
+        write.write(rowData(1, 100, 15, BinaryString.fromString("20221208")));
+        write.write(rowData(1, 100, 16, BinaryString.fromString("20221208")));
+        write.write(rowData(1, 100, 15, BinaryString.fromString("20221209")));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        write.write(rowData(2, 200, 15, StringData.fromString("20221208")));
-        write.write(rowData(2, 200, 16, StringData.fromString("20221208")));
-        write.write(rowData(2, 200, 15, StringData.fromString("20221209")));
+        write.write(rowData(2, 200, 15, BinaryString.fromString("20221208")));
+        write.write(rowData(2, 200, 16, BinaryString.fromString("20221208")));
+        write.write(rowData(2, 200, 15, BinaryString.fromString("20221209")));
         commit.commit(1, write.prepareCommit(true, 1));
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
@@ -142,8 +139,8 @@ public class CompactorSinkITCase extends AbstractTestBase {
         return Arrays.asList(partition1, partition2);
     }
 
-    private GenericRowData rowData(Object... values) {
-        return GenericRowData.of(values);
+    private GenericRow rowData(Object... values) {
+        return GenericRow.of(values);
     }
 
     private FileStoreTable createFileStoreTable() throws Exception {

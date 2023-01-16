@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.format;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.RecordReader;
 
 import java.io.IOException;
@@ -28,5 +28,5 @@ import java.io.Serializable;
 /** A factory to create {@link RecordReader} for file. */
 public interface FormatReaderFactory extends Serializable {
 
-    RecordReader<RowData> createReader(Path file) throws IOException;
+    RecordReader<InternalRow> createReader(Path file) throws IOException;
 }

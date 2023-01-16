@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.format.parquet.reader;
 
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.data.columnar.Dictionary;
 
 import static org.apache.flink.table.store.format.parquet.reader.TimestampColumnReader.decodeInt96ToTimestamp;
@@ -58,7 +58,7 @@ public final class ParquetDictionary implements Dictionary {
     }
 
     @Override
-    public TimestampData decodeToTimestamp(int id) {
+    public Timestamp decodeToTimestamp(int id) {
         return decodeInt96ToTimestamp(true, dictionary, id);
     }
 }

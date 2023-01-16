@@ -21,7 +21,7 @@ package org.apache.flink.table.store.format.avro;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.IteratorResultIterator;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FormatReaderFactory;
@@ -60,7 +60,7 @@ public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
         return createReader(file, createReusedAvroRecord(), createConverter());
     }
 
-    private AvroReader createReader(Path file, A reuse, Function<A, RowData> converter)
+    private AvroReader createReader(Path file, A reuse, Function<A, InternalRow> converter)
             throws IOException {
         long end = file.getFileSystem().getFileStatus(file).getLen();
         return new AvroReader(file, 0, end, -1, 0, reuse, converter);
@@ -68,12 +68,12 @@ public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
 
     protected abstract A createReusedAvroRecord();
 
-    protected abstract Function<A, RowData> createConverter();
+    protected abstract Function<A, InternalRow> createConverter();
 
-    private class AvroReader implements RecordReader<RowData> {
+    private class AvroReader implements RecordReader<InternalRow> {
 
         private final DataFileReader<A> reader;
-        private final Function<A, RowData> converter;
+        private final Function<A, InternalRow> converter;
 
         private final long end;
         private final Pool<A> pool;
@@ -87,7 +87,7 @@ public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
                 long blockStart,
                 long recordsToSkip,
                 A reuse,
-                Function<A, RowData> converter)
+                Function<A, InternalRow> converter)
                 throws IOException {
             this.reader = createReaderFromPath(path);
             if (blockStart >= 0) {
@@ -118,7 +118,7 @@ public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
 
         @Nullable
         @Override
-        public RecordIterator<RowData> readBatch() throws IOException {
+        public RecordIterator<InternalRow> readBatch() throws IOException {
             A reuse;
             try {
                 reuse = pool.pollEntry();
@@ -133,7 +133,7 @@ public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
                 return null;
             }
 
-            Iterator<RowData> iterator =
+            Iterator<InternalRow> iterator =
                     new AvroBlockIterator(
                             reader.getBlockCount() - currentRecordsToSkip,
                             reader,
@@ -155,18 +155,18 @@ public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
         }
     }
 
-    private class AvroBlockIterator implements Iterator<RowData> {
+    private class AvroBlockIterator implements Iterator<InternalRow> {
 
         private long numRecordsRemaining;
         private final DataFileReader<A> reader;
         private final A reuse;
-        private final Function<A, RowData> converter;
+        private final Function<A, InternalRow> converter;
 
         private AvroBlockIterator(
                 long numRecordsRemaining,
                 DataFileReader<A> reader,
                 A reuse,
-                Function<A, RowData> converter) {
+                Function<A, InternalRow> converter) {
             this.numRecordsRemaining = numRecordsRemaining;
             this.reader = reader;
             this.reuse = reuse;
@@ -179,7 +179,7 @@ public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
         }
 
         @Override
-        public RowData next() {
+        public InternalRow next() {
             try {
                 numRecordsRemaining--;
                 // reader.next merely deserialize bytes in memory to java objects

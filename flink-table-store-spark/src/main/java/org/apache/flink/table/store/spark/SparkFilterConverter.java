@@ -20,8 +20,8 @@ package org.apache.flink.table.store.spark;
 
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.spark.sql.sources.And;
 import org.apache.spark.sql.sources.EqualTo;
@@ -140,7 +140,7 @@ public class SparkFilterConverter {
     }
 
     private Object convertLiteral(int index, Object value) {
-        LogicalType type = rowType.getTypeAt(index);
+        DataType type = rowType.getTypeAt(index);
         return convertJavaObject(type, value);
     }
 }

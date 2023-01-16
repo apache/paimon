@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.conversion.RowRowConverter;
+import org.apache.flink.table.store.data.DataFormatTestUtil;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaChange;
@@ -33,13 +33,11 @@ import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.FloatType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.utils.TypeConversions;
-import org.apache.flink.types.Row;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.FloatType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -89,8 +87,8 @@ public class SchemaEvolutionTest {
         FileStoreTable table = FileStoreTableFactory.create(tablePath);
 
         TableWrite write = table.newWrite(commitUser);
-        write.write(GenericRowData.of(1, 1L));
-        write.write(GenericRowData.of(2, 2L));
+        write.write(GenericRow.of(1, 1L));
+        write.write(GenericRow.of(2, 2L));
         table.newCommit(commitUser).commit(0, write.prepareCommit(true, 0));
         write.close();
 
@@ -99,33 +97,29 @@ public class SchemaEvolutionTest {
         table = FileStoreTableFactory.create(tablePath);
 
         write = table.newWrite(commitUser);
-        write.write(GenericRowData.of(3, 3L, 3L));
-        write.write(GenericRowData.of(4, 4L, 4L));
+        write.write(GenericRow.of(3, 3L, 3L));
+        write.write(GenericRow.of(4, 4L, 4L));
         table.newCommit(commitUser).commit(1, write.prepareCommit(true, 1));
         write.close();
 
         // read all
-        List<Row> rows = readRecords(table, null);
+        List<String> rows = readRecords(table, null);
         assertThat(rows)
-                .containsExactlyInAnyOrder(
-                        Row.of(1, 1L, null),
-                        Row.of(2, 2L, null),
-                        Row.of(3, 3L, 3L),
-                        Row.of(4, 4L, 4L));
+                .containsExactlyInAnyOrder("1, 1, NULL", "2, 2, NULL", "3, 3, 3", "4, 4, 4");
 
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
 
         // read where f0 = 1 (filter on old field)
         rows = readRecords(table, builder.equal(0, 1));
-        assertThat(rows).containsExactlyInAnyOrder(Row.of(1, 1L, null), Row.of(2, 2L, null));
+        assertThat(rows).containsExactlyInAnyOrder("1, 1, NULL", "2, 2, NULL");
 
         // read where f3 is null (filter on new field)
         rows = readRecords(table, builder.isNull(2));
-        assertThat(rows).containsExactlyInAnyOrder(Row.of(1, 1L, null), Row.of(2, 2L, null));
+        assertThat(rows).containsExactlyInAnyOrder("1, 1, NULL", "2, 2, NULL");
 
         // read where f3 = 3 (filter on new field)
         rows = readRecords(table, builder.equal(2, 3L));
-        assertThat(rows).containsExactlyInAnyOrder(Row.of(3, 3L, 3L), Row.of(4, 4L, 4L));
+        assertThat(rows).containsExactlyInAnyOrder("3, 3, 3", "4, 4, 4");
 
         // test add not null field
         assertThatThrownBy(
@@ -289,7 +283,7 @@ public class SchemaEvolutionTest {
         UpdateSchema updateSchema1 =
                 new UpdateSchema(
                         RowType.of(
-                                new LogicalType[] {new IntType(), new BigIntType()},
+                                new DataType[] {new IntType(), new BigIntType()},
                                 new String[] {"f0", "_VALUE_COUNT"}),
                         Collections.emptyList(),
                         Collections.emptyList(),
@@ -305,7 +299,7 @@ public class SchemaEvolutionTest {
         UpdateSchema updateSchema2 =
                 new UpdateSchema(
                         RowType.of(
-                                new LogicalType[] {new IntType(), new BigIntType()},
+                                new DataType[] {new IntType(), new BigIntType()},
                                 new String[] {"f0", "_KEY_f1"}),
                         Collections.emptyList(),
                         Collections.emptyList(),
@@ -339,17 +333,20 @@ public class SchemaEvolutionTest {
                                 "_VALUE_KIND", SYSTEM_FIELD_NAMES.toString()));
     }
 
-    private List<Row> readRecords(FileStoreTable table, Predicate filter) throws IOException {
-        RowRowConverter converter =
-                RowRowConverter.create(
-                        TypeConversions.fromLogicalToDataType(table.schema().logicalRowType()));
-        List<Row> results = new ArrayList<>();
-        forEachRemaining(table, filter, rowData -> results.add(converter.toExternal(rowData)));
+    private List<String> readRecords(FileStoreTable table, Predicate filter) throws IOException {
+        List<String> results = new ArrayList<>();
+        forEachRemaining(
+                table,
+                filter,
+                rowData ->
+                        results.add(
+                                DataFormatTestUtil.toStringNoRowKind(rowData, table.rowType())));
         return results;
     }
 
     private void forEachRemaining(
-            FileStoreTable table, Predicate filter, Consumer<RowData> consumer) throws IOException {
+            FileStoreTable table, Predicate filter, Consumer<InternalRow> consumer)
+            throws IOException {
         TableScan scan = table.newScan();
         if (filter != null) {
             scan.withFilter(filter);
@@ -359,7 +356,7 @@ public class SchemaEvolutionTest {
             if (filter != null) {
                 read.withFilter(filter);
             }
-            RecordReader<RowData> reader = read.createReader(split);
+            RecordReader<InternalRow> reader = read.createReader(split);
             RecordReaderUtils.forEachRemaining(reader, consumer);
         }
     }

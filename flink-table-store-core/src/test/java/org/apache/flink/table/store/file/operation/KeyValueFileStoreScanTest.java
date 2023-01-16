@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestFileStore;
@@ -31,8 +31,8 @@ import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -91,14 +91,14 @@ public class KeyValueFileStoreScanTest {
     public void testWithPartitionFilter() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<KeyValue> data = generateData(random.nextInt(1000) + 1);
-        List<BinaryRowData> partitions =
+        List<BinaryRow> partitions =
                 data.stream()
                         .map(kv -> gen.getPartition(kv))
                         .distinct()
                         .collect(Collectors.toList());
         Snapshot snapshot = writeData(data);
 
-        Set<BinaryRowData> wantedPartitions = new HashSet<>();
+        Set<BinaryRow> wantedPartitions = new HashSet<>();
         for (int i = random.nextInt(partitions.size() + 1); i > 0; i--) {
             wantedPartitions.add(partitions.get(random.nextInt(partitions.size())));
         }
@@ -107,7 +107,7 @@ public class KeyValueFileStoreScanTest {
         scan.withSnapshot(snapshot.id());
         scan.withPartitionFilter(new ArrayList<>(wantedPartitions));
 
-        Map<BinaryRowData, BinaryRowData> expected =
+        Map<BinaryRow, BinaryRow> expected =
                 store.toKvMap(
                         wantedPartitions.isEmpty()
                                 ? data
@@ -133,7 +133,7 @@ public class KeyValueFileStoreScanTest {
         scan.withKeyFilter(
                 new PredicateBuilder(RowType.of(new IntType(false))).equal(0, wantedShopId));
 
-        Map<BinaryRowData, BinaryRowData> expected =
+        Map<BinaryRow, BinaryRow> expected =
                 store.toKvMap(
                         data.stream()
                                 .filter(kv -> kv.key().getInt(0) == wantedShopId)
@@ -153,7 +153,7 @@ public class KeyValueFileStoreScanTest {
         scan.withSnapshot(snapshot.id());
         scan.withBucket(wantedBucket);
 
-        Map<BinaryRowData, BinaryRowData> expected =
+        Map<BinaryRow, BinaryRow> expected =
                 store.toKvMap(
                         data.stream()
                                 .filter(kv -> getBucket(kv) == wantedBucket)
@@ -179,7 +179,7 @@ public class KeyValueFileStoreScanTest {
         FileStoreScan scan = store.newScan();
         scan.withSnapshot(wantedSnapshot);
 
-        Map<BinaryRowData, BinaryRowData> expected =
+        Map<BinaryRow, BinaryRow> expected =
                 store.toKvMap(
                         allData.subList(0, wantedCommit + 1).stream()
                                 .flatMap(Collection::stream)
@@ -206,29 +206,29 @@ public class KeyValueFileStoreScanTest {
 
         List<KeyValue> expectedKvs = store.readKvsFromSnapshot(wantedSnapshotId);
         gen.sort(expectedKvs);
-        Map<BinaryRowData, BinaryRowData> expected = store.toKvMap(expectedKvs);
+        Map<BinaryRow, BinaryRow> expected = store.toKvMap(expectedKvs);
         runTestExactMatch(scan, null, expected);
     }
 
     private void runTestExactMatch(
-            FileStoreScan scan, Long expectedSnapshotId, Map<BinaryRowData, BinaryRowData> expected)
+            FileStoreScan scan, Long expectedSnapshotId, Map<BinaryRow, BinaryRow> expected)
             throws Exception {
-        Map<BinaryRowData, BinaryRowData> actual = getActualKvMap(scan, expectedSnapshotId);
+        Map<BinaryRow, BinaryRow> actual = getActualKvMap(scan, expectedSnapshotId);
         assertThat(actual).isEqualTo(expected);
     }
 
     private void runTestContainsAll(
-            FileStoreScan scan, Long expectedSnapshotId, Map<BinaryRowData, BinaryRowData> expected)
+            FileStoreScan scan, Long expectedSnapshotId, Map<BinaryRow, BinaryRow> expected)
             throws Exception {
-        Map<BinaryRowData, BinaryRowData> actual = getActualKvMap(scan, expectedSnapshotId);
-        for (Map.Entry<BinaryRowData, BinaryRowData> entry : expected.entrySet()) {
+        Map<BinaryRow, BinaryRow> actual = getActualKvMap(scan, expectedSnapshotId);
+        for (Map.Entry<BinaryRow, BinaryRow> entry : expected.entrySet()) {
             assertThat(actual).containsKey(entry.getKey());
             assertThat(actual.get(entry.getKey())).isEqualTo(entry.getValue());
         }
     }
 
-    private Map<BinaryRowData, BinaryRowData> getActualKvMap(
-            FileStoreScan scan, Long expectedSnapshotId) throws Exception {
+    private Map<BinaryRow, BinaryRow> getActualKvMap(FileStoreScan scan, Long expectedSnapshotId)
+            throws Exception {
         FileStoreScan.Plan plan = scan.plan();
         assertThat(plan.snapshotId()).isEqualTo(expectedSnapshotId);
 

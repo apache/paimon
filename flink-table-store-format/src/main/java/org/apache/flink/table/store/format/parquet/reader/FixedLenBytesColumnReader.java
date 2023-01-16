@@ -31,7 +31,7 @@ import org.apache.parquet.schema.PrimitiveType;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-/** Fixed length bytes {@link ColumnReader}, just for decimal. */
+/** Fixed length bytes {@link ColumnReader}, just for Decimal. */
 public class FixedLenBytesColumnReader<VECTOR extends WritableColumnVector>
         extends AbstractColumnReader<VECTOR> {
 

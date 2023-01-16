@@ -19,14 +19,15 @@
 package org.apache.flink.table.store.format.parquet;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FileStatsExtractor;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataTypeRoot;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.DateTimeUtils;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.LogicalTypeRoot;
-import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.parquet.column.statistics.BinaryStatistics;
 import org.apache.parquet.column.statistics.BooleanStatistics;
@@ -68,20 +69,20 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
         return IntStream.range(0, rowType.getFieldCount())
                 .mapToObj(
                         i -> {
-                            RowType.RowField field = rowType.getFields().get(i);
-                            return toFieldStats(field, stats.get(field.getName()));
+                            DataField field = rowType.getFields().get(i);
+                            return toFieldStats(field, stats.get(field.name()));
                         })
                 .toArray(FieldStats[]::new);
     }
 
-    private FieldStats toFieldStats(RowType.RowField field, Statistics stats) {
-        LogicalTypeRoot flinkType = field.getType().getTypeRoot();
+    private FieldStats toFieldStats(DataField field, Statistics stats) {
+        DataTypeRoot flinkType = field.type().getTypeRoot();
         if (stats == null
-                || flinkType == LogicalTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE
-                || flinkType == LogicalTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE) {
+                || flinkType == DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE
+                || flinkType == DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE) {
             throw new UnsupportedOperationException(
                     "type "
-                            + field.getType().getTypeRoot()
+                            + field.type().getTypeRoot()
                             + " not supported for extracting statistics in parquet format");
         }
         long nullCount = stats.getNumNulls();
@@ -95,8 +96,8 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
                 assertStatsClass(field, stats, BinaryStatistics.class);
                 BinaryStatistics binaryStats = (BinaryStatistics) stats;
                 return new FieldStats(
-                        StringData.fromString(binaryStats.minAsString()),
-                        StringData.fromString(binaryStats.maxAsString()),
+                        BinaryString.fromString(binaryStats.minAsString()),
+                        BinaryString.fromString(binaryStats.maxAsString()),
                         nullCount);
             case BOOLEAN:
                 assertStatsClass(field, stats, BooleanStatistics.class);
@@ -104,7 +105,7 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
                 return new FieldStats(boolStats.getMin(), boolStats.getMax(), nullCount);
             case DECIMAL:
                 PrimitiveType primitive = stats.type();
-                DecimalType decimalType = (DecimalType) (field.getType());
+                DecimalType decimalType = (DecimalType) (field.type());
                 int precision = decimalType.getPrecision();
                 int scale = decimalType.getScale();
                 if (primitive.getOriginalType() != null
@@ -162,7 +163,7 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
      */
     private FieldStats convertStatsToDecimalFieldStats(
             PrimitiveType primitive,
-            RowType.RowField field,
+            DataField field,
             Statistics stats,
             int precision,
             int scale,
@@ -173,11 +174,11 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
                 assertStatsClass(field, stats, BinaryStatistics.class);
                 BinaryStatistics decimalStats = (BinaryStatistics) stats;
                 return new FieldStats(
-                        DecimalData.fromBigDecimal(
+                        Decimal.fromBigDecimal(
                                 new BigDecimal(new BigInteger(decimalStats.getMinBytes()), scale),
                                 precision,
                                 scale),
-                        DecimalData.fromBigDecimal(
+                        Decimal.fromBigDecimal(
                                 new BigDecimal(new BigInteger(decimalStats.getMaxBytes()), scale),
                                 precision,
                                 scale),
@@ -186,15 +187,15 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
                 assertStatsClass(field, stats, LongStatistics.class);
                 LongStatistics longStats = (LongStatistics) stats;
                 return new FieldStats(
-                        DecimalData.fromUnscaledLong(longStats.getMin(), precision, scale),
-                        DecimalData.fromUnscaledLong(longStats.getMax(), precision, scale),
+                        Decimal.fromUnscaledLong(longStats.getMin(), precision, scale),
+                        Decimal.fromUnscaledLong(longStats.getMax(), precision, scale),
                         nullCount);
             case INT32:
                 assertStatsClass(field, stats, IntStatistics.class);
                 IntStatistics intStats = (IntStatistics) stats;
                 return new FieldStats(
-                        DecimalData.fromUnscaledLong(intStats.getMin(), precision, scale),
-                        DecimalData.fromUnscaledLong(intStats.getMax(), precision, scale),
+                        Decimal.fromUnscaledLong(intStats.getMin(), precision, scale),
+                        Decimal.fromUnscaledLong(intStats.getMax(), precision, scale),
                         nullCount);
             default:
                 return new FieldStats(null, null, nullCount);

@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.file.stats;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.writer.BinaryRowWriter;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.BinaryRowWriter;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.format.FieldStats;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -40,11 +40,11 @@ public class BinaryTableStatsTest {
         List<Integer> maxList = Arrays.asList(11, 12, 13, 14, 15, 16, 17, 18, 19);
         long[] nullCounts = new long[] {0L, 1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L};
 
-        BinaryRowData minRowData = binaryRow(minList);
-        BinaryRowData maxRowData = binaryRow(maxList);
+        BinaryRow minRowData = binaryRow(minList);
+        BinaryRow maxRowData = binaryRow(maxList);
         BinaryTableStats tableStats1 = new BinaryTableStats(minRowData, maxRowData, nullCounts);
 
-        RowData rowData = tableStats1.toRowData();
+        InternalRow rowData = tableStats1.toRowData();
         BinaryTableStats tableStats2 = new BinaryTableStats(rowData);
         assertThat(tableStats1.min()).isEqualTo(tableStats2.min());
         assertThat(tableStats1.max()).isEqualTo(tableStats2.max());
@@ -81,8 +81,8 @@ public class BinaryTableStatsTest {
         assertThat(tableStats3.fields(serializer)).isEqualTo(fieldStatsArray2);
     }
 
-    private BinaryRowData binaryRow(List<Integer> valueList) {
-        BinaryRowData b = new BinaryRowData(valueList.size());
+    private BinaryRow binaryRow(List<Integer> valueList) {
+        BinaryRow b = new BinaryRow(valueList.size());
         BinaryRowWriter writer = new BinaryRowWriter(b);
         for (int i = 0; i < valueList.size(); i++) {
             writer.writeInt(i, valueList.get(i));

@@ -18,11 +18,9 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.data.MapData;
+import org.apache.flink.table.store.data.InternalMap;
 
 /** Map column vector. */
-@Internal
 public interface MapColumnVector extends ColumnVector {
-    MapData getMap(int i);
+    InternalMap getMap(int i);
 }

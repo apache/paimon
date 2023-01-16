@@ -26,7 +26,7 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.types.LogicalTypeConversion;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,8 +53,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
         writeAndCheckFileResult(
                 schemas -> null,
                 (files, schemas) -> {
-                    PredicateBuilder builder =
-                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_1_FIELDS));
+                    PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().plan().splits();
 
@@ -97,8 +96,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
     public void testReadFilterKeyField() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
-                    PredicateBuilder builder =
-                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_0_FIELDS));
+                    PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_0_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     // scan filter with "kt" = 114 in schema0
                     List<Split> splits =
@@ -109,8 +107,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                     return null;
                 },
                 (files, schemas) -> {
-                    PredicateBuilder builder =
-                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_1_FIELDS));
+                    PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
 
                     // scan filter with "kt" = 114 in schema1
@@ -138,8 +135,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
     public void testStreamingFilter() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
-                    PredicateBuilder builder =
-                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_0_FIELDS));
+                    PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_0_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
                     // filter with "b" = 15 in schema0
@@ -155,8 +151,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                     return null;
                 },
                 (files, schemas) -> {
-                    PredicateBuilder builder =
-                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_1_FIELDS));
+                    PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
 
@@ -189,8 +184,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
     public void testStreamingFilterKey() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
-                    PredicateBuilder builder =
-                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_0_FIELDS));
+                    PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_0_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
                     // filter with "kt" = 116 in schema0
@@ -203,8 +197,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                     return null;
                 },
                 (files, schemas) -> {
-                    PredicateBuilder builder =
-                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_1_FIELDS));
+                    PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
 

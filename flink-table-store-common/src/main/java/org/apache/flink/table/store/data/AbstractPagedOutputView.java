@@ -20,8 +20,8 @@ package org.apache.flink.table.store.data;
 
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
-import org.apache.flink.core.memory.MemorySegment;
-import org.apache.flink.core.memory.MemorySegmentWritable;
+import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.flink.table.store.memory.MemorySegmentWritable;
 
 import java.io.IOException;
 import java.io.UTFDataFormatException;

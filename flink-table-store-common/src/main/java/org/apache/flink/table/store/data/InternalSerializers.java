@@ -28,26 +28,26 @@ import org.apache.flink.api.common.typeutils.base.IntSerializer;
 import org.apache.flink.api.common.typeutils.base.LongSerializer;
 import org.apache.flink.api.common.typeutils.base.ShortSerializer;
 import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.MapType;
-import org.apache.flink.table.types.logical.MultisetType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.MultisetType;
+import org.apache.flink.table.store.types.RowType;
 
-import static org.apache.flink.table.types.logical.utils.LogicalTypeChecks.getPrecision;
-import static org.apache.flink.table.types.logical.utils.LogicalTypeChecks.getScale;
+import static org.apache.flink.table.store.types.DataTypeChecks.getFieldTypes;
+import static org.apache.flink.table.store.types.DataTypeChecks.getPrecision;
+import static org.apache.flink.table.store.types.DataTypeChecks.getScale;
 
-/** {@link TypeSerializer} of {@link LogicalType} for internal data structures. */
+/** {@link TypeSerializer} of {@link DataType} for internal data structures. */
 @Internal
 public final class InternalSerializers {
 
     /**
-     * Creates a {@link TypeSerializer} for internal data structures of the given {@link
-     * LogicalType}.
+     * Creates a {@link TypeSerializer} for internal data structures of the given {@link DataType}.
      */
     @SuppressWarnings("unchecked")
-    public static <T> TypeSerializer<T> create(LogicalType type) {
+    public static <T> TypeSerializer<T> create(DataType type) {
         return (TypeSerializer<T>) createInternal(type);
     }
 
@@ -58,19 +58,19 @@ public final class InternalSerializers {
         return (RowDataSerializer) createInternal(type);
     }
 
-    private static TypeSerializer<?> createInternal(LogicalType type) {
+    private static TypeSerializer<?> createInternal(DataType type) {
         // ordered by type root definition
         switch (type.getTypeRoot()) {
             case CHAR:
             case VARCHAR:
-                return StringDataSerializer.INSTANCE;
+                return BinaryStringSerializer.INSTANCE;
             case BOOLEAN:
                 return BooleanSerializer.INSTANCE;
             case BINARY:
             case VARBINARY:
                 return BytePrimitiveArraySerializer.INSTANCE;
             case DECIMAL:
-                return new DecimalDataSerializer(getPrecision(type), getScale(type));
+                return new DecimalSerializer(getPrecision(type), getScale(type));
             case TINYINT:
                 return ByteSerializer.INSTANCE;
             case SMALLINT:
@@ -78,10 +78,8 @@ public final class InternalSerializers {
             case INTEGER:
             case DATE:
             case TIME_WITHOUT_TIME_ZONE:
-            case INTERVAL_YEAR_MONTH:
                 return IntSerializer.INSTANCE;
             case BIGINT:
-            case INTERVAL_DAY_TIME:
                 return LongSerializer.INSTANCE;
             case FLOAT:
                 return FloatSerializer.INSTANCE;
@@ -89,9 +87,7 @@ public final class InternalSerializers {
                 return DoubleSerializer.INSTANCE;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return new TimestampDataSerializer(getPrecision(type));
-            case TIMESTAMP_WITH_TIME_ZONE:
-                throw new UnsupportedOperationException();
+                return new TimestampSerializer(getPrecision(type));
             case ARRAY:
                 return new ArrayDataSerializer(((ArrayType) type).getElementType());
             case MULTISET:
@@ -101,8 +97,7 @@ public final class InternalSerializers {
                 MapType mapType = (MapType) type;
                 return new MapDataSerializer(mapType.getKeyType(), mapType.getValueType());
             case ROW:
-            case STRUCTURED_TYPE:
-                return new RowDataSerializer(type.getChildren().toArray(new LogicalType[0]));
+                return new RowDataSerializer(getFieldTypes(type).toArray(new DataType[0]));
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported type '" + type + "' to get internal serializer");

@@ -18,16 +18,16 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
-import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
 import java.util.List;
 
-/** A {@link java.util.function.Predicate} to filter {@link RowData}. */
-public class PredicateFilter implements java.util.function.Predicate<RowData> {
+/** A {@link java.util.function.Predicate} to filter {@link InternalRow}. */
+public class PredicateFilter implements java.util.function.Predicate<InternalRow> {
 
     private final RowDataToObjectArrayConverter arrayConverter;
     @Nullable private final Predicate predicate;
@@ -42,7 +42,7 @@ public class PredicateFilter implements java.util.function.Predicate<RowData> {
     }
 
     @Override
-    public boolean test(RowData rowData) {
+    public boolean test(InternalRow rowData) {
         return predicate == null || predicate.test(arrayConverter.convert(rowData));
     }
 }

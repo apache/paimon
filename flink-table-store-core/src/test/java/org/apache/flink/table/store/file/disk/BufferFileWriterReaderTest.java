@@ -18,9 +18,8 @@
 
 package org.apache.flink.table.store.file.disk;
 
-import org.apache.flink.core.memory.MemorySegment;
-import org.apache.flink.core.memory.MemorySegmentFactory;
 import org.apache.flink.table.store.file.memory.Buffer;
+import org.apache.flink.table.store.memory.MemorySegment;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -144,7 +143,7 @@ public class BufferFileWriterReaderTest {
     }
 
     private Buffer createBuffer() {
-        return Buffer.create(MemorySegmentFactory.allocateUnpooledSegment(BUFFER_SIZE));
+        return Buffer.create(MemorySegment.allocateHeapMemory(BUFFER_SIZE));
     }
 
     static int fillBufferWithAscendingNumbers(Buffer buffer, int currentNumber, int size) {

@@ -18,11 +18,9 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.data.DecimalData;
+import org.apache.flink.table.store.data.Decimal;
 
 /** Decimal column vector. */
-@Internal
 public interface DecimalColumnVector extends ColumnVector {
-    DecimalData getDecimal(int i, int precision, int scale);
+    Decimal getDecimal(int i, int precision, int scale);
 }

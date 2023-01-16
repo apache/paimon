@@ -18,14 +18,14 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypeRoot;
 import org.apache.flink.table.store.utils.RowDataUtils;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.LogicalTypeRoot;
 
 /** max aggregate a field of a row. */
 public class FieldMaxAgg extends FieldAggregator {
-    public FieldMaxAgg(LogicalType logicalType) {
-        super(logicalType);
+    public FieldMaxAgg(DataType dataType) {
+        super(dataType);
     }
 
     @Override
@@ -35,7 +35,7 @@ public class FieldMaxAgg extends FieldAggregator {
         if (accumulator == null || inputField == null) {
             max = (accumulator == null ? inputField : accumulator);
         } else {
-            LogicalTypeRoot type = fieldType.getTypeRoot();
+            DataTypeRoot type = fieldType.getTypeRoot();
             if (RowDataUtils.compare(accumulator, inputField, type) < 0) {
                 max = inputField;
             } else {

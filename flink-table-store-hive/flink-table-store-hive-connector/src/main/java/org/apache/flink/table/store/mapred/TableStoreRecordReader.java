@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.mapred;
 
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.RowDataContainer;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.utils.ProjectedRowData;
+import org.apache.flink.table.store.utils.ProjectedRow;
 
 import org.apache.hadoop.mapred.RecordReader;
 
@@ -34,7 +34,7 @@ import java.util.List;
 
 /**
  * Base {@link RecordReader} for table store. Reads {@link KeyValue}s from data files and picks out
- * {@link RowData} for Hive to consume.
+ * {@link InternalRow} for Hive to consume.
  *
  * <p>NOTE: To support projection push down, when {@code selectedColumns} does not match {@code
  * columnNames} this reader will still produce records of the original schema. However, columns not
@@ -42,10 +42,10 @@ import java.util.List;
  */
 public class TableStoreRecordReader implements RecordReader<Void, RowDataContainer> {
 
-    private final RecordReaderIterator<RowData> iterator;
+    private final RecordReaderIterator<InternalRow> iterator;
     private final long splitLength;
 
-    @Nullable private final ProjectedRowData reusedProjectedRow;
+    @Nullable private final ProjectedRow reusedProjectedRow;
 
     private float progress;
 
@@ -60,7 +60,7 @@ public class TableStoreRecordReader implements RecordReader<Void, RowDataContain
         } else {
             read.withProjection(selectedColumns.stream().mapToInt(columnNames::indexOf).toArray());
             reusedProjectedRow =
-                    ProjectedRowData.from(
+                    ProjectedRow.from(
                             columnNames.stream().mapToInt(selectedColumns::indexOf).toArray());
         }
 
@@ -71,7 +71,7 @@ public class TableStoreRecordReader implements RecordReader<Void, RowDataContain
 
     @Override
     public boolean next(Void key, RowDataContainer value) throws IOException {
-        RowData rowData = iterator.next();
+        InternalRow rowData = iterator.next();
 
         if (rowData == null) {
             progress = 1;

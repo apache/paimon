@@ -19,10 +19,10 @@
 package org.apache.flink.table.store.format;
 
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.InternalSerializers;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
-import org.apache.flink.table.types.logical.RowType;
 
 /** Collector to extract statistics of each fields from a series of records. */
 public class FieldStatsCollector {
@@ -51,9 +51,9 @@ public class FieldStatsCollector {
      * <p><b>IMPORTANT</b>: Fields of this row should NOT be reused, as they're directly stored in
      * the collector.
      */
-    public void collect(RowData row) {
+    public void collect(InternalRow row) {
         Object[] objects = converter.convert(row);
-        for (int i = 0; i < row.getArity(); i++) {
+        for (int i = 0; i < row.getFieldCount(); i++) {
             Object obj = objects[i];
             if (obj == null) {
                 nullCounts[i]++;

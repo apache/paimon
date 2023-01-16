@@ -21,12 +21,11 @@ package org.apache.flink.table.store.connector.source;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.writer.BinaryRowWriter;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.BinaryRowWriter;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -35,8 +34,9 @@ import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.util.CloseableIterator;
 
@@ -60,11 +60,8 @@ public class CompactorSourceITCase extends AbstractTestBase {
 
     private static final RowType ROW_TYPE =
             RowType.of(
-                    new LogicalType[] {
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.STRING().getLogicalType(),
-                        DataTypes.INT().getLogicalType()
+                    new DataType[] {
+                        DataTypes.INT(), DataTypes.INT(), DataTypes.STRING(), DataTypes.INT()
                     },
                     new String[] {"k", "v", "dt", "hh"});
 
@@ -85,12 +82,12 @@ public class CompactorSourceITCase extends AbstractTestBase {
         TableWrite write = table.newWrite(commitUser);
         TableCommit commit = table.newCommit(commitUser);
 
-        write.write(rowData(1, 1510, StringData.fromString("20221208"), 15));
-        write.write(rowData(2, 1620, StringData.fromString("20221208"), 16));
+        write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
+        write.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        write.write(rowData(1, 1511, StringData.fromString("20221208"), 15));
-        write.write(rowData(1, 1510, StringData.fromString("20221209"), 15));
+        write.write(rowData(1, 1511, BinaryString.fromString("20221208"), 15));
+        write.write(rowData(1, 1510, BinaryString.fromString("20221209"), 15));
         commit.commit(1, write.prepareCommit(true, 1));
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -123,22 +120,22 @@ public class CompactorSourceITCase extends AbstractTestBase {
         TableWrite write = table.newWrite(commitUser);
         TableCommit commit = table.newCommit(commitUser);
 
-        write.write(rowData(1, 1510, StringData.fromString("20221208"), 15));
-        write.write(rowData(2, 1620, StringData.fromString("20221208"), 16));
+        write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
+        write.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        write.write(rowData(1, 1511, StringData.fromString("20221208"), 15));
-        write.write(rowData(1, 1510, StringData.fromString("20221209"), 15));
+        write.write(rowData(1, 1511, BinaryString.fromString("20221208"), 15));
+        write.write(rowData(1, 1510, BinaryString.fromString("20221209"), 15));
         write.compact(binaryRow("20221208", 15), 0, true);
         write.compact(binaryRow("20221209", 15), 0, true);
         commit.commit(1, write.prepareCommit(true, 1));
 
-        write.write(rowData(2, 1520, StringData.fromString("20221208"), 15));
-        write.write(rowData(2, 1621, StringData.fromString("20221208"), 16));
+        write.write(rowData(2, 1520, BinaryString.fromString("20221208"), 15));
+        write.write(rowData(2, 1621, BinaryString.fromString("20221208"), 16));
         commit.commit(2, write.prepareCommit(true, 2));
 
-        write.write(rowData(1, 1512, StringData.fromString("20221208"), 15));
-        write.write(rowData(2, 1620, StringData.fromString("20221209"), 16));
+        write.write(rowData(1, 1512, BinaryString.fromString("20221208"), 15));
+        write.write(rowData(2, 1620, BinaryString.fromString("20221209"), 16));
         commit.commit(3, write.prepareCommit(true, 3));
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -161,9 +158,9 @@ public class CompactorSourceITCase extends AbstractTestBase {
                                 "+I 5|20221208|15|0|1",
                                 "+I 5|20221209|16|0|1"));
 
-        write.write(rowData(2, 1520, StringData.fromString("20221209"), 15));
-        write.write(rowData(1, 1510, StringData.fromString("20221208"), 16));
-        write.write(rowData(1, 1511, StringData.fromString("20221209"), 15));
+        write.write(rowData(2, 1520, BinaryString.fromString("20221209"), 15));
+        write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 16));
+        write.write(rowData(1, 1511, BinaryString.fromString("20221209"), 15));
         commit.commit(4, write.prepareCommit(true, 4));
 
         actual.clear();
@@ -219,17 +216,17 @@ public class CompactorSourceITCase extends AbstractTestBase {
         TableWrite write = table.newWrite(commitUser);
         TableCommit commit = table.newCommit(commitUser);
 
-        write.write(rowData(1, 1510, StringData.fromString("20221208"), 15));
-        write.write(rowData(2, 1620, StringData.fromString("20221208"), 16));
+        write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
+        write.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        write.write(rowData(2, 1520, StringData.fromString("20221208"), 15));
-        write.write(rowData(2, 1520, StringData.fromString("20221209"), 15));
+        write.write(rowData(2, 1520, BinaryString.fromString("20221208"), 15));
+        write.write(rowData(2, 1520, BinaryString.fromString("20221209"), 15));
         commit.commit(1, write.prepareCommit(true, 1));
 
-        write.write(rowData(1, 1511, StringData.fromString("20221208"), 15));
-        write.write(rowData(1, 1610, StringData.fromString("20221208"), 16));
-        write.write(rowData(1, 1510, StringData.fromString("20221209"), 15));
+        write.write(rowData(1, 1511, BinaryString.fromString("20221208"), 15));
+        write.write(rowData(1, 1610, BinaryString.fromString("20221208"), 16));
+        write.write(rowData(1, 1510, BinaryString.fromString("20221209"), 15));
         commit.commit(2, write.prepareCommit(true, 2));
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -270,14 +267,14 @@ public class CompactorSourceITCase extends AbstractTestBase {
                 numFiles);
     }
 
-    private GenericRowData rowData(Object... values) {
-        return GenericRowData.of(values);
+    private GenericRow rowData(Object... values) {
+        return GenericRow.of(values);
     }
 
-    private BinaryRowData binaryRow(String dt, int hh) {
-        BinaryRowData b = new BinaryRowData(2);
+    private BinaryRow binaryRow(String dt, int hh) {
+        BinaryRow b = new BinaryRow(2);
         BinaryRowWriter writer = new BinaryRowWriter(b);
-        writer.writeString(0, StringData.fromString(dt));
+        writer.writeString(0, BinaryString.fromString(dt));
         writer.writeInt(1, hh);
         writer.complete();
         return b;

@@ -18,11 +18,11 @@
 
 package org.apache.flink.table.store.spark;
 
+import org.apache.flink.table.store.data.InternalArray;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.RowDataUtils;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.util.ArrayData;
@@ -39,15 +39,15 @@ import static org.apache.flink.table.store.utils.TypeUtils.timestampPrecision;
 /** Spark {@link ArrayData} to wrap Flink {@code ArrayData}. */
 public class SparkArrayData extends ArrayData {
 
-    private final LogicalType elementType;
+    private final org.apache.flink.table.store.types.DataType elementType;
 
-    private org.apache.flink.table.data.ArrayData array;
+    private InternalArray array;
 
-    public SparkArrayData(LogicalType elementType) {
+    public SparkArrayData(org.apache.flink.table.store.types.DataType elementType) {
         this.elementType = elementType;
     }
 
-    public SparkArrayData replace(org.apache.flink.table.data.ArrayData array) {
+    public SparkArrayData replace(InternalArray array) {
         this.array = array;
         return this;
     }

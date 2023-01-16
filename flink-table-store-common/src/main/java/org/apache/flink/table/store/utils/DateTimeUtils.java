@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.Timestamp;
 
 import java.time.DateTimeException;
 import java.time.LocalDate;
@@ -380,9 +380,9 @@ public class DateTimeUtils {
         return day + (153 * m + 2) / 5 + 365 * y + y / 4 - y / 100 + y / 400 - 32045;
     }
 
-    public static TimestampData parseTimestampData(String dateStr, int precision)
+    public static Timestamp parseTimestampData(String dateStr, int precision)
             throws DateTimeException {
-        return TimestampData.fromLocalDateTime(
+        return Timestamp.fromLocalDateTime(
                 fromTemporalAccessor(DEFAULT_TIMESTAMP_FORMATTER.parse(dateStr), precision));
     }
 
@@ -433,17 +433,17 @@ public class DateTimeUtils {
         return x;
     }
 
-    public static TimestampData truncate(TimestampData ts, int precision) {
+    public static Timestamp truncate(Timestamp ts, int precision) {
         String fraction = Integer.toString(ts.toLocalDateTime().getNano());
         if (fraction.length() <= precision) {
             return ts;
         } else {
             // need to truncate
             if (precision <= 3) {
-                return TimestampData.fromEpochMillis(
+                return Timestamp.fromEpochMillis(
                         zeroLastDigits(ts.getMillisecond(), 3 - precision));
             } else {
-                return TimestampData.fromEpochMillis(
+                return Timestamp.fromEpochMillis(
                         ts.getMillisecond(),
                         (int) zeroLastDigits(ts.getNanoOfMillisecond(), 9 - precision));
             }

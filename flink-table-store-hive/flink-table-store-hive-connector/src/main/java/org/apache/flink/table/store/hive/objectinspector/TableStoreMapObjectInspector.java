@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.ArrayData;
-import org.apache.flink.table.data.MapData;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.data.InternalArray;
+import org.apache.flink.table.store.data.InternalMap;
+import org.apache.flink.table.store.types.DataType;
 
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.objectinspector.MapObjectInspector;
@@ -31,7 +31,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * {@link MapObjectInspector} for {@link MapData}.
+ * {@link MapObjectInspector} for {@link InternalMap}.
  *
  * <p>Behaviors of this class when input is null are compatible with {@link
  * org.apache.hadoop.hive.serde2.objectinspector.StandardMapObjectInspector}.
@@ -40,14 +40,14 @@ public class TableStoreMapObjectInspector implements MapObjectInspector {
 
     private final ObjectInspector keyObjectInspector;
     private final ObjectInspector valueObjectInspector;
-    private final ArrayData.ElementGetter keyGetter;
-    private final ArrayData.ElementGetter valueGetter;
+    private final InternalArray.ElementGetter keyGetter;
+    private final InternalArray.ElementGetter valueGetter;
 
-    public TableStoreMapObjectInspector(LogicalType keyType, LogicalType valueType) {
+    public TableStoreMapObjectInspector(DataType keyType, DataType valueType) {
         this.keyObjectInspector = TableStoreObjectInspectorFactory.create(keyType);
         this.valueObjectInspector = TableStoreObjectInspectorFactory.create(valueType);
-        this.keyGetter = ArrayData.createElementGetter(keyType);
-        this.valueGetter = ArrayData.createElementGetter(valueType);
+        this.keyGetter = InternalArray.createElementGetter(keyType);
+        this.valueGetter = InternalArray.createElementGetter(valueType);
     }
 
     @Override
@@ -65,9 +65,9 @@ public class TableStoreMapObjectInspector implements MapObjectInspector {
         if (o == null || key == null) {
             return null;
         }
-        MapData mapData = (MapData) o;
-        ArrayData keyArrayData = mapData.keyArray();
-        ArrayData valueArrayData = mapData.valueArray();
+        InternalMap mapData = (InternalMap) o;
+        InternalArray keyArrayData = mapData.keyArray();
+        InternalArray valueArrayData = mapData.valueArray();
         for (int i = 0; i < mapData.size(); i++) {
             Object k = keyGetter.getElementOrNull(keyArrayData, i);
             if (Objects.equals(k, key)) {
@@ -82,9 +82,9 @@ public class TableStoreMapObjectInspector implements MapObjectInspector {
         if (o == null) {
             return null;
         }
-        MapData mapData = (MapData) o;
-        ArrayData keyArrayData = mapData.keyArray();
-        ArrayData valueArrayData = mapData.valueArray();
+        InternalMap mapData = (InternalMap) o;
+        InternalArray keyArrayData = mapData.keyArray();
+        InternalArray valueArrayData = mapData.valueArray();
         Map<Object, Object> result = new HashMap<>();
         for (int i = 0; i < mapData.size(); i++) {
             Object k = keyGetter.getElementOrNull(keyArrayData, i);
@@ -99,7 +99,7 @@ public class TableStoreMapObjectInspector implements MapObjectInspector {
         if (o == null) {
             return -1;
         }
-        return ((MapData) o).size();
+        return ((InternalMap) o).size();
     }
 
     @Override

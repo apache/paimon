@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.format;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.append.AppendOnlyCompactManager;
 import org.apache.flink.table.store.file.append.AppendOnlyWriter;
 import org.apache.flink.table.store.file.io.DataFileMeta;
@@ -30,10 +30,10 @@ import org.apache.flink.table.store.file.io.KeyValueFileReadWriteTest;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -46,7 +46,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
 
     private static final RowType SCHEMA =
             RowType.of(
-                    new LogicalType[] {new IntType(), new VarCharType(), new VarCharType()},
+                    new DataType[] {new IntType(), new VarCharType(), new VarCharType()},
                     new String[] {"id", "name", "dt"});
 
     @Test
@@ -72,7 +72,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         false,
                         dataFilePathFactory);
         appendOnlyWriter.write(
-                GenericRowData.of(1, StringData.fromString("aaa"), StringData.fromString("1")));
+                GenericRow.of(1, BinaryString.fromString("aaa"), BinaryString.fromString("1")));
         RecordWriter.CommitIncrement increment = appendOnlyWriter.prepareCommit(true);
         appendOnlyWriter.close();
 

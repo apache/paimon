@@ -90,7 +90,9 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
         }
         SearchArgumentToPredicateConverter converter =
                 new SearchArgumentToPredicateConverter(
-                        sarg, tableSchema.fieldNames(), tableSchema.logicalRowType().getChildren());
+                        sarg,
+                        tableSchema.fieldNames(),
+                        tableSchema.logicalRowType().getFieldTypes());
         return converter.convert();
     }
 

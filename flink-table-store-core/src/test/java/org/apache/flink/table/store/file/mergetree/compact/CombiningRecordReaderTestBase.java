@@ -56,8 +56,8 @@ public abstract class CombiningRecordReaderTestBase {
 
     protected List<List<ReusingTestData>> parseData(String... stringsData) {
         List<List<ReusingTestData>> readersData = new ArrayList<>();
-        for (String stringData : stringsData) {
-            readersData.add(ReusingTestData.parse(stringData));
+        for (String string : stringsData) {
+            readersData.add(ReusingTestData.parse(string));
         }
         return readersData;
     }

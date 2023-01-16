@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.writer.BinaryRowWriter;
 import org.apache.flink.table.store.codegen.RecordComparator;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.BinaryRowWriter;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
@@ -157,11 +157,11 @@ public class IntervalPartitionTest {
     }
 
     private DataFileMeta makeInterval(int left, int right) {
-        BinaryRowData minKey = new BinaryRowData(1);
+        BinaryRow minKey = new BinaryRow(1);
         BinaryRowWriter minWriter = new BinaryRowWriter(minKey);
         minWriter.writeInt(0, left);
         minWriter.complete();
-        BinaryRowData maxKey = new BinaryRowData(1);
+        BinaryRow maxKey = new BinaryRow(1);
         BinaryRowWriter maxWriter = new BinaryRowWriter(maxKey);
         maxWriter.writeInt(0, right);
         maxWriter.complete();

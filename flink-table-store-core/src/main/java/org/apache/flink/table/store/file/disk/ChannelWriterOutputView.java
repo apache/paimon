@@ -18,12 +18,11 @@
 
 package org.apache.flink.table.store.file.disk;
 
-import org.apache.flink.core.memory.MemorySegment;
-import org.apache.flink.core.memory.MemorySegmentFactory;
 import org.apache.flink.table.store.data.AbstractPagedOutputView;
 import org.apache.flink.table.store.file.compression.BlockCompressionFactory;
 import org.apache.flink.table.store.file.compression.BlockCompressor;
 import org.apache.flink.table.store.file.memory.Buffer;
+import org.apache.flink.table.store.memory.MemorySegment;
 
 import java.io.IOException;
 
@@ -47,12 +46,11 @@ public final class ChannelWriterOutputView extends AbstractPagedOutputView {
             BufferFileWriter writer,
             BlockCompressionFactory compressionCodecFactory,
             int compressionBlockSize) {
-        super(MemorySegmentFactory.wrap(new byte[compressionBlockSize]), compressionBlockSize);
+        super(MemorySegment.wrap(new byte[compressionBlockSize]), compressionBlockSize);
 
         compressor = compressionCodecFactory.getCompressor();
         compressedBuffer =
-                MemorySegmentFactory.wrap(
-                        new byte[compressor.getMaxCompressedSize(compressionBlockSize)]);
+                MemorySegment.wrap(new byte[compressor.getMaxCompressedSize(compressionBlockSize)]);
         this.writer = writer;
     }
 

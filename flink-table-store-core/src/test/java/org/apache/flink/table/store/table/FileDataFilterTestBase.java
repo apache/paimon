@@ -18,8 +18,7 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.predicate.Equal;
@@ -31,8 +30,9 @@ import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.types.LogicalTypeConversion;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -49,7 +49,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
 
     protected static final int[] PROJECTION = new int[] {3, 2, 1};
 
-    protected static final Function<RowData, String> SCHEMA_0_ROW_TO_STRING =
+    protected static final Function<InternalRow, String> SCHEMA_0_ROW_TO_STRING =
             rowData ->
                     getNullOrString(rowData, 0)
                             + "|"
@@ -63,7 +63,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                             + "|"
                             + getNullOrString(rowData, 5);
 
-    protected static final Function<RowData, String> STREAMING_SCHEMA_0_ROW_TO_STRING =
+    protected static final Function<InternalRow, String> STREAMING_SCHEMA_0_ROW_TO_STRING =
             rowData ->
                     (rowData.getRowKind() == RowKind.INSERT ? "+" : "-")
                             + getNullOrString(rowData, 0)
@@ -78,7 +78,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                             + "|"
                             + getNullOrString(rowData, 5);
 
-    protected static final Function<RowData, String> SCHEMA_0_PROJECT_ROW_TO_STRING =
+    protected static final Function<InternalRow, String> SCHEMA_0_PROJECT_ROW_TO_STRING =
             rowData ->
                     getNullOrString(rowData, 0)
                             + "|"
@@ -86,7 +86,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                             + "|"
                             + getNullOrInt(rowData, 2);
 
-    protected static final Function<RowData, String> STREAMING_SCHEMA_0_PROJECT_ROW_TO_STRING =
+    protected static final Function<InternalRow, String> STREAMING_SCHEMA_0_PROJECT_ROW_TO_STRING =
             rowData ->
                     (rowData.getRowKind() == RowKind.INSERT ? "+" : "-")
                             + getNullOrString(rowData, 0)
@@ -95,7 +95,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                             + "|"
                             + getNullOrInt(rowData, 2);
 
-    protected static final Function<RowData, String> SCHEMA_1_ROW_TO_STRING =
+    protected static final Function<InternalRow, String> SCHEMA_1_ROW_TO_STRING =
             rowData ->
                     getNullOrInt(rowData, 0)
                             + "|"
@@ -109,7 +109,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                             + "|"
                             + getNullOrString(rowData, 5);
 
-    protected static final Function<RowData, String> STREAMING_SCHEMA_1_ROW_TO_STRING =
+    protected static final Function<InternalRow, String> STREAMING_SCHEMA_1_ROW_TO_STRING =
             rowData ->
                     (rowData.getRowKind() == RowKind.INSERT ? "+" : "-")
                             + getNullOrInt(rowData, 0)
@@ -124,7 +124,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                             + "|"
                             + getNullOrString(rowData, 5);
 
-    protected static final Function<RowData, String> SCHEMA_1_PROJECT_ROW_TO_STRING =
+    protected static final Function<InternalRow, String> SCHEMA_1_PROJECT_ROW_TO_STRING =
             rowData ->
                     getNullOrInt(rowData, 0)
                             + "|"
@@ -132,7 +132,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                             + "|"
                             + getNullOrInt(rowData, 2);
 
-    protected static final Function<RowData, String> STREAMING_SCHEMA_1_PROJECT_ROW_TO_STRING =
+    protected static final Function<InternalRow, String> STREAMING_SCHEMA_1_PROJECT_ROW_TO_STRING =
             rowData ->
                     (rowData.getRowKind() == RowKind.INSERT ? "+" : "-")
                             + getNullOrInt(rowData, 0)
@@ -141,15 +141,15 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                             + "|"
                             + getNullOrInt(rowData, 2);
 
-    private static String getNullOrInt(RowData rowData, int index) {
+    private static String getNullOrInt(InternalRow rowData, int index) {
         return rowData.isNullAt(index) ? "null" : String.valueOf(rowData.getInt(index));
     }
 
-    private static String getNullOrLong(RowData rowData, int index) {
+    private static String getNullOrLong(InternalRow rowData, int index) {
         return rowData.isNullAt(index) ? "null" : String.valueOf(rowData.getLong(index));
     }
 
-    private static String getNullOrString(RowData rowData, int index) {
+    private static String getNullOrString(InternalRow rowData, int index) {
         return rowData.isNullAt(index) ? "null" : rowData.getString(index).toString();
     }
 
@@ -157,8 +157,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
     public void testReadFilterExistField() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
-                    PredicateBuilder builder =
-                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_0_FIELDS));
+                    PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_0_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().plan().splits();
                     // filter with "b" = 15 in schema0
@@ -171,8 +170,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     return null;
                 },
                 (files, schemas) -> {
-                    PredicateBuilder builder =
-                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_1_FIELDS));
+                    PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().plan().splits();
 
@@ -200,8 +198,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
         writeAndCheckFileResult(
                 schemas -> null,
                 (files, schemas) -> {
-                    PredicateBuilder builder =
-                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_1_FIELDS));
+                    PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().plan().splits();
 
@@ -241,13 +238,13 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                             Arrays.asList(
                                     new LeafPredicate(
                                             Equal.INSTANCE,
-                                            DataTypes.INT().getLogicalType(),
+                                            DataTypes.INT(),
                                             1,
                                             "d",
                                             Collections.singletonList(21)),
                                     new LeafPredicate(
                                             IsNull.INSTANCE,
-                                            DataTypes.INT().getLogicalType(),
+                                            DataTypes.INT(),
                                             4,
                                             "f",
                                             Collections.emptyList()));
@@ -401,8 +398,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
     public void testStreamingFilter() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
-                    PredicateBuilder builder =
-                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_0_FIELDS));
+                    PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_0_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
                     // filter with "b" = 15 in schema0
@@ -415,8 +411,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     return null;
                 },
                 (files, schemas) -> {
-                    PredicateBuilder builder =
-                            new PredicateBuilder(LogicalTypeConversion.toRowType(SCHEMA_1_FIELDS));
+                    PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
 
@@ -438,17 +433,17 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     protected List<String> getResult(
-            TableRead read, List<Split> splits, Function<RowData, String> rowDataToString) {
+            TableRead read, List<Split> splits, Function<InternalRow, String> rowDataToString) {
         try {
-            List<ConcatRecordReader.ReaderSupplier<RowData>> readers = new ArrayList<>();
+            List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
             for (Split split : splits) {
                 readers.add(() -> read.createReader(split));
             }
-            RecordReader<RowData> recordReader = ConcatRecordReader.create(readers);
-            RecordReaderIterator<RowData> iterator = new RecordReaderIterator<>(recordReader);
+            RecordReader<InternalRow> recordReader = ConcatRecordReader.create(readers);
+            RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(recordReader);
             List<String> result = new ArrayList<>();
             while (iterator.hasNext()) {
-                RowData rowData = iterator.next();
+                InternalRow rowData = iterator.next();
                 result.add(rowDataToString.apply(rowData));
             }
             iterator.close();

@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.FileKind;
@@ -37,7 +37,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
-import static org.apache.flink.table.data.binary.BinaryRowDataUtil.EMPTY_ROW;
+import static org.apache.flink.table.store.data.BinaryRow.EMPTY_ROW;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -55,7 +55,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         FileStoreExpireImpl expire = store.newExpire(1, 3, Long.MAX_VALUE);
 
         // write test files
-        BinaryRowData partition = gen.getPartition(gen.next());
+        BinaryRow partition = gen.getPartition(gen.next());
         Path bucketPath = store.pathFactory().bucketPath(partition, 0);
         Path myDataFile = new Path(bucketPath, "myDataFile");
         FileUtils.writeFileUtf8(myDataFile, "1");

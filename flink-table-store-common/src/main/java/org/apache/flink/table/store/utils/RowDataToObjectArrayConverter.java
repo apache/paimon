@@ -18,16 +18,16 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.types.RowType;
 
 import java.util.stream.IntStream;
 
-/** Convert {@link RowData} to object array. */
+/** Convert {@link InternalRow} to object array. */
 public class RowDataToObjectArrayConverter {
 
     private final RowType rowType;
-    private final RowData.FieldGetter[] fieldGetters;
+    private final InternalRow.FieldGetter[] fieldGetters;
 
     public RowDataToObjectArrayConverter(RowType rowType) {
         this.rowType = rowType;
@@ -37,7 +37,7 @@ public class RowDataToObjectArrayConverter {
                                 i ->
                                         RowDataUtils.createNullCheckingFieldGetter(
                                                 rowType.getTypeAt(i), i))
-                        .toArray(RowData.FieldGetter[]::new);
+                        .toArray(InternalRow.FieldGetter[]::new);
     }
 
     public RowType rowType() {
@@ -48,7 +48,7 @@ public class RowDataToObjectArrayConverter {
         return fieldGetters.length;
     }
 
-    public Object[] convert(RowData rowData) {
+    public Object[] convert(InternalRow rowData) {
         Object[] result = new Object[fieldGetters.length];
         for (int i = 0; i < fieldGetters.length; i++) {
             result[i] = fieldGetters[i].getFieldOrNull(rowData);

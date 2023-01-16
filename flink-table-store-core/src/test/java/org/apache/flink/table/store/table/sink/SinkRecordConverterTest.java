@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -55,7 +55,7 @@ public class SinkRecordConverterTest {
 
     @Test
     public void testBucket() {
-        GenericRowData row = GenericRowData.of(5, 6, 7);
+        GenericRow row = GenericRow.of(5, 6, 7);
         assertThat(bucket(converter("a", "a,b"), row)).isEqualTo(96);
         assertThat(bucket(converter("", "a"), row)).isEqualTo(96);
         assertThat(bucket(converter("", "a,b"), row)).isEqualTo(27);
@@ -65,7 +65,7 @@ public class SinkRecordConverterTest {
         assertThat(bucket(converter("", "a,b,c"), row)).isEqualTo(40);
     }
 
-    private int bucket(SinkRecordConverter converter, RowData row) {
+    private int bucket(SinkRecordConverter converter, InternalRow row) {
         int bucket1 = converter.bucket(row);
         int bucket2 = converter.convert(row).bucket();
         assertThat(bucket1).isEqualTo(bucket2);
@@ -80,9 +80,9 @@ public class SinkRecordConverterTest {
         RowType rowType =
                 new RowType(
                         Arrays.asList(
-                                new RowType.RowField("a", new IntType()),
-                                new RowType.RowField("b", new IntType()),
-                                new RowType.RowField("c", new IntType())));
+                                new DataField(0, "a", new IntType()),
+                                new DataField(1, "b", new IntType()),
+                                new DataField(2, "c", new IntType())));
         List<DataField> fields = TableSchema.newFields(rowType);
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET_KEY.key(), bk);

@@ -18,10 +18,14 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.conversion.RowRowConverter;
-import org.apache.flink.table.types.utils.TypeConversions;
-import org.apache.flink.types.Row;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.GenericArray;
+import org.apache.flink.table.store.data.GenericMap;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.utils.DateTimeUtils;
 
 import org.apache.spark.sql.catalyst.CatalystTypeConverters;
 import org.junit.jupiter.api.Test;
@@ -37,6 +41,7 @@ import java.util.stream.Stream;
 
 import scala.Function1;
 
+import static org.apache.flink.table.store.data.BinaryString.fromString;
 import static org.apache.flink.table.store.spark.SparkTypeTest.ALL_TYPES;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -45,32 +50,34 @@ public class SparkInternalRowTest {
 
     @Test
     public void test() {
-        Row row =
-                Row.of(
+        InternalRow rowData =
+                GenericRow.of(
                         1,
-                        "jingsong",
+                        fromString("jingsong"),
                         22.2,
-                        Stream.of(
-                                        new AbstractMap.SimpleEntry<>("key1", Row.of(1.2, 2.3)),
-                                        new AbstractMap.SimpleEntry<>("key2", Row.of(2.4, 3.5)))
-                                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)),
-                        new String[] {"v1", "v5"},
-                        new Integer[] {10, 30},
+                        new GenericMap(
+                                Stream.of(
+                                                new AbstractMap.SimpleEntry<>(
+                                                        fromString("key1"),
+                                                        GenericRow.of(1.2, 2.3)),
+                                                new AbstractMap.SimpleEntry<>(
+                                                        fromString("key2"),
+                                                        GenericRow.of(2.4, 3.5)))
+                                        .collect(
+                                                Collectors.toMap(
+                                                        Map.Entry::getKey, Map.Entry::getValue))),
+                        new GenericArray(new BinaryString[] {fromString("v1"), fromString("v5")}),
+                        new GenericArray(new Integer[] {10, 30}),
                         true,
                         (byte) 22,
                         (short) 356,
                         23567222L,
                         "varbinary_v".getBytes(StandardCharsets.UTF_8),
-                        LocalDateTime.parse("2007-12-03T10:15:30"),
-                        LocalDate.parse("2022-05-02"),
-                        BigDecimal.valueOf(0.21),
-                        BigDecimal.valueOf(65782123123.01),
-                        BigDecimal.valueOf(62123123.5));
-
-        RowRowConverter flinkConverter =
-                RowRowConverter.create(TypeConversions.fromLogicalToDataType(ALL_TYPES));
-        flinkConverter.open(Thread.currentThread().getContextClassLoader());
-        RowData rowData = flinkConverter.toInternal(row);
+                        Timestamp.fromLocalDateTime(LocalDateTime.parse("2007-12-03T10:15:30")),
+                        DateTimeUtils.toInternal(LocalDate.parse("2022-05-02")),
+                        Decimal.fromBigDecimal(BigDecimal.valueOf(0.21), 2, 2),
+                        Decimal.fromBigDecimal(BigDecimal.valueOf(65782123123.01), 38, 2),
+                        Decimal.fromBigDecimal(BigDecimal.valueOf(62123123.5), 10, 1));
 
         Function1<Object, Object> sparkConverter =
                 CatalystTypeConverters.createToScalaConverter(
@@ -100,7 +107,10 @@ public class SparkInternalRowTest {
                         + "}";
         assertThat(sparkRow.json()).isEqualTo(expected);
 
-        SparkRowData sparkRowData = new SparkRowData(ALL_TYPES, sparkRow);
-        assertThat(flinkConverter.toExternal(sparkRowData)).isEqualTo(row);
+        SparkRow sparkRowData = new SparkRow(ALL_TYPES, sparkRow);
+        sparkRow =
+                (org.apache.spark.sql.Row)
+                        sparkConverter.apply(new SparkInternalRow(ALL_TYPES).replace(sparkRowData));
+        assertThat(sparkRow.json()).isEqualTo(expected);
     }
 }

@@ -21,18 +21,20 @@ package org.apache.flink.table.store.connector.lookup;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
 import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.functions.FunctionContext;
 import org.apache.flink.table.functions.TableFunction;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.connector.FlinkRowData;
+import org.apache.flink.table.store.connector.FlinkRowWrapper;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.TableStreamingReader;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.TypeUtils;
-import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.FileUtils;
 
 import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
@@ -59,7 +61,7 @@ import static org.apache.flink.table.store.file.predicate.PredicateBuilder.trans
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** A lookup {@link TableFunction} for file store. */
-public class FileStoreLookupFunction extends TableFunction<RowData> {
+public class FileStoreLookupFunction extends TableFunction<org.apache.flink.table.data.RowData> {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreLookupFunction.class);
 
@@ -161,9 +163,9 @@ public class FileStoreLookupFunction extends TableFunction<RowData> {
     @SuppressWarnings("unused")
     public void eval(Object... values) throws Exception {
         checkRefresh();
-        List<RowData> results = lookupTable.get(GenericRowData.of(values));
-        for (RowData matchedRow : results) {
-            collect(matchedRow);
+        List<InternalRow> results = lookupTable.get(new FlinkRowWrapper(GenericRowData.of(values)));
+        for (InternalRow matchedRow : results) {
+            collect(new FlinkRowData(matchedRow));
         }
     }
 
@@ -184,7 +186,7 @@ public class FileStoreLookupFunction extends TableFunction<RowData> {
 
     private void refresh() throws Exception {
         while (true) {
-            Iterator<RowData> batch = streamingReader.nextBatch();
+            Iterator<InternalRow> batch = streamingReader.nextBatch();
             if (batch == null) {
                 return;
             }

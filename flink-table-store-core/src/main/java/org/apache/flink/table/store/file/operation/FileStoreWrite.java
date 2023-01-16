@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
@@ -53,7 +53,7 @@ public interface FileStoreWrite<T> {
      * @param data the given data
      * @throws Exception the thrown exception when writing the record
      */
-    void write(BinaryRowData partition, int bucket, T data) throws Exception;
+    void write(BinaryRow partition, int bucket, T data) throws Exception;
 
     /**
      * Compact data stored in given partition and bucket. Note that compaction process is only
@@ -64,7 +64,7 @@ public interface FileStoreWrite<T> {
      * @param fullCompaction whether to trigger full compaction or just normal compaction
      * @throws Exception the thrown exception when compacting the records
      */
-    void compact(BinaryRowData partition, int bucket, boolean fullCompaction) throws Exception;
+    void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
 
     /**
      * Notify that some new files are created at given snapshot in given bucket.
@@ -77,8 +77,7 @@ public interface FileStoreWrite<T> {
      * @param bucket the bucket where new files are created
      * @param files the new files themselves
      */
-    void notifyNewFiles(
-            long snapshotId, BinaryRowData partition, int bucket, List<DataFileMeta> files);
+    void notifyNewFiles(long snapshotId, BinaryRow partition, int bucket, List<DataFileMeta> files);
 
     /**
      * Prepare commit in the write.

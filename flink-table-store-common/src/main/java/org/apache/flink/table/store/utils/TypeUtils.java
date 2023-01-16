@@ -19,16 +19,16 @@
 package org.apache.flink.table.store.utils;
 
 import org.apache.flink.table.api.TableException;
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.data.binary.BinaryStringData;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.LocalZonedTimestampType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.LogicalTypeRoot;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.TimestampType;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypeRoot;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.LocalZonedTimestampType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.TimestampType;
 
 import java.math.BigDecimal;
 import java.time.DateTimeException;
@@ -37,32 +37,31 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.apache.flink.table.types.logical.LogicalTypeFamily.BINARY_STRING;
-import static org.apache.flink.table.types.logical.LogicalTypeFamily.CHARACTER_STRING;
+import static org.apache.flink.table.store.types.DataTypeChecks.getNestedTypes;
+import static org.apache.flink.table.store.types.DataTypeFamily.BINARY_STRING;
+import static org.apache.flink.table.store.types.DataTypeFamily.CHARACTER_STRING;
 
 /** Type related helper functions. */
 public class TypeUtils {
 
-    private static final List<BinaryStringData> TRUE_STRINGS =
+    private static final List<BinaryString> TRUE_STRINGS =
             Stream.of("t", "true", "y", "yes", "1")
-                    .map(BinaryStringData::fromString)
-                    .peek(BinaryStringData::ensureMaterialized)
+                    .map(BinaryString::fromString)
                     .collect(Collectors.toList());
 
-    private static final List<BinaryStringData> FALSE_STRINGS =
+    private static final List<BinaryString> FALSE_STRINGS =
             Stream.of("f", "false", "n", "no", "0")
-                    .map(BinaryStringData::fromString)
-                    .peek(BinaryStringData::ensureMaterialized)
+                    .map(BinaryString::fromString)
                     .collect(Collectors.toList());
 
     public static RowType project(RowType inputType, int[] mapping) {
-        List<RowType.RowField> fields = inputType.getFields();
+        List<DataField> fields = inputType.getFields();
         return new RowType(
                 Arrays.stream(mapping).mapToObj(fields::get).collect(Collectors.toList()));
     }
 
-    public static Object castFromString(String s, LogicalType type) {
-        BinaryStringData str = BinaryStringData.fromString(s);
+    public static Object castFromString(String s, DataType type) {
+        BinaryString str = BinaryString.fromString(s);
         switch (type.getTypeRoot()) {
             case CHAR:
             case VARCHAR:
@@ -76,7 +75,7 @@ public class TypeUtils {
                 return s.getBytes();
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) type;
-                return DecimalData.fromBigDecimal(
+                return Decimal.fromBigDecimal(
                         new BigDecimal(s), decimalType.getPrecision(), decimalType.getScale());
             case TINYINT:
                 return Byte.valueOf(s);
@@ -102,7 +101,7 @@ public class TypeUtils {
         }
     }
 
-    public static int timestampPrecision(LogicalType type) {
+    public static int timestampPrecision(DataType type) {
         if (type instanceof TimestampType) {
             return ((TimestampType) type).getPrecision();
         } else if (type instanceof LocalZonedTimestampType) {
@@ -112,9 +111,9 @@ public class TypeUtils {
         throw new UnsupportedOperationException("Unsupported type: " + type);
     }
 
-    /** Parse a {@link StringData} to boolean. */
-    public static boolean toBoolean(BinaryStringData str) throws TableException {
-        BinaryStringData lowerCase = str.toLowerCase();
+    /** Parse a {@link BinaryString} to boolean. */
+    public static boolean toBoolean(BinaryString str) throws TableException {
+        BinaryString lowerCase = str.toLowerCase();
         if (TRUE_STRINGS.contains(lowerCase)) {
             return true;
         }
@@ -124,7 +123,7 @@ public class TypeUtils {
         throw new TableException("Cannot parse '" + str + "' as BOOLEAN.");
     }
 
-    public static int toDate(BinaryStringData input) throws DateTimeException {
+    public static int toDate(BinaryString input) throws DateTimeException {
         Integer date = DateTimeUtils.parseDate(input.toString());
         if (date == null) {
             throw new DateTimeException("For input string: '" + input + "'.");
@@ -133,7 +132,7 @@ public class TypeUtils {
         return date;
     }
 
-    public static int toTime(BinaryStringData input) throws DateTimeException {
+    public static int toTime(BinaryString input) throws DateTimeException {
         Integer date = DateTimeUtils.parseTime(input.toString());
         if (date == null) {
             throw new DateTimeException("For input string: '" + input + "'.");
@@ -143,16 +142,16 @@ public class TypeUtils {
     }
 
     /** Used by {@code CAST(x as TIMESTAMP)}. */
-    public static TimestampData toTimestamp(BinaryStringData input, int precision)
+    public static Timestamp toTimestamp(BinaryString input, int precision)
             throws DateTimeException {
         return DateTimeUtils.parseTimestampData(input.toString(), precision);
     }
 
-    public static boolean isPrimitive(LogicalType type) {
+    public static boolean isPrimitive(DataType type) {
         return isPrimitive(type.getTypeRoot());
     }
 
-    public static boolean isPrimitive(LogicalTypeRoot root) {
+    public static boolean isPrimitive(DataTypeRoot root) {
         switch (root) {
             case BOOLEAN:
             case TINYINT:
@@ -171,7 +170,7 @@ public class TypeUtils {
      * Can the two types operate with each other. Such as: 1.CodeGen: equal, cast, assignment.
      * 2.Join keys.
      */
-    public static boolean isInteroperable(LogicalType t1, LogicalType t2) {
+    public static boolean isInteroperable(DataType t1, DataType t2) {
         if (t1.getTypeRoot().getFamilies().contains(CHARACTER_STRING)
                 && t2.getTypeRoot().getFamilies().contains(CHARACTER_STRING)) {
             return true;
@@ -190,8 +189,8 @@ public class TypeUtils {
             case MAP:
             case MULTISET:
             case ROW:
-                List<LogicalType> children1 = t1.getChildren();
-                List<LogicalType> children2 = t2.getChildren();
+                List<DataType> children1 = getNestedTypes(t1);
+                List<DataType> children2 = getNestedTypes(t2);
                 if (children1.size() != children2.size()) {
                     return false;
                 }

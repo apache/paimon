@@ -19,10 +19,10 @@
 package org.apache.flink.table.store.table.system;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.JoinedRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -36,10 +36,11 @@ import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarBinaryType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.VarBinaryType;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -83,19 +84,19 @@ public class BucketsTable implements DataTable {
     public RowType rowType() {
         RowType partitionType = wrapped.schema().logicalPartitionType();
 
-        List<RowType.RowField> fields = new ArrayList<>();
-        fields.add(new RowType.RowField("_SNAPSHOT_ID", new BigIntType()));
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "_SNAPSHOT_ID", new BigIntType()));
         fields.addAll(partitionType.getFields());
         // same with ManifestEntry.schema
-        fields.add(new RowType.RowField("_BUCKET", new IntType()));
-        fields.add(new RowType.RowField("_FILES", new VarBinaryType()));
+        fields.add(new DataField(1, "_BUCKET", new IntType()));
+        fields.add(new DataField(2, "_FILES", new VarBinaryType()));
         return new RowType(fields);
     }
 
     public static RowType partitionWithBucketRowType(RowType partitionType) {
-        List<RowType.RowField> fields = new ArrayList<>(partitionType.getFields());
+        List<DataField> fields = new ArrayList<>(partitionType.getFields());
         // same with ManifestEntry.schema
-        fields.add(new RowType.RowField("_BUCKET", new IntType()));
+        fields.add(new DataField(3, "_BUCKET", new IntType()));
         return new RowType(fields);
     }
 
@@ -135,17 +136,16 @@ public class BucketsTable implements DataTable {
         }
 
         @Override
-        public RecordReader<RowData> createReader(Split split) throws IOException {
+        public RecordReader<InternalRow> createReader(Split split) throws IOException {
             if (!(split instanceof DataSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
 
             DataSplit dataSplit = (DataSplit) split;
 
-            RowData row =
-                    new JoinedRowData(
-                            GenericRowData.of(dataSplit.snapshotId()), dataSplit.partition());
-            row = new JoinedRowData(row, GenericRowData.of(dataSplit.bucket()));
+            InternalRow row =
+                    new JoinedRow(GenericRow.of(dataSplit.snapshotId()), dataSplit.partition());
+            row = new JoinedRow(row, GenericRow.of(dataSplit.bucket()));
 
             List<DataFileMeta> files = Collections.emptyList();
             if (isContinuous) {
@@ -155,10 +155,9 @@ public class BucketsTable implements DataTable {
                 files = dataSplit.files();
             }
             row =
-                    new JoinedRowData(
+                    new JoinedRow(
                             row,
-                            GenericRowData.of(
-                                    (Object) dataFileMetaSerializer.serializeList(files)));
+                            GenericRow.of((Object) dataFileMetaSerializer.serializeList(files)));
 
             return new IteratorRecordReader<>(Collections.singletonList(row).iterator());
         }

@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.io.DataFileTestDataGenerator;
@@ -39,7 +39,7 @@ public class ManifestTestDataGenerator {
     private static final int LEVEL_CAPACITY = 3;
 
     private final int numBuckets;
-    private final List<Map<BinaryRowData, List<List<DataFileTestDataGenerator.Data>>>> levels;
+    private final List<Map<BinaryRow, List<List<DataFileTestDataGenerator.Data>>>> levels;
     private final DataFileTestDataGenerator gen;
 
     private final LinkedList<ManifestEntry> bufferedResults;
@@ -107,7 +107,7 @@ public class ManifestTestDataGenerator {
                 0);
     }
 
-    private void mergeLevelsIfNeeded(BinaryRowData partition, int bucket) {
+    private void mergeLevelsIfNeeded(BinaryRow partition, int bucket) {
         // this method uses a very simple merging strategy just for producing valid data
         List<List<DataFileTestDataGenerator.Data>> bucketLevels = levels.get(bucket).get(partition);
         int lastModifiedLevel = 0;

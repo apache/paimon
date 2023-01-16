@@ -18,42 +18,42 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.data.binary.BinaryStringData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.memory.MemorySegmentUtils;
 
 import java.util.Arrays;
 
-import static org.apache.flink.table.data.binary.BinaryStringData.fromBytes;
+import static org.apache.flink.table.store.data.BinaryString.fromBytes;
 
-/** Utils for {@link BinaryStringData}. */
+/** Utils for {@link BinaryString}. */
 public class StringUtils {
 
     /**
      * Concatenates input strings together into a single string. Returns NULL if any argument is
      * NULL.
      */
-    public static BinaryStringData concat(BinaryStringData... inputs) {
+    public static BinaryString concat(BinaryString... inputs) {
         return concat(Arrays.asList(inputs));
     }
 
-    public static BinaryStringData concat(Iterable<BinaryStringData> inputs) {
+    public static BinaryString concat(Iterable<BinaryString> inputs) {
         // Compute the total length of the result.
         int totalLength = 0;
-        for (BinaryStringData input : inputs) {
+        for (BinaryString input : inputs) {
             if (input == null) {
                 return null;
             }
 
-            input.ensureMaterialized();
             totalLength += input.getSizeInBytes();
         }
 
         // Allocate a new byte array, and copy the inputs one by one into it.
         final byte[] result = new byte[totalLength];
         int offset = 0;
-        for (BinaryStringData input : inputs) {
+        for (BinaryString input : inputs) {
             if (input != null) {
                 int len = input.getSizeInBytes();
-                SegmentsUtil.copyToBytes(
+                MemorySegmentUtils.copyToBytes(
                         input.getSegments(), input.getOffset(), result, offset, len);
                 offset += len;
             }

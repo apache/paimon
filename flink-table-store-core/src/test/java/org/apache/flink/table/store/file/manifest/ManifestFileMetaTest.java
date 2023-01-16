@@ -21,17 +21,17 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.writer.BinaryRowWriter;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.BinaryRowWriter;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.format.FileFormat;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.RepeatedTest;
@@ -227,22 +227,22 @@ public class ManifestFileMetaTest {
     }
 
     private ManifestEntry makeEntry(boolean isAdd, String fileName) {
-        BinaryRowData binaryRowData = new BinaryRowData(1);
-        BinaryRowWriter writer = new BinaryRowWriter(binaryRowData);
+        BinaryRow binaryRow = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
         writer.writeInt(0, 0);
         writer.complete();
 
         return new ManifestEntry(
                 isAdd ? FileKind.ADD : FileKind.DELETE,
-                binaryRowData, // not used
+                binaryRow, // not used
                 0, // not used
                 0, // not used
                 new DataFileMeta(
                         fileName,
                         0, // not used
                         0, // not used
-                        binaryRowData, // not useds
-                        binaryRowData, // not used
+                        binaryRow, // not useds
+                        binaryRow, // not used
                         StatsTestUtils.newEmptyTableStats(), // not used
                         StatsTestUtils.newEmptyTableStats(), // not used
                         0, // not used

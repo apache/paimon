@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.ArrayData;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.data.InternalArray;
+import org.apache.flink.table.store.types.DataType;
 
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.objectinspector.ListObjectInspector;
@@ -29,7 +29,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * {@link ListObjectInspector} for {@link ArrayData}.
+ * {@link ListObjectInspector} for {@link InternalArray}.
  *
  * <p>Behaviors of this class when input is null are compatible with {@link
  * org.apache.hadoop.hive.serde2.objectinspector.StandardListObjectInspector}.
@@ -37,11 +37,11 @@ import java.util.List;
 public class TableStoreListObjectInspector implements ListObjectInspector {
 
     private final ObjectInspector elementObjectInspector;
-    private final ArrayData.ElementGetter elementGetter;
+    private final InternalArray.ElementGetter elementGetter;
 
-    public TableStoreListObjectInspector(LogicalType elementType) {
+    public TableStoreListObjectInspector(DataType elementType) {
         this.elementObjectInspector = TableStoreObjectInspectorFactory.create(elementType);
-        this.elementGetter = ArrayData.createElementGetter(elementType);
+        this.elementGetter = InternalArray.createElementGetter(elementType);
     }
 
     @Override
@@ -54,7 +54,7 @@ public class TableStoreListObjectInspector implements ListObjectInspector {
         if (o == null) {
             return null;
         }
-        return elementGetter.getElementOrNull((ArrayData) o, i);
+        return elementGetter.getElementOrNull((InternalArray) o, i);
     }
 
     @Override
@@ -62,7 +62,7 @@ public class TableStoreListObjectInspector implements ListObjectInspector {
         if (o == null) {
             return -1;
         }
-        return ((ArrayData) o).size();
+        return ((InternalArray) o).size();
     }
 
     @Override

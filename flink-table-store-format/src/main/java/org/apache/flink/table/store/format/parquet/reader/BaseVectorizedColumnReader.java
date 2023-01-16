@@ -18,7 +18,7 @@
 package org.apache.flink.table.store.format.parquet.reader;
 
 import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.DataType;
 
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.BytesInput;
@@ -87,21 +87,21 @@ public abstract class BaseVectorizedColumnReader implements ColumnReader<Writabl
     protected final PageReader pageReader;
     protected final ColumnDescriptor descriptor;
     protected final Type type;
-    protected final LogicalType logicalType;
+    protected final DataType dataType;
 
     public BaseVectorizedColumnReader(
             ColumnDescriptor descriptor,
             PageReader pageReader,
             boolean isUtcTimestamp,
             Type parquetType,
-            LogicalType logicalType)
+            DataType dataType)
             throws IOException {
         this.descriptor = descriptor;
         this.type = parquetType;
         this.pageReader = pageReader;
         this.maxDefLevel = descriptor.getMaxDefinitionLevel();
         this.isUtcTimestamp = isUtcTimestamp;
-        this.logicalType = logicalType;
+        this.dataType = dataType;
 
         DictionaryPage dictionaryPage = pageReader.readDictionaryPage();
         if (dictionaryPage != null) {

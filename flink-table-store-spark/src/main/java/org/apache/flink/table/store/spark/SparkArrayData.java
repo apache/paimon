@@ -18,17 +18,17 @@
 
 package org.apache.flink.table.store.spark;
 
+import org.apache.flink.table.store.data.InternalArray;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.RowDataUtils;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.expressions.SpecializedGettersReader;
 import org.apache.spark.sql.catalyst.util.ArrayData;
 import org.apache.spark.sql.catalyst.util.MapData;
-import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.Decimal;
 import org.apache.spark.unsafe.types.CalendarInterval;
 import org.apache.spark.unsafe.types.UTF8String;
@@ -40,15 +40,15 @@ import static org.apache.flink.table.store.utils.TypeUtils.timestampPrecision;
 /** Spark {@link ArrayData} to wrap flink {@code ArrayData}. */
 public class SparkArrayData extends ArrayData {
 
-    private final LogicalType elementType;
+    private final DataType elementType;
 
-    private org.apache.flink.table.data.ArrayData array;
+    private InternalArray array;
 
-    public SparkArrayData(LogicalType elementType) {
+    public SparkArrayData(DataType elementType) {
         this.elementType = elementType;
     }
 
-    public SparkArrayData replace(org.apache.flink.table.data.ArrayData array) {
+    public SparkArrayData replace(InternalArray array) {
         this.array = array;
         return this;
     }
@@ -166,7 +166,7 @@ public class SparkArrayData extends ArrayData {
     }
 
     @Override
-    public Object get(int ordinal, DataType dataType) {
+    public Object get(int ordinal, org.apache.spark.sql.types.DataType dataType) {
         return SpecializedGettersReader.read(this, ordinal, dataType, true, true);
     }
 }

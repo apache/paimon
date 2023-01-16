@@ -19,25 +19,15 @@ package org.apache.flink.table.store.data;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
-import org.apache.flink.core.memory.MemorySegment;
-import org.apache.flink.core.memory.MemorySegmentFactory;
-import org.apache.flink.table.data.ArrayData;
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.MapData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.data.binary.BinaryArrayData;
-import org.apache.flink.table.data.binary.BinaryFormat;
-import org.apache.flink.table.data.binary.BinaryMapData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.binary.BinarySegmentUtils;
-import org.apache.flink.table.data.binary.BinaryStringData;
+import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.flink.table.store.memory.MemorySegmentUtils;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+
+import static org.apache.flink.table.store.data.BinarySection.MAX_FIX_PART_DATA_SIZE;
 
 /**
  * Use the special format to write data to a {@link MemorySegment} (its capacity grows
@@ -68,18 +58,18 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
 
     protected abstract void setNullBit(int ordinal);
 
-    /** See {@link BinarySegmentUtils#readStringData(MemorySegment[], int, int, long)}. */
+    /** See {@link MemorySegmentUtils#readBinaryString(MemorySegment[], int, int, long)}. */
     @Override
-    public void writeString(int pos, StringData input) {
-        BinaryStringData string = (BinaryStringData) input;
+    public void writeString(int pos, BinaryString input) {
+        BinaryString string = input;
         if (string.getSegments() == null) {
             String javaObject = string.toString();
             writeBytes(pos, javaObject.getBytes(StandardCharsets.UTF_8));
         } else {
             int len = string.getSizeInBytes();
             if (len <= 7) {
-                byte[] bytes = BinarySegmentUtils.allocateReuseBytes(len);
-                BinarySegmentUtils.copyToBytes(
+                byte[] bytes = MemorySegmentUtils.allocateReuseBytes(len);
+                MemorySegmentUtils.copyToBytes(
                         string.getSegments(), string.getOffset(), bytes, 0, len);
                 writeBytesToFixLenPart(segment, getFieldOffset(pos), bytes, len);
             } else {
@@ -90,7 +80,7 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
 
     private void writeBytes(int pos, byte[] bytes) {
         int len = bytes.length;
-        if (len <= BinaryFormat.MAX_FIX_PART_DATA_SIZE) {
+        if (len <= MAX_FIX_PART_DATA_SIZE) {
             writeBytesToFixLenPart(segment, getFieldOffset(pos), bytes, len);
         } else {
             writeBytesToVarLenPart(pos, bytes, len);
@@ -98,27 +88,27 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
     }
 
     @Override
-    public void writeArray(int pos, ArrayData input, ArrayDataSerializer serializer) {
-        BinaryArrayData binary = serializer.toBinaryArray(input);
+    public void writeArray(int pos, InternalArray input, ArrayDataSerializer serializer) {
+        BinaryArray binary = serializer.toBinaryArray(input);
         writeSegmentsToVarLenPart(
                 pos, binary.getSegments(), binary.getOffset(), binary.getSizeInBytes());
     }
 
     @Override
-    public void writeMap(int pos, MapData input, MapDataSerializer serializer) {
-        BinaryMapData binary = serializer.toBinaryMap(input);
+    public void writeMap(int pos, InternalMap input, MapDataSerializer serializer) {
+        BinaryMap binary = serializer.toBinaryMap(input);
         writeSegmentsToVarLenPart(
                 pos, binary.getSegments(), binary.getOffset(), binary.getSizeInBytes());
     }
 
     @Override
-    public void writeRow(int pos, RowData input, RowDataSerializer serializer) {
-        if (input instanceof BinaryFormat) {
-            BinaryFormat row = (BinaryFormat) input;
+    public void writeRow(int pos, InternalRow input, RowDataSerializer serializer) {
+        if (input instanceof BinarySection) {
+            BinarySection row = (BinarySection) input;
             writeSegmentsToVarLenPart(
                     pos, row.getSegments(), row.getOffset(), row.getSizeInBytes());
         } else {
-            BinaryRowData row = serializer.toBinaryRow(input);
+            BinaryRow row = serializer.toBinaryRow(input);
             writeSegmentsToVarLenPart(
                     pos, row.getSegments(), row.getOffset(), row.getSizeInBytes());
         }
@@ -127,7 +117,7 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
     @Override
     public void writeBinary(int pos, byte[] bytes) {
         int len = bytes.length;
-        if (len <= BinaryFormat.MAX_FIX_PART_DATA_SIZE) {
+        if (len <= BinarySection.MAX_FIX_PART_DATA_SIZE) {
             writeBytesToFixLenPart(segment, getFieldOffset(pos), bytes, len);
         } else {
             writeBytesToVarLenPart(pos, bytes, len);
@@ -135,10 +125,10 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
     }
 
     @Override
-    public void writeDecimal(int pos, DecimalData value, int precision) {
+    public void writeDecimal(int pos, Decimal value, int precision) {
         assert value == null || (value.precision() == precision);
 
-        if (DecimalData.isCompact(precision)) {
+        if (Decimal.isCompact(precision)) {
             assert value != null;
             writeLong(pos, value.toUnscaledLong());
         } else {
@@ -170,8 +160,8 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
     }
 
     @Override
-    public void writeTimestamp(int pos, TimestampData value, int precision) {
-        if (TimestampData.isCompact(precision)) {
+    public void writeTimestamp(int pos, Timestamp value, int precision) {
+        if (Timestamp.isCompact(precision)) {
             writeLong(pos, value.getMillisecond());
         } else {
             // store the nanoOfMillisecond in fixed-length part as offset and nanoOfMillisecond
@@ -274,7 +264,7 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
         if (newCapacity - minCapacity < 0) {
             newCapacity = minCapacity;
         }
-        segment = MemorySegmentFactory.wrap(Arrays.copyOf(segment.getArray(), newCapacity));
+        segment = MemorySegment.wrap(Arrays.copyOf(segment.getArray(), newCapacity));
         afterGrow();
     }
 
@@ -291,7 +281,7 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
             MemorySegment segment, int fieldOffset, byte[] bytes, int len) {
         long firstByte = len | 0x80; // first bit is 1, other bits is len
         long sevenBytes = 0L; // real data
-        if (BinaryRowData.LITTLE_ENDIAN) {
+        if (BinaryRow.LITTLE_ENDIAN) {
             for (int i = 0; i < len; i++) {
                 sevenBytes |= ((0x00000000000000FFL & bytes[i]) << (i * 8L));
             }

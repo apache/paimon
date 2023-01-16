@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateFilter;
@@ -90,22 +90,23 @@ public class TableStreamingReader {
     }
 
     @Nullable
-    public Iterator<RowData> nextBatch() throws Exception {
+    public Iterator<InternalRow> nextBatch() throws Exception {
         DataTableScan.DataFilePlan plan = enumerator.enumerate();
         return plan == null ? null : read(plan);
     }
 
-    private Iterator<RowData> read(DataTableScan.DataFilePlan plan) throws IOException {
+    private Iterator<InternalRow> read(DataTableScan.DataFilePlan plan) throws IOException {
         TableRead read = table.newRead().withProjection(projection);
         if (predicate != null) {
             read.withFilter(predicate);
         }
 
-        List<ConcatRecordReader.ReaderSupplier<RowData>> readers = new ArrayList<>();
+        List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
         for (DataSplit split : plan.splits) {
             readers.add(() -> read.createReader(split));
         }
-        Iterator<RowData> iterator = new RecordReaderIterator<>(ConcatRecordReader.create(readers));
+        Iterator<InternalRow> iterator =
+                new RecordReaderIterator<>(ConcatRecordReader.create(readers));
         if (recordFilter != null) {
             return Iterators.filter(iterator, recordFilter::test);
         }

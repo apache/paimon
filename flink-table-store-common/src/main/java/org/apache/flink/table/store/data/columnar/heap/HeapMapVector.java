@@ -18,15 +18,13 @@
 
 package org.apache.flink.table.store.data.columnar.heap;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.data.MapData;
+import org.apache.flink.table.store.data.InternalMap;
 import org.apache.flink.table.store.data.columnar.ColumnVector;
-import org.apache.flink.table.store.data.columnar.ColumnarMapData;
+import org.apache.flink.table.store.data.columnar.ColumnarMap;
 import org.apache.flink.table.store.data.columnar.MapColumnVector;
 import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
 
 /** This class represents a nullable heap map column vector. */
-@Internal
 public class HeapMapVector extends AbstractHeapVector
         implements WritableColumnVector, MapColumnVector {
 
@@ -69,9 +67,9 @@ public class HeapMapVector extends AbstractHeapVector
     }
 
     @Override
-    public MapData getMap(int i) {
+    public InternalMap getMap(int i) {
         long offset = offsets[i];
         long length = lengths[i];
-        return new ColumnarMapData(keys, values, (int) offset, (int) length);
+        return new ColumnarMap(keys, values, (int) offset, (int) length);
     }
 }

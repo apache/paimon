@@ -24,7 +24,7 @@ import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.store.data.InternalSerializers;
 import org.apache.flink.table.store.format.FieldStats;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.DataType;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -39,7 +39,7 @@ public class LeafPredicate implements Predicate {
     private static final long serialVersionUID = 1L;
 
     private final LeafFunction function;
-    private final LogicalType type;
+    private final DataType type;
     private final int fieldIndex;
     private final String fieldName;
 
@@ -47,7 +47,7 @@ public class LeafPredicate implements Predicate {
 
     public LeafPredicate(
             LeafFunction function,
-            LogicalType type,
+            DataType type,
             int fieldIndex,
             String fieldName,
             List<Object> literals) {
@@ -62,7 +62,7 @@ public class LeafPredicate implements Predicate {
         return function;
     }
 
-    public LogicalType type() {
+    public DataType type() {
         return type;
     }
 

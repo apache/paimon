@@ -18,14 +18,14 @@
 
 package org.apache.flink.table.store;
 
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
@@ -36,7 +36,6 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.sql.Date;
-import java.sql.Timestamp;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -48,45 +47,40 @@ public class SearchArgumentToPredicateConverterTest {
 
     @Test
     public void testLiteral() {
-        testLiteral(PredicateLeaf.Type.BOOLEAN, false, DataTypes.BOOLEAN().getLogicalType(), false);
-        testLiteral(PredicateLeaf.Type.LONG, 10L, DataTypes.TINYINT().getLogicalType(), (byte) 10);
-        testLiteral(
-                PredicateLeaf.Type.LONG, 100L, DataTypes.SMALLINT().getLogicalType(), (short) 100);
-        testLiteral(PredicateLeaf.Type.LONG, 1000L, DataTypes.INT().getLogicalType(), 1000);
-        testLiteral(PredicateLeaf.Type.LONG, 10000L, DataTypes.BIGINT().getLogicalType(), 10000L);
-        testLiteral(PredicateLeaf.Type.FLOAT, 0.2, DataTypes.FLOAT().getLogicalType(), 0.2f);
-        testLiteral(PredicateLeaf.Type.FLOAT, 0.2, DataTypes.DOUBLE().getLogicalType(), 0.2);
+        testLiteral(PredicateLeaf.Type.BOOLEAN, false, DataTypes.BOOLEAN(), false);
+        testLiteral(PredicateLeaf.Type.LONG, 10L, DataTypes.TINYINT(), (byte) 10);
+        testLiteral(PredicateLeaf.Type.LONG, 100L, DataTypes.SMALLINT(), (short) 100);
+        testLiteral(PredicateLeaf.Type.LONG, 1000L, DataTypes.INT(), 1000);
+        testLiteral(PredicateLeaf.Type.LONG, 10000L, DataTypes.BIGINT(), 10000L);
+        testLiteral(PredicateLeaf.Type.FLOAT, 0.2, DataTypes.FLOAT(), 0.2f);
+        testLiteral(PredicateLeaf.Type.FLOAT, 0.2, DataTypes.DOUBLE(), 0.2);
         testLiteral(
                 PredicateLeaf.Type.DECIMAL,
                 new HiveDecimalWritable(HiveDecimal.create("123456.789")),
-                DataTypes.DECIMAL(9, 3).getLogicalType(),
-                DecimalData.fromBigDecimal(new BigDecimal("123456.789"), 9, 3));
+                DataTypes.DECIMAL(9, 3),
+                Decimal.fromBigDecimal(new BigDecimal("123456.789"), 9, 3));
         testLiteral(
                 PredicateLeaf.Type.DECIMAL,
                 new HiveDecimalWritable(HiveDecimal.create("123456789123456789.123456789")),
-                DataTypes.DECIMAL(27, 9).getLogicalType(),
-                DecimalData.fromBigDecimal(new BigDecimal("123456789123456789.123456789"), 27, 9));
+                DataTypes.DECIMAL(27, 9),
+                Decimal.fromBigDecimal(new BigDecimal("123456789123456789.123456789"), 27, 9));
         testLiteral(
                 PredicateLeaf.Type.STRING,
                 "Table Store",
-                DataTypes.STRING().getLogicalType(),
-                StringData.fromString("Table Store"));
-        testLiteral(
-                PredicateLeaf.Type.DATE,
-                Date.valueOf("1971-01-11"),
-                DataTypes.DATE().getLogicalType(),
-                375);
+                DataTypes.STRING(),
+                BinaryString.fromString("Table Store"));
+        testLiteral(PredicateLeaf.Type.DATE, Date.valueOf("1971-01-11"), DataTypes.DATE(), 375);
         testLiteral(
                 PredicateLeaf.Type.TIMESTAMP,
-                Timestamp.valueOf("2022-05-17 16:25:53"),
-                DataTypes.TIMESTAMP(3).getLogicalType(),
-                TimestampData.fromTimestamp(Timestamp.valueOf("2022-05-17 16:25:53")));
+                java.sql.Timestamp.valueOf("2022-05-17 16:25:53"),
+                DataTypes.TIMESTAMP(3),
+                Timestamp.fromSQLTimestamp(java.sql.Timestamp.valueOf("2022-05-17 16:25:53")));
     }
 
     private void testLiteral(
             PredicateLeaf.Type hiveType,
             Object hiveLiteral,
-            LogicalType flinkType,
+            DataType flinkType,
             Object flinkLiteral) {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg = builder.equals("a", hiveType, hiveLiteral).build();
@@ -95,22 +89,19 @@ public class SearchArgumentToPredicateConverterTest {
                         sarg, Collections.singletonList("a"), Collections.singletonList(flinkType));
 
         Predicate expected =
-                new PredicateBuilder(RowType.of(new LogicalType[] {flinkType}, new String[] {"a"}))
+                new PredicateBuilder(RowType.of(new DataType[] {flinkType}, new String[] {"a"}))
                         .equal(0, flinkLiteral);
         Predicate actual = converter.convert().orElse(null);
         assertThat(actual).isEqualTo(expected);
     }
 
     private static final List<String> COLUMN_NAMES = Arrays.asList("f_int", "f_bigint", "f_double");
-    private static final List<LogicalType> COLUMN_TYPES =
-            Arrays.asList(
-                    DataTypes.INT().getLogicalType(),
-                    DataTypes.BIGINT().getLogicalType(),
-                    DataTypes.DOUBLE().getLogicalType());
+    private static final List<DataType> COLUMN_TYPES =
+            Arrays.asList(DataTypes.INT(), DataTypes.BIGINT(), DataTypes.DOUBLE());
     private static final PredicateBuilder BUILDER =
             new PredicateBuilder(
                     RowType.of(
-                            COLUMN_TYPES.toArray(new LogicalType[0]),
+                            COLUMN_TYPES.toArray(new DataType[0]),
                             COLUMN_NAMES.toArray(new String[0])));
 
     @Test

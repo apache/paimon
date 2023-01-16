@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
@@ -39,8 +39,8 @@ import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.store.table.source.DataSplit;
-import org.apache.flink.table.store.utils.ProjectedRowData;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -64,7 +64,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     private final TableSchema tableSchema;
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
-    private final Comparator<RowData> keyComparator;
+    private final Comparator<InternalRow> keyComparator;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final boolean valueCountMode;
 
@@ -81,7 +81,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             long schemaId,
             RowType keyType,
             RowType valueType,
-            Comparator<RowData> keyComparator,
+            Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
@@ -214,7 +214,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     private RecordReader<KeyValue> projectKey(
             RecordReader<KeyValue> reader, int[][] keyProjectedFields) {
-        ProjectedRowData projectedRow = ProjectedRowData.from(keyProjectedFields);
+        ProjectedRow projectedRow = ProjectedRow.from(keyProjectedFields);
         return RecordReaderUtils.transform(
                 reader, kv -> kv.replaceKey(projectedRow.replaceRow(kv.key())));
     }

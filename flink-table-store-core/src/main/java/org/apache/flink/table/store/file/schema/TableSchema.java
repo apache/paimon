@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.StringUtils;
 
@@ -32,12 +32,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
-import static org.apache.flink.table.store.types.LogicalTypeConversion.toDataType;
-import static org.apache.flink.table.store.types.LogicalTypeConversion.toRowType;
 
 /** Schema of a table. */
 public class TableSchema implements Serializable {
@@ -180,7 +177,7 @@ public class TableSchema implements Serializable {
     }
 
     public RowType logicalRowType() {
-        return toRowType(fields);
+        return new RowType(fields);
     }
 
     public RowType logicalPartitionType() {
@@ -219,7 +216,7 @@ public class TableSchema implements Serializable {
     }
 
     private RowType projectedLogicalRowType(List<String> projectedFieldNames) {
-        return toRowType(projectedDataFields(projectedFieldNames));
+        return new RowType(projectedDataFields(projectedFieldNames));
     }
 
     public TableSchema copy(Map<String, String> newOptions) {
@@ -258,9 +255,7 @@ public class TableSchema implements Serializable {
     }
 
     public static List<DataField> newFields(RowType rowType) {
-        return ((org.apache.flink.table.store.types.RowType)
-                        toDataType(rowType, new AtomicInteger(-1)))
-                .getFields();
+        return rowType.getFields();
     }
 
     public static int currentHighestFieldId(List<DataField> fields) {

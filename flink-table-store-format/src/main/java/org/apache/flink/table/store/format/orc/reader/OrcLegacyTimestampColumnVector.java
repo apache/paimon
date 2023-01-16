@@ -18,12 +18,11 @@
 
 package org.apache.flink.table.store.format.orc.reader;
 
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.Timestamp;
 
 import org.apache.hadoop.hive.ql.exec.vector.ColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
 
-import java.sql.Timestamp;
 import java.time.LocalDateTime;
 
 /**
@@ -41,10 +40,10 @@ public class OrcLegacyTimestampColumnVector extends AbstractOrcColumnVector
     }
 
     @Override
-    public TimestampData getTimestamp(int i, int precision) {
+    public Timestamp getTimestamp(int i, int precision) {
         int index = hiveVector.isRepeating ? 0 : i;
-        Timestamp timestamp = toTimestamp(hiveVector.vector[index]);
-        return TimestampData.fromTimestamp(timestamp);
+        java.sql.Timestamp timestamp = toTimestamp(hiveVector.vector[index]);
+        return Timestamp.fromSQLTimestamp(timestamp);
     }
 
     // creates a Hive ColumnVector of constant timestamp value
@@ -55,10 +54,10 @@ public class OrcLegacyTimestampColumnVector extends AbstractOrcColumnVector
             res.isNull[0] = true;
             res.isRepeating = true;
         } else {
-            Timestamp timestamp =
+            java.sql.Timestamp timestamp =
                     value instanceof LocalDateTime
-                            ? Timestamp.valueOf((LocalDateTime) value)
-                            : (Timestamp) value;
+                            ? java.sql.Timestamp.valueOf((LocalDateTime) value)
+                            : (java.sql.Timestamp) value;
             res.fill(fromTimestamp(timestamp));
             res.isNull[0] = false;
         }
@@ -66,13 +65,13 @@ public class OrcLegacyTimestampColumnVector extends AbstractOrcColumnVector
     }
 
     // converting from/to Timestamp is copied from Hive 2.0.0 TimestampUtils
-    private static long fromTimestamp(Timestamp timestamp) {
+    private static long fromTimestamp(java.sql.Timestamp timestamp) {
         long time = timestamp.getTime();
         int nanos = timestamp.getNanos();
         return (time * 1000000) + (nanos % 1000000);
     }
 
-    private static Timestamp toTimestamp(long timeInNanoSec) {
+    private static java.sql.Timestamp toTimestamp(long timeInNanoSec) {
         long integralSecInMillis =
                 (timeInNanoSec / 1000000000) * 1000; // Full seconds converted to millis.
         long nanos = timeInNanoSec % 1000000000; // The nanoseconds.
@@ -83,7 +82,7 @@ public class OrcLegacyTimestampColumnVector extends AbstractOrcColumnVector
             integralSecInMillis =
                     ((timeInNanoSec / 1000000000) - 1) * 1000; // Reduce by one second.
         }
-        Timestamp res = new Timestamp(0);
+        java.sql.Timestamp res = new java.sql.Timestamp(0);
         res.setTime(integralSecInMillis);
         res.setNanos((int) nanos);
         return res;

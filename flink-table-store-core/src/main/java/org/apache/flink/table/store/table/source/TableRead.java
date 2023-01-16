@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -30,7 +30,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/** An abstraction layer above {@link FileStoreRead} to provide reading of {@link RowData}. */
+/** An abstraction layer above {@link FileStoreRead} to provide reading of {@link InternalRow}. */
 public interface TableRead {
 
     default TableRead withFilter(List<Predicate> predicates) {
@@ -50,10 +50,10 @@ public interface TableRead {
 
     TableRead withProjection(int[][] projection);
 
-    RecordReader<RowData> createReader(Split split) throws IOException;
+    RecordReader<InternalRow> createReader(Split split) throws IOException;
 
-    default RecordReader<RowData> createReader(List<Split> splits) throws IOException {
-        List<ConcatRecordReader.ReaderSupplier<RowData>> readers = new ArrayList<>();
+    default RecordReader<InternalRow> createReader(List<Split> splits) throws IOException {
+        List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
         for (Split split : splits) {
             readers.add(() -> createReader(split));
         }

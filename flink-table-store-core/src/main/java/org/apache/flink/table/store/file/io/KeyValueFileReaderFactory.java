@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
@@ -29,8 +29,8 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.store.format.FormatKey;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Projection;
-import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
@@ -158,12 +158,12 @@ public class KeyValueFileReaderFactory {
             return this;
         }
 
-        public KeyValueFileReaderFactory build(BinaryRowData partition, int bucket) {
+        public KeyValueFileReaderFactory build(BinaryRow partition, int bucket) {
             return build(partition, bucket, true, Collections.emptyList());
         }
 
         public KeyValueFileReaderFactory build(
-                BinaryRowData partition,
+                BinaryRow partition,
                 int bucket,
                 boolean projectKeys,
                 @Nullable List<Predicate> filters) {

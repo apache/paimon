@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.format.FieldStats;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.DataType;
 
 import java.util.List;
 
@@ -28,13 +28,13 @@ public abstract class NullFalseLeafBinaryFunction extends LeafFunction {
 
     private static final long serialVersionUID = 1L;
 
-    public abstract boolean test(LogicalType type, Object field, Object literal);
+    public abstract boolean test(DataType type, Object field, Object literal);
 
     public abstract boolean test(
-            LogicalType type, long rowCount, FieldStats fieldStats, Object literal);
+            DataType type, long rowCount, FieldStats fieldStats, Object literal);
 
     @Override
-    public boolean test(LogicalType type, Object field, List<Object> literals) {
+    public boolean test(DataType type, Object field, List<Object> literals) {
         if (field == null || literals.get(0) == null) {
             return false;
         }
@@ -43,7 +43,7 @@ public abstract class NullFalseLeafBinaryFunction extends LeafFunction {
 
     @Override
     public boolean test(
-            LogicalType type, long rowCount, FieldStats fieldStats, List<Object> literals) {
+            DataType type, long rowCount, FieldStats fieldStats, List<Object> literals) {
         if (rowCount == fieldStats.nullCount() || literals.get(0) == null) {
             return false;
         }

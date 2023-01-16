@@ -18,12 +18,11 @@
 
 package org.apache.flink.table.store.file.disk;
 
-import org.apache.flink.core.memory.MemorySegment;
-import org.apache.flink.core.memory.MemorySegmentFactory;
 import org.apache.flink.table.store.data.AbstractPagedInputView;
 import org.apache.flink.table.store.file.compression.BlockCompressionFactory;
 import org.apache.flink.table.store.file.compression.BlockDecompressor;
 import org.apache.flink.table.store.file.memory.Buffer;
+import org.apache.flink.table.store.memory.MemorySegment;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -56,10 +55,10 @@ public class ChannelReaderInputView extends AbstractPagedInputView {
             throws IOException {
         this.numBlocksRemaining = numBlocks;
         this.reader = ioManager.createBufferFileReader(id);
-        uncompressedBuffer = MemorySegmentFactory.wrap(new byte[compressionBlockSize]);
+        uncompressedBuffer = MemorySegment.wrap(new byte[compressionBlockSize]);
         decompressor = compressionCodecFactory.getDecompressor();
         compressedBuffer =
-                MemorySegmentFactory.wrap(
+                MemorySegment.wrap(
                         new byte
                                 [compressionCodecFactory
                                         .getCompressor()

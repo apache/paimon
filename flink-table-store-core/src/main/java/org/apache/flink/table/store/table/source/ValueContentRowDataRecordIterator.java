@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.RecordReader;
 
@@ -32,13 +32,13 @@ public class ValueContentRowDataRecordIterator extends ResetRowKindRecordIterato
     }
 
     @Override
-    public RowData next() throws IOException {
+    public InternalRow next() throws IOException {
         KeyValue kv = nextKeyValue();
         if (kv == null) {
             return null;
         }
 
-        RowData rowData = kv.value();
+        InternalRow rowData = kv.value();
         rowData.setRowKind(kv.valueKind());
         return rowData;
     }

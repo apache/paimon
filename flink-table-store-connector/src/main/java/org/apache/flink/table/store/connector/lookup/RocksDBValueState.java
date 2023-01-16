@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.connector.lookup;
 
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDB;
@@ -37,14 +37,14 @@ public class RocksDBValueState extends RocksDBState<RocksDBState.Reference> {
     public RocksDBValueState(
             RocksDB db,
             ColumnFamilyHandle columnFamily,
-            TypeSerializer<RowData> keySerializer,
-            TypeSerializer<RowData> valueSerializer,
+            TypeSerializer<InternalRow> keySerializer,
+            TypeSerializer<InternalRow> valueSerializer,
             long lruCacheSize) {
         super(db, columnFamily, keySerializer, valueSerializer, lruCacheSize);
     }
 
     @Nullable
-    public RowData get(RowData key) throws IOException {
+    public InternalRow get(InternalRow key) throws IOException {
         try {
             Reference valueRef = get(wrap(serializeKey(key)));
             return valueRef.isPresent() ? deserializeValue(valueRef.bytes) : null;
@@ -63,7 +63,7 @@ public class RocksDBValueState extends RocksDBState<RocksDBState.Reference> {
         return valueRef;
     }
 
-    public void put(RowData key, RowData value) throws IOException {
+    public void put(InternalRow key, InternalRow value) throws IOException {
         checkArgument(value != null);
 
         try {
@@ -76,7 +76,7 @@ public class RocksDBValueState extends RocksDBState<RocksDBState.Reference> {
         }
     }
 
-    public void delete(RowData key) throws IOException {
+    public void delete(InternalRow key) throws IOException {
         try {
             byte[] keyBytes = serializeKey(key);
             ByteArray keyByteArray = wrap(keyBytes);
@@ -89,12 +89,12 @@ public class RocksDBValueState extends RocksDBState<RocksDBState.Reference> {
         }
     }
 
-    private RowData deserializeValue(byte[] valueBytes) throws IOException {
+    private InternalRow deserializeValue(byte[] valueBytes) throws IOException {
         valueInputView.setBuffer(valueBytes);
         return valueSerializer.deserialize(valueInputView);
     }
 
-    private byte[] serializeValue(RowData value) throws IOException {
+    private byte[] serializeValue(InternalRow value) throws IOException {
         valueOutputView.clear();
         valueSerializer.serialize(value, valueOutputView);
         return valueOutputView.getCopyOfBuffer();

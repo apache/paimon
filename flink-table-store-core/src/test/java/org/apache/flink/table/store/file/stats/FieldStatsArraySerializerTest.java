@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.stats;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.casting.CastExecutor;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -75,8 +75,8 @@ public class FieldStatsArraySerializerTest {
         FieldStatsArraySerializer fieldStatsArraySerializer =
                 new FieldStatsArraySerializer(
                         tableSchema.logicalRowType(), indexMapping, converterMapping);
-        BinaryRowData minRowData = row(1, 2, 3, 4);
-        BinaryRowData maxRowData = row(100, 99, 98, 97);
+        BinaryRow minRowData = row(1, 2, 3, 4);
+        BinaryRow maxRowData = row(100, 99, 98, 97);
         long[] nullCounts = new long[] {1, 0, 10, 100};
         BinaryTableStats dataTableStats = new BinaryTableStats(minRowData, maxRowData, nullCounts);
 

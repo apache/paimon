@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.connector.lookup;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.types.RowType;
 
 import java.io.IOException;
 import java.util.HashSet;
@@ -30,16 +30,16 @@ import java.util.function.Predicate;
 /** A lookup table which provides get and refresh. */
 public interface LookupTable {
 
-    List<RowData> get(RowData key) throws IOException;
+    List<InternalRow> get(InternalRow key) throws IOException;
 
-    void refresh(Iterator<RowData> incremental) throws IOException;
+    void refresh(Iterator<InternalRow> incremental) throws IOException;
 
     static LookupTable create(
             RocksDBStateFactory stateFactory,
             RowType rowType,
             List<String> primaryKey,
             List<String> joinKey,
-            Predicate<RowData> recordFilter,
+            Predicate<InternalRow> recordFilter,
             long lruCacheSize)
             throws IOException {
         if (new HashSet<>(primaryKey).equals(new HashSet<>(joinKey))) {

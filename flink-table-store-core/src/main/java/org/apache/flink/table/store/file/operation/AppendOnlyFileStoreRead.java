@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.io.RowDataFileRecordReader;
@@ -33,8 +33,8 @@ import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.store.format.FormatKey;
 import org.apache.flink.table.store.table.source.DataSplit;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Projection;
-import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
@@ -47,7 +47,7 @@ import java.util.Map;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
 
 /** {@link FileStoreRead} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
-public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
+public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
 
     private final SchemaManager schemaManager;
     private final long schemaId;
@@ -76,22 +76,22 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<RowData> {
         this.projection = Projection.range(0, rowType.getFieldCount()).toNestedIndexes();
     }
 
-    public FileStoreRead<RowData> withProjection(int[][] projectedFields) {
+    public FileStoreRead<InternalRow> withProjection(int[][] projectedFields) {
         projection = projectedFields;
         return this;
     }
 
     @Override
-    public FileStoreRead<RowData> withFilter(Predicate predicate) {
+    public FileStoreRead<InternalRow> withFilter(Predicate predicate) {
         this.filters = splitAnd(predicate);
         return this;
     }
 
     @Override
-    public RecordReader<RowData> createReader(DataSplit split) throws IOException {
+    public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(split.partition(), split.bucket());
-        List<ConcatRecordReader.ReaderSupplier<RowData>> suppliers = new ArrayList<>();
+        List<ConcatRecordReader.ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
         for (DataFileMeta file : split.files()) {
             String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
             BulkFormatMapping bulkFormatMapping =

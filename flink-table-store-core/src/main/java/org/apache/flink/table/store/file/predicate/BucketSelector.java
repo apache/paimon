@@ -19,11 +19,11 @@
 package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.table.sink.BucketComputer;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableSet;
 
@@ -139,7 +139,7 @@ public class BucketSelector implements Serializable {
     }
 
     private static int hash(List<Object> columns, RowDataSerializer serializer) {
-        BinaryRowData binaryRow = serializer.toBinaryRow(GenericRowData.of(columns.toArray()));
+        BinaryRow binaryRow = serializer.toBinaryRow(GenericRow.of(columns.toArray()));
         return BucketComputer.hashcode(binaryRow);
     }
 

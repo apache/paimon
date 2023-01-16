@@ -18,21 +18,21 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.RowDataUtils;
-import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.StringUtils;
 
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 
-/** PartitionComputer for {@link RowData}. */
+/** PartitionComputer for {@link InternalRow}. */
 public class RowDataPartitionComputer {
 
     protected final String defaultPartValue;
     protected final String[] partitionColumns;
-    protected final RowData.FieldGetter[] partitionFieldGetters;
+    protected final InternalRow.FieldGetter[] partitionFieldGetters;
 
     public RowDataPartitionComputer(
             String defaultPartValue, RowType rowType, String[] partitionColumns) {
@@ -46,10 +46,10 @@ public class RowDataPartitionComputer {
                                 i ->
                                         RowDataUtils.createNullCheckingFieldGetter(
                                                 rowType.getTypeAt(i), i))
-                        .toArray(RowData.FieldGetter[]::new);
+                        .toArray(InternalRow.FieldGetter[]::new);
     }
 
-    public LinkedHashMap<String, String> generatePartValues(RowData in) {
+    public LinkedHashMap<String, String> generatePartValues(InternalRow in) {
         LinkedHashMap<String, String> partSpec = new LinkedHashMap<>();
 
         for (int i = 0; i < partitionFieldGetters.length; i++) {

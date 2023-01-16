@@ -18,14 +18,14 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypeRoot;
 import org.apache.flink.table.store.utils.RowDataUtils;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.LogicalTypeRoot;
 
 /** min aggregate a field of a row. */
 public class FieldMinAgg extends FieldAggregator {
-    public FieldMinAgg(LogicalType logicalType) {
-        super(logicalType);
+    public FieldMinAgg(DataType dataType) {
+        super(dataType);
     }
 
     @Override
@@ -35,7 +35,7 @@ public class FieldMinAgg extends FieldAggregator {
         if (accumulator == null || inputField == null) {
             min = (accumulator == null ? inputField : accumulator);
         } else {
-            LogicalTypeRoot type = fieldType.getTypeRoot();
+            DataTypeRoot type = fieldType.getTypeRoot();
             if (RowDataUtils.compare(accumulator, inputField, type) < 0) {
                 min = accumulator;
             } else {

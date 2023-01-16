@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.mapred;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.mapred.JobConf;
@@ -29,10 +29,10 @@ import org.apache.hadoop.util.Progressable;
 import java.io.IOException;
 
 /** {@link OutputFormat} for table split. Currently useless. */
-public class TableStoreOutputFormat implements OutputFormat<RowData, RowData> {
+public class TableStoreOutputFormat implements OutputFormat<InternalRow, InternalRow> {
 
     @Override
-    public RecordWriter<RowData, RowData> getRecordWriter(
+    public RecordWriter<InternalRow, InternalRow> getRecordWriter(
             FileSystem fileSystem, JobConf jobConf, String s, Progressable progressable)
             throws IOException {
         throw new UnsupportedOperationException(

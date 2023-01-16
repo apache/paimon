@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.data;
 
 import org.apache.flink.core.memory.DataInputView;
-import org.apache.flink.core.memory.MemorySegment;
+import org.apache.flink.table.store.memory.MemorySegment;
 
 import java.io.EOFException;
 import java.io.IOException;

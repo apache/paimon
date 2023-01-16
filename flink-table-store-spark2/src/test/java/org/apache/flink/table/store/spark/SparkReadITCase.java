@@ -19,13 +19,14 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.spark.sql.Dataset;
@@ -64,19 +65,19 @@ public class SparkReadITCase {
         // Flink sink
         tablePath1 = new Path(warehousePath, "default.db/t1");
         SimpleTableTestHelper testHelper1 = createTestHelper(tablePath1);
-        testHelper1.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
-        testHelper1.write(GenericRowData.of(3, 4L, StringData.fromString("2")));
-        testHelper1.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
-        testHelper1.write(GenericRowData.ofKind(RowKind.DELETE, 3, 4L, StringData.fromString("2")));
+        testHelper1.write(GenericRow.of(1, 2L, BinaryString.fromString("1")));
+        testHelper1.write(GenericRow.of(3, 4L, BinaryString.fromString("2")));
+        testHelper1.write(GenericRow.of(5, 6L, BinaryString.fromString("3")));
+        testHelper1.write(GenericRow.ofKind(RowKind.DELETE, 3, 4L, BinaryString.fromString("2")));
         testHelper1.commit();
 
         tablePath2 = new Path(warehousePath, "default.db/t2");
         SimpleTableTestHelper testHelper2 = createTestHelper(tablePath2);
-        testHelper2.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
-        testHelper2.write(GenericRowData.of(3, 4L, StringData.fromString("2")));
+        testHelper2.write(GenericRow.of(1, 2L, BinaryString.fromString("1")));
+        testHelper2.write(GenericRow.of(3, 4L, BinaryString.fromString("2")));
         testHelper2.commit();
-        testHelper2.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
-        testHelper2.write(GenericRowData.of(7, 8L, StringData.fromString("4")));
+        testHelper2.write(GenericRow.of(5, 6L, BinaryString.fromString("3")));
+        testHelper2.write(GenericRow.of(7, 8L, BinaryString.fromString("4")));
         testHelper2.commit();
     }
 
@@ -84,9 +85,9 @@ public class SparkReadITCase {
         RowType rowType =
                 new RowType(
                         Arrays.asList(
-                                new RowType.RowField("a", new IntType()),
-                                new RowType.RowField("b", new BigIntType()),
-                                new RowType.RowField("c", new VarCharType())));
+                                new DataField(0, "a", new IntType()),
+                                new DataField(1, "b", new BigIntType()),
+                                new DataField(2, "c", new VarCharType())));
         return new SimpleTableTestHelper(tablePath, rowType);
     }
 

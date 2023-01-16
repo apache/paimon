@@ -29,10 +29,10 @@ import org.apache.flink.api.java.typeutils.runtime.TupleSerializer;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.BinaryRowSerializer;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -61,9 +61,9 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
 
     private final long fullCompactionThresholdMs;
 
-    private final Set<Tuple2<BinaryRowData, Integer>> currentWrittenBuckets;
-    private final NavigableMap<Long, Set<Tuple2<BinaryRowData, Integer>>> writtenBuckets;
-    private final ListState<Tuple3<Long, BinaryRowData, Integer>> writtenBucketState;
+    private final Set<Tuple2<BinaryRow, Integer>> currentWrittenBuckets;
+    private final NavigableMap<Long, Set<Tuple2<BinaryRow, Integer>>> writtenBuckets;
+    private final ListState<Tuple3<Long, BinaryRow, Integer>> writtenBucketState;
 
     private Long currentFirstWriteMs;
     private final NavigableMap<Long, Long> firstWriteMs;
@@ -84,12 +84,12 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
         this.fullCompactionThresholdMs = fullCompactionThresholdMs;
 
         currentWrittenBuckets = new HashSet<>();
-        TupleSerializer<Tuple3<Long, BinaryRowData, Integer>> writtenBucketStateSerializer =
+        TupleSerializer<Tuple3<Long, BinaryRow, Integer>> writtenBucketStateSerializer =
                 new TupleSerializer<>(
-                        (Class<Tuple3<Long, BinaryRowData, Integer>>) (Class<?>) Tuple3.class,
+                        (Class<Tuple3<Long, BinaryRow, Integer>>) (Class<?>) Tuple3.class,
                         new TypeSerializer[] {
                             LongSerializer.INSTANCE,
-                            new BinaryRowDataSerializer(
+                            new BinaryRowSerializer(
                                     table.schema().logicalPartitionType().getFieldCount()),
                             IntSerializer.INSTANCE
                         });
@@ -125,25 +125,24 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
     }
 
     @Override
-    public SinkRecord write(RowData rowData) throws Exception {
+    public SinkRecord write(InternalRow rowData) throws Exception {
         SinkRecord sinkRecord = super.write(rowData);
         touchBucket(sinkRecord.partition(), sinkRecord.bucket());
         return sinkRecord;
     }
 
     @Override
-    public void compact(BinaryRowData partition, int bucket, boolean fullCompaction)
-            throws Exception {
+    public void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {
         super.compact(partition, bucket, fullCompaction);
         touchBucket(partition, bucket);
     }
 
-    private void touchBucket(BinaryRowData partition, int bucket) {
+    private void touchBucket(BinaryRow partition, int bucket) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("touch partition {}, bucket {}", partition, bucket);
         }
 
-        // partition is a reused BinaryRowData
+        // partition is a reused BinaryRow
         // we first check if the tuple exists to minimize copying
         if (!currentWrittenBuckets.contains(Tuple2.of(partition, bucket))) {
             currentWrittenBuckets.add(Tuple2.of(partition.copy(), bucket));
@@ -170,11 +169,11 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
         }
 
         if (LOG.isDebugEnabled()) {
-            for (Map.Entry<Long, Set<Tuple2<BinaryRowData, Integer>>> checkpointIdAndBuckets :
+            for (Map.Entry<Long, Set<Tuple2<BinaryRow, Integer>>> checkpointIdAndBuckets :
                     writtenBuckets.entrySet()) {
                 LOG.debug(
                         "Written buckets for checkpoint #{} are:", checkpointIdAndBuckets.getKey());
-                for (Tuple2<BinaryRowData, Integer> bucket : checkpointIdAndBuckets.getValue()) {
+                for (Tuple2<BinaryRow, Integer> bucket : checkpointIdAndBuckets.getValue()) {
                     LOG.debug("  * partition {}, bucket {}", bucket.f0, bucket.f1);
                 }
             }
@@ -242,10 +241,10 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
     }
 
     private void submitFullCompaction() {
-        Set<Tuple2<BinaryRowData, Integer>> compactedBuckets = new HashSet<>();
+        Set<Tuple2<BinaryRow, Integer>> compactedBuckets = new HashSet<>();
         writtenBuckets.forEach(
                 (checkpointId, buckets) -> {
-                    for (Tuple2<BinaryRowData, Integer> bucket : buckets) {
+                    for (Tuple2<BinaryRow, Integer> bucket : buckets) {
                         if (compactedBuckets.contains(bucket)) {
                             continue;
                         }
@@ -263,10 +262,9 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
     public void snapshotState(StateSnapshotContext context) throws Exception {
         super.snapshotState(context);
 
-        List<Tuple3<Long, BinaryRowData, Integer>> writtenBucketList = new ArrayList<>();
-        for (Map.Entry<Long, Set<Tuple2<BinaryRowData, Integer>>> entry :
-                writtenBuckets.entrySet()) {
-            for (Tuple2<BinaryRowData, Integer> bucket : entry.getValue()) {
+        List<Tuple3<Long, BinaryRow, Integer>> writtenBucketList = new ArrayList<>();
+        for (Map.Entry<Long, Set<Tuple2<BinaryRow, Integer>>> entry : writtenBuckets.entrySet()) {
+            for (Tuple2<BinaryRow, Integer> bucket : entry.getValue()) {
                 writtenBucketList.add(Tuple3.of(entry.getKey(), bucket.f0, bucket.f1));
             }
         }

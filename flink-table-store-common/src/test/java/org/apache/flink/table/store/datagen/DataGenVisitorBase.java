@@ -21,10 +21,10 @@ package org.apache.flink.table.store.datagen;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.table.types.logical.DateType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.TimeType;
-import org.apache.flink.table.types.logical.utils.LogicalTypeDefaultVisitor;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypeDefaultVisitor;
+import org.apache.flink.table.store.types.DateType;
+import org.apache.flink.table.store.types.TimeType;
 
 import java.io.Serializable;
 import java.time.LocalDate;
@@ -33,11 +33,9 @@ import java.util.function.Supplier;
 
 import static java.time.temporal.ChronoField.MILLI_OF_DAY;
 
-/**
- * Base class for translating {@link LogicalType LogicalTypes} to {@link DataGeneratorContainer}'s.
- */
+/** Base class for translating {@link DataType} to {@link DataGeneratorContainer}'s. */
 @Internal
-public abstract class DataGenVisitorBase extends LogicalTypeDefaultVisitor<DataGeneratorContainer> {
+public abstract class DataGenVisitorBase extends DataTypeDefaultVisitor<DataGeneratorContainer> {
 
     protected final String name;
 
@@ -60,8 +58,8 @@ public abstract class DataGenVisitorBase extends LogicalTypeDefaultVisitor<DataG
     }
 
     @Override
-    protected DataGeneratorContainer defaultMethod(LogicalType logicalType) {
-        throw new ValidationException("Unsupported type: " + logicalType);
+    protected DataGeneratorContainer defaultMethod(DataType dataType) {
+        throw new ValidationException("Unsupported type: " + dataType);
     }
 
     private interface SerializableSupplier<T> extends Supplier<T>, Serializable {}

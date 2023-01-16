@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.RollingFileWriter;
 import org.apache.flink.table.store.file.io.SingleFileWriter;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -32,7 +32,7 @@ import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 import org.apache.flink.table.store.format.FieldStatsCollector;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FormatReaderFactory;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.io.IOException;
 import java.util.List;
@@ -48,7 +48,7 @@ public class ManifestFile {
     private final RowType partitionType;
     private final ManifestEntrySerializer serializer;
     private final FormatReaderFactory readerFactory;
-    private final BulkWriter.Factory<RowData> writerFactory;
+    private final BulkWriter.Factory<InternalRow> writerFactory;
     private final FileStorePathFactory pathFactory;
     private final long suggestedFileSize;
 
@@ -58,7 +58,7 @@ public class ManifestFile {
             RowType partitionType,
             ManifestEntrySerializer serializer,
             FormatReaderFactory readerFactory,
-            BulkWriter.Factory<RowData> writerFactory,
+            BulkWriter.Factory<InternalRow> writerFactory,
             FileStorePathFactory pathFactory,
             long suggestedFileSize) {
         this.schemaManager = schemaManager;
@@ -116,7 +116,7 @@ public class ManifestFile {
         private long numAddedFiles = 0;
         private long numDeletedFiles = 0;
 
-        ManifestEntryWriter(BulkWriter.Factory<RowData> factory, Path path) {
+        ManifestEntryWriter(BulkWriter.Factory<InternalRow> factory, Path path) {
             super(factory, path, serializer::toRow);
 
             this.partitionStatsCollector = new FieldStatsCollector(partitionType);

@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestFileStore;
@@ -107,13 +107,13 @@ public class FileStoreExpireTestBase {
     protected void assertSnapshot(
             int snapshotId, List<KeyValue> allData, List<Integer> snapshotPositions)
             throws Exception {
-        Map<BinaryRowData, BinaryRowData> expected =
+        Map<BinaryRow, BinaryRow> expected =
                 store.toKvMap(allData.subList(0, snapshotPositions.get(snapshotId - 1)));
         List<KeyValue> actualKvs =
                 store.readKvsFromManifestEntries(
                         store.newScan().withSnapshot(snapshotId).plan().files(), false);
         gen.sort(actualKvs);
-        Map<BinaryRowData, BinaryRowData> actual = store.toKvMap(actualKvs);
+        Map<BinaryRow, BinaryRow> actual = store.toKvMap(actualKvs);
         assertThat(actual).isEqualTo(expected);
     }
 }

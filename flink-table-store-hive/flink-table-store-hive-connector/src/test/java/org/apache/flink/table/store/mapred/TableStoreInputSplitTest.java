@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.mapred;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.io.DataFileTestDataGenerator;
 import org.apache.flink.table.store.table.source.DataSplit;
 
@@ -50,7 +50,7 @@ public class TableStoreInputSplitTest {
             generated.add(gen.next());
         }
 
-        BinaryRowData wantedPartition = generated.get(0).partition;
+        BinaryRow wantedPartition = generated.get(0).partition;
         TableStoreInputSplit split =
                 new TableStoreInputSplit(
                         tempDir.toString(),

@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
@@ -36,7 +36,7 @@ public class DataFileTestDataGenerator {
     private final int numBuckets;
     private final int memTableCapacity;
 
-    private final List<Map<BinaryRowData, List<KeyValue>>> memTables;
+    private final List<Map<BinaryRow, List<KeyValue>>> memTables;
     private final TestKeyValueGenerator gen;
 
     private DataFileTestDataGenerator(int numBuckets, int memTableCapacity) {
@@ -53,8 +53,8 @@ public class DataFileTestDataGenerator {
     public Data next() {
         while (true) {
             KeyValue kv = gen.next();
-            BinaryRowData key = (BinaryRowData) kv.key();
-            BinaryRowData partition = gen.getPartition(kv);
+            BinaryRow key = (BinaryRow) kv.key();
+            BinaryRow partition = gen.getPartition(kv);
             int bucket = (key.hashCode() % numBuckets + numBuckets) % numBuckets;
             List<KeyValue> memTable =
                     memTables.get(bucket).computeIfAbsent(partition, k -> new ArrayList<>());
@@ -70,7 +70,7 @@ public class DataFileTestDataGenerator {
     }
 
     public List<Data> createDataFiles(
-            List<KeyValue> kvs, int level, BinaryRowData partition, int bucket) {
+            List<KeyValue> kvs, int level, BinaryRow partition, int bucket) {
         gen.sort(kvs);
         List<KeyValue> combined = new ArrayList<>();
         for (int i = 0; i + 1 < kvs.size(); i++) {
@@ -98,8 +98,7 @@ public class DataFileTestDataGenerator {
         return result;
     }
 
-    private Data createDataFile(
-            List<KeyValue> kvs, int level, BinaryRowData partition, int bucket) {
+    private Data createDataFile(List<KeyValue> kvs, int level, BinaryRow partition, int bucket) {
         FieldStatsCollector keyStatsCollector =
                 new FieldStatsCollector(TestKeyValueGenerator.KEY_TYPE);
         FieldStatsCollector valueStatsCollector =
@@ -110,13 +109,13 @@ public class DataFileTestDataGenerator {
                 new FieldStatsArraySerializer(TestKeyValueGenerator.DEFAULT_ROW_TYPE);
 
         long totalSize = 0;
-        BinaryRowData minKey = null;
-        BinaryRowData maxKey = null;
+        BinaryRow minKey = null;
+        BinaryRow maxKey = null;
         long minSequenceNumber = Long.MAX_VALUE;
         long maxSequenceNumber = Long.MIN_VALUE;
         for (KeyValue kv : kvs) {
-            BinaryRowData key = (BinaryRowData) kv.key();
-            BinaryRowData value = (BinaryRowData) kv.value();
+            BinaryRow key = (BinaryRow) kv.key();
+            BinaryRow value = (BinaryRow) kv.value();
             totalSize += key.getSizeInBytes() + value.getSizeInBytes();
             keyStatsCollector.collect(key);
             valueStatsCollector.collect(value);
@@ -150,13 +149,12 @@ public class DataFileTestDataGenerator {
 
     /** An in-memory data file. */
     public static class Data {
-        public final BinaryRowData partition;
+        public final BinaryRow partition;
         public final int bucket;
         public final DataFileMeta meta;
         public final List<KeyValue> content;
 
-        private Data(
-                BinaryRowData partition, int bucket, DataFileMeta meta, List<KeyValue> content) {
+        private Data(BinaryRow partition, int bucket, DataFileMeta meta, List<KeyValue> content) {
             this.partition = partition;
             this.bucket = bucket;
             this.meta = meta;

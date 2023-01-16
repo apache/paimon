@@ -20,7 +20,7 @@
 package org.apache.flink.table.store.file.append;
 
 import org.apache.flink.api.common.accumulators.LongCounter;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.DataFileMeta;
@@ -29,8 +29,8 @@ import org.apache.flink.table.store.file.io.NewFilesIncrement;
 import org.apache.flink.table.store.file.io.RowDataRollingFileWriter;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
@@ -44,7 +44,7 @@ import static org.apache.flink.table.store.file.io.DataFileMeta.getMaxSequenceNu
  * A {@link RecordWriter} implementation that only accepts records which are always insert
  * operations and don't have any unique keys or sort keys.
  */
-public class AppendOnlyWriter implements RecordWriter<RowData> {
+public class AppendOnlyWriter implements RecordWriter<InternalRow> {
 
     private final long schemaId;
     private final FileFormat fileFormat;
@@ -85,7 +85,7 @@ public class AppendOnlyWriter implements RecordWriter<RowData> {
     }
 
     @Override
-    public void write(RowData rowData) throws Exception {
+    public void write(InternalRow rowData) throws Exception {
         Preconditions.checkArgument(
                 rowData.getRowKind() == RowKind.INSERT,
                 "Append-only writer can only accept insert row kind, but current row kind is: %s",

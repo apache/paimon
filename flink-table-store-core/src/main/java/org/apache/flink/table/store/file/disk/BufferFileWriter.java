@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.disk;
 
-import org.apache.flink.core.memory.MemorySegment;
 import org.apache.flink.table.store.file.memory.Buffer;
+import org.apache.flink.table.store.memory.MemorySegment;
 
 import java.io.IOException;
 

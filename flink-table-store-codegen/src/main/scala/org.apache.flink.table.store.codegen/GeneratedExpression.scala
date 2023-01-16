@@ -17,7 +17,7 @@
  */
 package org.apache.flink.table.store.codegen
 
-import org.apache.flink.table.types.logical.LogicalType
+import org.apache.flink.table.store.types.DataType
 
 /**
  * Describes a generated expression.
@@ -35,7 +35,7 @@ case class GeneratedExpression(
     resultTerm: String,
     nullTerm: String,
     code: String,
-    resultType: LogicalType
+    resultType: DataType
 )
 
 object GeneratedExpression {

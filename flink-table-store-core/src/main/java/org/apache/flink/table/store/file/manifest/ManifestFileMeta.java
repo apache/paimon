@@ -20,9 +20,10 @@ package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -80,13 +81,13 @@ public class ManifestFileMeta {
     }
 
     public static RowType schema() {
-        List<RowType.RowField> fields = new ArrayList<>();
-        fields.add(new RowType.RowField("_FILE_NAME", new VarCharType(false, Integer.MAX_VALUE)));
-        fields.add(new RowType.RowField("_FILE_SIZE", new BigIntType(false)));
-        fields.add(new RowType.RowField("_NUM_ADDED_FILES", new BigIntType(false)));
-        fields.add(new RowType.RowField("_NUM_DELETED_FILES", new BigIntType(false)));
-        fields.add(new RowType.RowField("_PARTITION_STATS", FieldStatsArraySerializer.schema()));
-        fields.add(new RowType.RowField("_SCHEMA_ID", new BigIntType(false)));
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "_FILE_NAME", new VarCharType(false, Integer.MAX_VALUE)));
+        fields.add(new DataField(1, "_FILE_SIZE", new BigIntType(false)));
+        fields.add(new DataField(2, "_NUM_ADDED_FILES", new BigIntType(false)));
+        fields.add(new DataField(3, "_NUM_DELETED_FILES", new BigIntType(false)));
+        fields.add(new DataField(4, "_PARTITION_STATS", FieldStatsArraySerializer.schema()));
+        fields.add(new DataField(5, "_SCHEMA_ID", new BigIntType(false)));
         return new RowType(fields);
     }
 

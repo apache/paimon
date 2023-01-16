@@ -18,30 +18,29 @@
 
 package org.apache.flink.table.store.file.casting;
 
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.data.binary.BinaryStringData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.types.BinaryType;
+import org.apache.flink.table.store.types.CharType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.TimestampType;
+import org.apache.flink.table.store.types.VarBinaryType;
+import org.apache.flink.table.store.types.VarCharType;
 import org.apache.flink.table.store.utils.DateTimeUtils;
 import org.apache.flink.table.store.utils.DecimalUtils;
 import org.apache.flink.table.store.utils.StringUtils;
-import org.apache.flink.table.types.logical.BinaryType;
-import org.apache.flink.table.types.logical.CharType;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.TimestampType;
-import org.apache.flink.table.types.logical.VarBinaryType;
-import org.apache.flink.table.types.logical.VarCharType;
 
 import javax.annotation.Nullable;
 
 import java.util.Arrays;
 
-import static org.apache.flink.table.types.logical.LogicalTypeRoot.BINARY;
-import static org.apache.flink.table.types.logical.LogicalTypeRoot.CHAR;
-import static org.apache.flink.table.types.logical.LogicalTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE;
-import static org.apache.flink.table.types.logical.LogicalTypeRoot.VARBINARY;
-import static org.apache.flink.table.types.logical.LogicalTypeRoot.VARCHAR;
+import static org.apache.flink.table.store.types.DataTypeRoot.BINARY;
+import static org.apache.flink.table.store.types.DataTypeRoot.CHAR;
+import static org.apache.flink.table.store.types.DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE;
+import static org.apache.flink.table.store.types.DataTypeRoot.VARBINARY;
+import static org.apache.flink.table.store.types.DataTypeRoot.VARCHAR;
 
 /** Cast executors for input type and output type. */
 public class CastExecutors {
@@ -55,8 +54,7 @@ public class CastExecutors {
      * @param outputType the output value type.
      * @return the {@link CastExecutor} instance.
      */
-    public static @Nullable CastExecutor<?, ?> resolve(
-            LogicalType inputType, LogicalType outputType) {
+    public static @Nullable CastExecutor<?, ?> resolve(DataType inputType, DataType outputType) {
         switch (inputType.getTypeRoot()) {
             case TINYINT:
             case SMALLINT:
@@ -110,23 +108,22 @@ public class CastExecutors {
                 {
                     switch (outputType.getTypeRoot()) {
                         case TINYINT:
-                            return value -> (byte) DecimalUtils.castToIntegral((DecimalData) value);
+                            return value -> (byte) DecimalUtils.castToIntegral((Decimal) value);
                         case SMALLINT:
-                            return value ->
-                                    (short) DecimalUtils.castToIntegral((DecimalData) value);
+                            return value -> (short) DecimalUtils.castToIntegral((Decimal) value);
                         case INTEGER:
-                            return value -> (int) DecimalUtils.castToIntegral((DecimalData) value);
+                            return value -> (int) DecimalUtils.castToIntegral((Decimal) value);
                         case BIGINT:
-                            return value -> DecimalUtils.castToIntegral((DecimalData) value);
+                            return value -> DecimalUtils.castToIntegral((Decimal) value);
                         case FLOAT:
-                            return value -> (float) DecimalUtils.doubleValue((DecimalData) value);
+                            return value -> (float) DecimalUtils.doubleValue((Decimal) value);
                         case DOUBLE:
-                            return value -> DecimalUtils.doubleValue((DecimalData) value);
+                            return value -> DecimalUtils.doubleValue((Decimal) value);
                         case DECIMAL:
                             DecimalType decimalType = (DecimalType) outputType;
                             return value ->
                                     DecimalUtils.castToDecimal(
-                                            (DecimalData) value,
+                                            (Decimal) value,
                                             decimalType.getPrecision(),
                                             decimalType.getScale());
                         default:
@@ -139,17 +136,16 @@ public class CastExecutors {
                     final boolean targetCharType = outputType.getTypeRoot() == CHAR;
                     final int targetLength = getStringLength(outputType);
                     return value -> {
-                        StringData result;
+                        BinaryString result;
                         String strVal = value.toString();
-                        BinaryStringData strData = BinaryStringData.fromString(strVal);
+                        BinaryString strData = BinaryString.fromString(strVal);
                         if (strData.numChars() > targetLength) {
-                            result = BinaryStringData.fromString(strVal.substring(0, targetLength));
+                            result = BinaryString.fromString(strVal.substring(0, targetLength));
                         } else {
                             if (strData.numChars() < targetLength) {
                                 if (targetCharType) {
                                     int padLength = targetLength - strData.numChars();
-                                    BinaryStringData padString =
-                                            BinaryStringData.blankString(padLength);
+                                    BinaryString padString = BinaryString.blankString(padLength);
                                     result = StringUtils.concat(strData, padString);
                                 } else {
                                     result = strData;
@@ -164,7 +160,7 @@ public class CastExecutors {
                 } else if (outputType.getTypeRoot() == VARBINARY) {
                     final int targetLength = getBinaryLength(outputType);
                     return value -> {
-                        byte[] byteArrayTerm = ((StringData) value).toBytes();
+                        byte[] byteArrayTerm = ((BinaryString) value).toBytes();
                         if (byteArrayTerm.length <= targetLength) {
                             return byteArrayTerm;
                         } else {
@@ -204,21 +200,21 @@ public class CastExecutors {
                         {
                             return value ->
                                     (int)
-                                            (((TimestampData) value).getMillisecond()
+                                            (((Timestamp) value).getMillisecond()
                                                     / DateTimeUtils.MILLIS_PER_DAY);
                         }
                     case TIMESTAMP_WITHOUT_TIME_ZONE:
                         {
                             return value ->
                                     DateTimeUtils.truncate(
-                                            (TimestampData) value,
+                                            (Timestamp) value,
                                             ((TimestampType) outputType).getPrecision());
                         }
                     case TIME_WITHOUT_TIME_ZONE:
                         {
                             return value ->
                                     (int)
-                                            (((TimestampData) value).getMillisecond()
+                                            (((Timestamp) value).getMillisecond()
                                                     % DateTimeUtils.MILLIS_PER_DAY);
                         }
                     default:
@@ -230,7 +226,7 @@ public class CastExecutors {
                 if (outputType.getTypeRoot() == TIMESTAMP_WITHOUT_TIME_ZONE) {
                     return value ->
                             (int)
-                                    (((TimestampData) value).getMillisecond()
+                                    (((Timestamp) value).getMillisecond()
                                             % DateTimeUtils.MILLIS_PER_DAY);
                 }
                 return null;
@@ -243,23 +239,23 @@ public class CastExecutors {
         return IDENTITY_CAST_EXECUTOR;
     }
 
-    private static int getStringLength(LogicalType logicalType) {
-        if (logicalType instanceof CharType) {
-            return ((CharType) logicalType).getLength();
-        } else if (logicalType instanceof VarCharType) {
-            return ((VarCharType) logicalType).getLength();
+    private static int getStringLength(DataType dataType) {
+        if (dataType instanceof CharType) {
+            return ((CharType) dataType).getLength();
+        } else if (dataType instanceof VarCharType) {
+            return ((VarCharType) dataType).getLength();
         }
 
-        throw new IllegalArgumentException(String.format("Unsupported type %s", logicalType));
+        throw new IllegalArgumentException(String.format("Unsupported type %s", dataType));
     }
 
-    private static int getBinaryLength(LogicalType logicalType) {
-        if (logicalType instanceof VarBinaryType) {
-            return ((VarBinaryType) logicalType).getLength();
-        } else if (logicalType instanceof BinaryType) {
-            return ((BinaryType) logicalType).getLength();
+    private static int getBinaryLength(DataType dataType) {
+        if (dataType instanceof VarBinaryType) {
+            return ((VarBinaryType) dataType).getLength();
+        } else if (dataType instanceof BinaryType) {
+            return ((BinaryType) dataType).getLength();
         }
 
-        throw new IllegalArgumentException(String.format("Unsupported type %s", logicalType));
+        throw new IllegalArgumentException(String.format("Unsupported type %s", dataType));
     }
 }

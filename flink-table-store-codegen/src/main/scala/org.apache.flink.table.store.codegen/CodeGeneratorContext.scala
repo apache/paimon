@@ -19,7 +19,7 @@ package org.apache.flink.table.store.codegen
 
 import org.apache.flink.table.store.codegen.GenerateUtils.{newName, newNames}
 import org.apache.flink.table.store.data.InternalSerializers
-import org.apache.flink.table.types.logical.LogicalType
+import org.apache.flink.table.store.types.DataType
 import org.apache.flink.util.InstantiationUtil
 
 import scala.collection.mutable
@@ -47,8 +47,8 @@ class CodeGeneratorContext {
 
   // map of type serializer that will be added only once
   // LogicalType -> reused_term
-  private val reusableTypeSerializers: mutable.Map[LogicalType, String] =
-    mutable.Map[LogicalType, String]()
+  private val reusableTypeSerializers: mutable.Map[DataType, String] =
+    mutable.Map[DataType, String]()
 
   // local variable statements.
   private val reusableLocalVariableStatements = mutable.LinkedHashSet[String]()
@@ -154,7 +154,7 @@ class CodeGeneratorContext {
    * @return
    *   member variable term
    */
-  def addReusableTypeSerializer(t: LogicalType): String = {
+  def addReusableTypeSerializer(t: DataType): String = {
     // if type serializer has been used before, we can reuse the code that
     // has already been generated
     reusableTypeSerializers.get(t) match {

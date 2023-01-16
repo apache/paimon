@@ -21,8 +21,8 @@ package org.apache.flink.table.store.connector.sink;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.SinkRecord;
@@ -34,14 +34,13 @@ import java.util.List;
 /** Helper class of {@link StoreWriteOperator} for different types of table store sinks. */
 interface StoreSinkWrite {
 
-    SinkRecord write(RowData rowData) throws Exception;
+    SinkRecord write(InternalRow rowData) throws Exception;
 
     SinkRecord toLogRecord(SinkRecord record);
 
-    void compact(BinaryRowData partition, int bucket, boolean fullCompaction) throws Exception;
+    void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
 
-    void notifyNewFiles(
-            long snapshotId, BinaryRowData partition, int bucket, List<DataFileMeta> files);
+    void notifyNewFiles(long snapshotId, BinaryRow partition, int bucket, List<DataFileMeta> files);
 
     List<Committable> prepareCommit(boolean doCompaction, long checkpointId) throws IOException;
 

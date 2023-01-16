@@ -18,9 +18,8 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.api.TableSchema;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
@@ -32,40 +31,38 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SparkTypeTest {
 
     public static final RowType ALL_TYPES =
-            (RowType)
-                    TableSchema.builder()
-                            .field("id", DataTypes.INT().notNull())
-                            .field("name", DataTypes.STRING()) /* optional by default */
-                            .field("salary", DataTypes.DOUBLE().notNull())
-                            .field(
-                                    "locations",
-                                    DataTypes.MAP(
-                                            DataTypes.STRING().notNull(),
-                                            DataTypes.ROW(
-                                                    DataTypes.FIELD(
-                                                            "posX",
-                                                            DataTypes.DOUBLE().notNull(),
-                                                            "X field"),
-                                                    DataTypes.FIELD(
-                                                            "posY",
-                                                            DataTypes.DOUBLE().notNull(),
-                                                            "Y field"))))
-                            .field("strArray", DataTypes.ARRAY(DataTypes.STRING()).nullable())
-                            .field("intArray", DataTypes.ARRAY(DataTypes.INT()).nullable())
-                            .field("boolean", DataTypes.BOOLEAN().nullable())
-                            .field("tinyint", DataTypes.TINYINT())
-                            .field("smallint", DataTypes.SMALLINT())
-                            .field("bigint", DataTypes.BIGINT())
-                            .field("bytes", DataTypes.BYTES())
-                            .field("timestamp", DataTypes.TIMESTAMP())
-                            .field("date", DataTypes.DATE())
-                            .field("decimal", DataTypes.DECIMAL(2, 2))
-                            .field("decimal2", DataTypes.DECIMAL(38, 2))
-                            .field("decimal3", DataTypes.DECIMAL(10, 1))
-                            .build()
-                            .toRowDataType()
-                            .getLogicalType()
-                            .copy(true);
+            RowType.builder()
+                    .field("id", DataTypes.INT().notNull())
+                    .field("name", DataTypes.STRING()) /* optional by default */
+                    .field("salary", DataTypes.DOUBLE().notNull())
+                    .field(
+                            "locations",
+                            DataTypes.MAP(
+                                    DataTypes.STRING().notNull(),
+                                    DataTypes.ROW(
+                                            DataTypes.FIELD(
+                                                    0,
+                                                    "posX",
+                                                    DataTypes.DOUBLE().notNull(),
+                                                    "X field"),
+                                            DataTypes.FIELD(
+                                                    1,
+                                                    "posY",
+                                                    DataTypes.DOUBLE().notNull(),
+                                                    "Y field"))))
+                    .field("strArray", DataTypes.ARRAY(DataTypes.STRING()).nullable())
+                    .field("intArray", DataTypes.ARRAY(DataTypes.INT()).nullable())
+                    .field("boolean", DataTypes.BOOLEAN().nullable())
+                    .field("tinyint", DataTypes.TINYINT())
+                    .field("smallint", DataTypes.SMALLINT())
+                    .field("bigint", DataTypes.BIGINT())
+                    .field("bytes", DataTypes.BYTES())
+                    .field("timestamp", DataTypes.TIMESTAMP())
+                    .field("date", DataTypes.DATE())
+                    .field("decimal", DataTypes.DECIMAL(2, 2))
+                    .field("decimal2", DataTypes.DECIMAL(38, 2))
+                    .field("decimal3", DataTypes.DECIMAL(10, 1))
+                    .build();
 
     @Test
     public void testAllTypes() {

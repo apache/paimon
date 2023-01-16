@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -124,11 +124,13 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
             FieldStats[] statsArray = getTableValueStats(fileMeta).fields(null);
             assertThat(statsArray.length).isEqualTo(4);
             if (filesName.contains(fileMeta.fileName())) {
-                assertThat(statsArray[0].minValue()).isEqualTo(StringData.fromString("200       "));
-                assertThat(statsArray[0].maxValue()).isEqualTo(StringData.fromString("300       "));
+                assertThat(statsArray[0].minValue())
+                        .isEqualTo(BinaryString.fromString("200       "));
+                assertThat(statsArray[0].maxValue())
+                        .isEqualTo(BinaryString.fromString("300       "));
 
-                assertThat(statsArray[1].minValue()).isEqualTo(StringData.fromString("201"));
-                assertThat(statsArray[1].maxValue()).isEqualTo(StringData.fromString("301"));
+                assertThat(statsArray[1].minValue()).isEqualTo(BinaryString.fromString("201"));
+                assertThat(statsArray[1].maxValue()).isEqualTo(BinaryString.fromString("301"));
 
                 assertThat((Double) statsArray[2].minValue()).isEqualTo(202D);
                 assertThat((Double) statsArray[2].maxValue()).isEqualTo(302D);
@@ -138,10 +140,10 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
             } else {
                 assertThat(statsArray[0].minValue())
                         .isEqualTo(statsArray[0].maxValue())
-                        .isEqualTo(StringData.fromString("400"));
+                        .isEqualTo(BinaryString.fromString("400"));
                 assertThat(statsArray[1].minValue())
                         .isEqualTo(statsArray[1].maxValue())
-                        .isEqualTo(StringData.fromString("401"));
+                        .isEqualTo(BinaryString.fromString("401"));
                 assertThat((Double) statsArray[2].minValue())
                         .isEqualTo((Double) statsArray[2].maxValue())
                         .isEqualTo(402D);

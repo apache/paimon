@@ -21,8 +21,9 @@ package org.apache.flink.table.store.file.io;
 import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializerTest;
@@ -33,12 +34,11 @@ import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
-import org.apache.flink.table.store.utils.BinaryRowDataUtil;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.VarCharType;
 import org.apache.flink.util.CloseableIterator;
 
 import org.junit.jupiter.api.RepeatedTest;
@@ -162,7 +162,11 @@ public class KeyValueFileReadWriteTest {
         KeyValueFileReaderFactory readerFactory =
                 createReaderFactory(tempDir.toString(), "avro", new int[][] {new int[] {1}}, null);
         RowType projectedKeyType =
-                RowType.of(new LogicalType[] {new BigIntType(false)}, new String[] {"key_orderId"});
+                RowType.builder()
+                        .fields(
+                                new DataType[] {new BigIntType(false)},
+                                new String[] {"key_orderId"})
+                        .build();
         RowDataSerializer projectedKeySerializer = new RowDataSerializer(projectedKeyType);
         assertData(
                 data,
@@ -174,7 +178,7 @@ public class KeyValueFileReadWriteTest {
                 kv ->
                         new KeyValue()
                                 .replace(
-                                        GenericRowData.of(kv.key().getLong(1)),
+                                        GenericRow.of(kv.key().getLong(1)),
                                         kv.sequenceNumber(),
                                         kv.valueKind(),
                                         kv.value()));
@@ -203,7 +207,7 @@ public class KeyValueFileReadWriteTest {
                         new int[][] {new int[] {2}, new int[] {4}, new int[] {0}, new int[] {1}});
         RowType projectedValueType =
                 RowType.of(
-                        new LogicalType[] {
+                        new DataType[] {
                             new IntType(false),
                             new BigIntType(),
                             new VarCharType(false, 8),
@@ -224,7 +228,7 @@ public class KeyValueFileReadWriteTest {
                                         kv.key(),
                                         kv.sequenceNumber(),
                                         kv.valueKind(),
-                                        GenericRowData.of(
+                                        GenericRow.of(
                                                 kv.value().getInt(2),
                                                 kv.value().isNullAt(4)
                                                         ? null
@@ -251,7 +255,7 @@ public class KeyValueFileReadWriteTest {
                         new FlushingFileFormat(format),
                         pathFactory,
                         suggestedFileSize)
-                .build(BinaryRowDataUtil.EMPTY_ROW, 0);
+                .build(BinaryRow.EMPTY_ROW, 0);
     }
 
     private KeyValueFileReaderFactory createReaderFactory(
@@ -272,7 +276,7 @@ public class KeyValueFileReadWriteTest {
         if (valueProjection != null) {
             builder.withValueProjection(valueProjection);
         }
-        return builder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
+        return builder.build(BinaryRow.EMPTY_ROW, 0);
     }
 
     private void assertData(

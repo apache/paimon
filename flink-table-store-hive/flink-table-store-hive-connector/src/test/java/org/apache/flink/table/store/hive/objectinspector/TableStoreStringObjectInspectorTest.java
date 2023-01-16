@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
@@ -46,7 +46,7 @@ public class TableStoreStringObjectInspectorTest {
     public void testGetPrimitiveJavaObject() {
         TableStoreStringObjectInspector oi = new TableStoreStringObjectInspector();
 
-        StringData input = StringData.fromString("testString");
+        BinaryString input = BinaryString.fromString("testString");
         String expected = "testString";
         assertThat(oi.getPrimitiveJavaObject(input)).isEqualTo(expected);
         assertThat(oi.getPrimitiveJavaObject(null)).isNull();
@@ -56,7 +56,7 @@ public class TableStoreStringObjectInspectorTest {
     public void testGetPrimitiveWritableObject() {
         TableStoreStringObjectInspector oi = new TableStoreStringObjectInspector();
 
-        StringData input = StringData.fromString("testString");
+        BinaryString input = BinaryString.fromString("testString");
         Text expected = new Text("testString");
         assertThat(oi.getPrimitiveWritableObject(input)).isEqualTo(expected);
         assertThat(oi.getPrimitiveWritableObject(null)).isNull();
@@ -66,7 +66,7 @@ public class TableStoreStringObjectInspectorTest {
     public void testCopyObject() {
         TableStoreStringObjectInspector oi = new TableStoreStringObjectInspector();
 
-        StringData input = StringData.fromString("testString");
+        BinaryString input = BinaryString.fromString("testString");
         Object copy = oi.copyObject(input);
         assertThat(copy).isEqualTo(input);
         assertThat(copy).isNotSameAs(input);

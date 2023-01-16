@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.disk;
 
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.core.memory.MemorySegment;
+import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.util.MutableObjectIterator;
 
 import java.io.EOFException;

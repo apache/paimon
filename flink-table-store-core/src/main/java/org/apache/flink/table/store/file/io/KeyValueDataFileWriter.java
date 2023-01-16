@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
@@ -29,7 +29,7 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FileStatsExtractor;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,15 +61,15 @@ public class KeyValueDataFileWriter
     private final FieldStatsArraySerializer valueStatsConverter;
     private final RowDataSerializer keySerializer;
 
-    private BinaryRowData minKey = null;
-    private RowData maxKey = null;
+    private BinaryRow minKey = null;
+    private InternalRow maxKey = null;
     private long minSeqNumber = Long.MAX_VALUE;
     private long maxSeqNumber = Long.MIN_VALUE;
 
     public KeyValueDataFileWriter(
-            BulkWriter.Factory<RowData> factory,
+            BulkWriter.Factory<InternalRow> factory,
             Path path,
-            Function<KeyValue, RowData> converter,
+            Function<KeyValue, InternalRow> converter,
             RowType keyType,
             RowType valueType,
             @Nullable FileStatsExtractor fileStatsExtractor,

@@ -21,15 +21,15 @@ package org.apache.flink.table.store.file.io;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import javax.annotation.Nullable;
 
@@ -39,7 +39,7 @@ public class KeyValueFileWriterFactory {
     private final long schemaId;
     private final RowType keyType;
     private final RowType valueType;
-    private final BulkWriter.Factory<RowData> writerFactory;
+    private final BulkWriter.Factory<InternalRow> writerFactory;
     @Nullable private final FileStatsExtractor fileStatsExtractor;
     private final DataFilePathFactory pathFactory;
     private final long suggestedFileSize;
@@ -48,7 +48,7 @@ public class KeyValueFileWriterFactory {
             long schemaId,
             RowType keyType,
             RowType valueType,
-            BulkWriter.Factory<RowData> writerFactory,
+            BulkWriter.Factory<InternalRow> writerFactory,
             @Nullable FileStatsExtractor fileStatsExtractor,
             DataFilePathFactory pathFactory,
             long suggestedFileSize) {
@@ -138,7 +138,7 @@ public class KeyValueFileWriterFactory {
             this.suggestedFileSize = suggestedFileSize;
         }
 
-        public KeyValueFileWriterFactory build(BinaryRowData partition, int bucket) {
+        public KeyValueFileWriterFactory build(BinaryRow partition, int bucket) {
             RowType recordType = KeyValue.schema(keyType, valueType);
             return new KeyValueFileWriterFactory(
                     schemaId,

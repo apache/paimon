@@ -17,7 +17,7 @@
 
 package org.apache.flink.table.store.format.parquet.reader;
 
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.data.columnar.writable.WritableIntVector;
 import org.apache.flink.table.store.data.columnar.writable.WritableTimestampVector;
 
@@ -30,13 +30,12 @@ import org.apache.parquet.schema.PrimitiveType;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.sql.Timestamp;
 import java.util.concurrent.TimeUnit;
 
 /**
  * Timestamp {@link ColumnReader}. We only support INT96 bytes now, julianDay(4) + nanosOfDay(8).
- * See https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#timestamp
- * TIMESTAMP_MILLIS and TIMESTAMP_MICROS are the deprecated ConvertedType.
+ * See https://github.com/apache/parquet-format/blob/master/DataTypes.md#timestamp TIMESTAMP_MILLIS
+ * and TIMESTAMP_MICROS are the deprecated ConvertedType.
  */
 public class TimestampColumnReader extends AbstractColumnReader<WritableTimestampVector> {
 
@@ -86,7 +85,7 @@ public class TimestampColumnReader extends AbstractColumnReader<WritableTimestam
         }
     }
 
-    public static TimestampData decodeInt96ToTimestamp(
+    public static Timestamp decodeInt96ToTimestamp(
             boolean utcTimestamp, org.apache.parquet.column.Dictionary dictionary, int id) {
         Binary binary = dictionary.decodeToBinary(id);
         Preconditions.checkArgument(
@@ -95,17 +94,16 @@ public class TimestampColumnReader extends AbstractColumnReader<WritableTimestam
         return int96ToTimestamp(utcTimestamp, buffer.getLong(), buffer.getInt());
     }
 
-    public static TimestampData int96ToTimestamp(
-            boolean utcTimestamp, long nanosOfDay, int julianDay) {
+    public static Timestamp int96ToTimestamp(boolean utcTimestamp, long nanosOfDay, int julianDay) {
         long millisecond = julianDayToMillis(julianDay) + (nanosOfDay / NANOS_PER_MILLISECOND);
 
         if (utcTimestamp) {
             int nanoOfMillisecond = (int) (nanosOfDay % NANOS_PER_MILLISECOND);
-            return TimestampData.fromEpochMillis(millisecond, nanoOfMillisecond);
+            return Timestamp.fromEpochMillis(millisecond, nanoOfMillisecond);
         } else {
-            Timestamp timestamp = new Timestamp(millisecond);
+            java.sql.Timestamp timestamp = new java.sql.Timestamp(millisecond);
             timestamp.setNanos((int) (nanosOfDay % NANOS_PER_SECOND));
-            return TimestampData.fromTimestamp(timestamp);
+            return Timestamp.fromSQLTimestamp(timestamp);
         }
     }
 

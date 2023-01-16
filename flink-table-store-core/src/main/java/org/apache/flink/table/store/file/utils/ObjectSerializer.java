@@ -22,10 +22,10 @@ import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.InternalSerializers;
 import org.apache.flink.table.store.data.RowDataSerializer;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -107,9 +107,9 @@ public abstract class ObjectSerializer<T> implements Serializable {
         return deserializeList(view);
     }
 
-    /** Convert a {@link T} to {@link RowData}. */
-    public abstract RowData toRow(T record);
+    /** Convert a {@link T} to {@link InternalRow}. */
+    public abstract InternalRow toRow(T record);
 
-    /** Convert a {@link RowData} to {@link T}. */
-    public abstract T fromRow(RowData rowData);
+    /** Convert a {@link InternalRow} to {@link T}. */
+    public abstract T fromRow(InternalRow rowData);
 }

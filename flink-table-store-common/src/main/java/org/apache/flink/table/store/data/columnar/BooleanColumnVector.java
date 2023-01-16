@@ -18,10 +18,7 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-
 /** Boolean column vector. */
-@Internal
 public interface BooleanColumnVector extends ColumnVector {
     boolean getBoolean(int i);
 }

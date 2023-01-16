@@ -20,8 +20,8 @@ package org.apache.flink.table.store;
 
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.hadoop.hive.ql.io.sarg.ExpressionTree;
@@ -47,11 +47,11 @@ public class SearchArgumentToPredicateConverter {
     private final ExpressionTree root;
     private final List<PredicateLeaf> leaves;
     private final List<String> columnNames;
-    private final List<LogicalType> columnTypes;
+    private final List<DataType> columnTypes;
     private final PredicateBuilder builder;
 
     public SearchArgumentToPredicateConverter(
-            SearchArgument sarg, List<String> columnNames, List<LogicalType> columnTypes) {
+            SearchArgument sarg, List<String> columnNames, List<DataType> columnTypes) {
         this.root = sarg.getExpression();
         this.leaves = sarg.getLeaves();
         this.columnNames = columnNames;
@@ -59,7 +59,7 @@ public class SearchArgumentToPredicateConverter {
         this.builder =
                 new PredicateBuilder(
                         RowType.of(
-                                columnTypes.toArray(new LogicalType[0]),
+                                columnTypes.toArray(new DataType[0]),
                                 columnNames.toArray(new String[0])));
     }
 
@@ -118,7 +118,7 @@ public class SearchArgumentToPredicateConverter {
         String columnName = leaf.getColumnName();
         int idx = columnNames.indexOf(columnName);
         Preconditions.checkArgument(idx >= 0, "Column " + columnName + " not found.");
-        LogicalType columnType = columnTypes.get(idx);
+        DataType columnType = columnTypes.get(idx);
         switch (leaf.getOperator()) {
             case EQUALS:
                 return builder.equal(idx, toLiteral(columnType, leaf.getLiteral()));
@@ -146,7 +146,7 @@ public class SearchArgumentToPredicateConverter {
         }
     }
 
-    private Object toLiteral(LogicalType literalType, Object o) {
+    private Object toLiteral(DataType literalType, Object o) {
         if (o instanceof HiveDecimalWritable) {
             o = ((HiveDecimalWritable) o).getHiveDecimal().bigDecimalValue();
         }

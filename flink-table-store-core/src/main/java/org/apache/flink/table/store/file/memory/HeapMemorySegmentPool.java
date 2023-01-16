@@ -18,8 +18,7 @@
 
 package org.apache.flink.table.store.file.memory;
 
-import org.apache.flink.core.memory.MemorySegment;
-import org.apache.flink.core.memory.MemorySegmentFactory;
+import org.apache.flink.table.store.memory.MemorySegment;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -46,7 +45,7 @@ public class HeapMemorySegmentPool implements MemorySegmentPool {
             return this.segments.poll();
         } else if (numPage < maxPages) {
             numPage++;
-            return MemorySegmentFactory.allocateUnpooledSegment(pageSize);
+            return MemorySegment.allocateHeapMemory(pageSize);
         }
 
         return null;

@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.file.mergetree;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
 
 import javax.annotation.Nullable;
 
@@ -39,7 +39,7 @@ public interface WriteBuffer {
      *
      * @return True, if the record was successfully written, false, if the mem table was full.
      */
-    boolean put(long sequenceNumber, RowKind valueKind, RowData key, RowData value)
+    boolean put(long sequenceNumber, RowKind valueKind, InternalRow key, InternalRow value)
             throws IOException;
 
     /** Record size of this table. */
@@ -59,7 +59,7 @@ public interface WriteBuffer {
      * @param mergedConsumer consumer to consume records after merging.
      */
     void forEach(
-            Comparator<RowData> keyComparator,
+            Comparator<InternalRow> keyComparator,
             MergeFunction<KeyValue> mergeFunction,
             @Nullable KvConsumer rawConsumer,
             KvConsumer mergedConsumer)
