@@ -24,6 +24,7 @@ import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.Table;
 
 import static org.apache.flink.table.store.table.system.AuditLogTable.AUDIT_LOG;
+import static org.apache.flink.table.store.table.system.FilesTable.FILES;
 import static org.apache.flink.table.store.table.system.OptionsTable.OPTIONS;
 import static org.apache.flink.table.store.table.system.SchemasTable.SCHEMAS;
 import static org.apache.flink.table.store.table.system.SnapshotsTable.SNAPSHOTS;
@@ -41,6 +42,8 @@ public class SystemTableLoader {
                 return new SchemasTable(fileIO, location);
             case AUDIT_LOG:
                 return new AuditLogTable(FileStoreTableFactory.create(fileIO, location));
+            case FILES:
+                return new FilesTable(FileStoreTableFactory.create(fileIO, location));
             default:
                 throw new UnsupportedOperationException("Unsupported system table type: " + type);
         }

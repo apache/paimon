@@ -19,7 +19,9 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.table.sink.BucketComputer;
 import org.apache.flink.table.store.types.RowType;
 
@@ -55,5 +57,9 @@ public interface FileStoreTable extends DataTable, SupportsPartition, SupportsWr
     @Override
     default BucketComputer bucketComputer() {
         return new BucketComputer(schema());
+    }
+
+    default BinaryTableStats getSchemaFieldStats(DataFileMeta dataFileMeta) {
+        return dataFileMeta.valueStats();
     }
 }
