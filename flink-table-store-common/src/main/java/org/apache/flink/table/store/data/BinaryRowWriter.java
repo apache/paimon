@@ -18,29 +18,28 @@
 package org.apache.flink.table.store.data;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.core.memory.MemorySegmentFactory;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.binary.BinarySegmentUtils;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.flink.table.store.memory.MemorySegmentUtils;
+import org.apache.flink.table.store.types.RowKind;
 
-/** Writer for {@link BinaryRowData}. */
+/** Writer for {@link BinaryRow}. */
 @Internal
 public final class BinaryRowWriter extends AbstractBinaryWriter {
 
     private final int nullBitsSizeInBytes;
-    private final BinaryRowData row;
+    private final BinaryRow row;
     private final int fixedSize;
 
-    public BinaryRowWriter(BinaryRowData row) {
+    public BinaryRowWriter(BinaryRow row) {
         this(row, 0);
     }
 
-    public BinaryRowWriter(BinaryRowData row, int initialSize) {
-        this.nullBitsSizeInBytes = BinaryRowData.calculateBitSetWidthInBytes(row.getArity());
+    public BinaryRowWriter(BinaryRow row, int initialSize) {
+        this.nullBitsSizeInBytes = BinaryRow.calculateBitSetWidthInBytes(row.getFieldCount());
         this.fixedSize = row.getFixedLengthPartSize();
         this.cursor = fixedSize;
 
-        this.segment = MemorySegmentFactory.wrap(new byte[fixedSize + initialSize]);
+        this.segment = MemorySegment.wrap(new byte[fixedSize + initialSize]);
         this.row = row;
         this.row.pointTo(segment, 0, segment.size());
     }
@@ -63,7 +62,7 @@ public final class BinaryRowWriter extends AbstractBinaryWriter {
 
     @Override
     public void setNullBit(int pos) {
-        BinarySegmentUtils.bitSet(segment, 0, pos + BinaryRowData.HEADER_SIZE_IN_BITS);
+        MemorySegmentUtils.bitSet(segment, 0, pos + BinaryRow.HEADER_SIZE_IN_BITS);
     }
 
     public void writeRowKind(RowKind kind) {

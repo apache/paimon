@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestFileStore;
@@ -35,7 +35,7 @@ import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
 import org.apache.flink.table.store.file.utils.TraceableFileSystem;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -199,7 +199,7 @@ public class FileStoreCommitTest {
             int numThreads, boolean failing, CoreOptions.ChangelogProducer changelogProducer)
             throws Exception {
         // prepare test data
-        Map<BinaryRowData, List<KeyValue>> data =
+        Map<BinaryRow, List<KeyValue>> data =
                 generateData(ThreadLocalRandom.current().nextInt(1000) + 1);
         logData(
                 () ->
@@ -208,11 +208,11 @@ public class FileStoreCommitTest {
                                 .collect(Collectors.toList()),
                 "input");
 
-        List<Map<BinaryRowData, List<KeyValue>>> dataPerThread = new ArrayList<>();
+        List<Map<BinaryRow, List<KeyValue>>> dataPerThread = new ArrayList<>();
         for (int i = 0; i < numThreads; i++) {
             dataPerThread.add(new HashMap<>());
         }
-        for (Map.Entry<BinaryRowData, List<KeyValue>> entry : data.entrySet()) {
+        for (Map.Entry<BinaryRow, List<KeyValue>> entry : data.entrySet()) {
             dataPerThread
                     .get(ThreadLocalRandom.current().nextInt(numThreads))
                     .put(entry.getKey(), entry.getValue());
@@ -229,7 +229,7 @@ public class FileStoreCommitTest {
             int numThreads, boolean failing, CoreOptions.ChangelogProducer changelogProducer)
             throws Exception {
         // prepare test data
-        Map<BinaryRowData, List<KeyValue>> data =
+        Map<BinaryRow, List<KeyValue>> data =
                 generateData(ThreadLocalRandom.current().nextInt(1000) + 1);
         logData(
                 () ->
@@ -238,11 +238,11 @@ public class FileStoreCommitTest {
                                 .collect(Collectors.toList()),
                 "input");
 
-        List<Map<BinaryRowData, List<KeyValue>>> dataPerThread = new ArrayList<>();
+        List<Map<BinaryRow, List<KeyValue>>> dataPerThread = new ArrayList<>();
         for (int i = 0; i < numThreads; i++) {
             dataPerThread.add(new HashMap<>());
         }
-        for (Map.Entry<BinaryRowData, List<KeyValue>> entry : data.entrySet()) {
+        for (Map.Entry<BinaryRow, List<KeyValue>> entry : data.entrySet()) {
             for (KeyValue kv : entry.getValue()) {
                 dataPerThread
                         .get(Math.abs(kv.key().hashCode()) % numThreads)
@@ -255,14 +255,14 @@ public class FileStoreCommitTest {
     }
 
     private void testRandomConcurrent(
-            List<Map<BinaryRowData, List<KeyValue>>> dataPerThread,
+            List<Map<BinaryRow, List<KeyValue>>> dataPerThread,
             boolean enableOverwrite,
             boolean failing,
             CoreOptions.ChangelogProducer changelogProducer)
             throws Exception {
         // concurrent commits
         List<TestCommitThread> threads = new ArrayList<>();
-        for (Map<BinaryRowData, List<KeyValue>> data : dataPerThread) {
+        for (Map<BinaryRow, List<KeyValue>> data : dataPerThread) {
             TestCommitThread thread =
                     new TestCommitThread(
                             TestKeyValueGenerator.KEY_TYPE,
@@ -283,7 +283,7 @@ public class FileStoreCommitTest {
             thread.join();
             threadResults.addAll(thread.getResult());
         }
-        Map<BinaryRowData, BinaryRowData> expected = store.toKvMap(threadResults);
+        Map<BinaryRow, BinaryRow> expected = store.toKvMap(threadResults);
 
         // read actual data and compare
         Long snapshotId = store.snapshotManager().latestSnapshotId();
@@ -291,7 +291,7 @@ public class FileStoreCommitTest {
         List<KeyValue> actualKvs = store.readKvsFromSnapshot(snapshotId);
         gen.sort(actualKvs);
         logData(() -> actualKvs, "raw read results");
-        Map<BinaryRowData, BinaryRowData> actual = store.toKvMap(actualKvs);
+        Map<BinaryRow, BinaryRow> actual = store.toKvMap(actualKvs);
         logData(() -> kvMapToKvList(expected), "expected");
         logData(() -> kvMapToKvList(actual), "actual");
         assertThat(actual).isEqualTo(expected);
@@ -300,7 +300,7 @@ public class FileStoreCommitTest {
         if (changelogProducer != CoreOptions.ChangelogProducer.NONE) {
             List<KeyValue> actualChangelog = store.readAllChangelogUntilSnapshot(snapshotId);
             logData(() -> actualChangelog, "raw changelog results");
-            Map<BinaryRowData, BinaryRowData> actualChangelogMap = store.toKvMap(actualChangelog);
+            Map<BinaryRow, BinaryRow> actualChangelogMap = store.toKvMap(actualChangelog);
             logData(() -> kvMapToKvList(actualChangelogMap), "actual changelog map");
             assertThat(actualChangelogMap).isEqualTo(expected);
 
@@ -311,10 +311,10 @@ public class FileStoreCommitTest {
     }
 
     private void validateFullChangelog(List<KeyValue> changelog) {
-        Map<BinaryRowData, KeyValue> kvMap = new HashMap<>();
-        Map<BinaryRowData, RowKind> kindMap = new HashMap<>();
+        Map<BinaryRow, KeyValue> kvMap = new HashMap<>();
+        Map<BinaryRow, RowKind> kindMap = new HashMap<>();
         for (KeyValue kv : changelog) {
-            BinaryRowData key = TestKeyValueGenerator.KEY_SERIALIZER.toBinaryRow(kv.key()).copy();
+            BinaryRow key = TestKeyValueGenerator.KEY_SERIALIZER.toBinaryRow(kv.key()).copy();
             switch (kv.valueKind()) {
                 case INSERT:
                     assertThat(kvMap).doesNotContainKey(key);
@@ -347,7 +347,7 @@ public class FileStoreCommitTest {
 
     @Test
     public void testOverwritePartialCommit() throws Exception {
-        Map<BinaryRowData, List<KeyValue>> data1 =
+        Map<BinaryRow, List<KeyValue>> data1 =
                 generateData(ThreadLocalRandom.current().nextInt(1000) + 1);
         logData(
                 () ->
@@ -374,7 +374,7 @@ public class FileStoreCommitTest {
             LOG.debug("dtToOverwrite " + dtToOverwrite);
         }
 
-        Map<BinaryRowData, List<KeyValue>> data2 =
+        Map<BinaryRow, List<KeyValue>> data2 =
                 generateData(ThreadLocalRandom.current().nextInt(1000) + 1);
         // remove all records not belonging to dtToOverwrite
         data2.entrySet().removeIf(e -> !dtToOverwrite.equals(e.getKey().getString(0).toString()));
@@ -395,7 +395,7 @@ public class FileStoreCommitTest {
         assertThat(overwriteSnapshots.get(0).commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
 
         List<KeyValue> expectedKvs = new ArrayList<>();
-        for (Map.Entry<BinaryRowData, List<KeyValue>> entry : data1.entrySet()) {
+        for (Map.Entry<BinaryRow, List<KeyValue>> entry : data1.entrySet()) {
             if (dtToOverwrite.equals(entry.getKey().getString(0).toString())) {
                 continue;
             }
@@ -403,12 +403,12 @@ public class FileStoreCommitTest {
         }
         data2.values().forEach(expectedKvs::addAll);
         gen.sort(expectedKvs);
-        Map<BinaryRowData, BinaryRowData> expected = store.toKvMap(expectedKvs);
+        Map<BinaryRow, BinaryRow> expected = store.toKvMap(expectedKvs);
 
         List<KeyValue> actualKvs =
                 store.readKvsFromSnapshot(store.snapshotManager().latestSnapshotId());
         gen.sort(actualKvs);
-        Map<BinaryRowData, BinaryRowData> actual = store.toKvMap(actualKvs);
+        Map<BinaryRow, BinaryRow> actual = store.toKvMap(actualKvs);
 
         logData(() -> kvMapToKvList(expected), "expected");
         logData(() -> kvMapToKvList(actual), "actual");
@@ -549,8 +549,8 @@ public class FileStoreCommitTest {
                 .collect(Collectors.toList());
     }
 
-    private Map<BinaryRowData, List<KeyValue>> generateData(int numRecords) {
-        Map<BinaryRowData, List<KeyValue>> data = new HashMap<>();
+    private Map<BinaryRow, List<KeyValue>> generateData(int numRecords) {
+        Map<BinaryRow, List<KeyValue>> data = new HashMap<>();
         for (int i = 0; i < numRecords; i++) {
             KeyValue kv = gen.next();
             data.computeIfAbsent(gen.getPartition(kv), p -> new ArrayList<>()).add(kv);
@@ -558,7 +558,7 @@ public class FileStoreCommitTest {
         return data;
     }
 
-    private List<KeyValue> kvMapToKvList(Map<BinaryRowData, BinaryRowData> map) {
+    private List<KeyValue> kvMapToKvList(Map<BinaryRow, BinaryRow> map) {
         return map.entrySet().stream()
                 .map(e -> new KeyValue().replace(e.getKey(), -1, RowKind.INSERT, e.getValue()))
                 .collect(Collectors.toList());

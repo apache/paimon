@@ -21,8 +21,8 @@ package org.apache.flink.table.store.spark;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.TypeUtils;
-import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.sources.Filter;

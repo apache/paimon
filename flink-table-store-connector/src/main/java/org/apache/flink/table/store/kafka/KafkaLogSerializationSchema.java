@@ -23,8 +23,9 @@ import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.streaming.connectors.kafka.KafkaSerializationSchema;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
+import org.apache.flink.table.store.connector.FlinkRowData;
 import org.apache.flink.table.store.table.sink.SinkRecord;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
 
@@ -70,14 +71,15 @@ public class KafkaLogSerializationSchema implements KafkaSerializationSchema<Sin
         byte[] primaryKeyBytes = null;
         byte[] valueBytes = null;
         if (primaryKeySerializer != null) {
-            primaryKeyBytes = primaryKeySerializer.serialize(element.primaryKey());
+            primaryKeyBytes =
+                    primaryKeySerializer.serialize(new FlinkRowData(element.primaryKey()));
             if (changelogMode == LogChangelogMode.ALL
                     || kind == RowKind.INSERT
                     || kind == RowKind.UPDATE_AFTER) {
-                valueBytes = valueSerializer.serialize(element.row());
+                valueBytes = valueSerializer.serialize(new FlinkRowData(element.row()));
             }
         } else {
-            valueBytes = valueSerializer.serialize(element.row());
+            valueBytes = valueSerializer.serialize(new FlinkRowData(element.row()));
         }
         return new ProducerRecord<>(topic, element.bucket(), primaryKeyBytes, valueBytes);
     }

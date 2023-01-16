@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
 
 import org.apache.hadoop.hive.common.type.HiveVarchar;
 import org.apache.hadoop.hive.serde2.io.HiveVarcharWritable;
@@ -47,9 +47,9 @@ public class TableStoreVarcharObjectInspectorTest {
     public void testGetPrimitiveJavaObject() {
         TableStoreVarcharObjectInspector oi = new TableStoreVarcharObjectInspector(10);
 
-        StringData input1 = StringData.fromString("testString");
+        BinaryString input1 = BinaryString.fromString("testString");
         HiveVarchar expected1 = new HiveVarchar("testString", 10);
-        StringData input2 = StringData.fromString("test");
+        BinaryString input2 = BinaryString.fromString("test");
         HiveVarchar expected2 = new HiveVarchar("test", 10);
         assertThat(oi.getPrimitiveJavaObject(input1)).isEqualTo(expected1);
         assertThat(oi.getPrimitiveJavaObject(input2)).isEqualTo(expected2);
@@ -60,9 +60,9 @@ public class TableStoreVarcharObjectInspectorTest {
     public void testGetPrimitiveWritableObject() {
         TableStoreVarcharObjectInspector oi = new TableStoreVarcharObjectInspector(10);
 
-        StringData input1 = StringData.fromString("testString");
+        BinaryString input1 = BinaryString.fromString("testString");
         HiveVarcharWritable expected1 = new HiveVarcharWritable(new HiveVarchar("testString", 10));
-        StringData input2 = StringData.fromString("test");
+        BinaryString input2 = BinaryString.fromString("test");
         HiveVarcharWritable expected2 = new HiveVarcharWritable(new HiveVarchar("test", 10));
         assertThat(oi.getPrimitiveWritableObject(input1)).isEqualTo(expected1);
         assertThat(oi.getPrimitiveWritableObject(input2)).isEqualTo(expected2);
@@ -73,7 +73,7 @@ public class TableStoreVarcharObjectInspectorTest {
     public void testCopyObject() {
         TableStoreVarcharObjectInspector oi = new TableStoreVarcharObjectInspector(10);
 
-        StringData input1 = StringData.fromString("testString");
+        BinaryString input1 = BinaryString.fromString("testString");
         Object copy1 = oi.copyObject(input1);
         assertThat(copy1).isEqualTo(input1);
         assertThat(copy1).isNotSameAs(input1);

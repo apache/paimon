@@ -23,7 +23,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import org.apache.flink.table.store.table.sink.SinkRecord;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.util.Collector;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -33,6 +33,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.apache.flink.table.store.connector.FlinkRowData.toFlinkRowKind;
 import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.discoverKafkaLogFactory;
 import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.testContext;
 import static org.apache.flink.table.store.kafka.KafkaLogTestUtils.testRecord;
@@ -112,14 +113,16 @@ public class KafkaLogSerializationTest {
         RowData row = rowReference.get();
 
         if (rowKind == RowKind.UPDATE_BEFORE) {
-            assertThat(row.getRowKind()).isEqualTo(RowKind.DELETE);
+            assertThat(row.getRowKind()).isEqualTo(org.apache.flink.types.RowKind.DELETE);
         } else if (rowKind == RowKind.UPDATE_AFTER) {
-            assertThat(row.getRowKind()).isEqualTo(RowKind.INSERT);
+            assertThat(row.getRowKind()).isEqualTo(org.apache.flink.types.RowKind.INSERT);
         } else {
-            assertThat(row.getRowKind()).isEqualTo(rowKind);
+            assertThat(row.getRowKind()).isEqualTo(toFlinkRowKind(rowKind));
         }
         assertThat(row.getInt(0)).isEqualTo(key);
-        if (row.getRowKind() == RowKind.INSERT || mode == LogChangelogMode.ALL || !keyed) {
+        if (row.getRowKind() == org.apache.flink.types.RowKind.INSERT
+                || mode == LogChangelogMode.ALL
+                || !keyed) {
             assertThat(row.getInt(1)).isEqualTo(value);
         } else {
             assertThat(row.isNullAt(1)).isTrue();

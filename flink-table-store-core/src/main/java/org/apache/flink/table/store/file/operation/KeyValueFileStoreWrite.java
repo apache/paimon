@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.core.fs.FileSystemKind;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.NoopCompactManager;
@@ -43,7 +43,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.format.FileFormatDiscover;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,7 +65,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
 
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
     private final KeyValueFileWriterFactory.Builder writerFactoryBuilder;
-    private final Supplier<Comparator<RowData>> keyComparatorSupplier;
+    private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final CoreOptions options;
     private final FileStorePathFactory pathFactory;
@@ -76,7 +76,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             String commitUser,
             RowType keyType,
             RowType valueType,
-            Supplier<Comparator<RowData>> keyComparatorSupplier,
+            Supplier<Comparator<InternalRow>> keyComparatorSupplier,
             MergeFunctionFactory<KeyValue> mfFactory,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
@@ -109,7 +109,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
 
     @Override
     public WriterContainer<KeyValue> createWriterContainer(
-            BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
+            BinaryRow partition, int bucket, ExecutorService compactExecutor) {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         RecordWriter<KeyValue> writer =
                 createMergeTreeWriter(
@@ -122,7 +122,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
 
     @Override
     public WriterContainer<KeyValue> createEmptyWriterContainer(
-            BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
+            BinaryRow partition, int bucket, ExecutorService compactExecutor) {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         RecordWriter<KeyValue> writer =
                 createMergeTreeWriter(partition, bucket, Collections.emptyList(), compactExecutor);
@@ -130,7 +130,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     private MergeTreeWriter createMergeTreeWriter(
-            BinaryRowData partition,
+            BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoreFiles,
             ExecutorService compactExecutor) {
@@ -143,7 +143,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         }
 
         KeyValueFileWriterFactory writerFactory = writerFactoryBuilder.build(partition, bucket);
-        Comparator<RowData> keyComparator = keyComparatorSupplier.get();
+        Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
         CompactManager compactManager =
                 createCompactManager(
@@ -179,7 +179,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     private CompactManager createCompactManager(
-            BinaryRowData partition,
+            BinaryRow partition,
             int bucket,
             CompactStrategy compactStrategy,
             ExecutorService compactExecutor,
@@ -187,7 +187,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         if (options.writeOnly()) {
             return new NoopCompactManager();
         } else {
-            Comparator<RowData> keyComparator = keyComparatorSupplier.get();
+            Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
             CompactRewriter rewriter = createRewriter(partition, bucket, keyComparator);
             return new MergeTreeCompactManager(
                     compactExecutor,
@@ -201,7 +201,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     private MergeTreeCompactRewriter createRewriter(
-            BinaryRowData partition, int bucket, Comparator<RowData> keyComparator) {
+            BinaryRow partition, int bucket, Comparator<InternalRow> keyComparator) {
         KeyValueFileReaderFactory readerFactory = readerFactoryBuilder.build(partition, bucket);
         KeyValueFileWriterFactory writerFactory = writerFactoryBuilder.build(partition, bucket);
 

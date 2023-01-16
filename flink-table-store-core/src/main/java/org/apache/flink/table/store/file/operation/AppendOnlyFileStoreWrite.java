@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.api.common.accumulators.LongCounter;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.append.AppendOnlyCompactManager;
 import org.apache.flink.table.store.file.append.AppendOnlyWriter;
 import org.apache.flink.table.store.file.compact.CompactManager;
@@ -35,7 +35,7 @@ import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.table.source.DataSplit;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.util.Collections;
 import java.util.LinkedList;
@@ -45,7 +45,7 @@ import java.util.concurrent.ExecutorService;
 import static org.apache.flink.table.store.file.io.DataFileMeta.getMaxSequenceNumber;
 
 /** {@link FileStoreWrite} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
-public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
+public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow> {
 
     private final AppendOnlyFileStoreRead read;
     private final long schemaId;
@@ -81,10 +81,10 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
     }
 
     @Override
-    public WriterContainer<RowData> createWriterContainer(
-            BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
+    public WriterContainer<InternalRow> createWriterContainer(
+            BinaryRow partition, int bucket, ExecutorService compactExecutor) {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        RecordWriter<RowData> writer =
+        RecordWriter<InternalRow> writer =
                 createWriter(
                         partition,
                         bucket,
@@ -94,16 +94,16 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
     }
 
     @Override
-    public WriterContainer<RowData> createEmptyWriterContainer(
-            BinaryRowData partition, int bucket, ExecutorService compactExecutor) {
+    public WriterContainer<InternalRow> createEmptyWriterContainer(
+            BinaryRow partition, int bucket, ExecutorService compactExecutor) {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        RecordWriter<RowData> writer =
+        RecordWriter<InternalRow> writer =
                 createWriter(partition, bucket, Collections.emptyList(), compactExecutor);
         return new WriterContainer<>(writer, latestSnapshotId);
     }
 
-    private RecordWriter<RowData> createWriter(
-            BinaryRowData partition,
+    private RecordWriter<InternalRow> createWriter(
+            BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoredFiles,
             ExecutorService compactExecutor) {
@@ -134,7 +134,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<RowData> {
     }
 
     private AppendOnlyCompactManager.CompactRewriter compactRewriter(
-            BinaryRowData partition, int bucket) {
+            BinaryRow partition, int bucket) {
         return toCompact -> {
             if (toCompact.isEmpty()) {
                 return Collections.emptyList();

@@ -18,13 +18,14 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.types.logical.DateType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.TimestampType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DateType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.TimestampType;
 
 import org.apache.spark.sql.sources.EqualTo;
 import org.apache.spark.sql.sources.GreaterThan;
@@ -37,7 +38,6 @@ import org.apache.spark.sql.sources.LessThanOrEqual;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Date;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -53,7 +53,7 @@ public class SparkFilterConverterTest {
     @Test
     public void testAll() {
         RowType rowType =
-                new RowType(Collections.singletonList(new RowType.RowField("id", new IntType())));
+                new RowType(Collections.singletonList(new DataField(0, "id", new IntType())));
         SparkFilterConverter converter = new SparkFilterConverter(rowType);
         PredicateBuilder builder = new PredicateBuilder(rowType);
 
@@ -137,19 +137,18 @@ public class SparkFilterConverterTest {
     @Test
     public void testTimestamp() {
         RowType rowType =
-                new RowType(
-                        Collections.singletonList(new RowType.RowField("x", new TimestampType())));
+                new RowType(Collections.singletonList(new DataField(0, "x", new TimestampType())));
         SparkFilterConverter converter = new SparkFilterConverter(rowType);
         PredicateBuilder builder = new PredicateBuilder(rowType);
 
-        Timestamp timestamp = Timestamp.valueOf("2018-10-18 00:00:57.907");
+        java.sql.Timestamp timestamp = java.sql.Timestamp.valueOf("2018-10-18 00:00:57.907");
         LocalDateTime localDateTime = LocalDateTime.parse("2018-10-18T00:00:57.907");
         Instant instant = localDateTime.toInstant(ZoneOffset.UTC);
 
         Predicate instantExpression = converter.convert(GreaterThan.apply("x", instant));
         Predicate timestampExpression = converter.convert(GreaterThan.apply("x", timestamp));
         Predicate rawExpression =
-                builder.greaterThan(0, TimestampData.fromLocalDateTime(localDateTime));
+                builder.greaterThan(0, Timestamp.fromLocalDateTime(localDateTime));
 
         assertThat(timestampExpression).isEqualTo(rawExpression);
         assertThat(instantExpression).isEqualTo(rawExpression);
@@ -158,7 +157,7 @@ public class SparkFilterConverterTest {
     @Test
     public void testDate() {
         RowType rowType =
-                new RowType(Collections.singletonList(new RowType.RowField("x", new DateType())));
+                new RowType(Collections.singletonList(new DataField(0, "x", new DateType())));
         SparkFilterConverter converter = new SparkFilterConverter(rowType);
         PredicateBuilder builder = new PredicateBuilder(rowType);
 

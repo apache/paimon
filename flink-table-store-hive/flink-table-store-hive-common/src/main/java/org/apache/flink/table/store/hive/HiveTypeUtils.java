@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.hive;
 
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.CharType;
-import org.apache.flink.table.types.logical.DecimalType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.MapType;
-import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.CharType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
@@ -31,7 +31,7 @@ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 /** Utils for converting types related classes between Flink and Hive. */
 public class HiveTypeUtils {
 
-    public static TypeInfo logicalTypeToTypeInfo(LogicalType logicalType) {
+    public static TypeInfo logicalTypeToTypeInfo(DataType logicalType) {
         switch (logicalType.getTypeRoot()) {
             case BOOLEAN:
                 return TypeInfoFactory.booleanTypeInfo;
@@ -79,7 +79,7 @@ public class HiveTypeUtils {
                         logicalTypeToTypeInfo(mapType.getValueType()));
             default:
                 throw new UnsupportedOperationException(
-                        "Unsupported logical type " + logicalType.asSummaryString());
+                        "Unsupported logical type " + logicalType.asSQLString());
         }
     }
 }

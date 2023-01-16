@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.codegen;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.InternalRow;
 
 /**
  * Interface for code generated projection, which will map a RowData to another BinaryRowData.
@@ -27,5 +27,5 @@ import org.apache.flink.table.data.binary.BinaryRowData;
  */
 public interface Projection {
 
-    BinaryRowData apply(RowData row);
+    BinaryRow apply(InternalRow row);
 }

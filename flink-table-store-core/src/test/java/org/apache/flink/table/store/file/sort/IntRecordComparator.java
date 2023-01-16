@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.sort;
 
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.codegen.RecordComparator;
+import org.apache.flink.table.store.data.InternalRow;
 
 /** Example Int {@link RecordComparator}. */
 public class IntRecordComparator implements RecordComparator {
@@ -27,7 +27,7 @@ public class IntRecordComparator implements RecordComparator {
     public static final IntRecordComparator INSTANCE = new IntRecordComparator();
 
     @Override
-    public int compare(RowData o1, RowData o2) {
+    public int compare(InternalRow o1, InternalRow o2) {
 
         boolean null0At1 = o1.isNullAt(0);
         boolean null0At2 = o2.isNullAt(0);

@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.benchmark.file.mergetree;
 
-import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.mergetree.MergeTreeReaders;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
@@ -26,7 +26,7 @@ import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
 
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
@@ -64,11 +64,11 @@ public class MergeTreeReaderBenchmark extends MergeTreeBenchmark {
             Random random = new Random();
             for (int k = 0; k < batchCount; k++) {
                 for (int i = 0; i < countPerBatch; i++) {
-                    GenericRowData key = new GenericRowData(1);
+                    GenericRow key = new GenericRow(1);
                     key.setField(0, random.nextInt());
                     key.setRowKind(RowKind.INSERT);
 
-                    GenericRowData value = new GenericRowData(1);
+                    GenericRow value = new GenericRow(1);
                     value.setField(0, random.nextInt());
 
                     kv.replace(key, sequenceNumber++, RowKind.INSERT, value);

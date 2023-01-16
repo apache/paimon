@@ -27,36 +27,32 @@ import org.apache.flink.api.java.typeutils.runtime.DataInputViewStream;
 import org.apache.flink.api.java.typeutils.runtime.DataOutputViewStream;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
-import org.apache.flink.core.memory.MemorySegmentFactory;
-import org.apache.flink.table.data.ArrayData;
-import org.apache.flink.table.data.MapData;
-import org.apache.flink.table.data.binary.BinaryArrayData;
-import org.apache.flink.table.data.binary.BinaryMapData;
-import org.apache.flink.table.data.binary.BinarySegmentUtils;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.flink.table.store.memory.MemorySegmentUtils;
+import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.util.InstantiationUtil;
 
 import java.io.IOException;
 
-/** Serializer for {@link MapData}. */
+/** Serializer for {@link InternalMap}. */
 @Internal
-public class MapDataSerializer extends TypeSerializer<MapData> {
+public class MapDataSerializer extends TypeSerializer<InternalMap> {
 
-    private final LogicalType keyType;
-    private final LogicalType valueType;
+    private final DataType keyType;
+    private final DataType valueType;
 
     private final TypeSerializer keySerializer;
     private final TypeSerializer valueSerializer;
 
-    private final ArrayData.ElementGetter keyGetter;
-    private final ArrayData.ElementGetter valueGetter;
+    private final InternalArray.ElementGetter keyGetter;
+    private final InternalArray.ElementGetter valueGetter;
 
-    private transient BinaryArrayData reuseKeyArray;
-    private transient BinaryArrayData reuseValueArray;
+    private transient BinaryArray reuseKeyArray;
+    private transient BinaryArray reuseValueArray;
     private transient BinaryArrayWriter reuseKeyWriter;
     private transient BinaryArrayWriter reuseValueWriter;
 
-    public MapDataSerializer(LogicalType keyType, LogicalType valueType) {
+    public MapDataSerializer(DataType keyType, DataType valueType) {
         this(
                 keyType,
                 valueType,
@@ -65,8 +61,8 @@ public class MapDataSerializer extends TypeSerializer<MapData> {
     }
 
     private MapDataSerializer(
-            LogicalType keyType,
-            LogicalType valueType,
+            DataType keyType,
+            DataType valueType,
             TypeSerializer keySerializer,
             TypeSerializer valueSerializer) {
         this.keyType = keyType;
@@ -75,8 +71,8 @@ public class MapDataSerializer extends TypeSerializer<MapData> {
         this.keySerializer = keySerializer;
         this.valueSerializer = valueSerializer;
 
-        this.keyGetter = ArrayData.createElementGetter(keyType);
-        this.valueGetter = ArrayData.createElementGetter(valueType);
+        this.keyGetter = InternalArray.createElementGetter(keyType);
+        this.valueGetter = InternalArray.createElementGetter(valueType);
     }
 
     @Override
@@ -85,14 +81,14 @@ public class MapDataSerializer extends TypeSerializer<MapData> {
     }
 
     @Override
-    public TypeSerializer<MapData> duplicate() {
+    public TypeSerializer<InternalMap> duplicate() {
         return new MapDataSerializer(
                 keyType, valueType, keySerializer.duplicate(), valueSerializer.duplicate());
     }
 
     @Override
-    public MapData createInstance() {
-        return new BinaryMapData();
+    public InternalMap createInstance() {
+        return new BinaryMap();
     }
 
     /**
@@ -100,16 +96,16 @@ public class MapDataSerializer extends TypeSerializer<MapData> {
      * HashMap, problems maybe occur.
      */
     @Override
-    public MapData copy(MapData from) {
-        if (from instanceof BinaryMapData) {
-            return ((BinaryMapData) from).copy();
+    public InternalMap copy(InternalMap from) {
+        if (from instanceof BinaryMap) {
+            return ((BinaryMap) from).copy();
         } else {
             return toBinaryMap(from);
         }
     }
 
     @Override
-    public MapData copy(MapData from, MapData reuse) {
+    public InternalMap copy(InternalMap from, InternalMap reuse) {
         return copy(from);
     }
 
@@ -119,31 +115,31 @@ public class MapDataSerializer extends TypeSerializer<MapData> {
     }
 
     @Override
-    public void serialize(MapData record, DataOutputView target) throws IOException {
-        BinaryMapData binaryMap = toBinaryMap(record);
+    public void serialize(InternalMap record, DataOutputView target) throws IOException {
+        BinaryMap binaryMap = toBinaryMap(record);
         target.writeInt(binaryMap.getSizeInBytes());
-        BinarySegmentUtils.copyToView(
+        MemorySegmentUtils.copyToView(
                 binaryMap.getSegments(), binaryMap.getOffset(), binaryMap.getSizeInBytes(), target);
     }
 
-    public BinaryMapData toBinaryMap(MapData from) {
-        if (from instanceof BinaryMapData) {
-            return (BinaryMapData) from;
+    public BinaryMap toBinaryMap(InternalMap from) {
+        if (from instanceof BinaryMap) {
+            return (BinaryMap) from;
         }
 
         int numElements = from.size();
         if (reuseKeyArray == null) {
-            reuseKeyArray = new BinaryArrayData();
+            reuseKeyArray = new BinaryArray();
         }
         if (reuseValueArray == null) {
-            reuseValueArray = new BinaryArrayData();
+            reuseValueArray = new BinaryArray();
         }
         if (reuseKeyWriter == null || reuseKeyWriter.getNumElements() != numElements) {
             reuseKeyWriter =
                     new BinaryArrayWriter(
                             reuseKeyArray,
                             numElements,
-                            BinaryArrayData.calculateFixLengthPartSize(keyType));
+                            BinaryArray.calculateFixLengthPartSize(keyType));
         } else {
             reuseKeyWriter.reset();
         }
@@ -152,13 +148,13 @@ public class MapDataSerializer extends TypeSerializer<MapData> {
                     new BinaryArrayWriter(
                             reuseValueArray,
                             numElements,
-                            BinaryArrayData.calculateFixLengthPartSize(valueType));
+                            BinaryArray.calculateFixLengthPartSize(valueType));
         } else {
             reuseValueWriter.reset();
         }
 
-        ArrayData keyArray = from.keyArray();
-        ArrayData valueArray = from.valueArray();
+        InternalArray keyArray = from.keyArray();
+        InternalArray valueArray = from.valueArray();
         for (int i = 0; i < from.size(); i++) {
             Object key = keyGetter.getElementOrNull(keyArray, i);
             Object value = valueGetter.getElementOrNull(valueArray, i);
@@ -177,27 +173,25 @@ public class MapDataSerializer extends TypeSerializer<MapData> {
         reuseKeyWriter.complete();
         reuseValueWriter.complete();
 
-        return BinaryMapData.valueOf(reuseKeyArray, reuseValueArray);
+        return BinaryMap.valueOf(reuseKeyArray, reuseValueArray);
     }
 
     @Override
-    public MapData deserialize(DataInputView source) throws IOException {
-        return deserializeReuse(new BinaryMapData(), source);
+    public InternalMap deserialize(DataInputView source) throws IOException {
+        return deserializeReuse(new BinaryMap(), source);
     }
 
     @Override
-    public MapData deserialize(MapData reuse, DataInputView source) throws IOException {
+    public InternalMap deserialize(InternalMap reuse, DataInputView source) throws IOException {
         return deserializeReuse(
-                reuse instanceof BinaryMapData ? (BinaryMapData) reuse : new BinaryMapData(),
-                source);
+                reuse instanceof BinaryMap ? (BinaryMap) reuse : new BinaryMap(), source);
     }
 
-    private BinaryMapData deserializeReuse(BinaryMapData reuse, DataInputView source)
-            throws IOException {
+    private BinaryMap deserializeReuse(BinaryMap reuse, DataInputView source) throws IOException {
         int length = source.readInt();
         byte[] bytes = new byte[length];
         source.readFully(bytes);
-        reuse.pointTo(MemorySegmentFactory.wrap(bytes), 0, bytes.length);
+        reuse.pointTo(MemorySegment.wrap(bytes), 0, bytes.length);
         return reuse;
     }
 
@@ -240,16 +234,17 @@ public class MapDataSerializer extends TypeSerializer<MapData> {
     }
 
     @Override
-    public TypeSerializerSnapshot<MapData> snapshotConfiguration() {
+    public TypeSerializerSnapshot<InternalMap> snapshotConfiguration() {
         return new MapDataSerializerSnapshot(keyType, valueType, keySerializer, valueSerializer);
     }
 
     /** {@link TypeSerializerSnapshot} for {@link ArrayDataSerializer}. */
-    public static final class MapDataSerializerSnapshot implements TypeSerializerSnapshot<MapData> {
+    public static final class MapDataSerializerSnapshot
+            implements TypeSerializerSnapshot<InternalMap> {
         private static final int CURRENT_VERSION = 3;
 
-        private LogicalType previousKeyType;
-        private LogicalType previousValueType;
+        private DataType previousKeyType;
+        private DataType previousValueType;
 
         private TypeSerializer previousKeySerializer;
         private TypeSerializer previousValueSerializer;
@@ -260,10 +255,7 @@ public class MapDataSerializer extends TypeSerializer<MapData> {
         }
 
         MapDataSerializerSnapshot(
-                LogicalType keyT,
-                LogicalType valueT,
-                TypeSerializer keySer,
-                TypeSerializer valueSer) {
+                DataType keyT, DataType valueT, TypeSerializer keySer, TypeSerializer valueSer) {
             this.previousKeyType = keyT;
             this.previousValueType = valueT;
 
@@ -304,7 +296,7 @@ public class MapDataSerializer extends TypeSerializer<MapData> {
         }
 
         @Override
-        public TypeSerializer<MapData> restoreSerializer() {
+        public TypeSerializer<InternalMap> restoreSerializer() {
             return new MapDataSerializer(
                     previousKeyType,
                     previousValueType,
@@ -313,8 +305,8 @@ public class MapDataSerializer extends TypeSerializer<MapData> {
         }
 
         @Override
-        public TypeSerializerSchemaCompatibility<MapData> resolveSchemaCompatibility(
-                TypeSerializer<MapData> newSerializer) {
+        public TypeSerializerSchemaCompatibility<InternalMap> resolveSchemaCompatibility(
+                TypeSerializer<InternalMap> newSerializer) {
             if (!(newSerializer instanceof MapDataSerializer)) {
                 return TypeSerializerSchemaCompatibility.incompatible();
             }

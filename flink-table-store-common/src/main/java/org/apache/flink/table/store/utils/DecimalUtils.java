@@ -18,14 +18,15 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.data.DecimalData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 
-import static org.apache.flink.table.data.DecimalData.fromBigDecimal;
+import static org.apache.flink.table.store.data.Decimal.fromBigDecimal;
 
-/** Utilities for {@link DecimalData}. */
+/** Utilities for {@link Decimal}. */
 public class DecimalUtils {
 
     static final int MAX_COMPACT_PRECISION = 18;
@@ -39,7 +40,7 @@ public class DecimalUtils {
         }
     }
 
-    public static double doubleValue(DecimalData decimal) {
+    public static double doubleValue(Decimal decimal) {
         if (decimal.isCompact()) {
             return ((double) decimal.toUnscaledLong()) / POW10[decimal.scale()];
         } else {
@@ -47,16 +48,16 @@ public class DecimalUtils {
         }
     }
 
-    public static DecimalData add(DecimalData v1, DecimalData v2, int precision, int scale) {
+    public static Decimal add(Decimal v1, Decimal v2, int precision, int scale) {
         if (v1.isCompact()
                 && v2.isCompact()
                 && v1.scale() == v2.scale()
-                && DecimalData.isCompact(precision)) {
+                && Decimal.isCompact(precision)) {
             assert scale == v1.scale(); // no need to rescale
             try {
                 long ls =
                         Math.addExact(v1.toUnscaledLong(), v2.toUnscaledLong()); // checks overflow
-                return DecimalData.fromUnscaledLong(ls, precision, scale);
+                return Decimal.fromUnscaledLong(ls, precision, scale);
             } catch (ArithmeticException e) {
                 // overflow, fall through
             }
@@ -65,7 +66,7 @@ public class DecimalUtils {
         return fromBigDecimal(bd, precision, scale);
     }
 
-    public static long castToIntegral(DecimalData dec) {
+    public static long castToIntegral(Decimal dec) {
         BigDecimal bd = dec.toBigDecimal();
         // rounding down. This is consistent with float=>int,
         // and consistent with SQLServer, Spark.
@@ -73,27 +74,31 @@ public class DecimalUtils {
         return bd.longValue();
     }
 
-    public static DecimalData castToDecimal(DecimalData dec, int precision, int scale) {
+    public static Decimal castToDecimal(Decimal dec, int precision, int scale) {
         return fromBigDecimal(dec.toBigDecimal(), precision, scale);
     }
 
-    public static DecimalData castFrom(DecimalData dec, int precision, int scale) {
+    public static Decimal castFrom(Decimal dec, int precision, int scale) {
         return fromBigDecimal(dec.toBigDecimal(), precision, scale);
     }
 
-    public static DecimalData castFrom(String string, int precision, int scale) {
+    public static Decimal castFrom(String string, int precision, int scale) {
         return fromBigDecimal(new BigDecimal(string), precision, scale);
     }
 
-    public static DecimalData castFrom(double val, int p, int s) {
+    public static Decimal castFrom(BinaryString string, int precision, int scale) {
+        return castFrom(string.toString(), precision, scale);
+    }
+
+    public static Decimal castFrom(double val, int p, int s) {
         return fromBigDecimal(BigDecimal.valueOf(val), p, s);
     }
 
-    public static DecimalData castFrom(long val, int p, int s) {
+    public static Decimal castFrom(long val, int p, int s) {
         return fromBigDecimal(BigDecimal.valueOf(val), p, s);
     }
 
-    public static boolean castToBoolean(DecimalData dec) {
+    public static boolean castToBoolean(Decimal dec) {
         return dec.toBigDecimal().compareTo(BigDecimal.ZERO) != 0;
     }
 }

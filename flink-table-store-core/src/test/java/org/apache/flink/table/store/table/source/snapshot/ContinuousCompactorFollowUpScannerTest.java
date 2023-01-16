@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -28,7 +28,7 @@ import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.system.BucketsTable;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
 
 import org.junit.jupiter.api.Test;
 
@@ -110,7 +110,7 @@ public class ContinuousCompactorFollowUpScannerTest extends SnapshotEnumeratorTe
     }
 
     @Override
-    protected String rowDataToString(RowData rowData) {
+    protected String rowDataToString(InternalRow rowData) {
         int numFiles;
         try {
             numFiles = dataFileMetaSerializer.deserializeList(rowData.getBinary(3)).size();

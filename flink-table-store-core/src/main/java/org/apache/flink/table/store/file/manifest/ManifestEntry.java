@@ -18,12 +18,13 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.TinyIntType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.TinyIntType;
 import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
@@ -40,17 +41,13 @@ public class ManifestEntry {
 
     private final FileKind kind;
     // for tables without partition this field should be a row with 0 columns (not null)
-    private final BinaryRowData partition;
+    private final BinaryRow partition;
     private final int bucket;
     private final int totalBuckets;
     private final DataFileMeta file;
 
     public ManifestEntry(
-            FileKind kind,
-            BinaryRowData partition,
-            int bucket,
-            int totalBuckets,
-            DataFileMeta file) {
+            FileKind kind, BinaryRow partition, int bucket, int totalBuckets, DataFileMeta file) {
         this.kind = kind;
         this.partition = partition;
         this.bucket = bucket;
@@ -62,7 +59,7 @@ public class ManifestEntry {
         return kind;
     }
 
-    public BinaryRowData partition() {
+    public BinaryRow partition() {
         return partition;
     }
 
@@ -83,12 +80,12 @@ public class ManifestEntry {
     }
 
     public static RowType schema() {
-        List<RowType.RowField> fields = new ArrayList<>();
-        fields.add(new RowType.RowField("_KIND", new TinyIntType(false)));
-        fields.add(new RowType.RowField("_PARTITION", newBytesType(false)));
-        fields.add(new RowType.RowField("_BUCKET", new IntType(false)));
-        fields.add(new RowType.RowField("_TOTAL_BUCKETS", new IntType(false)));
-        fields.add(new RowType.RowField("_FILE", DataFileMeta.schema()));
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "_KIND", new TinyIntType(false)));
+        fields.add(new DataField(1, "_PARTITION", newBytesType(false)));
+        fields.add(new DataField(2, "_BUCKET", new IntType(false)));
+        fields.add(new DataField(3, "_TOTAL_BUCKETS", new IntType(false)));
+        fields.add(new DataField(4, "_FILE", DataFileMeta.schema()));
         return new RowType(fields);
     }
 
@@ -166,12 +163,12 @@ public class ManifestEntry {
      * file.
      */
     public static class Identifier {
-        public final BinaryRowData partition;
+        public final BinaryRow partition;
         public final int bucket;
         public final int level;
         public final String fileName;
 
-        private Identifier(BinaryRowData partition, int bucket, int level, String fileName) {
+        private Identifier(BinaryRow partition, int bucket, int level, String fileName) {
             this.partition = partition;
             this.bucket = bucket;
             this.level = level;

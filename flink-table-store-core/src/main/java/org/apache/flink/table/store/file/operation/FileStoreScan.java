@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.FileKind;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
@@ -38,7 +38,7 @@ public interface FileStoreScan {
 
     FileStoreScan withPartitionFilter(Predicate predicate);
 
-    FileStoreScan withPartitionFilter(List<BinaryRowData> partitions);
+    FileStoreScan withPartitionFilter(List<BinaryRow> partitions);
 
     FileStoreScan withBucket(int bucket);
 
@@ -72,9 +72,9 @@ public interface FileStoreScan {
         }
 
         /** Return a map group by partition and bucket. */
-        default Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupByPartFiles(
+        default Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupByPartFiles(
                 List<ManifestEntry> files) {
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupBy = new HashMap<>();
+            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupBy = new HashMap<>();
             for (ManifestEntry entry : files) {
                 groupBy.computeIfAbsent(entry.partition(), k -> new HashMap<>())
                         .computeIfAbsent(entry.bucket(), k -> new ArrayList<>())

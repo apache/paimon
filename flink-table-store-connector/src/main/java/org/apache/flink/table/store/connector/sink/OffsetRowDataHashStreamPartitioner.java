@@ -23,20 +23,21 @@ import org.apache.flink.runtime.plugable.SerializationDelegate;
 import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
-import org.apache.flink.table.store.file.utils.OffsetRowData;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.connector.FlinkRowWrapper;
+import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.file.utils.OffsetRow;
+import org.apache.flink.table.store.types.RowType;
 
 /**
  * {@link StreamPartitioner} to partition {@link RowData} according to its hash value from an {@link
- * OffsetRowData}.
+ * OffsetRow}.
  */
 public class OffsetRowDataHashStreamPartitioner extends StreamPartitioner<RowData> {
 
     private final RowType offsetRowType;
     private final int offset;
 
-    private transient OffsetRowData offsetRowData;
+    private transient OffsetRow offsetRow;
     private transient RowDataSerializer serializer;
 
     public OffsetRowDataHashStreamPartitioner(RowType offsetRowType, int offset) {
@@ -47,14 +48,15 @@ public class OffsetRowDataHashStreamPartitioner extends StreamPartitioner<RowDat
     @Override
     public void setup(int numberOfChannels) {
         super.setup(numberOfChannels);
-        this.offsetRowData = new OffsetRowData(offsetRowType.getFieldCount(), offset);
+        this.offsetRow = new OffsetRow(offsetRowType.getFieldCount(), offset);
         serializer = new RowDataSerializer(offsetRowType);
     }
 
     @Override
     public int selectChannel(SerializationDelegate<StreamRecord<RowData>> record) {
         RowData rowData = record.getInstance().getValue();
-        int hash = serializer.toBinaryRow(offsetRowData.replace(rowData)).hashCode();
+        int hash =
+                serializer.toBinaryRow(offsetRow.replace(new FlinkRowWrapper(rowData))).hashCode();
         return Math.abs(hash) % numberOfChannels;
     }
 

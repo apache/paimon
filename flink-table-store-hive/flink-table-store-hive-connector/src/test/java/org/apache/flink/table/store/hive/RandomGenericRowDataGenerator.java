@@ -18,15 +18,16 @@
 
 package org.apache.flink.table.store.hive;
 
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.GenericArrayData;
-import org.apache.flink.table.data.GenericMapData;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.GenericArray;
+import org.apache.flink.table.store.data.GenericMap;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.RowType;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
@@ -37,28 +38,28 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-/** Util class for generating random {@link GenericRowData}. */
+/** Util class for generating random {@link GenericRow}. */
 public class RandomGenericRowDataGenerator {
 
-    public static final List<LogicalType> LOGICAL_TYPES =
+    public static final List<DataType> LOGICAL_TYPES =
             Arrays.asList(
-                    DataTypes.BOOLEAN().getLogicalType(),
-                    DataTypes.TINYINT().getLogicalType(),
-                    DataTypes.SMALLINT().getLogicalType(),
-                    DataTypes.INT().getLogicalType(),
-                    DataTypes.BIGINT().getLogicalType(),
-                    DataTypes.FLOAT().getLogicalType(),
-                    DataTypes.DOUBLE().getLogicalType(),
-                    DataTypes.DECIMAL(5, 3).getLogicalType(),
-                    DataTypes.DECIMAL(28, 6).getLogicalType(),
-                    DataTypes.CHAR(10).getLogicalType(),
-                    DataTypes.VARCHAR(10).getLogicalType(),
-                    DataTypes.STRING().getLogicalType(),
-                    DataTypes.VARBINARY(Integer.MAX_VALUE).getLogicalType(),
-                    DataTypes.DATE().getLogicalType(),
-                    DataTypes.TIMESTAMP(3).getLogicalType(),
-                    DataTypes.ARRAY(DataTypes.BIGINT()).getLogicalType(),
-                    DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()).getLogicalType());
+                    DataTypes.BOOLEAN(),
+                    DataTypes.TINYINT(),
+                    DataTypes.SMALLINT(),
+                    DataTypes.INT(),
+                    DataTypes.BIGINT(),
+                    DataTypes.FLOAT(),
+                    DataTypes.DOUBLE(),
+                    DataTypes.DECIMAL(5, 3),
+                    DataTypes.DECIMAL(28, 6),
+                    DataTypes.CHAR(10),
+                    DataTypes.VARCHAR(10),
+                    DataTypes.STRING(),
+                    DataTypes.VARBINARY(Integer.MAX_VALUE),
+                    DataTypes.DATE(),
+                    DataTypes.TIMESTAMP(3),
+                    DataTypes.ARRAY(DataTypes.BIGINT()),
+                    DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()));
 
     public static final List<String> TYPE_NAMES =
             Arrays.asList(
@@ -125,13 +126,14 @@ public class RandomGenericRowDataGenerator {
                     IntStream.range(0, FIELD_NAMES.size())
                             .mapToObj(
                                     i ->
-                                            new RowType.RowField(
+                                            new DataField(
+                                                    i,
                                                     FIELD_NAMES.get(i),
                                                     LOGICAL_TYPES.get(i),
                                                     FIELD_COMMENTS.get(i)))
                             .collect(Collectors.toList()));
 
-    public static GenericRowData generate() {
+    public static GenericRow generate() {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         byte[] randomBytes = new byte[random.nextInt(20)];
         random.nextBytes(randomBytes);
@@ -143,12 +145,12 @@ public class RandomGenericRowDataGenerator {
                 randomLongArray[i] = random.nextLong();
             }
         }
-        Map<StringData, Integer> randomMap = new HashMap<>();
+        Map<BinaryString, Integer> randomMap = new HashMap<>();
         for (int i = random.nextInt(20); i > 0; i--) {
-            randomMap.put(StringData.fromString(randomString(20)), random.nextInt());
+            randomMap.put(BinaryString.fromString(randomString(20)), random.nextInt());
         }
-        GenericRowData rowData =
-                GenericRowData.of(
+        GenericRow rowData =
+                GenericRow.of(
                         random.nextBoolean(),
                         (byte) random.nextInt(Byte.MIN_VALUE, Byte.MAX_VALUE + 1),
                         (short) random.nextInt(Short.MIN_VALUE, Short.MAX_VALUE + 1),
@@ -156,17 +158,17 @@ public class RandomGenericRowDataGenerator {
                         random.nextLong(),
                         random.nextFloat(),
                         random.nextDouble(),
-                        DecimalData.fromBigDecimal(randomBigDecimal(5, 3), 5, 3),
-                        DecimalData.fromBigDecimal(randomBigDecimal(28, 6), 28, 6),
-                        StringData.fromString(randomString(10)),
-                        StringData.fromString(randomString(10)),
-                        StringData.fromString(randomString(100)),
+                        Decimal.fromBigDecimal(randomBigDecimal(5, 3), 5, 3),
+                        Decimal.fromBigDecimal(randomBigDecimal(28, 6), 28, 6),
+                        BinaryString.fromString(randomString(10)),
+                        BinaryString.fromString(randomString(10)),
+                        BinaryString.fromString(randomString(100)),
                         randomBytes,
                         random.nextInt(10000),
-                        TimestampData.fromEpochMillis(random.nextLong(Integer.MAX_VALUE)),
-                        new GenericArrayData(randomLongArray),
-                        new GenericMapData(randomMap));
-        for (int i = 0; i < rowData.getArity(); i++) {
+                        Timestamp.fromEpochMillis(random.nextLong(Integer.MAX_VALUE)),
+                        new GenericArray(randomLongArray),
+                        new GenericMap(randomMap));
+        for (int i = 0; i < rowData.getFieldCount(); i++) {
             if (random.nextBoolean()) {
                 rowData.setField(i, null);
             }

@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.table.data.binary.BinaryStringData;
+import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.format.FieldStats;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.DataType;
 
 import java.util.List;
 import java.util.Optional;
@@ -36,17 +36,17 @@ public class StartsWith extends NullFalseLeafBinaryFunction {
     private StartsWith() {}
 
     @Override
-    public boolean test(LogicalType type, Object field, Object patternLiteral) {
-        BinaryStringData fieldString = (BinaryStringData) field;
-        return fieldString.startsWith((BinaryStringData) patternLiteral);
+    public boolean test(DataType type, Object field, Object patternLiteral) {
+        BinaryString fieldString = (BinaryString) field;
+        return fieldString.startsWith((BinaryString) patternLiteral);
     }
 
     @Override
     public boolean test(
-            LogicalType type, long rowCount, FieldStats fieldStats, Object patternLiteral) {
-        BinaryStringData min = (BinaryStringData) fieldStats.minValue();
-        BinaryStringData max = (BinaryStringData) fieldStats.maxValue();
-        BinaryStringData pattern = (BinaryStringData) patternLiteral;
+            DataType type, long rowCount, FieldStats fieldStats, Object patternLiteral) {
+        BinaryString min = (BinaryString) fieldStats.minValue();
+        BinaryString max = (BinaryString) fieldStats.maxValue();
+        BinaryString pattern = (BinaryString) patternLiteral;
         return (min.startsWith(pattern) || min.compareTo(pattern) <= 0)
                 && (max.startsWith(pattern) || max.compareTo(pattern) >= 0);
     }

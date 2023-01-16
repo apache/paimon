@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.Timestamp;
 
 import org.apache.hadoop.hive.serde2.io.TimestampWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
@@ -26,7 +26,6 @@ import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 
-import java.sql.Timestamp;
 import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,7 +42,7 @@ public class TableStoreTimestampObjectInspectorTest {
         assertThat(oi.getPrimitiveCategory())
                 .isEqualTo(PrimitiveObjectInspector.PrimitiveCategory.TIMESTAMP);
 
-        assertThat(oi.getJavaPrimitiveClass()).isEqualTo(Timestamp.class);
+        assertThat(oi.getJavaPrimitiveClass()).isEqualTo(java.sql.Timestamp.class);
         assertThat(oi.getPrimitiveWritableClass()).isEqualTo(TimestampWritable.class);
     }
 
@@ -52,7 +51,7 @@ public class TableStoreTimestampObjectInspectorTest {
         TableStoreTimestampObjectInspector oi = new TableStoreTimestampObjectInspector();
 
         LocalDateTime local = LocalDateTime.of(2022, 4, 27, 15, 0, 0, 100_000_000);
-        TimestampData input = TimestampData.fromLocalDateTime(local);
+        Timestamp input = Timestamp.fromLocalDateTime(local);
         assertThat(oi.getPrimitiveJavaObject(input).toString()).isEqualTo("2022-04-27 15:00:00.1");
         assertThat(oi.getPrimitiveJavaObject(null)).isNull();
     }
@@ -62,7 +61,7 @@ public class TableStoreTimestampObjectInspectorTest {
         TableStoreTimestampObjectInspector oi = new TableStoreTimestampObjectInspector();
 
         LocalDateTime local = LocalDateTime.of(2022, 4, 27, 15, 0, 0, 100_000_000);
-        TimestampData input = TimestampData.fromLocalDateTime(local);
+        Timestamp input = Timestamp.fromLocalDateTime(local);
         assertThat(oi.getPrimitiveWritableObject(input).getTimestamp().toString())
                 .isEqualTo("2022-04-27 15:00:00.1");
         assertThat(oi.getPrimitiveWritableObject(null)).isNull();
@@ -74,11 +73,11 @@ public class TableStoreTimestampObjectInspectorTest {
         TableStoreTimestampObjectInspector oi = new TableStoreTimestampObjectInspector();
 
         // TimestampData is immutable
-        TimestampData input1 = TimestampData.fromEpochMillis(10007);
+        Timestamp input1 = Timestamp.fromEpochMillis(10007);
         Object copy1 = oi.copyObject(input1);
         assertThat(copy1).isEqualTo(input1);
 
-        Timestamp input2 = new Timestamp(10007);
+        java.sql.Timestamp input2 = new java.sql.Timestamp(10007);
         Object copy2 = oi.copyObject(input2);
         assertThat(copy2).isEqualTo(input2);
         assertThat(copy2).isNotSameAs(input2);

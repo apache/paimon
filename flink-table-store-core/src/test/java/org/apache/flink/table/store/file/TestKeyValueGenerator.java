@@ -19,25 +19,25 @@
 package org.apache.flink.table.store.file;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericArrayData;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.codegen.RecordComparator;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericArray;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.SchemaEvolutionTableTestBase;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import javax.annotation.Nullable;
 
@@ -70,7 +70,7 @@ public class TestKeyValueGenerator {
     // * comment: string, length from 10 to 1000
     public static final RowType DEFAULT_ROW_TYPE =
             RowType.of(
-                    new LogicalType[] {
+                    new DataType[] {
                         new VarCharType(false, 8),
                         new IntType(false),
                         new IntType(false),
@@ -87,7 +87,7 @@ public class TestKeyValueGenerator {
 
     public static final RowType SINGLE_PARTITIONED_ROW_TYPE =
             RowType.of(
-                    new LogicalType[] {
+                    new DataType[] {
                         new VarCharType(false, 8),
                         new IntType(false),
                         new BigIntType(false),
@@ -101,7 +101,7 @@ public class TestKeyValueGenerator {
 
     public static final RowType NON_PARTITIONED_ROW_TYPE =
             RowType.of(
-                    new LogicalType[] {
+                    new DataType[] {
                         new IntType(false),
                         new BigIntType(false),
                         new BigIntType(),
@@ -115,7 +115,7 @@ public class TestKeyValueGenerator {
 
     public static final RowType KEY_TYPE =
             RowType.of(
-                    new LogicalType[] {new IntType(false), new BigIntType(false)},
+                    new DataType[] {new IntType(false), new BigIntType(false)},
                     new String[] {"key_shopId", "key_orderId"});
 
     public static final RowDataSerializer DEFAULT_ROW_SERIALIZER =
@@ -207,14 +207,14 @@ public class TestKeyValueGenerator {
         return new KeyValue()
                 .replace(
                         KEY_SERIALIZER
-                                .toBinaryRow(GenericRowData.of(order.shopId, order.orderId))
+                                .toBinaryRow(GenericRow.of(order.shopId, order.orderId))
                                 .copy(),
                         sequenceNumber++,
                         kind,
                         rowSerializer.toBinaryRow(convertToRow(order)).copy());
     }
 
-    private RowData convertToRow(Order order) {
+    private InternalRow convertToRow(Order order) {
         List<Object> values =
                 new ArrayList<>(
                         Arrays.asList(
@@ -223,19 +223,19 @@ public class TestKeyValueGenerator {
                                 order.itemId,
                                 order.priceAmount == null
                                         ? null
-                                        : new GenericArrayData(order.priceAmount),
-                                StringData.fromString(order.comment)));
+                                        : new GenericArray(order.priceAmount),
+                                BinaryString.fromString(order.comment)));
 
         if (mode == MULTI_PARTITIONED) {
-            values.add(0, StringData.fromString(order.dt));
+            values.add(0, BinaryString.fromString(order.dt));
             values.add(1, order.hr);
         } else if (mode == SINGLE_PARTITIONED) {
-            values.add(0, StringData.fromString(order.dt));
+            values.add(0, BinaryString.fromString(order.dt));
         }
-        return GenericRowData.of(values.toArray(new Object[0]));
+        return GenericRow.of(values.toArray(new Object[0]));
     }
 
-    public BinaryRowData getPartition(KeyValue kv) {
+    public BinaryRow getPartition(KeyValue kv) {
         Object[] values;
         if (mode == MULTI_PARTITIONED) {
             values = new Object[] {kv.value().getString(0), kv.value().getInt(1)};
@@ -244,7 +244,7 @@ public class TestKeyValueGenerator {
         } else {
             values = new Object[0];
         }
-        return partitionSerializer.toBinaryRow(GenericRowData.of(values)).copy();
+        return partitionSerializer.toBinaryRow(GenericRow.of(values)).copy();
     }
 
     public static List<String> getPrimaryKeys(GeneratorMode mode) {
@@ -262,7 +262,7 @@ public class TestKeyValueGenerator {
         return trimmedPk;
     }
 
-    public static Map<String, String> toPartitionMap(BinaryRowData partition, GeneratorMode mode) {
+    public static Map<String, String> toPartitionMap(BinaryRow partition, GeneratorMode mode) {
         Map<String, String> map = new HashMap<>();
         if (mode == MULTI_PARTITIONED) {
             map.put("dt", partition.getString(0).toString());

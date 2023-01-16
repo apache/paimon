@@ -30,17 +30,19 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.StartupMode;
+import org.apache.flink.table.store.connector.Projection;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
-import org.apache.flink.table.store.utils.Projection;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
 import java.util.Optional;
+
+import static org.apache.flink.table.store.connector.LogicalTypeConversion.toLogicalType;
 
 /**
  * Source builder to build a Flink {@link StaticFileStoreSource} or {@link
@@ -145,7 +147,7 @@ public class FlinkSourceBuilder {
             throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
         }
 
-        RowType rowType = table.schema().logicalRowType();
+        RowType rowType = toLogicalType(table.schema().logicalRowType());
         LogicalType produceType =
                 Optional.ofNullable(projectedFields)
                         .map(Projection::of)

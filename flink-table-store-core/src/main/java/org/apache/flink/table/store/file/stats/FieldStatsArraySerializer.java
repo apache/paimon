@@ -18,16 +18,17 @@
 
 package org.apache.flink.table.store.file.stats;
 
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.file.casting.CastExecutor;
 import org.apache.flink.table.store.format.FieldStats;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.RowDataUtils;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
@@ -42,7 +43,7 @@ public class FieldStatsArraySerializer {
 
     private final RowDataSerializer serializer;
 
-    private final RowData.FieldGetter[] fieldGetters;
+    private final InternalRow.FieldGetter[] fieldGetters;
 
     @Nullable private final int[] indexMapping;
     @Nullable private final CastExecutor<Object, Object>[] converterMapping;
@@ -61,15 +62,15 @@ public class FieldStatsArraySerializer {
                                 i ->
                                         RowDataUtils.createNullCheckingFieldGetter(
                                                 safeType.getTypeAt(i), i))
-                        .toArray(RowData.FieldGetter[]::new);
+                        .toArray(InternalRow.FieldGetter[]::new);
         this.indexMapping = indexMapping;
         this.converterMapping = converterMapping;
     }
 
     public BinaryTableStats toBinary(FieldStats[] stats) {
         int rowFieldCount = stats.length;
-        GenericRowData minValues = new GenericRowData(rowFieldCount);
-        GenericRowData maxValues = new GenericRowData(rowFieldCount);
+        GenericRow minValues = new GenericRow(rowFieldCount);
+        GenericRow maxValues = new GenericRow(rowFieldCount);
         long[] nullCounts = new long[rowFieldCount];
         for (int i = 0; i < rowFieldCount; i++) {
             minValues.setField(i, stats[i].minValue());
@@ -92,7 +93,7 @@ public class FieldStatsArraySerializer {
         FieldStats[] stats = new FieldStats[fieldCount];
         for (int i = 0; i < fieldCount; i++) {
             int fieldIndex = indexMapping == null ? i : indexMapping[i];
-            if (fieldIndex < 0 || fieldIndex >= array.min().getArity()) {
+            if (fieldIndex < 0 || fieldIndex >= array.min().getFieldCount()) {
                 // simple evolution for add column
                 if (rowCount == null) {
                     throw new RuntimeException("Schema Evolution for stats needs row count.");
@@ -114,20 +115,22 @@ public class FieldStatsArraySerializer {
     }
 
     public static RowType schema() {
-        List<RowType.RowField> fields = new ArrayList<>();
-        fields.add(new RowType.RowField("_MIN_VALUES", newBytesType(false)));
-        fields.add(new RowType.RowField("_MAX_VALUES", newBytesType(false)));
-        fields.add(new RowType.RowField("_NULL_COUNTS", new ArrayType(new BigIntType(false))));
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "_MIN_VALUES", newBytesType(false)));
+        fields.add(new DataField(1, "_MAX_VALUES", newBytesType(false)));
+        fields.add(new DataField(2, "_NULL_COUNTS", new ArrayType(new BigIntType(false))));
         return new RowType(fields);
     }
 
     private static RowType toAllFieldsNullableRowType(RowType rowType) {
         // as stated in RollingFile.Writer#finish, field stats are not collected currently so
         // min/max values are all nulls
-        return RowType.of(
-                rowType.getFields().stream()
-                        .map(f -> f.getType().copy(true))
-                        .toArray(LogicalType[]::new),
-                rowType.getFieldNames().toArray(new String[0]));
+        return RowType.builder()
+                .fields(
+                        rowType.getFields().stream()
+                                .map(f -> f.type().copy(true))
+                                .toArray(DataType[]::new),
+                        rowType.getFieldNames().toArray(new String[0]))
+                .build();
     }
 }

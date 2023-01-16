@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.codegen;
 
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.TypeUtils;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
 
 import java.util.List;
 
@@ -37,19 +37,19 @@ public class CodeGeneratorImpl implements CodeGenerator {
 
     @Override
     public GeneratedClass<NormalizedKeyComputer> generateNormalizedKeyComputer(
-            List<LogicalType> fieldTypes, String name) {
+            List<DataType> fieldTypes, String name) {
         return new SortCodeGenerator(
-                        RowType.of(fieldTypes.toArray(new LogicalType[0])),
+                        RowType.builder().fields(fieldTypes).build(),
                         getAscendingSortSpec(fieldTypes.size()))
                 .generateNormalizedKeyComputer(name);
     }
 
     @Override
     public GeneratedClass<RecordComparator> generateRecordComparator(
-            List<LogicalType> fieldTypes, String name) {
+            List<DataType> fieldTypes, String name) {
         return ComparatorCodeGenerator.gen(
                 name,
-                RowType.of(fieldTypes.toArray(new LogicalType[0])),
+                RowType.builder().fields(fieldTypes).build(),
                 getAscendingSortSpec(fieldTypes.size()));
     }
 

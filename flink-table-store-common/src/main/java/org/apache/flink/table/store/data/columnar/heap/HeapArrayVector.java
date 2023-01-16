@@ -18,15 +18,13 @@
 
 package org.apache.flink.table.store.data.columnar.heap;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.table.data.ArrayData;
+import org.apache.flink.table.store.data.InternalArray;
 import org.apache.flink.table.store.data.columnar.ArrayColumnVector;
 import org.apache.flink.table.store.data.columnar.ColumnVector;
-import org.apache.flink.table.store.data.columnar.ColumnarArrayData;
+import org.apache.flink.table.store.data.columnar.ColumnarArray;
 import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
 
 /** This class represents a nullable heap array column vector. */
-@Internal
 public class HeapArrayVector extends AbstractHeapVector
         implements WritableColumnVector, ArrayColumnVector {
 
@@ -81,9 +79,9 @@ public class HeapArrayVector extends AbstractHeapVector
     }
 
     @Override
-    public ArrayData getArray(int i) {
+    public InternalArray getArray(int i) {
         long offset = offsets[i];
         long length = lengths[i];
-        return new ColumnarArrayData(child, (int) offset, (int) length);
+        return new ColumnarArray(child, (int) offset, (int) length);
     }
 }

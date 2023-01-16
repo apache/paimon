@@ -18,17 +18,16 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.filesystem.FileSystems;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.TableRead;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.TypeUtils;
-import org.apache.flink.table.types.logical.RowType;
 
-import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.read.InputPartition;
 import org.apache.spark.sql.connector.read.PartitionReader;
 import org.apache.spark.sql.connector.read.PartitionReaderFactory;
@@ -62,8 +61,9 @@ public class SparkReaderFactory implements PartitionReaderFactory {
     }
 
     @Override
-    public PartitionReader<InternalRow> createReader(InputPartition partition) {
-        RecordReader<RowData> reader;
+    public PartitionReader<org.apache.spark.sql.catalyst.InternalRow> createReader(
+            InputPartition partition) {
+        RecordReader<InternalRow> reader;
         TableRead read = table.newRead().withProjection(projectedFields);
         if (predicates.size() > 0) {
             read.withFilter(and(predicates));
@@ -73,9 +73,9 @@ public class SparkReaderFactory implements PartitionReaderFactory {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        RecordReaderIterator<RowData> iterator = new RecordReaderIterator<>(reader);
+        RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader);
         SparkInternalRow row = new SparkInternalRow(readRowType());
-        return new PartitionReader<InternalRow>() {
+        return new PartitionReader<org.apache.spark.sql.catalyst.InternalRow>() {
 
             @Override
             public boolean next() {
@@ -87,7 +87,7 @@ public class SparkReaderFactory implements PartitionReaderFactory {
             }
 
             @Override
-            public InternalRow get() {
+            public org.apache.spark.sql.catalyst.InternalRow get() {
                 return row;
             }
 

@@ -55,6 +55,7 @@ import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.NONE;
+import static org.apache.flink.table.store.connector.LogicalTypeConversion.toLogicalType;
 import static org.apache.flink.table.store.log.LogStoreTableFactory.discoverLogStoreFactory;
 
 /** Abstract table store factory to create table source and table sink. */
@@ -141,15 +142,15 @@ public abstract class AbstractTableStoreFactory
                         Configuration.fromMap(context.getCatalogTable().getOptions()));
 
         TableSchema tableSchema = table.schema();
-        UpdateSchema updateSchema = UpdateSchema.fromCatalogTable(context.getCatalogTable());
+        UpdateSchema updateSchema = FlinkCatalog.fromCatalogTable(context.getCatalogTable());
 
-        RowType rowType = updateSchema.rowType();
+        RowType rowType = toLogicalType(updateSchema.rowType());
         List<String> partitionKeys = updateSchema.partitionKeys();
         List<String> primaryKeys = updateSchema.primaryKeys();
 
         // compare fields to ignore the outside nullability and nested fields' comments
         Preconditions.checkArgument(
-                schemaEquals(tableSchema.logicalRowType(), rowType),
+                schemaEquals(toLogicalType(tableSchema.logicalRowType()), rowType),
                 "Flink schema and store schema are not the same, "
                         + "store schema is %s, Flink schema is %s",
                 tableSchema.logicalRowType(),

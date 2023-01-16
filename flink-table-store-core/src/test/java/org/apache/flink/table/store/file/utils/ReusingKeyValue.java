@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.writer.BinaryRowWriter;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.BinaryRowWriter;
 import org.apache.flink.table.store.file.KeyValue;
 
 /**
@@ -28,16 +28,16 @@ import org.apache.flink.table.store.file.KeyValue;
  */
 public class ReusingKeyValue {
 
-    private final BinaryRowData key;
+    private final BinaryRow key;
     private final BinaryRowWriter keyWriter;
-    private final BinaryRowData value;
+    private final BinaryRow value;
     private final BinaryRowWriter valueWriter;
     private final KeyValue kv;
 
     public ReusingKeyValue() {
-        this.key = new BinaryRowData(1);
+        this.key = new BinaryRow(1);
         this.keyWriter = new BinaryRowWriter(key);
-        this.value = new BinaryRowData(1);
+        this.value = new BinaryRow(1);
         this.valueWriter = new BinaryRowWriter(value);
         this.kv = new KeyValue();
     }

@@ -18,13 +18,13 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.DataType;
 
 /** last non-null value aggregate a field of a row. */
 public class FieldLastNonNullValueAgg extends FieldAggregator {
 
-    public FieldLastNonNullValueAgg(LogicalType logicalType) {
-        super(logicalType);
+    public FieldLastNonNullValueAgg(DataType dataType) {
+        super(dataType);
     }
 
     @Override

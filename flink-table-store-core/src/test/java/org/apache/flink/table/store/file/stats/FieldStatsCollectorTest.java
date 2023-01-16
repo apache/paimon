@@ -18,15 +18,15 @@
 
 package org.apache.flink.table.store.file.stats;
 
-import org.apache.flink.table.data.GenericArrayData;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericArray;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FieldStatsCollector;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import org.junit.jupiter.api.Test;
 
@@ -42,57 +42,55 @@ public class FieldStatsCollectorTest {
         FieldStatsCollector collector = new FieldStatsCollector(rowType);
 
         collector.collect(
-                GenericRowData.of(
-                        1,
-                        StringData.fromString("Flink"),
-                        new GenericArrayData(new int[] {1, 10})));
+                GenericRow.of(
+                        1, BinaryString.fromString("Flink"), new GenericArray(new int[] {1, 10})));
         assertThat(collector.extract())
                 .isEqualTo(
                         new FieldStats[] {
                             new FieldStats(1, 1, 0),
                             new FieldStats(
-                                    StringData.fromString("Flink"),
-                                    StringData.fromString("Flink"),
+                                    BinaryString.fromString("Flink"),
+                                    BinaryString.fromString("Flink"),
                                     0),
                             new FieldStats(null, null, 0)
                         });
 
-        collector.collect(GenericRowData.of(3, null, new GenericArrayData(new int[] {3, 30})));
+        collector.collect(GenericRow.of(3, null, new GenericArray(new int[] {3, 30})));
         assertThat(collector.extract())
                 .isEqualTo(
                         new FieldStats[] {
                             new FieldStats(1, 3, 0),
                             new FieldStats(
-                                    StringData.fromString("Flink"),
-                                    StringData.fromString("Flink"),
+                                    BinaryString.fromString("Flink"),
+                                    BinaryString.fromString("Flink"),
                                     1),
                             new FieldStats(null, null, 0)
                         });
 
         collector.collect(
-                GenericRowData.of(
+                GenericRow.of(
                         null,
-                        StringData.fromString("Apache"),
-                        new GenericArrayData(new int[] {2, 20})));
+                        BinaryString.fromString("Apache"),
+                        new GenericArray(new int[] {2, 20})));
         assertThat(collector.extract())
                 .isEqualTo(
                         new FieldStats[] {
                             new FieldStats(1, 3, 1),
                             new FieldStats(
-                                    StringData.fromString("Apache"),
-                                    StringData.fromString("Flink"),
+                                    BinaryString.fromString("Apache"),
+                                    BinaryString.fromString("Flink"),
                                     1),
                             new FieldStats(null, null, 0)
                         });
 
-        collector.collect(GenericRowData.of(2, StringData.fromString("Batch"), null));
+        collector.collect(GenericRow.of(2, BinaryString.fromString("Batch"), null));
         assertThat(collector.extract())
                 .isEqualTo(
                         new FieldStats[] {
                             new FieldStats(1, 3, 1),
                             new FieldStats(
-                                    StringData.fromString("Apache"),
-                                    StringData.fromString("Flink"),
+                                    BinaryString.fromString("Apache"),
+                                    BinaryString.fromString("Flink"),
                                     1),
                             new FieldStats(null, null, 1)
                         });

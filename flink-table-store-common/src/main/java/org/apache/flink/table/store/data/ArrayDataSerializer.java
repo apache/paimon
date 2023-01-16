@@ -27,39 +27,35 @@ import org.apache.flink.api.java.typeutils.runtime.DataInputViewStream;
 import org.apache.flink.api.java.typeutils.runtime.DataOutputViewStream;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
-import org.apache.flink.core.memory.MemorySegmentFactory;
-import org.apache.flink.table.data.ArrayData;
-import org.apache.flink.table.data.GenericArrayData;
-import org.apache.flink.table.data.binary.BinaryArrayData;
-import org.apache.flink.table.data.binary.BinarySegmentUtils;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.utils.LogicalTypeUtils;
+import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.flink.table.store.memory.MemorySegmentUtils;
+import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.util.InstantiationUtil;
 
 import java.io.IOException;
 import java.lang.reflect.Array;
 import java.util.Arrays;
 
-/** Serializer for {@link ArrayData}. */
+/** Serializer for {@link InternalArray}. */
 @Internal
-public class ArrayDataSerializer extends TypeSerializer<ArrayData> {
+public class ArrayDataSerializer extends TypeSerializer<InternalArray> {
     private static final long serialVersionUID = 1L;
 
-    private final LogicalType eleType;
+    private final DataType eleType;
     private final TypeSerializer<Object> eleSer;
-    private final ArrayData.ElementGetter elementGetter;
+    private final InternalArray.ElementGetter elementGetter;
 
-    private transient BinaryArrayData reuseArray;
+    private transient BinaryArray reuseArray;
     private transient BinaryArrayWriter reuseWriter;
 
-    public ArrayDataSerializer(LogicalType eleType) {
+    public ArrayDataSerializer(DataType eleType) {
         this(eleType, InternalSerializers.create(eleType));
     }
 
-    private ArrayDataSerializer(LogicalType eleType, TypeSerializer<Object> eleSer) {
+    private ArrayDataSerializer(DataType eleType, TypeSerializer<Object> eleSer) {
         this.eleType = eleType;
         this.eleSer = eleSer;
-        this.elementGetter = ArrayData.createElementGetter(eleType);
+        this.elementGetter = InternalArray.createElementGetter(eleType);
     }
 
     @Override
@@ -68,65 +64,61 @@ public class ArrayDataSerializer extends TypeSerializer<ArrayData> {
     }
 
     @Override
-    public TypeSerializer<ArrayData> duplicate() {
+    public TypeSerializer<InternalArray> duplicate() {
         return new ArrayDataSerializer(eleType, eleSer.duplicate());
     }
 
     @Override
-    public ArrayData createInstance() {
-        return new BinaryArrayData();
+    public InternalArray createInstance() {
+        return new BinaryArray();
     }
 
     @Override
-    public ArrayData copy(ArrayData from) {
-        if (from instanceof GenericArrayData) {
-            return copyGenericArray((GenericArrayData) from);
-        } else if (from instanceof BinaryArrayData) {
-            return ((BinaryArrayData) from).copy();
+    public InternalArray copy(InternalArray from) {
+        if (from instanceof GenericArray) {
+            return copyGenericArray((GenericArray) from);
+        } else if (from instanceof BinaryArray) {
+            return ((BinaryArray) from).copy();
         } else {
             return toBinaryArray(from);
         }
     }
 
     @Override
-    public ArrayData copy(ArrayData from, ArrayData reuse) {
+    public InternalArray copy(InternalArray from, InternalArray reuse) {
         return copy(from);
     }
 
-    private GenericArrayData copyGenericArray(GenericArrayData array) {
+    private GenericArray copyGenericArray(GenericArray array) {
         if (array.isPrimitiveArray()) {
             switch (eleType.getTypeRoot()) {
                 case BOOLEAN:
-                    return new GenericArrayData(
-                            Arrays.copyOf(array.toBooleanArray(), array.size()));
+                    return new GenericArray(Arrays.copyOf(array.toBooleanArray(), array.size()));
                 case TINYINT:
-                    return new GenericArrayData(Arrays.copyOf(array.toByteArray(), array.size()));
+                    return new GenericArray(Arrays.copyOf(array.toByteArray(), array.size()));
                 case SMALLINT:
-                    return new GenericArrayData(Arrays.copyOf(array.toShortArray(), array.size()));
+                    return new GenericArray(Arrays.copyOf(array.toShortArray(), array.size()));
                 case INTEGER:
-                    return new GenericArrayData(Arrays.copyOf(array.toIntArray(), array.size()));
+                    return new GenericArray(Arrays.copyOf(array.toIntArray(), array.size()));
                 case BIGINT:
-                    return new GenericArrayData(Arrays.copyOf(array.toLongArray(), array.size()));
+                    return new GenericArray(Arrays.copyOf(array.toLongArray(), array.size()));
                 case FLOAT:
-                    return new GenericArrayData(Arrays.copyOf(array.toFloatArray(), array.size()));
+                    return new GenericArray(Arrays.copyOf(array.toFloatArray(), array.size()));
                 case DOUBLE:
-                    return new GenericArrayData(Arrays.copyOf(array.toDoubleArray(), array.size()));
+                    return new GenericArray(Arrays.copyOf(array.toDoubleArray(), array.size()));
                 default:
                     throw new RuntimeException("Unknown type: " + eleType);
             }
         } else {
             Object[] objectArray = array.toObjectArray();
             Object[] newArray =
-                    (Object[])
-                            Array.newInstance(
-                                    LogicalTypeUtils.toInternalConversionClass(eleType),
-                                    array.size());
+                    (Object[]) Array.newInstance(InternalRow.getDataClass(eleType), array.size());
             for (int i = 0; i < array.size(); i++) {
                 if (objectArray[i] != null) {
                     newArray[i] = eleSer.copy(objectArray[i]);
                 }
             }
-            return new GenericArrayData(newArray);
+            return new GenericArray(newArray);
         }
     }
 
@@ -136,31 +128,31 @@ public class ArrayDataSerializer extends TypeSerializer<ArrayData> {
     }
 
     @Override
-    public void serialize(ArrayData record, DataOutputView target) throws IOException {
-        BinaryArrayData binaryArray = toBinaryArray(record);
+    public void serialize(InternalArray record, DataOutputView target) throws IOException {
+        BinaryArray binaryArray = toBinaryArray(record);
         target.writeInt(binaryArray.getSizeInBytes());
-        BinarySegmentUtils.copyToView(
+        MemorySegmentUtils.copyToView(
                 binaryArray.getSegments(),
                 binaryArray.getOffset(),
                 binaryArray.getSizeInBytes(),
                 target);
     }
 
-    public BinaryArrayData toBinaryArray(ArrayData from) {
-        if (from instanceof BinaryArrayData) {
-            return (BinaryArrayData) from;
+    public BinaryArray toBinaryArray(InternalArray from) {
+        if (from instanceof BinaryArray) {
+            return (BinaryArray) from;
         }
 
         int numElements = from.size();
         if (reuseArray == null) {
-            reuseArray = new BinaryArrayData();
+            reuseArray = new BinaryArray();
         }
         if (reuseWriter == null || reuseWriter.getNumElements() != numElements) {
             reuseWriter =
                     new BinaryArrayWriter(
                             reuseArray,
                             numElements,
-                            BinaryArrayData.calculateFixLengthPartSize(eleType));
+                            BinaryArray.calculateFixLengthPartSize(eleType));
         } else {
             reuseWriter.reset();
         }
@@ -179,23 +171,22 @@ public class ArrayDataSerializer extends TypeSerializer<ArrayData> {
     }
 
     @Override
-    public ArrayData deserialize(DataInputView source) throws IOException {
-        return deserializeReuse(new BinaryArrayData(), source);
+    public InternalArray deserialize(DataInputView source) throws IOException {
+        return deserializeReuse(new BinaryArray(), source);
     }
 
     @Override
-    public ArrayData deserialize(ArrayData reuse, DataInputView source) throws IOException {
+    public InternalArray deserialize(InternalArray reuse, DataInputView source) throws IOException {
         return deserializeReuse(
-                reuse instanceof BinaryArrayData ? (BinaryArrayData) reuse : new BinaryArrayData(),
-                source);
+                reuse instanceof BinaryArray ? (BinaryArray) reuse : new BinaryArray(), source);
     }
 
-    private BinaryArrayData deserializeReuse(BinaryArrayData reuse, DataInputView source)
+    private BinaryArray deserializeReuse(BinaryArray reuse, DataInputView source)
             throws IOException {
         int length = source.readInt();
         byte[] bytes = new byte[length];
         source.readFully(bytes);
-        reuse.pointTo(MemorySegmentFactory.wrap(bytes), 0, bytes.length);
+        reuse.pointTo(MemorySegment.wrap(bytes), 0, bytes.length);
         return reuse;
     }
 
@@ -231,16 +222,16 @@ public class ArrayDataSerializer extends TypeSerializer<ArrayData> {
     }
 
     @Override
-    public TypeSerializerSnapshot<ArrayData> snapshotConfiguration() {
+    public TypeSerializerSnapshot<InternalArray> snapshotConfiguration() {
         return new ArrayDataSerializerSnapshot(eleType, eleSer);
     }
 
     /** {@link TypeSerializerSnapshot} for {@link ArrayDataSerializer}. */
     public static final class ArrayDataSerializerSnapshot
-            implements TypeSerializerSnapshot<ArrayData> {
+            implements TypeSerializerSnapshot<InternalArray> {
         private static final int CURRENT_VERSION = 3;
 
-        private LogicalType previousType;
+        private DataType previousType;
         private TypeSerializer previousEleSer;
 
         @SuppressWarnings("unused")
@@ -248,7 +239,7 @@ public class ArrayDataSerializer extends TypeSerializer<ArrayData> {
             // this constructor is used when restoring from a checkpoint/savepoint.
         }
 
-        ArrayDataSerializerSnapshot(LogicalType eleType, TypeSerializer eleSer) {
+        ArrayDataSerializerSnapshot(DataType eleType, TypeSerializer eleSer) {
             this.previousType = eleType;
             this.previousEleSer = eleSer;
         }
@@ -280,13 +271,13 @@ public class ArrayDataSerializer extends TypeSerializer<ArrayData> {
         }
 
         @Override
-        public TypeSerializer<ArrayData> restoreSerializer() {
+        public TypeSerializer<InternalArray> restoreSerializer() {
             return new ArrayDataSerializer(previousType, previousEleSer);
         }
 
         @Override
-        public TypeSerializerSchemaCompatibility<ArrayData> resolveSchemaCompatibility(
-                TypeSerializer<ArrayData> newSerializer) {
+        public TypeSerializerSchemaCompatibility<InternalArray> resolveSchemaCompatibility(
+                TypeSerializer<InternalArray> newSerializer) {
             if (!(newSerializer instanceof ArrayDataSerializer)) {
                 return TypeSerializerSchemaCompatibility.incompatible();
             }

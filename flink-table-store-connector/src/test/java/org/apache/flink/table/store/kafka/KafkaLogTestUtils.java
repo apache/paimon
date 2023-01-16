@@ -29,7 +29,6 @@ import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.catalog.UniqueConstraint;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
-import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
@@ -37,14 +36,15 @@ import org.apache.flink.table.runtime.connector.source.ScanRuntimeProviderContex
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import org.apache.flink.table.store.CoreOptions.LogConsistency;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.store.table.sink.SinkRecord;
+import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.utils.TypeConversions;
-import org.apache.flink.types.RowKind;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -57,10 +57,10 @@ import java.util.stream.IntStream;
 
 import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
+import static org.apache.flink.table.store.data.BinaryRow.EMPTY_ROW;
 import static org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.TOPIC;
-import static org.apache.flink.table.store.utils.BinaryRowDataUtil.EMPTY_ROW;
 
 /** Utils for the test of {@link KafkaLogStoreFactory}. */
 public class KafkaLogTestUtils {
@@ -200,6 +200,6 @@ public class KafkaLogTestUtils {
                 EMPTY_ROW,
                 bucket,
                 hasPk ? row(pk) : EMPTY_ROW,
-                GenericRowData.ofKind(rowKind, pk, value));
+                GenericRow.ofKind(rowKind, pk, value));
     }
 }

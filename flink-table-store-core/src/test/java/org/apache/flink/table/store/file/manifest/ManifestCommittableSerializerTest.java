@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.NewFilesIncrement;
@@ -65,7 +65,7 @@ public class ManifestCommittableSerializerTest {
     }
 
     private static void addFileCommittables(
-            ManifestCommittable committable, BinaryRowData partition, int bucket) {
+            ManifestCommittable committable, BinaryRow partition, int bucket) {
         List<FileCommittable> fileCommittables = new ArrayList<>();
         int length = ThreadLocalRandom.current().nextInt(10) + 1;
         for (int i = 0; i < length; i++) {

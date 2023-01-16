@@ -19,20 +19,20 @@
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
 import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.DataType;
 
 import java.io.Serializable;
 
 /** abstract class of aggregating a field of a row. */
 public abstract class FieldAggregator implements Serializable {
-    protected LogicalType fieldType;
+    protected DataType fieldType;
 
-    public FieldAggregator(LogicalType logicalType) {
-        this.fieldType = logicalType;
+    public FieldAggregator(DataType dataType) {
+        this.fieldType = dataType;
     }
 
     static FieldAggregator createFieldAggregator(
-            LogicalType fieldType, String strAgg, boolean isPrimaryKey) {
+            DataType fieldType, String strAgg, boolean isPrimaryKey) {
         final FieldAggregator fieldAggregator;
         if (isPrimaryKey) {
             fieldAggregator = new FieldLastValueAgg(fieldType);

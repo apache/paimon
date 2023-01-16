@@ -21,8 +21,8 @@ package org.apache.flink.table.store.file;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
@@ -47,7 +47,7 @@ import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.source.DataSplit;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -132,7 +132,7 @@ public class TestFileStore extends KeyValueFileStore {
 
     public List<Snapshot> commitData(
             List<KeyValue> kvs,
-            Function<KeyValue, BinaryRowData> partitionCalculator,
+            Function<KeyValue, BinaryRow> partitionCalculator,
             Function<KeyValue, Integer> bucketCalculator)
             throws Exception {
         return commitData(kvs, partitionCalculator, bucketCalculator, new HashMap<>());
@@ -140,7 +140,7 @@ public class TestFileStore extends KeyValueFileStore {
 
     public List<Snapshot> commitData(
             List<KeyValue> kvs,
-            Function<KeyValue, BinaryRowData> partitionCalculator,
+            Function<KeyValue, BinaryRow> partitionCalculator,
             Function<KeyValue, Integer> bucketCalculator,
             Map<Integer, Long> logOffsets)
             throws Exception {
@@ -158,7 +158,7 @@ public class TestFileStore extends KeyValueFileStore {
 
     public List<Snapshot> overwriteData(
             List<KeyValue> kvs,
-            Function<KeyValue, BinaryRowData> partitionCalculator,
+            Function<KeyValue, BinaryRow> partitionCalculator,
             Function<KeyValue, Integer> bucketCalculator,
             Map<String, String> partition)
             throws Exception {
@@ -174,16 +174,16 @@ public class TestFileStore extends KeyValueFileStore {
 
     public List<Snapshot> commitDataImpl(
             List<KeyValue> kvs,
-            Function<KeyValue, BinaryRowData> partitionCalculator,
+            Function<KeyValue, BinaryRow> partitionCalculator,
             Function<KeyValue, Integer> bucketCalculator,
             boolean emptyWriter,
             Long identifier,
             BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction)
             throws Exception {
         AbstractFileStoreWrite<KeyValue> write = newWrite(commitUser);
-        Map<BinaryRowData, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
+        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
         for (KeyValue kv : kvs) {
-            BinaryRowData partition = partitionCalculator.apply(kv);
+            BinaryRow partition = partitionCalculator.apply(kv);
             int bucket = bucketCalculator.apply(kv);
             writers.computeIfAbsent(partition, p -> new HashMap<>())
                     .compute(
@@ -215,7 +215,7 @@ public class TestFileStore extends KeyValueFileStore {
         FileStoreCommit commit = newCommit(commitUser);
         ManifestCommittable committable =
                 new ManifestCommittable(identifier == null ? commitIdentifier++ : identifier);
-        for (Map.Entry<BinaryRowData, Map<Integer, RecordWriter<KeyValue>>> entryWithPartition :
+        for (Map.Entry<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> entryWithPartition :
                 writers.entrySet()) {
             for (Map.Entry<Integer, RecordWriter<KeyValue>> entryWithBucket :
                     entryWithPartition.getValue().entrySet()) {
@@ -295,7 +295,7 @@ public class TestFileStore extends KeyValueFileStore {
             }
         }
 
-        Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> filesPerPartitionAndBucket =
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> filesPerPartitionAndBucket =
                 new HashMap<>();
         for (ManifestEntry entry : entries) {
             filesPerPartitionAndBucket
@@ -306,7 +306,7 @@ public class TestFileStore extends KeyValueFileStore {
 
         List<KeyValue> kvs = new ArrayList<>();
         FileStoreRead<KeyValue> read = newRead();
-        for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> entryWithPartition :
+        for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> entryWithPartition :
                 filesPerPartitionAndBucket.entrySet()) {
             for (Map.Entry<Integer, List<DataFileMeta>> entryWithBucket :
                     entryWithPartition.getValue().entrySet()) {
@@ -328,7 +328,7 @@ public class TestFileStore extends KeyValueFileStore {
         return kvs;
     }
 
-    public Map<BinaryRowData, BinaryRowData> toKvMap(List<KeyValue> kvs) {
+    public Map<BinaryRow, BinaryRow> toKvMap(List<KeyValue> kvs) {
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Compacting list of key values to kv map\n"
@@ -341,10 +341,10 @@ public class TestFileStore extends KeyValueFileStore {
                                     .collect(Collectors.joining("\n")));
         }
 
-        Map<BinaryRowData, BinaryRowData> result = new HashMap<>();
+        Map<BinaryRow, BinaryRow> result = new HashMap<>();
         for (KeyValue kv : kvs) {
-            BinaryRowData key = keySerializer.toBinaryRow(kv.key()).copy();
-            BinaryRowData value = valueSerializer.toBinaryRow(kv.value()).copy();
+            BinaryRow key = keySerializer.toBinaryRow(kv.key()).copy();
+            BinaryRow value = valueSerializer.toBinaryRow(kv.value()).copy();
             switch (kv.valueKind()) {
                 case INSERT:
                 case UPDATE_AFTER:

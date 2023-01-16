@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.format.avro;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.util.FileUtils;
@@ -49,31 +49,32 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for {@link AbstractAvroBulkFormat}. */
 class AvroBulkFormatTest {
 
-    private static final List<RowData> TEST_DATA =
+    private static final List<InternalRow> TEST_DATA =
             Arrays.asList(
                     // -------- batch 0, block start 232 --------
-                    GenericRowData.of(
-                            StringData.fromString("AvroBulk"), StringData.fromString("FormatTest")),
-                    GenericRowData.of(
-                            StringData.fromString("Apache"), StringData.fromString("Flink")),
-                    GenericRowData.of(
-                            StringData.fromString(
+                    GenericRow.of(
+                            BinaryString.fromString("AvroBulk"),
+                            BinaryString.fromString("FormatTest")),
+                    GenericRow.of(
+                            BinaryString.fromString("Apache"), BinaryString.fromString("Flink")),
+                    GenericRow.of(
+                            BinaryString.fromString(
                                     "永和九年，岁在癸丑，暮春之初，会于会稽山阴之兰亭，修禊事也。群贤毕至，少"
                                             + "长咸集。此地有崇山峻岭，茂林修竹，又有清流激湍，映带左右。引"
                                             + "以为流觞曲水，列坐其次。虽无丝竹管弦之盛，一觞一咏，亦足以畅"
                                             + "叙幽情。"),
-                            StringData.fromString("")),
+                            BinaryString.fromString("")),
                     // -------- batch 1, block start 593 --------
-                    GenericRowData.of(
-                            StringData.fromString("File"), StringData.fromString("Format")),
-                    GenericRowData.of(
+                    GenericRow.of(
+                            BinaryString.fromString("File"), BinaryString.fromString("Format")),
+                    GenericRow.of(
                             null,
-                            StringData.fromString(
+                            BinaryString.fromString(
                                     "This is a string with English, 中文 and even 🍎🍌🍑🥝🍍🥭🍐")),
                     // -------- batch 2, block start 705 --------
-                    GenericRowData.of(
-                            StringData.fromString("block with"),
-                            StringData.fromString("only one record"))
+                    GenericRow.of(
+                            BinaryString.fromString("block with"),
+                            BinaryString.fromString("only one record"))
                     // -------- file length 752 --------
                     );
     private static final List<Long> BLOCK_STARTS = Arrays.asList(232L, 593L, 705L);
@@ -121,7 +122,7 @@ class AvroBulkFormatTest {
     void testReadWholeFileWithOneSplit() throws IOException {
         AvroBulkFormatTestUtils.TestingAvroBulkFormat bulkFormat =
                 new AvroBulkFormatTestUtils.TestingAvroBulkFormat();
-        RecordReader<RowData> reader = bulkFormat.createReader(new Path(tmpFile.toString()));
+        RecordReader<InternalRow> reader = bulkFormat.createReader(new Path(tmpFile.toString()));
         AtomicInteger i = new AtomicInteger(0);
         RecordReaderUtils.forEachRemaining(
                 reader,

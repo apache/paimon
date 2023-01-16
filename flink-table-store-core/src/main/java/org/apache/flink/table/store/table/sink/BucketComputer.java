@@ -18,14 +18,14 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.codegen.Projection;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
 
 import java.util.stream.IntStream;
 
@@ -55,11 +55,11 @@ public class BucketComputer {
         this.pkProjection = CodeGenUtils.newProjection(rowType, primaryKeys);
     }
 
-    private int hashRow(RowData row) {
-        if (row instanceof BinaryRowData) {
+    private int hashRow(InternalRow row) {
+        if (row instanceof BinaryRow) {
             RowKind rowKind = row.getRowKind();
             row.setRowKind(RowKind.INSERT);
-            int hash = hashcode((BinaryRowData) row);
+            int hash = hashcode((BinaryRow) row);
             row.setRowKind(rowKind);
             return hash;
         } else {
@@ -67,39 +67,39 @@ public class BucketComputer {
         }
     }
 
-    public int bucket(RowData row) {
+    public int bucket(InternalRow row) {
         int hashcode = hashBucketKey(row);
         return bucket(hashcode, numBucket);
     }
 
-    public int bucket(RowData row, BinaryRowData pk) {
+    public int bucket(InternalRow row, BinaryRow pk) {
         int hashcode = hashBucketKey(row, pk);
         return bucket(hashcode, numBucket);
     }
 
-    private int hashBucketKey(RowData row) {
-        BinaryRowData bucketKey = bucketProjection.apply(row);
-        if (bucketKey.getArity() == 0) {
+    private int hashBucketKey(InternalRow row) {
+        BinaryRow bucketKey = bucketProjection.apply(row);
+        if (bucketKey.getFieldCount() == 0) {
             bucketKey = pkProjection.apply(row);
         }
-        if (bucketKey.getArity() == 0) {
+        if (bucketKey.getFieldCount() == 0) {
             return hashRow(row);
         }
         return bucketKey.hashCode();
     }
 
-    private int hashBucketKey(RowData row, BinaryRowData pk) {
-        BinaryRowData bucketKey = bucketProjection.apply(row);
-        if (bucketKey.getArity() == 0) {
+    private int hashBucketKey(InternalRow row, BinaryRow pk) {
+        BinaryRow bucketKey = bucketProjection.apply(row);
+        if (bucketKey.getFieldCount() == 0) {
             bucketKey = pk;
         }
-        if (bucketKey.getArity() == 0) {
+        if (bucketKey.getFieldCount() == 0) {
             return hashRow(row);
         }
         return bucketKey.hashCode();
     }
 
-    public static int hashcode(BinaryRowData rowData) {
+    public static int hashcode(BinaryRow rowData) {
         assert rowData.getRowKind() == RowKind.INSERT;
         return rowData.hashCode();
     }

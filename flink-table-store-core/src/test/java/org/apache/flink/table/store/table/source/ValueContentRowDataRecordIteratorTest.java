@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.store.file.utils.ReusingTestData;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.RowKind;
 
 import org.junit.jupiter.api.Test;
 
@@ -43,7 +43,7 @@ public class ValueContentRowDataRecordIteratorTest extends RowDataRecordIterator
                 input,
                 ValueContentRowDataRecordIterator::new,
                 (rowData, idx) -> {
-                    assertThat(rowData.getArity()).isEqualTo(1);
+                    assertThat(rowData.getFieldCount()).isEqualTo(1);
                     assertThat(rowData.getLong(0)).isEqualTo(expectedValues.get(idx));
                     assertThat(rowData.getRowKind()).isEqualTo(expectedRowKinds.get(idx));
                 });

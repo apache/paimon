@@ -18,19 +18,19 @@
 
 package org.apache.flink.table.store.file;
 
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreRead;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreWrite;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.format.FileFormatDiscover;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.util.Comparator;
 
-/** {@link FileStore} for reading and writing {@link RowData}. */
-public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
+/** {@link FileStore} for reading and writing {@link InternalRow}. */
+public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     private final RowType bucketKeyType;
     private final RowType rowType;
@@ -86,7 +86,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<RowData> {
     }
 
     @Override
-    public Comparator<RowData> newKeyComparator() {
+    public Comparator<InternalRow> newKeyComparator() {
         return null;
     }
 }

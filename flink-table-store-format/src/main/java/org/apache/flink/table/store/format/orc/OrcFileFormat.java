@@ -22,8 +22,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
@@ -34,13 +33,15 @@ import org.apache.flink.table.store.format.orc.filter.OrcPredicateFunctionVisito
 import org.apache.flink.table.store.format.orc.reader.OrcSplitReaderUtil;
 import org.apache.flink.table.store.format.orc.writer.RowDataVectorizer;
 import org.apache.flink.table.store.format.orc.writer.Vectorizer;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.MultisetType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Projection;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.MapType;
-import org.apache.flink.table.types.logical.MultisetType;
-import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.orc.TypeDescription;
 
@@ -51,6 +52,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.stream.Collectors;
+
+import static org.apache.flink.table.store.types.DataTypeChecks.getFieldTypes;
 
 /** Orc {@link FileFormat}. The main code is copied from Flink {@code OrcFileFormatFactory}. */
 public class OrcFileFormat extends FileFormat {
@@ -94,7 +97,7 @@ public class OrcFileFormat extends FileFormat {
 
         return new OrcReaderFactory(
                 readerConf,
-                (RowType) refineLogicalType(type),
+                (RowType) refineDataType(type),
                 Projection.of(projection).toTopLevelIndexes(),
                 orcPredicates,
                 2048);
@@ -111,12 +114,12 @@ public class OrcFileFormat extends FileFormat {
      * @return The factory of the {@link BulkWriter}
      */
     @Override
-    public BulkWriter.Factory<RowData> createWriterFactory(RowType type) {
-        LogicalType refinedType = refineLogicalType(type);
-        LogicalType[] orcTypes = refinedType.getChildren().toArray(new LogicalType[0]);
+    public BulkWriter.Factory<InternalRow> createWriterFactory(RowType type) {
+        DataType refinedType = refineDataType(type);
+        DataType[] orcTypes = getFieldTypes(refinedType).toArray(new DataType[0]);
 
-        TypeDescription typeDescription = OrcSplitReaderUtil.logicalTypeToOrcType(refinedType);
-        Vectorizer<RowData> vectorizer =
+        TypeDescription typeDescription = OrcSplitReaderUtil.toOrcType(refinedType);
+        Vectorizer<InternalRow> vectorizer =
                 new RowDataVectorizer(typeDescription.toString(), orcTypes);
 
         return new OrcWriterFactory<>(vectorizer, orcProperties, writerConf);
@@ -130,27 +133,27 @@ public class OrcFileFormat extends FileFormat {
         return orcProperties;
     }
 
-    private static LogicalType refineLogicalType(LogicalType type) {
+    private static DataType refineDataType(DataType type) {
         switch (type.getTypeRoot()) {
             case BINARY:
             case VARBINARY:
-                // OrcSplitReaderUtil#logicalTypeToOrcType() only supports the DataTypes.BYTES()
+                // OrcSplitReaderUtil#DataTypeToOrcType() only supports the DataTypes.BYTES()
                 // logical type for BINARY and VARBINARY.
-                return DataTypes.BYTES().getLogicalType();
+                return DataTypes.BYTES();
             case ARRAY:
                 ArrayType arrayType = (ArrayType) type;
                 return new ArrayType(
-                        arrayType.isNullable(), refineLogicalType(arrayType.getElementType()));
+                        arrayType.isNullable(), refineDataType(arrayType.getElementType()));
             case MAP:
                 MapType mapType = (MapType) type;
                 return new MapType(
-                        refineLogicalType(mapType.getKeyType()),
-                        refineLogicalType(mapType.getValueType()));
+                        refineDataType(mapType.getKeyType()),
+                        refineDataType(mapType.getValueType()));
             case MULTISET:
                 MultisetType multisetType = (MultisetType) type;
                 return new MapType(
-                        refineLogicalType(multisetType.getElementType()),
-                        refineLogicalType(new IntType(false)));
+                        refineDataType(multisetType.getElementType()),
+                        refineDataType(new IntType(false)));
             case ROW:
                 RowType rowType = (RowType) type;
                 return new RowType(
@@ -158,10 +161,11 @@ public class OrcFileFormat extends FileFormat {
                         rowType.getFields().stream()
                                 .map(
                                         f ->
-                                                new RowType.RowField(
-                                                        f.getName(),
-                                                        refineLogicalType(f.getType()),
-                                                        f.getDescription().orElse(null)))
+                                                new DataField(
+                                                        f.id(),
+                                                        f.name(),
+                                                        refineDataType(f.type()),
+                                                        f.description()))
                                 .collect(Collectors.toList()));
             default:
                 return type;

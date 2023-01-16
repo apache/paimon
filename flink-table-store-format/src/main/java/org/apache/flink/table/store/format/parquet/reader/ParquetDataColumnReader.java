@@ -17,7 +17,7 @@
 
 package org.apache.flink.table.store.format.parquet.reader;
 
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.Timestamp;
 
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.column.Dictionary;
@@ -66,7 +66,7 @@ public interface ParquetDataColumnReader {
     byte[] readBytes();
 
     /** @return the next TimestampData from the page */
-    TimestampData readTimestamp();
+    Timestamp readTimestamp();
 
     /** @return the underlying dictionary if current reader is dictionary encoded */
     Dictionary getDictionary();
@@ -123,5 +123,5 @@ public interface ParquetDataColumnReader {
      * @param id in dictionary
      * @return the TimestampData from the dictionary by id
      */
-    TimestampData readTimestamp(int id);
+    Timestamp readTimestamp(int id);
 }

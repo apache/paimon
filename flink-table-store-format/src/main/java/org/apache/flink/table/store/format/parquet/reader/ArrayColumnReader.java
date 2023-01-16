@@ -17,7 +17,7 @@
 
 package org.apache.flink.table.store.format.parquet.reader;
 
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.data.columnar.VectorizedColumnBatch;
 import org.apache.flink.table.store.data.columnar.heap.HeapArrayVector;
 import org.apache.flink.table.store.data.columnar.heap.HeapBooleanVector;
@@ -30,8 +30,8 @@ import org.apache.flink.table.store.data.columnar.heap.HeapLongVector;
 import org.apache.flink.table.store.data.columnar.heap.HeapShortVector;
 import org.apache.flink.table.store.data.columnar.heap.HeapTimestampVector;
 import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.DataType;
 
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReader;
@@ -59,9 +59,9 @@ public class ArrayColumnReader extends BaseVectorizedColumnReader {
             PageReader pageReader,
             boolean isUtcTimestamp,
             Type type,
-            LogicalType logicalType)
+            DataType dataType)
             throws IOException {
-        super(descriptor, pageReader, isUtcTimestamp, type, logicalType);
+        super(descriptor, pageReader, isUtcTimestamp, type, dataType);
     }
 
     @Override
@@ -72,7 +72,7 @@ public class ArrayColumnReader extends BaseVectorizedColumnReader {
         lcv.setOffsets(new long[VectorizedColumnBatch.DEFAULT_SIZE]);
         lcv.setLengths(new long[VectorizedColumnBatch.DEFAULT_SIZE]);
 
-        LogicalType elementType = ((ArrayType) logicalType).getElementType();
+        DataType elementType = ((ArrayType) dataType).getElementType();
 
         // read the first row in parquet data page, this will be only happened once for this
         // instance
@@ -99,7 +99,7 @@ public class ArrayColumnReader extends BaseVectorizedColumnReader {
      * @param type the element type of array
      * @return boolean
      */
-    private boolean fetchNextValue(LogicalType type) {
+    private boolean fetchNextValue(DataType type) {
         int left = readPageIfNeed();
         if (left > 0) {
             // get the values of repetition and definitionLevel
@@ -134,7 +134,7 @@ public class ArrayColumnReader extends BaseVectorizedColumnReader {
 
     // Need to be in consistent with that VectorizedPrimitiveColumnReader#readBatchHelper
     // TODO Reduce the duplicated code
-    private Object readPrimitiveTypedRow(LogicalType type) {
+    private Object readPrimitiveTypedRow(DataType type) {
         switch (type.getTypeRoot()) {
             case CHAR:
             case VARCHAR:
@@ -175,7 +175,7 @@ public class ArrayColumnReader extends BaseVectorizedColumnReader {
         }
     }
 
-    private Object dictionaryDecodeValue(LogicalType type, Integer dictionaryValue) {
+    private Object dictionaryDecodeValue(DataType type, Integer dictionaryValue) {
         if (dictionaryValue == null) {
             return null;
         }
@@ -231,7 +231,7 @@ public class ArrayColumnReader extends BaseVectorizedColumnReader {
      * @return int
      */
     private int collectDataFromParquetPage(
-            int total, HeapArrayVector lcv, List<Object> valueList, LogicalType type) {
+            int total, HeapArrayVector lcv, List<Object> valueList, DataType type) {
         int index = 0;
         /*
          * Here is a nested loop for collecting all values from a parquet page.
@@ -290,7 +290,7 @@ public class ArrayColumnReader extends BaseVectorizedColumnReader {
     }
 
     private void fillColumnVector(
-            LogicalType type, HeapArrayVector lcv, List valueList, int elementNum) {
+            DataType type, HeapArrayVector lcv, List valueList, int elementNum) {
         int total = valueList.size();
         setChildrenInfo(lcv, total, elementNum);
         switch (type.getTypeRoot()) {
@@ -412,7 +412,7 @@ public class ArrayColumnReader extends BaseVectorizedColumnReader {
                         ((HeapTimestampVector) lcv.getChild()).setNullAt(i);
                     } else {
                         ((HeapTimestampVector) lcv.getChild())
-                                .setTimestamp(i, ((List<TimestampData>) valueList).get(i));
+                                .setTimestamp(i, ((List<Timestamp>) valueList).get(i));
                     }
                 }
                 break;

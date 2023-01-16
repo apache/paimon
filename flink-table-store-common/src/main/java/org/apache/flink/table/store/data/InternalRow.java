@@ -1,0 +1,233 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.flink.table.store.data;
+
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypeChecks;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
+
+import javax.annotation.Nullable;
+
+import java.io.Serializable;
+
+import static org.apache.flink.table.store.types.DataTypeChecks.getPrecision;
+import static org.apache.flink.table.store.types.DataTypeChecks.getScale;
+
+/**
+ * Base interface for an internal data structure representing data of {@link RowType}.
+ *
+ * <p>The mappings from SQL data types to the internal data structures are listed in the following
+ * table:
+ *
+ * <pre>
+ * +--------------------------------+-----------------------------------------+
+ * | SQL Data Types                 | Internal Data Structures                |
+ * +--------------------------------+-----------------------------------------+
+ * | BOOLEAN                        | boolean                                 |
+ * +--------------------------------+-----------------------------------------+
+ * | CHAR / VARCHAR / STRING        | {@link BinaryString}                    |
+ * +--------------------------------+-----------------------------------------+
+ * | BINARY / VARBINARY / BYTES     | byte[]                                  |
+ * +--------------------------------+-----------------------------------------+
+ * | DECIMAL                        | {@link Decimal}                         |
+ * +--------------------------------+-----------------------------------------+
+ * | TINYINT                        | byte                                    |
+ * +--------------------------------+-----------------------------------------+
+ * | SMALLINT                       | short                                   |
+ * +--------------------------------+-----------------------------------------+
+ * | INT                            | int                                     |
+ * +--------------------------------+-----------------------------------------+
+ * | BIGINT                         | long                                    |
+ * +--------------------------------+-----------------------------------------+
+ * | FLOAT                          | float                                   |
+ * +--------------------------------+-----------------------------------------+
+ * | DOUBLE                         | double                                  |
+ * +--------------------------------+-----------------------------------------+
+ * | DATE                           | int (number of days since epoch)        |
+ * +--------------------------------+-----------------------------------------+
+ * | TIME                           | int (number of milliseconds of the day) |
+ * +--------------------------------+-----------------------------------------+
+ * | TIMESTAMP                      | {@link Timestamp}                       |
+ * +--------------------------------+-----------------------------------------+
+ * | TIMESTAMP WITH LOCAL TIME ZONE | {@link Timestamp}                       |
+ * +--------------------------------+-----------------------------------------+
+ * | ROW                            | {@link InternalRow}                     |
+ * +--------------------------------+-----------------------------------------+
+ * | ARRAY                          | {@link InternalArray}                   |
+ * +--------------------------------+-----------------------------------------+
+ * | MAP / MULTISET                 | {@link InternalMap}                     |
+ * +--------------------------------+-----------------------------------------+
+ * </pre>
+ *
+ * <p>Nullability is always handled by the container data structure.
+ */
+public interface InternalRow extends DataGetters {
+
+    /**
+     * Returns the number of fields in this row.
+     *
+     * <p>The number does not include {@link RowKind}. It is kept separately.
+     */
+    int getFieldCount();
+
+    /**
+     * Returns the kind of change that this row describes in a changelog.
+     *
+     * @see RowKind
+     */
+    RowKind getRowKind();
+
+    /**
+     * Sets the kind of change that this row describes in a changelog.
+     *
+     * @see RowKind
+     */
+    void setRowKind(RowKind kind);
+
+    // ------------------------------------------------------------------------------------------
+    // Access Utilities
+    // ------------------------------------------------------------------------------------------
+
+    /** Returns the data class for the given {@link DataType}. */
+    static Class<?> getDataClass(DataType type) {
+        // ordered by type root definition
+        switch (type.getTypeRoot()) {
+            case CHAR:
+            case VARCHAR:
+                return BinaryString.class;
+            case BOOLEAN:
+                return Boolean.class;
+            case BINARY:
+            case VARBINARY:
+                return byte[].class;
+            case DECIMAL:
+                return Decimal.class;
+            case TINYINT:
+                return Byte.class;
+            case SMALLINT:
+                return Short.class;
+            case INTEGER:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+                return Integer.class;
+            case BIGINT:
+                return Long.class;
+            case FLOAT:
+                return Float.class;
+            case DOUBLE:
+                return Double.class;
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return Timestamp.class;
+            case ARRAY:
+                return InternalArray.class;
+            case MULTISET:
+            case MAP:
+                return InternalMap.class;
+            case ROW:
+                return InternalRow.class;
+            default:
+                throw new IllegalArgumentException("Illegal type: " + type);
+        }
+    }
+
+    /**
+     * Creates an accessor for getting elements in an internal row data structure at the given
+     * position.
+     *
+     * @param fieldType the element type of the row
+     * @param fieldPos the element position of the row
+     */
+    static FieldGetter createFieldGetter(DataType fieldType, int fieldPos) {
+        final FieldGetter fieldGetter;
+        // ordered by type root definition
+        switch (fieldType.getTypeRoot()) {
+            case CHAR:
+            case VARCHAR:
+                fieldGetter = row -> row.getString(fieldPos);
+                break;
+            case BOOLEAN:
+                fieldGetter = row -> row.getBoolean(fieldPos);
+                break;
+            case BINARY:
+            case VARBINARY:
+                fieldGetter = row -> row.getBinary(fieldPos);
+                break;
+            case DECIMAL:
+                final int decimalPrecision = getPrecision(fieldType);
+                final int decimalScale = getScale(fieldType);
+                fieldGetter = row -> row.getDecimal(fieldPos, decimalPrecision, decimalScale);
+                break;
+            case TINYINT:
+                fieldGetter = row -> row.getByte(fieldPos);
+                break;
+            case SMALLINT:
+                fieldGetter = row -> row.getShort(fieldPos);
+                break;
+            case INTEGER:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+                fieldGetter = row -> row.getInt(fieldPos);
+                break;
+            case BIGINT:
+                fieldGetter = row -> row.getLong(fieldPos);
+                break;
+            case FLOAT:
+                fieldGetter = row -> row.getFloat(fieldPos);
+                break;
+            case DOUBLE:
+                fieldGetter = row -> row.getDouble(fieldPos);
+                break;
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                final int timestampPrecision = getPrecision(fieldType);
+                fieldGetter = row -> row.getTimestamp(fieldPos, timestampPrecision);
+                break;
+            case ARRAY:
+                fieldGetter = row -> row.getArray(fieldPos);
+                break;
+            case MULTISET:
+            case MAP:
+                fieldGetter = row -> row.getMap(fieldPos);
+                break;
+            case ROW:
+                final int rowFieldCount = DataTypeChecks.getFieldCount(fieldType);
+                fieldGetter = row -> row.getRow(fieldPos, rowFieldCount);
+                break;
+            default:
+                throw new IllegalArgumentException();
+        }
+        if (!fieldType.isNullable()) {
+            return fieldGetter;
+        }
+        return row -> {
+            if (row.isNullAt(fieldPos)) {
+                return null;
+            }
+            return fieldGetter.getFieldOrNull(row);
+        };
+    }
+
+    /** Accessor for getting the field of a row during runtime. */
+    interface FieldGetter extends Serializable {
+        @Nullable
+        Object getFieldOrNull(InternalRow row);
+    }
+}

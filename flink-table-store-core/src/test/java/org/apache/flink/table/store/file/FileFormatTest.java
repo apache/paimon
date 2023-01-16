@@ -23,14 +23,14 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.format.FileFormat;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -55,31 +55,30 @@ public class FileFormatTest {
 
         // write
 
-        List<RowData> expected = new ArrayList<>();
-        expected.add(GenericRowData.of(1, 11));
-        expected.add(GenericRowData.of(2, 22));
-        expected.add(GenericRowData.of(3, 33));
+        List<InternalRow> expected = new ArrayList<>();
+        expected.add(GenericRow.of(1, 11));
+        expected.add(GenericRow.of(2, 22));
+        expected.add(GenericRow.of(3, 33));
         FSDataOutputStream out = fs.create(path, FileSystem.WriteMode.NO_OVERWRITE);
-        BulkWriter<RowData> writer = avro.createWriterFactory(rowType).create(out);
-        for (RowData row : expected) {
+        BulkWriter<InternalRow> writer = avro.createWriterFactory(rowType).create(out);
+        for (InternalRow row : expected) {
             writer.addElement(row);
         }
         writer.finish();
         out.close();
 
         // read
-        RecordReader<RowData> reader = avro.createReaderFactory(rowType).createReader(path);
-        List<RowData> result = new ArrayList<>();
+        RecordReader<InternalRow> reader = avro.createReaderFactory(rowType).createReader(path);
+        List<InternalRow> result = new ArrayList<>();
         RecordReaderUtils.forEachRemaining(
-                reader,
-                rowData -> result.add(GenericRowData.of(rowData.getInt(0), rowData.getInt(1))));
+                reader, rowData -> result.add(GenericRow.of(rowData.getInt(0), rowData.getInt(1))));
 
         assertThat(result).isEqualTo(expected);
     }
 
     @Test
     public void testUnsupportedOption(@TempDir java.nio.file.Path tempDir) {
-        BulkWriter.Factory<RowData> writerFactory =
+        BulkWriter.Factory<InternalRow> writerFactory =
                 createFileFormat("_unsupported").createWriterFactory(RowType.of(new IntType()));
         Path path = new Path(tempDir.toUri().toString(), "1.avro");
         Assertions.assertThrows(

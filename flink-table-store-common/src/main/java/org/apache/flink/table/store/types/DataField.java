@@ -69,6 +69,10 @@ public final class DataField implements Serializable {
         return type;
     }
 
+    public DataField newName(String newName) {
+        return new DataField(id, newName, type, description);
+    }
+
     @Nullable
     public String description() {
         return description;

@@ -20,12 +20,12 @@
 package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.api.common.accumulators.LongCounter;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.format.FileFormat;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
-/** {@link RollingFileWriter} for data files containing {@link RowData}. */
-public class RowDataRollingFileWriter extends RollingFileWriter<RowData, DataFileMeta> {
+/** {@link RollingFileWriter} for data files containing {@link InternalRow}. */
+public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, DataFileMeta> {
 
     public RowDataRollingFileWriter(
             long schemaId,

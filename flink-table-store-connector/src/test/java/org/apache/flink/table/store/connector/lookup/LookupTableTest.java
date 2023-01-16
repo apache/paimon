@@ -19,11 +19,11 @@
 package org.apache.flink.table.store.connector.lookup;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -72,7 +72,7 @@ public class LookupTableTest {
                         ThreadLocalRandom.current().nextInt(2) * 10);
 
         table.refresh(singletonList(row(1, 11, 111)).iterator());
-        List<RowData> result = table.get(row(1));
+        List<InternalRow> result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 11, 111);
 
@@ -100,7 +100,7 @@ public class LookupTableTest {
                         ThreadLocalRandom.current().nextInt(2) * 10);
 
         table.refresh(singletonList(row(1, 11, 111)).iterator());
-        List<RowData> result = table.get(row(1));
+        List<InternalRow> result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 11, 111);
 
@@ -121,7 +121,7 @@ public class LookupTableTest {
                         ThreadLocalRandom.current().nextInt(2) * 10);
 
         table.refresh(singletonList(row(1, 11, 111)).iterator());
-        List<RowData> result = table.get(row(11));
+        List<InternalRow> result = table.get(row(11));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 11, 111);
 
@@ -146,12 +146,12 @@ public class LookupTableTest {
         assertThat(table.get(row(33))).hasSize(0);
     }
 
-    private static RowData row(Object... values) {
+    private static InternalRow row(Object... values) {
         return row(RowKind.INSERT, values);
     }
 
-    private static RowData row(RowKind kind, Object... values) {
-        GenericRowData row = new GenericRowData(kind, values.length);
+    private static InternalRow row(RowKind kind, Object... values) {
+        GenericRow row = new GenericRow(kind, values.length);
 
         for (int i = 0; i < values.length; ++i) {
             row.setField(i, values[i]);
@@ -160,7 +160,7 @@ public class LookupTableTest {
         return row;
     }
 
-    private static void assertRow(RowData resultRow, int... expected) {
+    private static void assertRow(InternalRow resultRow, int... expected) {
         int[] results = new int[expected.length];
         for (int i = 0; i < results.length; i++) {
             results[i] = resultRow.getInt(i);

@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
 
 import org.apache.hadoop.hive.common.type.HiveVarchar;
 import org.apache.hadoop.hive.serde2.io.HiveVarcharWritable;
@@ -50,8 +50,8 @@ public class TableStoreVarcharObjectInspector extends AbstractPrimitiveJavaObjec
 
     @Override
     public Object copyObject(Object o) {
-        if (o instanceof StringData) {
-            return StringData.fromString(o.toString());
+        if (o instanceof BinaryString) {
+            return BinaryString.fromString(o.toString());
         } else if (o instanceof HiveVarchar) {
             HiveVarchar hiveVarchar = (HiveVarchar) o;
             return new HiveVarchar(hiveVarchar, len);

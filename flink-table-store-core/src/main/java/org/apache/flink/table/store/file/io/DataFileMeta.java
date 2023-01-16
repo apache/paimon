@@ -18,23 +18,24 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.types.logical.ArrayType;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.ArrayType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
+import static org.apache.flink.table.store.data.BinaryRow.EMPTY_ROW;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.newBytesType;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.newStringType;
-import static org.apache.flink.table.store.utils.BinaryRowDataUtil.EMPTY_ROW;
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /** Metadata of a data file. */
@@ -44,16 +45,16 @@ public class DataFileMeta {
     // the following dummy values.
     public static final BinaryTableStats EMPTY_KEY_STATS =
             new BinaryTableStats(EMPTY_ROW, EMPTY_ROW, new long[0]);
-    public static final BinaryRowData EMPTY_MIN_KEY = EMPTY_ROW;
-    public static final BinaryRowData EMPTY_MAX_KEY = EMPTY_ROW;
+    public static final BinaryRow EMPTY_MIN_KEY = EMPTY_ROW;
+    public static final BinaryRow EMPTY_MAX_KEY = EMPTY_ROW;
     public static final int DUMMY_LEVEL = 0;
 
     private final String fileName;
     private final long fileSize;
     private final long rowCount;
 
-    private final BinaryRowData minKey;
-    private final BinaryRowData maxKey;
+    private final BinaryRow minKey;
+    private final BinaryRow maxKey;
     private final BinaryTableStats keyStats;
     private final BinaryTableStats valueStats;
 
@@ -90,8 +91,8 @@ public class DataFileMeta {
             String fileName,
             long fileSize,
             long rowCount,
-            BinaryRowData minKey,
-            BinaryRowData maxKey,
+            BinaryRow minKey,
+            BinaryRow maxKey,
             BinaryTableStats keyStats,
             BinaryTableStats valueStats,
             long minSequenceNumber,
@@ -117,8 +118,8 @@ public class DataFileMeta {
             String fileName,
             long fileSize,
             long rowCount,
-            BinaryRowData minKey,
-            BinaryRowData maxKey,
+            BinaryRow minKey,
+            BinaryRow maxKey,
             BinaryTableStats keyStats,
             BinaryTableStats valueStats,
             long minSequenceNumber,
@@ -154,11 +155,11 @@ public class DataFileMeta {
         return rowCount;
     }
 
-    public BinaryRowData minKey() {
+    public BinaryRow minKey() {
         return minKey;
     }
 
-    public BinaryRowData maxKey() {
+    public BinaryRow maxKey() {
         return maxKey;
     }
 
@@ -290,20 +291,19 @@ public class DataFileMeta {
     }
 
     public static RowType schema() {
-        List<RowType.RowField> fields = new ArrayList<>();
-        fields.add(new RowType.RowField("_FILE_NAME", newStringType(false)));
-        fields.add(new RowType.RowField("_FILE_SIZE", new BigIntType(false)));
-        fields.add(new RowType.RowField("_ROW_COUNT", new BigIntType(false)));
-        fields.add(new RowType.RowField("_MIN_KEY", newBytesType(false)));
-        fields.add(new RowType.RowField("_MAX_KEY", newBytesType(false)));
-        fields.add(new RowType.RowField("_KEY_STATS", FieldStatsArraySerializer.schema()));
-        fields.add(new RowType.RowField("_VALUE_STATS", FieldStatsArraySerializer.schema()));
-        fields.add(new RowType.RowField("_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
-        fields.add(new RowType.RowField("_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
-        fields.add(new RowType.RowField("_SCHEMA_ID", new BigIntType(false)));
-        fields.add(new RowType.RowField("_LEVEL", new IntType(false)));
-        fields.add(
-                new RowType.RowField("_EXTRA_FILES", new ArrayType(false, newStringType(false))));
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "_FILE_NAME", newStringType(false)));
+        fields.add(new DataField(1, "_FILE_SIZE", new BigIntType(false)));
+        fields.add(new DataField(2, "_ROW_COUNT", new BigIntType(false)));
+        fields.add(new DataField(3, "_MIN_KEY", newBytesType(false)));
+        fields.add(new DataField(4, "_MAX_KEY", newBytesType(false)));
+        fields.add(new DataField(5, "_KEY_STATS", FieldStatsArraySerializer.schema()));
+        fields.add(new DataField(6, "_VALUE_STATS", FieldStatsArraySerializer.schema()));
+        fields.add(new DataField(7, "_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
+        fields.add(new DataField(8, "_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
+        fields.add(new DataField(9, "_SCHEMA_ID", new BigIntType(false)));
+        fields.add(new DataField(10, "_LEVEL", new IntType(false)));
+        fields.add(new DataField(11, "_EXTRA_FILES", new ArrayType(false, newStringType(false))));
         return new RowType(fields);
     }
 

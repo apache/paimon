@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 
 import org.apache.spark.sql.AnalysisException;
 import org.apache.spark.sql.Dataset;
@@ -62,8 +62,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     public void testAddColumn() throws Exception {
         Path tablePath = new Path(warehousePath, "default.db/testAddColumn");
         SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
-        testHelper1.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
-        testHelper1.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
+        testHelper1.write(GenericRow.of(1, 2L, BinaryString.fromString("1")));
+        testHelper1.write(GenericRow.of(5, 6L, BinaryString.fromString("3")));
         testHelper1.commit();
 
         spark.sql("ALTER TABLE tablestore.default.testAddColumn ADD COLUMN d STRING");
@@ -109,8 +109,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     public void testRenameColumn() throws Exception {
         Path tablePath = new Path(warehousePath, "default.db/testRenameColumn");
         SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
-        testHelper1.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
-        testHelper1.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
+        testHelper1.write(GenericRow.of(1, 2L, BinaryString.fromString("1")));
+        testHelper1.write(GenericRow.of(5, 6L, BinaryString.fromString("3")));
         testHelper1.commit();
 
         List<Row> beforeRename =
@@ -191,8 +191,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     public void testDropSingleColumn() throws Exception {
         Path tablePath = new Path(warehousePath, "default.db/testDropSingleColumn");
         SimpleTableTestHelper testHelper = createTestHelper(tablePath);
-        testHelper.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
-        testHelper.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
+        testHelper.write(GenericRow.of(1, 2L, BinaryString.fromString("1")));
+        testHelper.write(GenericRow.of(5, 6L, BinaryString.fromString("3")));
         testHelper.commit();
 
         List<Row> beforeDrop =
@@ -335,9 +335,9 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     /**
      * In fact, the table store does not currently support alter column type. In this case, changing
      * "a" type from int to bigint can run successfully because the underlying orc supports directly
-     * reading int to bigint. At present, we read int value from orc into {@link RowData} according
-     * to the underlying data schema, and then read long from {@link RowData} will cause failure.
-     * TODO: This case needs to be ignored first and will be completely fixed in
+     * reading int to bigint. At present, we read int value from orc into {@link InternalRow}
+     * according to the underlying data schema, and then read long from {@link InternalRow} will
+     * cause failure. TODO: This case needs to be ignored first and will be completely fixed in
      * https://issues.apache.org/jira/browse/FLINK-27845
      */
     @Disabled
@@ -345,8 +345,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     public void testAlterColumnType() throws Exception {
         Path tablePath = new Path(warehousePath, "default.db/testAlterColumnType");
         SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
-        testHelper1.write(GenericRowData.of(1, 2L, StringData.fromString("1")));
-        testHelper1.write(GenericRowData.of(5, 6L, StringData.fromString("3")));
+        testHelper1.write(GenericRow.of(1, 2L, BinaryString.fromString("1")));
+        testHelper1.write(GenericRow.of(5, 6L, BinaryString.fromString("3")));
         testHelper1.commit();
 
         spark.sql("ALTER TABLE tablestore.default.testAlterColumnType ALTER COLUMN a TYPE BIGINT");
@@ -457,8 +457,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         // Create table with fields [a, b, c] and insert 2 records
         Path tablePath = new Path(warehousePath, "default.db/testSchemaEvolution");
         SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
-        testHelper1.write(GenericRowData.of(1, 2L, StringData.fromString("3")));
-        testHelper1.write(GenericRowData.of(4, 5L, StringData.fromString("6")));
+        testHelper1.write(GenericRow.of(1, 2L, BinaryString.fromString("3")));
+        testHelper1.write(GenericRow.of(4, 5L, BinaryString.fromString("6")));
         testHelper1.commit();
         assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
                 .isEqualTo("[[1,2,3], [4,5,6]]");
@@ -480,8 +480,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution RENAME COLUMN c to a");
         spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution RENAME COLUMN b to c");
         SimpleTableTestHelper testHelper2 = createTestHelperWithoutDDL(tablePath);
-        testHelper2.write(GenericRowData.of(7, 8L, StringData.fromString("9")));
-        testHelper2.write(GenericRowData.of(10, 11L, StringData.fromString("12")));
+        testHelper2.write(GenericRow.of(7, 8L, BinaryString.fromString("9")));
+        testHelper2.write(GenericRow.of(10, 11L, BinaryString.fromString("12")));
         testHelper2.commit();
         assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
                 .isEqualTo("[[1,2,3], [4,5,6], [7,8,9], [10,11,12]]");
@@ -502,8 +502,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         // Drop fields "aa", "c" and the fields are [a], insert 2 records
         spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution DROP COLUMNS aa, c");
         SimpleTableTestHelper testHelper3 = createTestHelperWithoutDDL(tablePath);
-        testHelper3.write(GenericRowData.of(StringData.fromString("13")));
-        testHelper3.write(GenericRowData.of(StringData.fromString("14")));
+        testHelper3.write(GenericRow.of(BinaryString.fromString("13")));
+        testHelper3.write(GenericRow.of(BinaryString.fromString("14")));
         testHelper3.commit();
         assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
                 .isEqualTo("[[3], [6], [9], [12], [13], [14]]");
@@ -519,8 +519,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         spark.sql(
                 "ALTER TABLE tablestore.default.testSchemaEvolution ADD COLUMNS (d INT, c INT, b INT)");
         SimpleTableTestHelper testHelper4 = createTestHelperWithoutDDL(tablePath);
-        testHelper4.write(GenericRowData.of(StringData.fromString("15"), 16, 17, 18));
-        testHelper4.write(GenericRowData.of(StringData.fromString("19"), 20, 21, 22));
+        testHelper4.write(GenericRow.of(BinaryString.fromString("15"), 16, 17, 18));
+        testHelper4.write(GenericRow.of(BinaryString.fromString("19"), 20, 21, 22));
         testHelper4.commit();
         assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
                 .isEqualTo(

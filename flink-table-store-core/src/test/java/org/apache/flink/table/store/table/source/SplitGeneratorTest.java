@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 
 import org.junit.jupiter.api.Test;
@@ -70,7 +70,7 @@ public class SplitGeneratorTest {
 
     @Test
     public void testMergeTree() {
-        Comparator<RowData> comparator = Comparator.comparingInt(o -> o.getInt(0));
+        Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
         assertThat(toNames(new MergeTreeSplitGenerator(comparator, 100, 2).split(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2", "4", "3", "5"), Collections.singletonList("6"));

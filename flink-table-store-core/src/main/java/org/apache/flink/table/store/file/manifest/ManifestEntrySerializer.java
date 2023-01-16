@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 
@@ -44,8 +44,8 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
     }
 
     @Override
-    public RowData convertTo(ManifestEntry entry) {
-        GenericRowData row = new GenericRowData(5);
+    public InternalRow convertTo(ManifestEntry entry) {
+        GenericRow row = new GenericRow(5);
         row.setField(0, entry.kind().toByteValue());
         row.setField(1, serializeBinaryRow(entry.partition()));
         row.setField(2, entry.bucket());
@@ -55,7 +55,7 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
     }
 
     @Override
-    public ManifestEntry convertFrom(int version, RowData row) {
+    public ManifestEntry convertFrom(int version, InternalRow row) {
         if (version != 2) {
             if (version == 1) {
                 throw new IllegalArgumentException(

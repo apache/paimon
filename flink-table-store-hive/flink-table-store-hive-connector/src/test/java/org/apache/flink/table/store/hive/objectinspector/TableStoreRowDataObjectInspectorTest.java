@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.store.data.GenericRow;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
@@ -108,7 +108,7 @@ public class TableStoreRowDataObjectInspectorTest {
     public void testGetStructFieldData() {
         TableStoreRowDataObjectInspector oi =
                 new TableStoreRowDataObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
-        GenericRowData rowData = generate();
+        GenericRow rowData = generate();
         List<Object> structFieldsData = oi.getStructFieldsDataAsList(rowData);
         for (int i = 0; i < structFieldsData.size(); i++) {
             assertThat(structFieldsData.get(i)).isEqualTo(rowData.getField(i));

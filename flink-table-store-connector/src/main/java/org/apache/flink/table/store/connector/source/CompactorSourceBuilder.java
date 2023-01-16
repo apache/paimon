@@ -24,9 +24,9 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
+import org.apache.flink.table.store.connector.LogicalTypeConversion;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.file.predicate.PredicateConverter;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousCompactorFollowUpScanner;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousCompactorStartingScanner;
@@ -34,7 +34,7 @@ import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnap
 import org.apache.flink.table.store.table.source.snapshot.FullStartingScanner;
 import org.apache.flink.table.store.table.source.snapshot.StaticDataFileSnapshotEnumerator;
 import org.apache.flink.table.store.table.system.BucketsTable;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.RowType;
 
 import javax.annotation.Nullable;
 
@@ -88,7 +88,7 @@ public class CompactorSourceBuilder {
             partitionPredicate =
                     PredicateBuilder.or(
                             specifiedPartitions.stream()
-                                    .map(p -> PredicateConverter.fromMap(p, table.rowType()))
+                                    .map(p -> PredicateBuilder.partition(p, table.rowType()))
                                     .toArray(Predicate[]::new));
         }
 
@@ -126,11 +126,11 @@ public class CompactorSourceBuilder {
         }
 
         BucketsTable bucketsTable = new BucketsTable(table, isContinuous);
-        LogicalType produceType = bucketsTable.rowType();
+        RowType produceType = bucketsTable.rowType();
         return env.fromSource(
                 buildSource(bucketsTable),
                 WatermarkStrategy.noWatermarks(),
                 tableIdentifier + "-compact-source",
-                InternalTypeInfo.of(produceType));
+                InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(produceType)));
     }
 }

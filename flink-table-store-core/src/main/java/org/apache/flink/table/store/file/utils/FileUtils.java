@@ -23,7 +23,7 @@ import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileStatus;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.format.FormatReaderFactory;
 
 import org.slf4j.Logger;
@@ -169,8 +169,8 @@ public class FileUtils {
                 .map(name -> Long.parseLong(name.substring(prefix.length())));
     }
 
-    public static RecordReader<RowData> createFormatReader(FormatReaderFactory format, Path file)
-            throws IOException {
+    public static RecordReader<InternalRow> createFormatReader(
+            FormatReaderFactory format, Path file) throws IOException {
         if (!file.getFileSystem().exists(file)) {
             throw new FileNotFoundException(
                     String.format(

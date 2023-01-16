@@ -21,7 +21,7 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.io.Serializable;
 import java.util.Map;

@@ -18,14 +18,14 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-import org.apache.flink.table.data.DecimalData;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.utils.DecimalUtils;
-import org.apache.flink.table.types.logical.LogicalType;
 
 /** sum aggregate a field of a row. */
 public class FieldSumAgg extends FieldAggregator {
-    public FieldSumAgg(LogicalType logicalType) {
-        super(logicalType);
+    public FieldSumAgg(DataType dataType) {
+        super(dataType);
     }
 
     @Override
@@ -38,12 +38,12 @@ public class FieldSumAgg extends FieldAggregator {
             // ordered by type root definition
             switch (fieldType.getTypeRoot()) {
                 case DECIMAL:
-                    DecimalData mergeFieldDD = (DecimalData) accumulator;
-                    DecimalData inFieldDD = (DecimalData) inputField;
+                    Decimal mergeFieldDD = (Decimal) accumulator;
+                    Decimal inFieldDD = (Decimal) inputField;
                     assert mergeFieldDD.scale() == inFieldDD.scale()
-                            : "Inconsistent scale of aggregate DecimalData!";
+                            : "Inconsistent scale of aggregate Decimal!";
                     assert mergeFieldDD.precision() == inFieldDD.precision()
-                            : "Inconsistent precision of aggregate DecimalData!";
+                            : "Inconsistent precision of aggregate Decimal!";
                     sum =
                             DecimalUtils.add(
                                     mergeFieldDD,

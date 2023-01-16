@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
@@ -33,14 +33,14 @@ import java.util.stream.Collectors;
 /** Merge tree implementation of {@link SplitGenerator}. */
 public class MergeTreeSplitGenerator implements SplitGenerator {
 
-    private final Comparator<RowData> keyComparator;
+    private final Comparator<InternalRow> keyComparator;
 
     private final long targetSplitSize;
 
     private final long openFileCost;
 
     public MergeTreeSplitGenerator(
-            Comparator<RowData> keyComparator, long targetSplitSize, long openFileCost) {
+            Comparator<InternalRow> keyComparator, long targetSplitSize, long openFileCost) {
         this.keyComparator = keyComparator;
         this.targetSplitSize = targetSplitSize;
         this.openFileCost = openFileCost;

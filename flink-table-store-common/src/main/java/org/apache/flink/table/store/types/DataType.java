@@ -161,4 +161,12 @@ public abstract class DataType implements Serializable {
     public abstract <R> R accept(DataTypeVisitor<R> visitor);
 
     public void collectFieldIds(Set<Integer> fieldIds) {}
+
+    public DataType notNull() {
+        return copy(false);
+    }
+
+    public DataType nullable() {
+        return copy(true);
+    }
 }

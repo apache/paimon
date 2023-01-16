@@ -20,7 +20,6 @@ package org.apache.flink.table.store.data;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.table.data.binary.BinaryRowData;
 
 import java.io.IOException;
 
@@ -32,7 +31,7 @@ public abstract class PagedTypeSerializer<T> extends TypeSerializer<T> {
 
     /**
      * Serializes the given record to the given target paged output view. Some implementations may
-     * skip some bytes if current page does not have enough space left, .e.g {@link BinaryRowData}.
+     * skip some bytes if current page does not have enough space left, .e.g {@link BinaryRow}.
      *
      * @param record The record to serialize.
      * @param target The output view to write the serialized data to.
@@ -47,7 +46,7 @@ public abstract class PagedTypeSerializer<T> extends TypeSerializer<T> {
     /**
      * De-serializes a record from the given source paged input view. For consistency with serialize
      * format, some implementations may need to skip some bytes of source before de-serializing,
-     * .e.g {@link BinaryRowData}. Typically, the content read from source should be copied out when
+     * .e.g {@link BinaryRow}. Typically, the content read from source should be copied out when
      * de-serializing, and we are not expecting the underlying data from source is reused. If you
      * have such requirement, see {@link #mapFromPages(T, AbstractPagedInputView)}.
      *

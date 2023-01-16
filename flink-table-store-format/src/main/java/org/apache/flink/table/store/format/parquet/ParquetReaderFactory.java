@@ -20,9 +20,9 @@ package org.apache.flink.table.store.format.parquet;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.columnar.ColumnVector;
-import org.apache.flink.table.store.data.columnar.ColumnarRowData;
+import org.apache.flink.table.store.data.columnar.ColumnarRow;
 import org.apache.flink.table.store.data.columnar.ColumnarRowIterator;
 import org.apache.flink.table.store.data.columnar.VectorizedColumnBatch;
 import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
@@ -31,10 +31,10 @@ import org.apache.flink.table.store.file.utils.RecordReader.RecordIterator;
 import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.format.parquet.reader.ColumnReader;
 import org.apache.flink.table.store.format.parquet.reader.ParquetDecimalVector;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypeRoot;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Pool;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.LogicalTypeRoot;
-import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.ColumnDescriptor;
@@ -76,7 +76,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     private final Configuration conf;
     private final String[] projectedFields;
-    private final LogicalType[] projectedTypes;
+    private final DataType[] projectedTypes;
     private final int batchSize;
     private final Set<Integer> unknownFieldsIndices = new HashSet<>();
 
@@ -87,7 +87,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     public ParquetReaderFactory(Configuration conf, RowType projectedType, int batchSize) {
         this.conf = conf;
         this.projectedFields = projectedType.getFieldNames().toArray(new String[0]);
-        this.projectedTypes = projectedType.getChildren().toArray(new LogicalType[0]);
+        this.projectedTypes = projectedType.getFieldTypes().toArray(new DataType[0]);
         this.batchSize = batchSize;
     }
 
@@ -223,14 +223,14 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         ColumnVector[] vectors = new ColumnVector[writableVectors.length];
         for (int i = 0; i < writableVectors.length; i++) {
             vectors[i] =
-                    projectedTypes[i].getTypeRoot() == LogicalTypeRoot.DECIMAL
+                    projectedTypes[i].getTypeRoot() == DataTypeRoot.DECIMAL
                             ? new ParquetDecimalVector(writableVectors[i])
                             : writableVectors[i];
         }
         return new VectorizedColumnBatch(vectors);
     }
 
-    private class ParquetReader implements RecordReader<RowData> {
+    private class ParquetReader implements RecordReader<InternalRow> {
 
         private ParquetFileReader reader;
 
@@ -272,7 +272,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         @Nullable
         @Override
-        public RecordIterator<RowData> readBatch() throws IOException {
+        public RecordIterator<InternalRow> readBatch() throws IOException {
             final ParquetReaderBatch batch = getCachedEntry();
 
             if (!nextBatch(batch)) {
@@ -376,15 +376,14 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             this.writableVectors = writableVectors;
             this.columnarBatch = columnarBatch;
             this.recycler = recycler;
-            this.result =
-                    new ColumnarRowIterator(new ColumnarRowData(columnarBatch), this::recycle);
+            this.result = new ColumnarRowIterator(new ColumnarRow(columnarBatch), this::recycle);
         }
 
         public void recycle() {
             recycler.recycle(this);
         }
 
-        public RecordIterator<RowData> convertAndGetIterator() {
+        public RecordIterator<InternalRow> convertAndGetIterator() {
             result.set(columnarBatch.getNumRows());
             return result;
         }

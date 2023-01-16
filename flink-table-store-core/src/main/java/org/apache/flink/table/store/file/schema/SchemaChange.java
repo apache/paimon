@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.DataType;
 
 import javax.annotation.Nullable;
 
@@ -36,12 +36,12 @@ public interface SchemaChange {
         return new RemoveOption(key);
     }
 
-    static SchemaChange addColumn(String fieldName, LogicalType logicalType) {
-        return addColumn(fieldName, logicalType, null);
+    static SchemaChange addColumn(String fieldName, DataType dataType) {
+        return addColumn(fieldName, dataType, null);
     }
 
-    static SchemaChange addColumn(String fieldName, LogicalType logicalType, String comment) {
-        return new AddColumn(fieldName, logicalType, comment);
+    static SchemaChange addColumn(String fieldName, DataType dataType, String comment) {
+        return new AddColumn(fieldName, dataType, comment);
     }
 
     static SchemaChange renameColumn(String fieldName, String newName) {
@@ -52,8 +52,8 @@ public interface SchemaChange {
         return new DropColumn(fieldName);
     }
 
-    static SchemaChange updateColumnType(String fieldName, LogicalType newLogicalType) {
-        return new UpdateColumnType(fieldName, newLogicalType);
+    static SchemaChange updateColumnType(String fieldName, DataType newDataType) {
+        return new UpdateColumnType(fieldName, newDataType);
     }
 
     static SchemaChange updateColumnNullability(String[] fieldNames, boolean newNullability) {
@@ -133,12 +133,12 @@ public interface SchemaChange {
     /** A SchemaChange to add a field. */
     final class AddColumn implements SchemaChange {
         private final String fieldName;
-        private final LogicalType logicalType;
+        private final DataType dataType;
         private final String description;
 
-        private AddColumn(String fieldName, LogicalType logicalType, String description) {
+        private AddColumn(String fieldName, DataType dataType, String description) {
             this.fieldName = fieldName;
-            this.logicalType = logicalType;
+            this.dataType = dataType;
             this.description = description;
         }
 
@@ -146,8 +146,8 @@ public interface SchemaChange {
             return fieldName;
         }
 
-        public LogicalType logicalType() {
-            return logicalType;
+        public DataType dataType() {
+            return dataType;
         }
 
         @Nullable
@@ -165,13 +165,13 @@ public interface SchemaChange {
             }
             AddColumn addColumn = (AddColumn) o;
             return Objects.equals(fieldName, addColumn.fieldName)
-                    && logicalType.equals(addColumn.logicalType)
+                    && dataType.equals(addColumn.dataType)
                     && Objects.equals(description, addColumn.description);
         }
 
         @Override
         public int hashCode() {
-            int result = Objects.hash(logicalType, description);
+            int result = Objects.hash(dataType, description);
             result = 31 * result + Objects.hashCode(fieldName);
             return result;
         }
@@ -249,19 +249,19 @@ public interface SchemaChange {
     /** A SchemaChange to update the field type. */
     final class UpdateColumnType implements SchemaChange {
         private final String fieldName;
-        private final LogicalType newLogicalType;
+        private final DataType newDataType;
 
-        private UpdateColumnType(String fieldName, LogicalType newLogicalType) {
+        private UpdateColumnType(String fieldName, DataType newDataType) {
             this.fieldName = fieldName;
-            this.newLogicalType = newLogicalType;
+            this.newDataType = newDataType;
         }
 
         public String fieldName() {
             return fieldName;
         }
 
-        public LogicalType newLogicalType() {
-            return newLogicalType;
+        public DataType newDataType() {
+            return newDataType;
         }
 
         @Override
@@ -274,12 +274,12 @@ public interface SchemaChange {
             }
             UpdateColumnType that = (UpdateColumnType) o;
             return Objects.equals(fieldName, that.fieldName)
-                    && newLogicalType.equals(that.newLogicalType);
+                    && newDataType.equals(that.newDataType);
         }
 
         @Override
         public int hashCode() {
-            int result = Objects.hash(newLogicalType);
+            int result = Objects.hash(newDataType);
             result = 31 * result + Objects.hashCode(fieldName);
             return result;
         }

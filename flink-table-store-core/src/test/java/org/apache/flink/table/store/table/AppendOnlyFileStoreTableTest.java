@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.ScanKind;
@@ -170,12 +170,12 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         TableWrite write = table.newWrite(commitUser);
 
         TableCommit commit = table.newCommit(commitUser);
-        List<Map<Integer, List<RowData>>> dataset = new ArrayList<>();
-        Map<Integer, List<RowData>> dataPerBucket = new HashMap<>(numOfBucket);
+        List<Map<Integer, List<InternalRow>>> dataset = new ArrayList<>();
+        Map<Integer, List<InternalRow>> dataPerBucket = new HashMap<>(numOfBucket);
         int numOfPartition = Math.max(random.nextInt(10), 1);
         for (int i = 0; i < numOfPartition; i++) {
             for (int j = 0; j < Math.max(random.nextInt(200), 1); j++) {
-                BinaryRowData data =
+                BinaryRow data =
                         serializer
                                 .toBinaryRow(rowData(i, random.nextInt(), random.nextLong()))
                                 .copy();

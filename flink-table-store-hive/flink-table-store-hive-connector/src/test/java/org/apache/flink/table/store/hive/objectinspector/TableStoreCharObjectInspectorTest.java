@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
 
 import org.apache.hadoop.hive.common.type.HiveChar;
 import org.apache.hadoop.hive.serde2.io.HiveCharWritable;
@@ -47,9 +47,9 @@ public class TableStoreCharObjectInspectorTest {
     public void testGetPrimitiveJavaObject() {
         TableStoreCharObjectInspector oi = new TableStoreCharObjectInspector(10);
 
-        StringData input1 = StringData.fromString("testString");
+        BinaryString input1 = BinaryString.fromString("testString");
         HiveChar expected1 = new HiveChar("testString", 10);
-        StringData input2 = StringData.fromString("test");
+        BinaryString input2 = BinaryString.fromString("test");
         HiveChar expected2 = new HiveChar("test", 10);
         assertThat(oi.getPrimitiveJavaObject(input1)).isEqualTo(expected1);
         assertThat(oi.getPrimitiveJavaObject(input2)).isEqualTo(expected2);
@@ -60,9 +60,9 @@ public class TableStoreCharObjectInspectorTest {
     public void testGetPrimitiveWritableObject() {
         TableStoreCharObjectInspector oi = new TableStoreCharObjectInspector(10);
 
-        StringData input1 = StringData.fromString("testString");
+        BinaryString input1 = BinaryString.fromString("testString");
         HiveCharWritable expected1 = new HiveCharWritable(new HiveChar("testString", 10));
-        StringData input2 = StringData.fromString("test");
+        BinaryString input2 = BinaryString.fromString("test");
         HiveCharWritable expected2 = new HiveCharWritable(new HiveChar("test", 10));
         assertThat(oi.getPrimitiveWritableObject(input1)).isEqualTo(expected1);
         assertThat(oi.getPrimitiveWritableObject(input2)).isEqualTo(expected2);
@@ -73,7 +73,7 @@ public class TableStoreCharObjectInspectorTest {
     public void testCopyObject() {
         TableStoreCharObjectInspector oi = new TableStoreCharObjectInspector(10);
 
-        StringData input1 = StringData.fromString("testString");
+        BinaryString input1 = BinaryString.fromString("testString");
         Object copy1 = oi.copyObject(input1);
         assertThat(copy1).isEqualTo(input1);
         assertThat(copy1).isNotSameAs(input1);

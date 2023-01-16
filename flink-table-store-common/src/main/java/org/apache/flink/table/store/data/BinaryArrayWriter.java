@@ -18,31 +18,29 @@
 package org.apache.flink.table.store.data;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.core.memory.MemorySegmentFactory;
-import org.apache.flink.table.data.binary.BinaryArrayData;
-import org.apache.flink.table.data.binary.BinarySegmentUtils;
-import org.apache.flink.table.types.logical.DistinctType;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.flink.table.store.memory.MemorySegmentUtils;
+import org.apache.flink.table.store.types.DataType;
 
 import java.io.Serializable;
 
-/** Writer for binary array. See {@link BinaryArrayData}. */
+/** Writer for binary array. See {@link BinaryArray}. */
 @Internal
 public final class BinaryArrayWriter extends AbstractBinaryWriter {
 
     private final int nullBitsSizeInBytes;
-    private final BinaryArrayData array;
+    private final BinaryArray array;
     private final int numElements;
     private final int fixedSize;
 
-    public BinaryArrayWriter(BinaryArrayData array, int numElements, int elementSize) {
-        this.nullBitsSizeInBytes = BinaryArrayData.calculateHeaderInBytes(numElements);
+    public BinaryArrayWriter(BinaryArray array, int numElements, int elementSize) {
+        this.nullBitsSizeInBytes = BinaryArray.calculateHeaderInBytes(numElements);
         this.fixedSize =
                 roundNumberOfBytesToNearestWord(nullBitsSizeInBytes + elementSize * numElements);
         this.cursor = fixedSize;
         this.numElements = numElements;
 
-        this.segment = MemorySegmentFactory.wrap(new byte[fixedSize]);
+        this.segment = MemorySegment.wrap(new byte[fixedSize]);
         this.segment.putInt(0, numElements);
         this.array = array;
     }
@@ -59,7 +57,7 @@ public final class BinaryArrayWriter extends AbstractBinaryWriter {
 
     @Override
     public void setNullBit(int ordinal) {
-        BinarySegmentUtils.bitSet(segment, 4, ordinal);
+        MemorySegmentUtils.bitSet(segment, 4, ordinal);
     }
 
     public void setNullBoolean(int ordinal) {
@@ -110,11 +108,11 @@ public final class BinaryArrayWriter extends AbstractBinaryWriter {
     }
 
     /**
-     * @deprecated Use {@link #createNullSetter(LogicalType)} for avoiding logical types during
+     * @deprecated Use {@link #createNullSetter(DataType)} for avoiding logical types during
      *     runtime.
      */
     @Deprecated
-    public void setNullAt(int pos, LogicalType type) {
+    public void setNullAt(int pos, DataType type) {
         switch (type.getTypeRoot()) {
             case BOOLEAN:
                 setNullBoolean(pos);
@@ -128,13 +126,11 @@ public final class BinaryArrayWriter extends AbstractBinaryWriter {
             case INTEGER:
             case DATE:
             case TIME_WITHOUT_TIME_ZONE:
-            case INTERVAL_YEAR_MONTH:
                 setNullInt(pos);
                 break;
             case BIGINT:
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-            case INTERVAL_DAY_TIME:
                 setNullLong(pos);
                 break;
             case FLOAT:
@@ -227,7 +223,7 @@ public final class BinaryArrayWriter extends AbstractBinaryWriter {
      *
      * @param elementType the element type of the array
      */
-    public static NullSetter createNullSetter(LogicalType elementType) {
+    public static NullSetter createNullSetter(DataType elementType) {
         // ordered by type root definition
         switch (elementType.getTypeRoot()) {
             case CHAR:
@@ -238,13 +234,10 @@ public final class BinaryArrayWriter extends AbstractBinaryWriter {
             case BIGINT:
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-            case INTERVAL_DAY_TIME:
             case ARRAY:
             case MULTISET:
             case MAP:
             case ROW:
-            case STRUCTURED_TYPE:
-            case RAW:
                 return BinaryArrayWriter::setNullLong;
             case BOOLEAN:
                 return BinaryArrayWriter::setNullBoolean;
@@ -255,19 +248,11 @@ public final class BinaryArrayWriter extends AbstractBinaryWriter {
             case INTEGER:
             case DATE:
             case TIME_WITHOUT_TIME_ZONE:
-            case INTERVAL_YEAR_MONTH:
                 return BinaryArrayWriter::setNullInt;
             case FLOAT:
                 return BinaryArrayWriter::setNullFloat;
             case DOUBLE:
                 return BinaryArrayWriter::setNullDouble;
-            case TIMESTAMP_WITH_TIME_ZONE:
-                throw new UnsupportedOperationException();
-            case DISTINCT_TYPE:
-                return createNullSetter(((DistinctType) elementType).getSourceType());
-            case NULL:
-            case SYMBOL:
-            case UNRESOLVED:
             default:
                 throw new IllegalArgumentException();
         }
@@ -276,7 +261,7 @@ public final class BinaryArrayWriter extends AbstractBinaryWriter {
     /**
      * Accessor for setting the elements of an array writer to {@code null} during runtime.
      *
-     * @see #createNullSetter(LogicalType)
+     * @see #createNullSetter(DataType)
      */
     public interface NullSetter extends Serializable {
         void setNull(BinaryArrayWriter writer, int pos);

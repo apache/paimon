@@ -20,11 +20,10 @@ package org.apache.flink.table.store.table.source.snapshot;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.writer.BinaryRowWriter;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.BinaryRowWriter;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -36,9 +35,10 @@ import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
@@ -58,11 +58,7 @@ public abstract class SnapshotEnumeratorTestBase {
 
     private static final RowType ROW_TYPE =
             RowType.of(
-                    new LogicalType[] {
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.INT().getLogicalType(),
-                        DataTypes.BIGINT().getLogicalType()
-                    },
+                    new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
                     new String[] {"pt", "a", "b"});
 
     @TempDir java.nio.file.Path tempDir;
@@ -76,16 +72,16 @@ public abstract class SnapshotEnumeratorTestBase {
         commitUser = UUID.randomUUID().toString();
     }
 
-    protected GenericRowData rowData(Object... values) {
-        return GenericRowData.of(values);
+    protected GenericRow rowData(Object... values) {
+        return GenericRow.of(values);
     }
 
-    protected GenericRowData rowDataWithKind(RowKind rowKind, Object... values) {
-        return GenericRowData.ofKind(rowKind, values);
+    protected GenericRow rowDataWithKind(RowKind rowKind, Object... values) {
+        return GenericRow.ofKind(rowKind, values);
     }
 
-    protected BinaryRowData binaryRow(int a) {
-        BinaryRowData b = new BinaryRowData(1);
+    protected BinaryRow binaryRow(int a) {
+        BinaryRow b = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(b);
         writer.writeInt(0, a);
         writer.complete();
@@ -93,22 +89,22 @@ public abstract class SnapshotEnumeratorTestBase {
     }
 
     protected List<String> getResult(TableRead read, List<Split> splits) throws Exception {
-        List<ConcatRecordReader.ReaderSupplier<RowData>> readers = new ArrayList<>();
+        List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
         for (Split split : splits) {
             readers.add(() -> read.createReader(split));
         }
-        RecordReader<RowData> recordReader = ConcatRecordReader.create(readers);
-        RecordReaderIterator<RowData> iterator = new RecordReaderIterator<>(recordReader);
+        RecordReader<InternalRow> recordReader = ConcatRecordReader.create(readers);
+        RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(recordReader);
         List<String> result = new ArrayList<>();
         while (iterator.hasNext()) {
-            RowData rowData = iterator.next();
+            InternalRow rowData = iterator.next();
             result.add(rowDataToString(rowData));
         }
         iterator.close();
         return result;
     }
 
-    protected String rowDataToString(RowData rowData) {
+    protected String rowDataToString(InternalRow rowData) {
         return String.format(
                 "%s %d|%d|%d",
                 rowData.getRowKind().shortString(),

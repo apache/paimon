@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.writer.BinaryRowWriter;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.BinaryRowWriter;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 
 /** Utils for {@link DataFileMeta}. */
@@ -79,16 +79,16 @@ public class DataFileTestUtils {
                 level);
     }
 
-    public static BinaryRowData row(int i) {
-        BinaryRowData row = new BinaryRowData(1);
+    public static BinaryRow row(int i) {
+        BinaryRow row = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(row);
         writer.writeInt(0, i);
         writer.complete();
         return row;
     }
 
-    public static BinaryRowData row(int... values) {
-        BinaryRowData row = new BinaryRowData(values.length);
+    public static BinaryRow row(int... values) {
+        BinaryRow row = new BinaryRow(values.length);
         BinaryRowWriter writer = new BinaryRowWriter(row);
         for (int i = 0; i < values.length; i++) {
             writer.writeInt(i, values[i]);

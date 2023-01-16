@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.NewFilesIncrement;
 
@@ -27,13 +27,13 @@ import java.util.Objects;
 /** File committable for sink. */
 public class FileCommittable {
 
-    private final BinaryRowData partition;
+    private final BinaryRow partition;
     private final int bucket;
     private final NewFilesIncrement newFilesIncrement;
     private final CompactIncrement compactIncrement;
 
     public FileCommittable(
-            BinaryRowData partition,
+            BinaryRow partition,
             int bucket,
             NewFilesIncrement newFilesIncrement,
             CompactIncrement compactIncrement) {
@@ -43,7 +43,7 @@ public class FileCommittable {
         this.compactIncrement = compactIncrement;
     }
 
-    public BinaryRowData partition() {
+    public BinaryRow partition() {
         return partition;
     }
 

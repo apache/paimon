@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.stats;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
 import org.apache.flink.table.store.format.FieldStats;
@@ -27,7 +27,7 @@ import org.apache.flink.table.store.format.FieldStatsCollector;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.store.format.FormatReaderFactory;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.io.IOException;
 import java.util.List;
@@ -50,27 +50,27 @@ public class TestFileStatsExtractor implements FileStatsExtractor {
     public FieldStats[] extract(Path path) throws IOException {
         IdentityObjectSerializer serializer = new IdentityObjectSerializer(rowType);
         FormatReaderFactory readerFactory = format.createReaderFactory(rowType);
-        List<RowData> records = FileUtils.readListFromFile(path, serializer, readerFactory);
+        List<InternalRow> records = FileUtils.readListFromFile(path, serializer, readerFactory);
         FieldStatsCollector statsCollector = new FieldStatsCollector(rowType);
-        for (RowData record : records) {
+        for (InternalRow record : records) {
             statsCollector.collect(record);
         }
         return statsCollector.extract();
     }
 
-    private static class IdentityObjectSerializer extends ObjectSerializer<RowData> {
+    private static class IdentityObjectSerializer extends ObjectSerializer<InternalRow> {
 
         public IdentityObjectSerializer(RowType rowType) {
             super(rowType);
         }
 
         @Override
-        public RowData toRow(RowData record) {
+        public InternalRow toRow(InternalRow record) {
             return record;
         }
 
         @Override
-        public RowData fromRow(RowData rowData) {
+        public InternalRow fromRow(InternalRow rowData) {
             return rowData;
         }
     }

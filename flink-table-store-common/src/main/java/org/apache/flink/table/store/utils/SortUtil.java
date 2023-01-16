@@ -18,16 +18,14 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.api.common.typeutils.base.NormalizedKeyUtil;
-import org.apache.flink.core.memory.MemorySegment;
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.table.data.binary.BinaryStringData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.memory.MemorySegment;
 
 import java.nio.ByteOrder;
 
-import static org.apache.flink.core.memory.MemoryUtils.UNSAFE;
+import static org.apache.flink.table.store.memory.MemorySegment.UNSAFE;
 
 /** Util for sort. */
 public class SortUtil {
@@ -53,27 +51,66 @@ public class SortUtil {
 
     public static void putShortNormalizedKey(
             short value, MemorySegment target, int offset, int numBytes) {
-        NormalizedKeyUtil.putShortNormalizedKey(value, target, offset, numBytes);
+        if (numBytes == 2) {
+            // default case, full normalized key
+            int highByte = ((value >>> 8) & 0xff);
+            highByte -= Byte.MIN_VALUE;
+            target.put(offset, (byte) highByte);
+            target.put(offset + 1, (byte) ((value) & 0xff));
+        } else if (numBytes <= 0) {
+        } else if (numBytes == 1) {
+            int highByte = ((value >>> 8) & 0xff);
+            highByte -= Byte.MIN_VALUE;
+            target.put(offset, (byte) highByte);
+        } else {
+            int highByte = ((value >>> 8) & 0xff);
+            highByte -= Byte.MIN_VALUE;
+            target.put(offset, (byte) highByte);
+            target.put(offset + 1, (byte) ((value) & 0xff));
+            for (int i = 2; i < numBytes; i++) {
+                target.put(offset + i, (byte) 0);
+            }
+        }
     }
 
     public static void putByteNormalizedKey(
             byte value, MemorySegment target, int offset, int numBytes) {
-        NormalizedKeyUtil.putByteNormalizedKey(value, target, offset, numBytes);
+        if (numBytes == 1) {
+            // default case, full normalized key. need to explicitly convert to int to
+            // avoid false results due to implicit type conversion to int when subtracting
+            // the min byte value
+            int highByte = value & 0xff;
+            highByte -= Byte.MIN_VALUE;
+            target.put(offset, (byte) highByte);
+        } else if (numBytes <= 0) {
+        } else {
+            int highByte = value & 0xff;
+            highByte -= Byte.MIN_VALUE;
+            target.put(offset, (byte) highByte);
+            for (int i = 1; i < numBytes; i++) {
+                target.put(offset + i, (byte) 0);
+            }
+        }
     }
 
     public static void putBooleanNormalizedKey(
             boolean value, MemorySegment target, int offset, int numBytes) {
-        NormalizedKeyUtil.putBooleanNormalizedKey(value, target, offset, numBytes);
+        if (numBytes > 0) {
+            target.put(offset, (byte) (value ? 1 : 0));
+
+            for (offset = offset + 1; numBytes > 1; numBytes--) {
+                target.put(offset++, (byte) 0);
+            }
+        }
     }
 
     /** UTF-8 supports bytes comparison. */
     public static void putStringNormalizedKey(
-            StringData value, MemorySegment target, int offset, int numBytes) {
-        BinaryStringData binaryString = (BinaryStringData) value;
+            BinaryString value, MemorySegment target, int offset, int numBytes) {
         final int limit = offset + numBytes;
-        final int end = binaryString.getSizeInBytes();
+        final int end = value.getSizeInBytes();
         for (int i = 0; i < end && offset < limit; i++) {
-            target.put(offset++, binaryString.byteAt(i));
+            target.put(offset++, value.byteAt(i));
         }
 
         for (int i = offset; i < limit; i++) {
@@ -83,19 +120,19 @@ public class SortUtil {
 
     /** Just support the compact precision decimal. */
     public static void putDecimalNormalizedKey(
-            DecimalData record, MemorySegment target, int offset, int len) {
+            Decimal record, MemorySegment target, int offset, int len) {
         assert record.isCompact();
         putLongNormalizedKey(record.toUnscaledLong(), target, offset, len);
     }
 
     public static void putIntNormalizedKey(
             int value, MemorySegment target, int offset, int numBytes) {
-        NormalizedKeyUtil.putIntNormalizedKey(value, target, offset, numBytes);
+        putUnsignedIntegerNormalizedKey(value - Integer.MIN_VALUE, target, offset, numBytes);
     }
 
     public static void putLongNormalizedKey(
             long value, MemorySegment target, int offset, int numBytes) {
-        NormalizedKeyUtil.putLongNormalizedKey(value, target, offset, numBytes);
+        putUnsignedLongNormalizedKey(value - Long.MIN_VALUE, target, offset, numBytes);
     }
 
     /** See http://stereopsis.com/radix.html for more details. */
@@ -103,7 +140,7 @@ public class SortUtil {
             float value, MemorySegment target, int offset, int numBytes) {
         int iValue = Float.floatToIntBits(value);
         iValue ^= ((iValue >> (Integer.SIZE - 1)) | Integer.MIN_VALUE);
-        NormalizedKeyUtil.putUnsignedIntegerNormalizedKey(iValue, target, offset, numBytes);
+        putUnsignedIntegerNormalizedKey(iValue, target, offset, numBytes);
     }
 
     /** See http://stereopsis.com/radix.html for more details. */
@@ -111,7 +148,7 @@ public class SortUtil {
             double value, MemorySegment target, int offset, int numBytes) {
         long lValue = Double.doubleToLongBits(value);
         lValue ^= ((lValue >> (Long.SIZE - 1)) | Long.MIN_VALUE);
-        NormalizedKeyUtil.putUnsignedLongNormalizedKey(lValue, target, offset, numBytes);
+        putUnsignedLongNormalizedKey(lValue, target, offset, numBytes);
     }
 
     public static void putBinaryNormalizedKey(
@@ -129,9 +166,47 @@ public class SortUtil {
 
     /** Support the compact precision TimestampData. */
     public static void putTimestampNormalizedKey(
-            TimestampData value, MemorySegment target, int offset, int numBytes) {
+            Timestamp value, MemorySegment target, int offset, int numBytes) {
         assert value.getNanoOfMillisecond() == 0;
         putLongNormalizedKey(value.getMillisecond(), target, offset, numBytes);
+    }
+
+    public static void putUnsignedIntegerNormalizedKey(
+            int value, MemorySegment target, int offset, int numBytes) {
+        if (numBytes == 4) {
+            // default case, full normalized key
+            target.putIntBigEndian(offset, value);
+        } else if (numBytes > 0) {
+            if (numBytes < 4) {
+                for (int i = 0; numBytes > 0; numBytes--, i++) {
+                    target.put(offset + i, (byte) (value >>> ((3 - i) << 3)));
+                }
+            } else {
+                target.putIntBigEndian(offset, value);
+                for (int i = 4; i < numBytes; i++) {
+                    target.put(offset + i, (byte) 0);
+                }
+            }
+        }
+    }
+
+    public static void putUnsignedLongNormalizedKey(
+            long value, MemorySegment target, int offset, int numBytes) {
+        if (numBytes == 8) {
+            // default case, full normalized key
+            target.putLongBigEndian(offset, value);
+        } else if (numBytes > 0) {
+            if (numBytes < 8) {
+                for (int i = 0; numBytes > 0; numBytes--, i++) {
+                    target.put(offset + i, (byte) (value >>> ((7 - i) << 3)));
+                }
+            } else {
+                target.putLongBigEndian(offset, value);
+                for (int i = 8; i < numBytes; i++) {
+                    target.put(offset + i, (byte) 0);
+                }
+            }
+        }
     }
 
     public static int compareBinary(byte[] a, byte[] b) {

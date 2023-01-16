@@ -29,7 +29,6 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 
 import javax.annotation.Nullable;
 
@@ -96,7 +95,7 @@ public class TableStoreConnectorFactory extends AbstractTableStoreFactory {
             SchemaManager schemaManager = new SchemaManager(tablePath);
             if (!schemaManager.latest().isPresent()) {
                 try {
-                    schemaManager.commitNewVersion(UpdateSchema.fromCatalogTable(table));
+                    schemaManager.commitNewVersion(FlinkCatalog.fromCatalogTable(table));
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }

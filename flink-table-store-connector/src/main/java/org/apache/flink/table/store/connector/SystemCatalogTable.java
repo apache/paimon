@@ -28,6 +28,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.flink.table.store.connector.LogicalTypeConversion.toLogicalType;
+
 /** A {@link CatalogTable} to represent system table. */
 public class SystemCatalogTable implements CatalogTable {
 
@@ -44,7 +46,8 @@ public class SystemCatalogTable implements CatalogTable {
     @Override
     public Schema getUnresolvedSchema() {
         return Schema.newBuilder()
-                .fromRowDataType(TypeConversions.fromLogicalToDataType(table.rowType()))
+                .fromRowDataType(
+                        TypeConversions.fromLogicalToDataType(toLogicalType(table.rowType())))
                 .build();
     }
 

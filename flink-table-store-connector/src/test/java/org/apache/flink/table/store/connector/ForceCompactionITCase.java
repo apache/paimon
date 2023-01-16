@@ -26,9 +26,9 @@ import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.format.FileFormat;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import org.junit.Test;
 
@@ -223,7 +223,7 @@ public class ForceCompactionITCase extends CatalogITCaseBase {
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
         RowType partType =
                 expectPartMinMax.length > 0
-                        ? RowType.of(new LogicalType[] {new VarCharType()}, new String[] {"f1"})
+                        ? RowType.of(new DataType[] {new VarCharType()}, new String[] {"f1"})
                         : RowType.of();
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(

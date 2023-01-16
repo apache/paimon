@@ -22,8 +22,9 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.format.orc.filter.OrcFilters;
 import org.apache.flink.table.store.format.orc.filter.OrcPredicateFunctionVisitor;
-import org.apache.flink.table.types.logical.BigIntType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.BigIntType;
+import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
 import org.junit.jupiter.api.Test;
@@ -42,7 +43,7 @@ public class OrcFilterConverterTest {
                 new PredicateBuilder(
                         new RowType(
                                 Collections.singletonList(
-                                        new RowType.RowField("long1", new BigIntType()))));
+                                        new DataField(0, "long1", new BigIntType()))));
         test(builder.isNull(0), new OrcFilters.IsNull("long1", PredicateLeaf.Type.LONG));
         test(
                 builder.isNotNull(0),

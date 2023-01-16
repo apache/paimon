@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.Test;
 

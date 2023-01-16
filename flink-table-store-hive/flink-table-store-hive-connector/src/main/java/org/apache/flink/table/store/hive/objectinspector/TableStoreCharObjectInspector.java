@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
 
 import org.apache.hadoop.hive.common.type.HiveChar;
 import org.apache.hadoop.hive.serde2.io.HiveCharWritable;
@@ -53,8 +53,8 @@ public class TableStoreCharObjectInspector extends AbstractPrimitiveJavaObjectIn
         if (o instanceof HiveChar) {
             HiveChar hiveChar = (HiveChar) o;
             return new HiveChar(hiveChar, len);
-        } else if (o instanceof StringData) {
-            return StringData.fromString(o.toString());
+        } else if (o instanceof BinaryString) {
+            return BinaryString.fromString(o.toString());
         } else {
             return o;
         }

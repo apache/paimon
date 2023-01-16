@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.format.avro;
 
-import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
+import org.apache.flink.table.store.types.RowType;
 
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
@@ -32,12 +32,13 @@ import java.util.function.Function;
 public class AvroBulkFormatTestUtils {
 
     public static final RowType ROW_TYPE =
-            RowType.of(
-                    false,
-                    new LogicalType[] {
-                        DataTypes.STRING().getLogicalType(), DataTypes.STRING().getLogicalType()
-                    },
-                    new String[] {"a", "b"});
+            (RowType)
+                    RowType.builder()
+                            .fields(
+                                    new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                                    new String[] {"a", "b"})
+                            .build()
+                            .notNull();
 
     /** {@link AbstractAvroBulkFormat} for tests. */
     public static class TestingAvroBulkFormat extends AbstractAvroBulkFormat<GenericRecord> {
@@ -52,10 +53,10 @@ public class AvroBulkFormatTestUtils {
         }
 
         @Override
-        protected Function<GenericRecord, RowData> createConverter() {
+        protected Function<GenericRecord, InternalRow> createConverter() {
             AvroToRowDataConverters.AvroToRowDataConverter converter =
                     AvroToRowDataConverters.createRowConverter(ROW_TYPE);
-            return record -> record == null ? null : (RowData) converter.convert(record);
+            return record -> record == null ? null : (InternalRow) converter.convert(record);
         }
     }
 }

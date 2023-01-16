@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArrayComparator;
-import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.store.types.DataType;
 
 /** Utils for comparator. */
 public class CompareUtils {
@@ -28,7 +28,7 @@ public class CompareUtils {
     private static final BytePrimitiveArrayComparator BINARY_COMPARATOR =
             new BytePrimitiveArrayComparator(true);
 
-    public static int compareLiteral(LogicalType type, Object v1, Object v2) {
+    public static int compareLiteral(DataType type, Object v1, Object v2) {
         if (v1 instanceof Comparable) {
             return ((Comparable<Object>) v1).compareTo(v2);
         } else if (v1 instanceof byte[]) {

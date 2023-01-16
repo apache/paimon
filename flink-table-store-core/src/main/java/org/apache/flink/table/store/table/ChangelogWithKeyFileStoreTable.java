@@ -20,8 +20,8 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueFileStore;
 import org.apache.flink.table.store.file.WriteMode;
@@ -46,8 +46,7 @@ import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
 import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.LogicalTypeConversion;
-import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.store.types.RowType;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -88,14 +87,14 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                     mfFactory =
                             PartialUpdateMergeFunction.factory(
                                     conf.get(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE),
-                                    rowType.getChildren());
+                                    rowType.getFieldTypes());
                     break;
                 case AGGREGATE:
                     mfFactory =
                             AggregateMergeFunction.factory(
                                     conf,
                                     tableSchema.fieldNames(),
-                                    rowType.getChildren(),
+                                    rowType.getFieldTypes(),
                                     tableSchema.primaryKeys());
                     break;
                 default:
@@ -112,7 +111,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                             options,
                             tableSchema.logicalPartitionType(),
                             addKeyNamePrefix(tableSchema.logicalBucketKeyType()),
-                            LogicalTypeConversion.toRowType(extractor.keyFields(tableSchema)),
+                            new RowType(extractor.keyFields(tableSchema)),
                             rowType,
                             extractor,
                             mfFactory);
@@ -126,10 +125,11 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                 type.getFields().stream()
                         .map(
                                 f ->
-                                        new RowType.RowField(
-                                                KEY_FIELD_PREFIX + f.getName(),
-                                                f.getType(),
-                                                f.getDescription().orElse(null)))
+                                        new DataField(
+                                                f.id(),
+                                                KEY_FIELD_PREFIX + f.name(),
+                                                f.type(),
+                                                f.description()))
                         .collect(Collectors.toList()));
     }
 
@@ -197,7 +197,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
             }
 
             @Override
-            protected RecordReader.RecordIterator<RowData> rowDataRecordIteratorFromKv(
+            protected RecordReader.RecordIterator<InternalRow> rowDataRecordIteratorFromKv(
                     RecordReader.RecordIterator<KeyValue> kvRecordIterator) {
                 return new ValueContentRowDataRecordIterator(kvRecordIterator);
             }

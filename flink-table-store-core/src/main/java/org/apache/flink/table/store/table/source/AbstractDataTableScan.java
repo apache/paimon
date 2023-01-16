@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.FileKind;
@@ -132,11 +132,11 @@ public abstract class AbstractDataTableScan implements DataTableScan {
             long snapshotId,
             boolean isIncremental,
             SplitGenerator splitGenerator,
-            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
+            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
         List<DataSplit> splits = new ArrayList<>();
-        for (Map.Entry<BinaryRowData, Map<Integer, List<DataFileMeta>>> entry :
+        for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> entry :
                 groupedDataFiles.entrySet()) {
-            BinaryRowData partition = entry.getKey();
+            BinaryRow partition = entry.getKey();
             Map<Integer, List<DataFileMeta>> buckets = entry.getValue();
             for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : buckets.entrySet()) {
                 int bucket = bucketEntry.getKey();

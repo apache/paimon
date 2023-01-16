@@ -19,15 +19,15 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.writer.BinaryRowWriter;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.BinaryRowWriter;
+import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.LogicalType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.VarCharType;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -70,7 +70,7 @@ public class FileStorePathFactoryTest {
     public void testCreateDataFilePathFactoryNoPartition() {
         FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(tempDir.toString()));
         DataFilePathFactory dataFilePathFactory =
-                pathFactory.createDataFilePathFactory(new BinaryRowData(0), 123);
+                pathFactory.createDataFilePathFactory(new BinaryRow(0), 123);
         assertThat(dataFilePathFactory.toPath("my-data-file-name"))
                 .isEqualTo(new Path(tempDir.toString() + "/bucket-123/my-data-file-name"));
     }
@@ -81,7 +81,7 @@ public class FileStorePathFactoryTest {
                 new FileStorePathFactory(
                         new Path(tempDir.toString()),
                         RowType.of(
-                                new LogicalType[] {new VarCharType(10), new IntType()},
+                                new DataType[] {new VarCharType(10), new IntType()},
                                 new String[] {"dt", "hr"}),
                         "default",
                         CoreOptions.FILE_FORMAT.defaultValue());
@@ -94,10 +94,10 @@ public class FileStorePathFactoryTest {
 
     private void assertPartition(
             String dt, Integer hr, FileStorePathFactory pathFactory, String expected) {
-        BinaryRowData partition = new BinaryRowData(2);
+        BinaryRow partition = new BinaryRow(2);
         BinaryRowWriter writer = new BinaryRowWriter(partition);
         if (dt != null) {
-            writer.writeString(0, StringData.fromString(dt));
+            writer.writeString(0, BinaryString.fromString(dt));
         } else {
             writer.setNullAt(0);
         }

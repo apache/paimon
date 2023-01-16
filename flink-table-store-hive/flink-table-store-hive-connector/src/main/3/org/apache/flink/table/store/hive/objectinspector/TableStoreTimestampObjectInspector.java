@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.TimestampData;
-
 import org.apache.hadoop.hive.common.type.Timestamp;
 import org.apache.hadoop.hive.serde2.io.TimestampWritableV2;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
@@ -36,7 +34,7 @@ public class TableStoreTimestampObjectInspector extends AbstractPrimitiveJavaObj
 
     @Override
     public Timestamp getPrimitiveJavaObject(Object o) {
-        return o == null ? null : Timestamp.ofEpochMilli(((TimestampData) o).getMillisecond());
+        return o == null ? null : Timestamp.ofEpochMilli(((org.apache.flink.table.store.data.Timestamp) o).getMillisecond());
     }
 
     @Override
@@ -47,8 +45,8 @@ public class TableStoreTimestampObjectInspector extends AbstractPrimitiveJavaObj
 
     @Override
     public Object copyObject(Object o) {
-        if (o instanceof TimestampData) {
-            // TimestampData is immutable
+        if (o instanceof org.apache.flink.table.store.data.Timestamp) {
+            // immutable
             return o;
         } else if (o instanceof Timestamp) {
             Timestamp timestamp = (Timestamp) o;
