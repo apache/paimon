@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
 
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.StringObjectInspector;
@@ -46,8 +46,8 @@ public class TableStoreStringObjectInspector extends AbstractPrimitiveJavaObject
 
     @Override
     public Object copyObject(Object o) {
-        if (o instanceof StringData) {
-            return StringData.fromString(o.toString());
+        if (o instanceof BinaryString) {
+            return BinaryString.fromString(o.toString());
         } else {
             return o;
         }
