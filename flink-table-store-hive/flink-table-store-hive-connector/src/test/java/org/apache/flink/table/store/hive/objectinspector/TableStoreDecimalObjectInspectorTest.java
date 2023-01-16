@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.DecimalData;
+import org.apache.flink.table.store.data.Decimal;
 
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
@@ -49,7 +49,7 @@ public class TableStoreDecimalObjectInspectorTest {
     public void testGetPrimitiveJavaObject() {
         TableStoreDecimalObjectInspector oi = new TableStoreDecimalObjectInspector(5, 3);
 
-        DecimalData input = DecimalData.fromBigDecimal(new BigDecimal("12.345"), 5, 3);
+        Decimal input = Decimal.fromBigDecimal(new BigDecimal("12.345"), 5, 3);
         HiveDecimal expected = HiveDecimal.create("12.345");
         assertThat(oi.getPrimitiveJavaObject(input)).isEqualTo(expected);
         assertThat(oi.getPrimitiveJavaObject(null)).isNull();
@@ -59,7 +59,7 @@ public class TableStoreDecimalObjectInspectorTest {
     public void testGetPrimitiveWritableObject() {
         TableStoreDecimalObjectInspector oi = new TableStoreDecimalObjectInspector(5, 3);
 
-        DecimalData input = DecimalData.fromBigDecimal(new BigDecimal("12.345"), 5, 3);
+        Decimal input = Decimal.fromBigDecimal(new BigDecimal("12.345"), 5, 3);
         HiveDecimalWritable expected = new HiveDecimalWritable(HiveDecimal.create("12.345"));
         assertThat(oi.getPrimitiveWritableObject(input)).isEqualTo(expected);
         assertThat(oi.getPrimitiveWritableObject(null)).isNull();
@@ -69,7 +69,7 @@ public class TableStoreDecimalObjectInspectorTest {
     public void testCopyObject() {
         TableStoreDecimalObjectInspector oi = new TableStoreDecimalObjectInspector(5, 3);
 
-        DecimalData input1 = DecimalData.fromBigDecimal(new BigDecimal("12.345"), 5, 3);
+        Decimal input1 = Decimal.fromBigDecimal(new BigDecimal("12.345"), 5, 3);
         Object copy1 = oi.copyObject(input1);
         assertThat(copy1).isEqualTo(input1);
         assertThat(copy1).isNotSameAs(input1);

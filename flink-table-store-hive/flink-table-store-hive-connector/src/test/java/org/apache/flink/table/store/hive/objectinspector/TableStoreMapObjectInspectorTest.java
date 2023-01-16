@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
-import org.apache.flink.table.data.GenericMapData;
-import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericMap;
 import org.apache.flink.table.store.types.DataTypes;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
@@ -47,29 +47,29 @@ public class TableStoreMapObjectInspectorTest {
         TableStoreMapObjectInspector oi =
                 new TableStoreMapObjectInspector(DataTypes.STRING(), DataTypes.BIGINT());
 
-        StringData[] keyArray =
-                new StringData[] {
-                    StringData.fromString("Hi"),
-                    StringData.fromString("Hello"),
-                    StringData.fromString("Test")
+        BinaryString[] keyArray =
+                new BinaryString[] {
+                    BinaryString.fromString("Hi"),
+                    BinaryString.fromString("Hello"),
+                    BinaryString.fromString("Test")
                 };
         Long[] valueArray = new Long[] {1L, null, 2L};
-        Map<StringData, Long> javaMap = new HashMap<>();
+        Map<BinaryString, Long> javaMap = new HashMap<>();
         for (int i = 0; i < keyArray.length; i++) {
             javaMap.put(keyArray[i], valueArray[i]);
         }
-        GenericMapData mapData = new GenericMapData(javaMap);
+        GenericMap mapData = new GenericMap(javaMap);
 
         assertThat(oi.getMapSize(mapData)).isEqualTo(3);
         for (int i = 0; i < keyArray.length; i++) {
             assertThat(oi.getMapValueElement(mapData, keyArray[i])).isEqualTo(valueArray[i]);
         }
-        assertThat(oi.getMapValueElement(mapData, StringData.fromString("NotKey"))).isNull();
+        assertThat(oi.getMapValueElement(mapData, BinaryString.fromString("NotKey"))).isNull();
         assertThat(oi.getMapValueElement(mapData, null)).isNull();
         assertThat(oi.getMap(mapData)).isEqualTo(javaMap);
 
         assertThat(oi.getMapSize(null)).isEqualTo(-1);
-        assertThat(oi.getMapValueElement(null, StringData.fromString("Hi"))).isNull();
+        assertThat(oi.getMapValueElement(null, BinaryString.fromString("Hi"))).isNull();
         assertThat(oi.getMap(null)).isNull();
     }
 }

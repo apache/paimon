@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store;
 
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.types.DataType;
@@ -36,7 +36,6 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.sql.Date;
-import java.sql.Timestamp;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -59,23 +58,23 @@ public class SearchArgumentToPredicateConverterTest {
                 PredicateLeaf.Type.DECIMAL,
                 new HiveDecimalWritable(HiveDecimal.create("123456.789")),
                 DataTypes.DECIMAL(9, 3),
-                DecimalData.fromBigDecimal(new BigDecimal("123456.789"), 9, 3));
+                Decimal.fromBigDecimal(new BigDecimal("123456.789"), 9, 3));
         testLiteral(
                 PredicateLeaf.Type.DECIMAL,
                 new HiveDecimalWritable(HiveDecimal.create("123456789123456789.123456789")),
                 DataTypes.DECIMAL(27, 9),
-                DecimalData.fromBigDecimal(new BigDecimal("123456789123456789.123456789"), 27, 9));
+                Decimal.fromBigDecimal(new BigDecimal("123456789123456789.123456789"), 27, 9));
         testLiteral(
                 PredicateLeaf.Type.STRING,
                 "Table Store",
                 DataTypes.STRING(),
-                StringData.fromString("Table Store"));
+                BinaryString.fromString("Table Store"));
         testLiteral(PredicateLeaf.Type.DATE, Date.valueOf("1971-01-11"), DataTypes.DATE(), 375);
         testLiteral(
                 PredicateLeaf.Type.TIMESTAMP,
-                Timestamp.valueOf("2022-05-17 16:25:53"),
+                java.sql.Timestamp.valueOf("2022-05-17 16:25:53"),
                 DataTypes.TIMESTAMP(3),
-                TimestampData.fromTimestamp(Timestamp.valueOf("2022-05-17 16:25:53")));
+                Timestamp.fromSQLTimestamp(java.sql.Timestamp.valueOf("2022-05-17 16:25:53")));
     }
 
     private void testLiteral(
