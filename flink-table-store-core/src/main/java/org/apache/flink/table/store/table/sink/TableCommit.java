@@ -39,7 +39,7 @@ public class TableCommit implements AutoCloseable {
     private final FileStoreCommit commit;
     @Nullable private final FileStoreExpire expire;
 
-    @Nullable private Map<String, String> overwritePartition = null;
+    @Nullable private List<Map<String, String>> overwritePartition = null;
     @Nullable private Lock lock;
 
     public TableCommit(FileStoreCommit commit, @Nullable FileStoreExpire expire) {
@@ -48,6 +48,14 @@ public class TableCommit implements AutoCloseable {
     }
 
     public TableCommit withOverwritePartition(@Nullable Map<String, String> overwritePartition) {
+        if (overwritePartition != null) {
+            this.overwritePartition = Collections.singletonList(overwritePartition);
+        }
+        return this;
+    }
+
+    public TableCommit withOverwritePartition(
+            @Nullable List<Map<String, String>> overwritePartition) {
         this.overwritePartition = overwritePartition;
         return this;
     }

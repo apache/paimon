@@ -36,8 +36,7 @@ import java.util.UUID;
 /** Similar to Flink's AbstractTestBase but using Junit5. */
 public class AbstractTestBase extends TestLogger {
 
-    private static final Logger LOG =
-            LoggerFactory.getLogger(org.apache.flink.test.util.AbstractTestBase.class);
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractTestBase.class);
 
     private static final int DEFAULT_PARALLELISM = 4;
 
