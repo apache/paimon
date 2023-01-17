@@ -34,14 +34,20 @@ import org.apache.flink.table.store.connector.utils.StreamExecutionEnvironmentUt
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 
-import java.util.ArrayList;
-import java.util.HashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.flink.table.store.connector.action.Action.getPartitions;
+import static org.apache.flink.table.store.connector.action.Action.getTablePath;
+
 /** Table compact action for Flink. */
-public class CompactAction {
+public class CompactAction implements Action {
+
+    private static final Logger LOG = LoggerFactory.getLogger(CompactAction.class);
 
     private final CompactorSourceBuilder sourceBuilder;
     private final CompactorSinkBuilder sinkBuilder;
@@ -79,68 +85,37 @@ public class CompactAction {
     //  Flink run methods
     // ------------------------------------------------------------------------
 
-    public static Optional<CompactAction> create(MultipleParameterTool params) {
+    public static Optional<Action> create(String[] args) {
+        LOG.info("Compact job args: {}", String.join(" ", args));
+
+        MultipleParameterTool params = MultipleParameterTool.fromArgs(args);
+
         if (params.has("help")) {
             printHelp();
             return Optional.empty();
         }
 
-        String warehouse = params.get("warehouse");
-        String database = params.get("database");
-        String table = params.get("table");
-        String path = params.get("path");
+        Path tablePath = getTablePath(params);
 
-        Path tablePath = null;
-        int count = 0;
-        if (warehouse != null || database != null || table != null) {
-            if (warehouse == null || database == null || table == null) {
-                System.err.println(
-                        "Warehouse, database and table must be specified all at once.\n"
-                                + "Run compact --help for help.");
-                return Optional.empty();
-            }
-            tablePath = new Path(new Path(warehouse, database + ".db"), table);
-            count++;
-        }
-        if (path != null) {
-            tablePath = new Path(path);
-            count++;
-        }
-
-        if (count != 1) {
-            System.err.println(
-                    "Please specify either \"warehouse, database and table\" or \"path\".\n"
-                            + "Run compact --help for help.");
+        if (tablePath == null) {
             return Optional.empty();
         }
 
         CompactAction action = new CompactAction(tablePath);
 
         if (params.has("partition")) {
-            List<Map<String, String>> partitions = new ArrayList<>();
-            for (String partition : params.getMultiParameter("partition")) {
-                Map<String, String> kvs = new HashMap<>();
-                for (String kvString : partition.split(",")) {
-                    String[] kv = kvString.split("=");
-                    if (kv.length != 2) {
-                        System.err.print(
-                                "Invalid key-value pair \""
-                                        + kvString
-                                        + "\".\n"
-                                        + "Run compact --help for help.");
-                        return Optional.empty();
-                    }
-                    kvs.put(kv[0], kv[1]);
-                }
-                partitions.add(kvs);
+            List<Map<String, String>> partitions = getPartitions(params);
+            if (partitions == null) {
+                return Optional.empty();
             }
+
             action.withPartitions(partitions);
         }
 
         return Optional.of(action);
     }
 
-    public static void printHelp() {
+    private static void printHelp() {
         System.out.println(
                 "Action \"compact\" runs a dedicated job for compacting specified table.");
         System.out.println();
@@ -164,5 +139,12 @@ public class CompactAction {
         System.out.println(
                 "  compact --warehouse hdfs:///path/to/warehouse --database test_db --table test_table "
                         + "--partition dt=20221126,hh=08 --partition dt=20221127,hh=09");
+    }
+
+    @Override
+    public void run() throws Exception {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        build(env);
+        env.execute("Compact job");
     }
 }
