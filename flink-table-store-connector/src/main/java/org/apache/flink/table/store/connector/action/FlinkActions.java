@@ -18,12 +18,11 @@
 
 package org.apache.flink.table.store.connector.action;
 
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
-import java.util.Arrays;
 import java.util.Optional;
+
+import static org.apache.flink.table.store.connector.action.Action.Factory.printHelp;
 
 /** Table maintenance actions for Flink. */
 public class FlinkActions {
@@ -46,35 +45,12 @@ public class FlinkActions {
             System.exit(1);
         }
 
-        String action = args[0].toLowerCase();
-        if ("compact".equals(action)) {
-            runCompact(Arrays.copyOfRange(args, 1, args.length));
-        } else {
-            System.err.println("Unknown action \"" + action + "\"");
-            printHelp();
-            System.exit(1);
-        }
-    }
+        Optional<Action> action = Action.Factory.create(args);
 
-    private static void runCompact(String[] args) throws Exception {
-        Optional<CompactAction> action = CompactAction.create(MultipleParameterTool.fromArgs(args));
         if (action.isPresent()) {
-            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-            action.get().build(env);
-            env.execute("Compact job: " + String.join(" ", args));
+            action.get().run();
         } else {
             System.exit(1);
         }
-    }
-
-    private static void printHelp() {
-        System.out.println("Usage: <action> [OPTIONS]");
-        System.out.println();
-
-        System.out.println("Available actions:");
-        System.out.println("  compact");
-        System.out.println();
-
-        System.out.println("For detailed options of each action, run <action> --help");
     }
 }

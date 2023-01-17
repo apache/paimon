@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.tests;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,6 +33,24 @@ public class FlinkActionsE2eTest extends E2eTestBase {
 
     public FlinkActionsE2eTest() {
         super(true, false);
+    }
+
+    private String warehousePath;
+    private String catalogDdl;
+    private String useCatalogCmd;
+
+    @BeforeEach
+    public void setUp() {
+        warehousePath = TEST_DATA_DIR + "/" + UUID.randomUUID() + ".store";
+        catalogDdl =
+                String.format(
+                        "CREATE CATALOG ts_catalog WITH (\n"
+                                + "    'type' = 'table-store',\n"
+                                + "    'warehouse' = '%s'\n"
+                                + ");",
+                        warehousePath);
+
+        useCatalogCmd = "USE CATALOG ts_catalog;";
     }
 
     @Test
@@ -56,17 +75,6 @@ public class FlinkActionsE2eTest extends E2eTestBase {
                                 + "    'format' = 'csv'\n"
                                 + ");",
                         topicName);
-
-        String warehousePath = TEST_DATA_DIR + "/" + UUID.randomUUID() + ".store";
-        String catalogDdl =
-                String.format(
-                        "CREATE CATALOG ts_catalog WITH (\n"
-                                + "    'type' = 'table-store',\n"
-                                + "    'warehouse' = '%s'\n"
-                                + ");",
-                        warehousePath);
-
-        String useCatalogCmd = "USE CATALOG ts_catalog;";
 
         String tableDdl =
                 "CREATE TABLE IF NOT EXISTS ts_table (\n"
@@ -130,6 +138,65 @@ public class FlinkActionsE2eTest extends E2eTestBase {
 
         // check that second part of test data are compacted
         checkResult("20221205, 1, 101", "20221206, 1, 101");
+    }
+
+    @Test
+    public void testDropPartition() throws Exception {
+        String tableDdl =
+                "CREATE TABLE IF NOT EXISTS ts_table (\n"
+                        + "    dt STRING,\n"
+                        + "    k0 INT,\n"
+                        + "    k1 INT,\n"
+                        + "    v INT,\n"
+                        + "    PRIMARY KEY (dt, k0, k1) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (k0, k1);";
+
+        String insert =
+                "INSERT INTO ts_table VALUES ('2023-01-13', 0, 0, 15), ('2023-01-14', 0, 0, 19), ('2023-01-13', 0, 0, 39), "
+                        + "('2023-01-15', 0, 1, 34), ('2023-01-15', 0, 1, 56), ('2023-01-15', 0, 1, 37), "
+                        + "('2023-01-16', 1, 0, 25), ('2023-01-17', 1, 0, 50), ('2023-01-18', 1, 0, 75), "
+                        + "('2023-01-19', 1, 1, 23), ('2023-01-20', 1, 1, 28), ('2023-01-21', 1, 1, 31);";
+
+        runSql("SET 'table.dml-sync' = 'true';\n" + insert, catalogDdl, useCatalogCmd, tableDdl);
+
+        // run drop partition job
+        Container.ExecResult execResult =
+                jobManager.execInContainer(
+                        "bin/flink",
+                        "run",
+                        "-c",
+                        "org.apache.flink.table.store.connector.action.FlinkActions",
+                        "--detached",
+                        "lib/flink-table-store.jar",
+                        "drop-partition",
+                        "--warehouse",
+                        warehousePath,
+                        "--database",
+                        "default",
+                        "--table",
+                        "ts_table",
+                        "--partition",
+                        "k0=0,k1=1",
+                        "--partition",
+                        "k0=1,k1=0");
+        LOG.info(execResult.getStdout());
+        LOG.info(execResult.getStderr());
+
+        // read all data from table store
+        runSql(
+                "INSERT INTO result1 SELECT * FROM ts_table;",
+                catalogDdl,
+                useCatalogCmd,
+                tableDdl,
+                createResultSink("result1", "dt STRING, k0 INT, k1 INT, v INT"));
+
+        // check the left data
+        checkResult(
+                "2023-01-13, 0, 0, 39",
+                "2023-01-14, 0, 0, 19",
+                "2023-01-19, 1, 1, 23",
+                "2023-01-20, 1, 1, 28",
+                "2023-01-21, 1, 1, 31");
     }
 
     private void runSql(String sql, String... ddls) throws Exception {
