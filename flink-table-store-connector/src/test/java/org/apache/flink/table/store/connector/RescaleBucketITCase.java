@@ -22,7 +22,6 @@ import org.apache.flink.api.common.JobID;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.jobgraph.SavepointConfigOptions;
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -194,7 +193,7 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
         // check write without rescale
         assertThatThrownBy(() -> batchSql("INSERT INTO %s VALUES (6)", tableName))
                 .getRootCause()
-                .isInstanceOf(TableException.class)
+                .isInstanceOf(RuntimeException.class)
                 .hasMessage(
                         "Try to write table with a new bucket num 4, but the previous bucket num is 2. "
                                 + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.");
