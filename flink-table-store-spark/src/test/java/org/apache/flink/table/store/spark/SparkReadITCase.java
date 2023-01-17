@@ -19,9 +19,6 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.GenericArray;
-import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.types.ArrayType;
@@ -41,7 +38,6 @@ import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,18 +52,16 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     @Test
     public void testNormal() {
-        innerTestSimpleType(spark.read().format("tablestore").load(tablePath1.toString()));
+        innerTestSimpleType(spark.table("tablestore.default.t1"));
 
-        innerTestNestedType(spark.read().format("tablestore").load(tablePath2.toString()));
+        innerTestNestedType(spark.table("tablestore.default.t2"));
     }
 
     @Test
     public void testFilterPushDown() {
-        innerTestSimpleTypeFilterPushDown(
-                spark.read().format("tablestore").load(tablePath1.toString()));
+        innerTestSimpleTypeFilterPushDown(spark.table("tablestore.default.t1"));
 
-        innerTestNestedTypeFilterPushDown(
-                spark.read().format("tablestore").load(tablePath2.toString()));
+        innerTestNestedTypeFilterPushDown(spark.table("tablestore.default.t2"));
     }
 
     @Test
@@ -227,8 +221,8 @@ public class SparkReadITCase extends SparkReadTestBase {
         innerTest("MyTable6", false, true, true);
     }
 
-    private void innerTest(String tableName, boolean hasPk, boolean partitioned, boolean appendOnly)
-            throws Exception {
+    private void innerTest(
+            String tableName, boolean hasPk, boolean partitioned, boolean appendOnly) {
         spark.sql("USE tablestore");
         String ddlTemplate =
                 "CREATE TABLE default.%s (\n"
@@ -243,6 +237,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                         + "TBLPROPERTIES (%s)";
         Map<String, String> tableProperties = new HashMap<>();
         tableProperties.put("foo", "bar");
+        tableProperties.put("file.format", "avro");
         List<String> columns =
                 Arrays.asList("order_id", "buyer_id", "coupon_info", "order_amount", "dt", "hh");
         List<DataType> types =
@@ -339,29 +334,9 @@ public class SparkReadITCase extends SparkReadTestBase {
 
         assertThat(schema.comment()).isEqualTo("table comment");
 
-        SimpleTableTestHelper testHelper =
-                new SimpleTableTestHelper(
-                        tablePath,
-                        schema.logicalRowType(),
-                        partitioned ? Arrays.asList("dt", "hh") : Collections.emptyList(),
-                        hasPk
-                                ? partitioned
-                                        ? Arrays.asList("order_id", "dt", "hh")
-                                        : Collections.singletonList("order_id")
-                                : Collections.emptyList());
-        testHelper.write(
-                GenericRow.of(
-                        1L,
-                        10L,
-                        new GenericArray(
-                                new BinaryString[] {
-                                    BinaryString.fromString("loyalty_discount"),
-                                    BinaryString.fromString("shipping_discount")
-                                }),
-                        199.0d,
-                        BinaryString.fromString("2022-07-20"),
-                        BinaryString.fromString("12")));
-        testHelper.commit();
+        writeTable(
+                tableName,
+                "(1L, 10L, array('loyalty_discount', 'shipping_discount'), 199.0d, '2022-07-20', '12')");
 
         Dataset<Row> dataset = spark.read().format("tablestore").load(tablePath.toString());
         assertThat(dataset.select("order_id", "buyer_id", "dt").collectAsList().toString())
