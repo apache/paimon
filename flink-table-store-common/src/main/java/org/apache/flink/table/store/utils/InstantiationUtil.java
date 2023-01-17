@@ -33,7 +33,6 @@ import java.util.HashMap;
 /** Utility class to create instances from class objects and checking failure reasons. */
 public final class InstantiationUtil {
 
-    @SuppressWarnings("unchecked")
     public static <T> T deserializeObject(byte[] bytes, ClassLoader cl)
             throws IOException, ClassNotFoundException {
 
