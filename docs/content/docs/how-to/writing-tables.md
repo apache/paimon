@@ -161,9 +161,9 @@ INSERT OVERWRITE MyTable SELECT * FROM MyTable WHERE false
 
 Currently, Table Store supports two ways to purge partitions.
 
-1. Like purging tables, you can use `INSERT OVERWRITE` to purge data of partitions by inserting empty value to them:
+1. Like purging tables, you can use `INSERT OVERWRITE` to purge data of partitions by inserting empty value to them.
 
-2. Flink SQL currently does not support statements related to drop partitions, so we have to submit the drop-partition job through `flink run`.
+2. Method #1 dose not support to drop multiple partitions. In case that you need to drop multiple partitions, you can submit the drop-partition job through `flink run`.
 
 {{< tabs "purge-partitions-syntax" >}}
 

@@ -46,7 +46,7 @@ public class DropPartitionAction implements Action {
     DropPartitionAction(Path tablePath, List<Map<String, String>> partitions) {
         FileStoreTable table = FileStoreTableFactory.create(tablePath);
         this.commit =
-                table.newCommit(UUID.randomUUID().toString()).withOverwritePartition(partitions);
+                table.newCommit(UUID.randomUUID().toString()).withOverwritePartitions(partitions);
     }
 
     public static Optional<Action> create(String[] args) {

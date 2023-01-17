@@ -164,12 +164,12 @@ public class CompactActionITCase extends ActionITCaseBase {
         // first full compaction
         List<String> actual = new ArrayList<>();
         while (plan != null) {
-            actual.addAll(getResult(table.newRead(), plan.splits(), FIELD_TYPES));
+            actual.addAll(getResult(table.newRead(), plan.splits(), ROW_TYPE));
             plan = snapshotEnumerator.enumerate();
         }
         actual.sort(String::compareTo);
         Assertions.assertEquals(
-                Arrays.asList("+I 1|100|15|20221208", "+I 1|100|15|20221209"), actual);
+                Arrays.asList("+I[1, 100, 15, 20221208]", "+I[1, 100, 15, 20221209]"), actual);
 
         // incremental records
         writeData(
@@ -188,16 +188,16 @@ public class CompactActionITCase extends ActionITCaseBase {
         // second full compaction
         actual = new ArrayList<>();
         while (plan != null) {
-            actual.addAll(getResult(table.newRead(), plan.splits(), FIELD_TYPES));
+            actual.addAll(getResult(table.newRead(), plan.splits(), ROW_TYPE));
             plan = snapshotEnumerator.enumerate();
         }
         actual.sort(String::compareTo);
         Assertions.assertEquals(
                 Arrays.asList(
-                        "+U 1|101|15|20221208",
-                        "+U 1|101|15|20221209",
-                        "-U 1|100|15|20221208",
-                        "-U 1|100|15|20221209"),
+                        "+U[1, 101, 15, 20221208]",
+                        "+U[1, 101, 15, 20221209]",
+                        "-U[1, 100, 15, 20221208]",
+                        "-U[1, 100, 15, 20221209]"),
                 actual);
 
         // assert dedicated compact job will expire snapshots

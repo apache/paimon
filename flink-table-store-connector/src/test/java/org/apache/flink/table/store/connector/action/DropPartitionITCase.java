@@ -62,25 +62,25 @@ public class DropPartitionITCase extends ActionITCaseBase {
 
         DataTableScan.DataFilePlan plan = table.newScan().plan();
         assertThat(plan.splits().size()).isEqualTo(2);
-        List<String> actual = getResult(table.newRead(), plan.splits(), FIELD_TYPES);
+        List<String> actual = getResult(table.newRead(), plan.splits(), ROW_TYPE);
 
         List<String> expected;
         if (hasPk) {
             expected =
                     Arrays.asList(
-                            "+I 1|0|2023-01-17|5",
-                            "+I 1|1|2023-01-18|82",
-                            "+I 1|1|2023-01-19|90",
-                            "+I 1|1|2023-01-20|97");
+                            "+I[1, 0, 2023-01-17, 5]",
+                            "+I[1, 1, 2023-01-18, 82]",
+                            "+I[1, 1, 2023-01-19, 90]",
+                            "+I[1, 1, 2023-01-20, 97]");
         } else {
             expected =
                     Arrays.asList(
-                            "+I 1|0|2023-01-17|2",
-                            "+I 1|0|2023-01-17|3",
-                            "+I 1|0|2023-01-17|5",
-                            "+I 1|1|2023-01-18|82",
-                            "+I 1|1|2023-01-19|90",
-                            "+I 1|1|2023-01-20|97");
+                            "+I[1, 0, 2023-01-17, 2]",
+                            "+I[1, 0, 2023-01-17, 3]",
+                            "+I[1, 0, 2023-01-17, 5]",
+                            "+I[1, 1, 2023-01-18, 82]",
+                            "+I[1, 1, 2023-01-19, 90]",
+                            "+I[1, 1, 2023-01-20, 97]");
         }
 
         assertThat(actual).isEqualTo(expected);
@@ -107,26 +107,26 @@ public class DropPartitionITCase extends ActionITCaseBase {
 
         DataTableScan.DataFilePlan plan = table.newScan().plan();
         assertThat(plan.splits().size()).isEqualTo(2);
-        List<String> actual = getResult(table.newRead(), plan.splits(), FIELD_TYPES);
+        List<String> actual = getResult(table.newRead(), plan.splits(), ROW_TYPE);
 
         List<String> expected;
         if (hasPk) {
             expected =
                     Arrays.asList(
-                            "+I 0|0|2023-01-12|102",
-                            "+I 0|0|2023-01-13|103",
-                            "+I 1|1|2023-01-18|82",
-                            "+I 1|1|2023-01-19|90",
-                            "+I 1|1|2023-01-20|97");
+                            "+I[0, 0, 2023-01-12, 102]",
+                            "+I[0, 0, 2023-01-13, 103]",
+                            "+I[1, 1, 2023-01-18, 82]",
+                            "+I[1, 1, 2023-01-19, 90]",
+                            "+I[1, 1, 2023-01-20, 97]");
         } else {
             expected =
                     Arrays.asList(
-                            "+I 0|0|2023-01-12|101",
-                            "+I 0|0|2023-01-12|102",
-                            "+I 0|0|2023-01-13|103",
-                            "+I 1|1|2023-01-18|82",
-                            "+I 1|1|2023-01-19|90",
-                            "+I 1|1|2023-01-20|97");
+                            "+I[0, 0, 2023-01-12, 101]",
+                            "+I[0, 0, 2023-01-12, 102]",
+                            "+I[0, 0, 2023-01-13, 103]",
+                            "+I[1, 1, 2023-01-18, 82]",
+                            "+I[1, 1, 2023-01-19, 90]",
+                            "+I[1, 1, 2023-01-20, 97]");
         }
 
         assertThat(actual).isEqualTo(expected);

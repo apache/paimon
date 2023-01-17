@@ -20,14 +20,14 @@ package org.apache.flink.table.store.connector.action;
 
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.connector.util.AbstractTestBase;
+import org.apache.flink.table.store.data.DataFormatTestUtil;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
@@ -35,7 +35,6 @@ import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.AfterEach;
@@ -46,8 +45,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 /** {@link Action} test base. */
 public class ActionITCaseBase extends AbstractTestBase {
@@ -103,33 +100,12 @@ public class ActionITCaseBase extends AbstractTestBase {
         incrementalIdentifier++;
     }
 
-    protected List<String> getResult(TableRead read, List<Split> splits, DataType[] fieldTypes)
+    protected List<String> getResult(TableRead read, List<Split> splits, RowType rowType)
             throws Exception {
-        List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
-        for (Split split : splits) {
-            readers.add(() -> read.createReader(split));
-        }
-        RecordReader<InternalRow> recordReader = ConcatRecordReader.create(readers);
-        RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(recordReader);
+        RecordReader<InternalRow> recordReader = read.createReader(splits);
         List<String> result = new ArrayList<>();
-        while (iterator.hasNext()) {
-            InternalRow rowData = iterator.next();
-            result.add(rowDataToString(rowData, fieldTypes));
-        }
-        iterator.close();
+        RecordReaderUtils.forEachRemaining(
+                recordReader, row -> result.add(DataFormatTestUtil.rowDataToString(row, rowType)));
         return result;
-    }
-
-    protected String rowDataToString(InternalRow rowData, DataType[] fieldTypes) {
-        List<String> fields =
-                IntStream.range(0, fieldTypes.length)
-                        .mapToObj(
-                                i ->
-                                        InternalRow.createFieldGetter(fieldTypes[i], i)
-                                                .getFieldOrNull(rowData))
-                        .map(String::valueOf)
-                        .collect(Collectors.toList());
-
-        return rowData.getRowKind().shortString() + " " + String.join("|", fields);
     }
 }
