@@ -240,13 +240,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public void overwrite(
-            Map<String, String> partition,
+            List<Map<String, String>> partitions,
             ManifestCommittable committable,
             Map<String, String> properties) {
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Ready to overwrite partition "
-                            + partition.toString()
+                            + partitions.stream()
+                                    .map(Object::toString)
+                                    .collect(Collectors.joining(","))
                             + "\n"
                             + committable.toString());
         }
@@ -279,19 +281,35 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         // sanity check, all changes must be done within the given partition
-        Predicate partitionFilter = PredicateBuilder.partition(partition, partitionType);
-        if (partitionFilter != null) {
-            for (ManifestEntry entry : appendTableFiles) {
-                if (!partitionFilter.test(partitionObjectConverter.convert(entry.partition()))) {
-                    throw new IllegalArgumentException(
-                            "Trying to overwrite partition "
-                                    + partition
-                                    + ", but the changes in "
-                                    + pathFactory.getPartitionString(entry.partition())
-                                    + " does not belong to this partition");
+        List<Predicate> partitionFilters = new ArrayList<>();
+        for (Map<String, String> partition : partitions) {
+            Predicate partitionFilter = PredicateBuilder.partition(partition, partitionType);
+            if (partitionFilter != null) {
+                for (ManifestEntry entry : appendTableFiles) {
+                    if (!partitionFilter.test(
+                            partitionObjectConverter.convert(entry.partition()))) {
+                        throw new IllegalArgumentException(
+                                "Trying to overwrite partition "
+                                        + partition
+                                        + ", but the changes in "
+                                        + pathFactory.getPartitionString(entry.partition())
+                                        + " does not belong to this partition");
+                    }
                 }
+
+                partitionFilters.add(partitionFilter);
             }
         }
+
+        Predicate partitionFilter;
+        if (partitionFilters.size() == 0) {
+            partitionFilter = null;
+        } else if (partitionFilters.size() == 1) {
+            partitionFilter = partitionFilters.get(0);
+        } else {
+            partitionFilter = PredicateBuilder.or(partitionFilters);
+        }
+
         // overwrite new files
         tryOverwrite(
                 partitionFilter,

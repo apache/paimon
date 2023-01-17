@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -37,16 +38,24 @@ public interface FileStoreCommit {
     /** Commit from manifest committable. */
     void commit(ManifestCommittable committable, Map<String, String> properties);
 
+    /** Overwrite a single partition from manifest committable. */
+    default void overwrite(
+            Map<String, String> partition,
+            ManifestCommittable committable,
+            Map<String, String> properties) {
+        overwrite(Collections.singletonList(partition), committable, properties);
+    }
+
     /**
-     * Overwrite from manifest committable and partition.
+     * Overwrite multiple partitions from manifest committable.
      *
-     * @param partition A single partition maps each partition key to a partition value. Depending
-     *     on the user-defined statement, the partition might not include all partition keys. Also
-     *     note that this partition does not necessarily equal to the partitions of the newly added
-     *     key-values. This is just the partition to be cleaned up.
+     * @param partitions A list of partition {@link Map}s that maps each partition key to a
+     *     partition value. Depending on the user-defined statement, the partition might not include
+     *     all partition keys. Also note that this partition does not necessarily equal to the
+     *     partitions of the newly added key-values. This is just the partition to be cleaned up.
      */
     void overwrite(
-            Map<String, String> partition,
+            List<Map<String, String>> partitions,
             ManifestCommittable committable,
             Map<String, String> properties);
 }
