@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.Timestamp;
@@ -112,7 +111,7 @@ public class TypeUtils {
     }
 
     /** Parse a {@link BinaryString} to boolean. */
-    public static boolean toBoolean(BinaryString str) throws TableException {
+    public static boolean toBoolean(BinaryString str) {
         BinaryString lowerCase = str.toLowerCase();
         if (TRUE_STRINGS.contains(lowerCase)) {
             return true;
@@ -120,7 +119,7 @@ public class TypeUtils {
         if (FALSE_STRINGS.contains(lowerCase)) {
             return false;
         }
-        throw new TableException("Cannot parse '" + str + "' as BOOLEAN.");
+        throw new RuntimeException("Cannot parse '" + str + "' as BOOLEAN.");
     }
 
     public static int toDate(BinaryString input) throws DateTimeException {

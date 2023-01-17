@@ -411,7 +411,10 @@ public class FlinkCatalogTest {
     }
 
     private void checkEquals(ObjectPath path, CatalogTable t1, CatalogTable t2) {
-        Path tablePath = ((FlinkCatalog) catalog).catalog().getTableLocation(path);
+        Path tablePath =
+                ((FlinkCatalog) catalog)
+                        .catalog()
+                        .getTableLocation(FlinkCatalog.toIdentifier(path));
         Map<String, String> options = new HashMap<>(t1.getOptions());
         options.put("path", tablePath.toString());
         t1 = ((ResolvedCatalogTable) t1).copy(options);

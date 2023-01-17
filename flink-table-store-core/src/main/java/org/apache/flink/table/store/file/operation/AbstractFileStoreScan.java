@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
@@ -219,7 +218,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                                                 .defaultValue())
                                                 .generatePartValues(file.partition())
                                 : "table";
-                throw new TableException(
+                throw new RuntimeException(
                         String.format(
                                 "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
                                         + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",

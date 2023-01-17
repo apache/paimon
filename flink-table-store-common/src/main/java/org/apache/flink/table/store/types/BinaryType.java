@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.types;
 
-import org.apache.flink.table.api.ValidationException;
-
 import java.util.Objects;
 
 /** Data type of a fixed-length binary string (=a sequence of bytes). */
@@ -40,7 +38,7 @@ public class BinaryType extends DataType {
     public BinaryType(boolean isNullable, int length) {
         super(isNullable, DataTypeRoot.BINARY);
         if (length < MIN_LENGTH) {
-            throw new ValidationException(
+            throw new IllegalArgumentException(
                     String.format(
                             "Binary string length must be between %d and %d (both inclusive).",
                             MIN_LENGTH, MAX_LENGTH));

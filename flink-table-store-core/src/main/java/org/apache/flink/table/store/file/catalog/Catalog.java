@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
@@ -94,72 +93,72 @@ public interface Catalog extends AutoCloseable {
     List<String> listTables(String databaseName) throws DatabaseNotExistException;
 
     /**
-     * Return the table location path identified by the given {@link ObjectPath}.
+     * Return the table location path identified by the given {@link Identifier}.
      *
-     * @param tablePath Path of the table
+     * @param identifier Path of the table
      * @return The requested table location
      */
-    Path getTableLocation(ObjectPath tablePath);
+    Path getTableLocation(Identifier identifier);
 
     /**
-     * Return a {@link TableSchema} identified by the given {@link ObjectPath}.
+     * Return a {@link TableSchema} identified by the given {@link Identifier}.
      *
-     * @param tablePath Path of the table
+     * @param identifier Path of the table
      * @return The requested table schema
      * @throws TableNotExistException if the target does not exist
      */
-    TableSchema getTableSchema(ObjectPath tablePath) throws TableNotExistException;
+    TableSchema getTableSchema(Identifier identifier) throws TableNotExistException;
 
     /**
-     * Return a {@link Table} identified by the given {@link ObjectPath}.
+     * Return a {@link Table} identified by the given {@link Identifier}.
      *
-     * @param tablePath Path of the table
+     * @param identifier Path of the table
      * @return The requested table
      * @throws TableNotExistException if the target does not exist
      */
-    Table getTable(ObjectPath tablePath) throws TableNotExistException;
+    Table getTable(Identifier identifier) throws TableNotExistException;
 
     /**
      * Check if a table exists in this catalog.
      *
-     * @param tablePath Path of the table
+     * @param identifier Path of the table
      * @return true if the given table exists in the catalog false otherwise
      */
-    boolean tableExists(ObjectPath tablePath);
+    boolean tableExists(Identifier identifier);
 
     /**
      * Drop a table.
      *
-     * @param tablePath Path of the table to be dropped
+     * @param identifier Path of the table to be dropped
      * @param ignoreIfNotExists Flag to specify behavior when the table does not exist: if set to
      *     false, throw an exception, if set to true, do nothing.
      * @throws TableNotExistException if the table does not exist
      */
-    void dropTable(ObjectPath tablePath, boolean ignoreIfNotExists) throws TableNotExistException;
+    void dropTable(Identifier identifier, boolean ignoreIfNotExists) throws TableNotExistException;
 
     /**
      * Create a new table.
      *
-     * @param tablePath path of the table to be created
+     * @param identifier path of the table to be created
      * @param tableSchema the table definition
      * @param ignoreIfExists flag to specify behavior when a table already exists at the given path:
      *     if set to false, it throws a TableAlreadyExistException, if set to true, do nothing.
      * @throws TableAlreadyExistException if table already exists and ignoreIfExists is false
-     * @throws DatabaseNotExistException if the database in tablePath doesn't exist
+     * @throws DatabaseNotExistException if the database in identifier doesn't exist
      */
-    void createTable(ObjectPath tablePath, UpdateSchema tableSchema, boolean ignoreIfExists)
+    void createTable(Identifier identifier, UpdateSchema tableSchema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException;
 
     /**
      * Modify an existing table from {@link SchemaChange}s.
      *
-     * @param tablePath path of the table to be modified
+     * @param identifier path of the table to be modified
      * @param changes the schema changes
      * @param ignoreIfNotExists flag to specify behavior when the table does not exist: if set to
      *     false, throw an exception, if set to true, do nothing.
      * @throws TableNotExistException if the table does not exist
      */
-    void alterTable(ObjectPath tablePath, List<SchemaChange> changes, boolean ignoreIfNotExists)
+    void alterTable(Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException;
 
     /** Exception for trying to drop on a database that is not empty. */
@@ -227,19 +226,19 @@ public interface Catalog extends AutoCloseable {
 
         private static final String MSG = "Table %s already exists.";
 
-        private final ObjectPath tablePath;
+        private final Identifier identifier;
 
-        public TableAlreadyExistException(ObjectPath tablePath) {
-            this(tablePath, null);
+        public TableAlreadyExistException(Identifier identifier) {
+            this(identifier, null);
         }
 
-        public TableAlreadyExistException(ObjectPath tablePath, Throwable cause) {
-            super(String.format(MSG, tablePath.getFullName()), cause);
-            this.tablePath = tablePath;
+        public TableAlreadyExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
         }
 
-        public ObjectPath tablePath() {
-            return tablePath;
+        public Identifier identifier() {
+            return identifier;
         }
     }
 
@@ -248,19 +247,19 @@ public interface Catalog extends AutoCloseable {
 
         private static final String MSG = "Table %s does not exist.";
 
-        private final ObjectPath tablePath;
+        private final Identifier identifier;
 
-        public TableNotExistException(ObjectPath tablePath) {
-            this(tablePath, null);
+        public TableNotExistException(Identifier identifier) {
+            this(identifier, null);
         }
 
-        public TableNotExistException(ObjectPath tablePath, Throwable cause) {
-            super(String.format(MSG, tablePath.getFullName()), cause);
-            this.tablePath = tablePath;
+        public TableNotExistException(Identifier identifier, Throwable cause) {
+            super(String.format(MSG, identifier.getFullName()), cause);
+            this.identifier = identifier;
         }
 
-        public ObjectPath tablePath() {
-            return tablePath;
+        public Identifier identifier() {
+            return identifier;
         }
     }
 }

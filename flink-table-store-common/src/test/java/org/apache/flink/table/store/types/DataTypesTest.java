@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.types;
 
-import org.apache.flink.table.api.ValidationException;
-
 import org.assertj.core.api.Assertions;
 import org.assertj.core.api.ObjectAssert;
 import org.assertj.core.api.ThrowingConsumer;
@@ -198,14 +196,14 @@ public class DataTypesTest {
                                                 new DataField(1, "b", new VarCharType()),
                                                 new DataField(2, "a", new VarCharType()),
                                                 new DataField(3, "a", new TimestampType()))))
-                .isInstanceOf(ValidationException.class);
+                .isInstanceOf(IllegalArgumentException.class);
 
         assertThatThrownBy(
                         () ->
                                 new RowType(
                                         Collections.singletonList(
                                                 new DataField(0, "", new VarCharType()))))
-                .isInstanceOf(ValidationException.class);
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     // --------------------------------------------------------------------------------------------

@@ -23,8 +23,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Objects;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
-
 /** {@link SortSpec} describes how the data will be sorted. */
 public class SortSpec {
 
@@ -34,7 +32,7 @@ public class SortSpec {
     private final SortFieldSpec[] fieldSpecs;
 
     public SortSpec(SortFieldSpec[] fieldSpecs) {
-        this.fieldSpecs = checkNotNull(fieldSpecs);
+        this.fieldSpecs = fieldSpecs;
     }
 
     /** Gets all {@link SortFieldSpec} in the SortSpec. */

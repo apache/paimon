@@ -22,7 +22,6 @@ import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.DelegatingConfiguration;
-import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.types.RowType;
@@ -98,7 +97,7 @@ public abstract class FileFormat {
                         fromIdentifier(identifier, options, FileFormat.class.getClassLoader())
                                 .orElseThrow(
                                         () ->
-                                                new ValidationException(
+                                                new RuntimeException(
                                                         String.format(
                                                                 "Could not find any factories that implement '%s' in the classpath.",
                                                                 FileFormatFactory.class
