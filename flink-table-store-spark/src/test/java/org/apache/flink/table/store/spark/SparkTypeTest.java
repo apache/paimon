@@ -24,6 +24,8 @@ import org.apache.flink.table.store.types.RowType;
 import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 import static org.apache.flink.table.store.spark.SparkTypeUtils.fromFlinkRowType;
 import static org.apache.flink.table.store.spark.SparkTypeUtils.toFlinkType;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,7 +34,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SparkTypeTest {
 
     public static final RowType ALL_TYPES =
-            RowType.builder()
+            RowType.builder(
+                            true,
+                            new AtomicInteger(
+                                    1)) // posX and posY have field id 0 and 1, here we start from 2
                     .field("id", DataTypes.INT().notNull())
                     .field("name", DataTypes.STRING()) /* optional by default */
                     .field("salary", DataTypes.DOUBLE().notNull())
