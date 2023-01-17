@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.file.operation.Lock;
@@ -202,10 +201,9 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
     @Override
     public SparkTable loadTable(Identifier ident) throws NoSuchTableException {
         try {
-            ObjectPath path = objectPath(ident);
             return new SparkTable(
-                    catalog.getTable(path),
-                    Lock.factory(catalog.lockFactory().orElse(null), path),
+                    catalog.getTable(toIdentifier(ident)),
+                    Lock.factory(catalog.lockFactory().orElse(null), toIdentifier(ident)),
                     conf);
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
@@ -217,7 +215,7 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         List<SchemaChange> schemaChanges =
                 Arrays.stream(changes).map(this::toSchemaChange).collect(Collectors.toList());
         try {
-            catalog.alterTable(objectPath(ident), schemaChanges, false);
+            catalog.alterTable(toIdentifier(ident), schemaChanges, false);
             return loadTable(ident);
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
@@ -233,7 +231,7 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
             throws TableAlreadyExistsException, NoSuchNamespaceException {
         try {
             catalog.createTable(
-                    objectPath(ident), toUpdateSchema(schema, partitions, properties), false);
+                    toIdentifier(ident), toUpdateSchema(schema, partitions, properties), false);
             return loadTable(ident);
         } catch (Catalog.TableAlreadyExistException e) {
             throw new TableAlreadyExistsException(ident);
@@ -247,7 +245,7 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
     @Override
     public boolean dropTable(Identifier ident) {
         try {
-            catalog.dropTable(objectPath(ident), false);
+            catalog.dropTable(toIdentifier(ident), false);
             return true;
         } catch (Catalog.TableNotExistException | NoSuchTableException e) {
             return false;
@@ -341,12 +339,14 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         return namespace.length == 1;
     }
 
-    private ObjectPath objectPath(Identifier ident) throws NoSuchTableException {
+    private org.apache.flink.table.store.file.catalog.Identifier toIdentifier(Identifier ident)
+            throws NoSuchTableException {
         if (!isValidateNamespace(ident.namespace())) {
             throw new NoSuchTableException(ident);
         }
 
-        return new ObjectPath(ident.namespace()[0], ident.name());
+        return new org.apache.flink.table.store.file.catalog.Identifier(
+                ident.namespace()[0], ident.name());
     }
 
     // --------------------- unsupported methods ----------------------------

@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.types;
 
-import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.StringUtils;
 
@@ -140,7 +139,7 @@ public final class RowType extends DataType {
         final List<String> fieldNames =
                 fields.stream().map(DataField::name).collect(Collectors.toList());
         if (fieldNames.stream().anyMatch(StringUtils::isNullOrWhitespaceOnly)) {
-            throw new ValidationException(
+            throw new IllegalArgumentException(
                     "Field names must contain at least one non-whitespace character.");
         }
         final Set<String> duplicates =
@@ -148,7 +147,7 @@ public final class RowType extends DataType {
                         .filter(n -> Collections.frequency(fieldNames, n) > 1)
                         .collect(Collectors.toSet());
         if (!duplicates.isEmpty()) {
-            throw new ValidationException(
+            throw new IllegalArgumentException(
                     String.format("Field names must be unique. Found duplicates: %s", duplicates));
         }
     }

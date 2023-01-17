@@ -29,7 +29,6 @@ import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.configuration.description.Description;
 import org.apache.flink.configuration.description.InlineElement;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.format.FileFormat;
@@ -847,7 +846,7 @@ public class CoreOptions implements Serializable {
 
         // Cannot define any primary key in an append-only table.
         if (!schema.primaryKeys().isEmpty() && Objects.equals(APPEND_ONLY, options.writeMode())) {
-            throw new TableException(
+            throw new RuntimeException(
                     "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if "
                             + "still want to keep the primary key definition.");
         }

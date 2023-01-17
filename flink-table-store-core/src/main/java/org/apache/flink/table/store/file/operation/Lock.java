@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
+import org.apache.flink.table.store.file.catalog.Identifier;
 
 import javax.annotation.Nullable;
 
@@ -37,7 +37,7 @@ public interface Lock extends AutoCloseable {
         Lock create();
     }
 
-    static Factory factory(@Nullable CatalogLock.Factory lockFactory, ObjectPath tablePath) {
+    static Factory factory(@Nullable CatalogLock.Factory lockFactory, Identifier tablePath) {
         return lockFactory == null
                 ? new EmptyFactory()
                 : new CatalogLockFactory(lockFactory, tablePath);
@@ -53,9 +53,9 @@ public interface Lock extends AutoCloseable {
         private static final long serialVersionUID = 1L;
 
         private final CatalogLock.Factory lockFactory;
-        private final ObjectPath tablePath;
+        private final Identifier tablePath;
 
-        public CatalogLockFactory(CatalogLock.Factory lockFactory, ObjectPath tablePath) {
+        public CatalogLockFactory(CatalogLock.Factory lockFactory, Identifier tablePath) {
             this.lockFactory = lockFactory;
             this.tablePath = tablePath;
         }
@@ -88,7 +88,7 @@ public interface Lock extends AutoCloseable {
         public void close() {}
     }
 
-    static Lock fromCatalog(CatalogLock lock, ObjectPath tablePath) {
+    static Lock fromCatalog(CatalogLock lock, Identifier tablePath) {
         if (lock == null) {
             return new EmptyLock();
         }
@@ -99,9 +99,9 @@ public interface Lock extends AutoCloseable {
     class CatalogLockImpl implements Lock {
 
         private final CatalogLock catalogLock;
-        private final ObjectPath tablePath;
+        private final Identifier tablePath;
 
-        private CatalogLockImpl(CatalogLock catalogLock, ObjectPath tablePath) {
+        private CatalogLockImpl(CatalogLock catalogLock, Identifier tablePath) {
             this.catalogLock = catalogLock;
             this.tablePath = tablePath;
         }

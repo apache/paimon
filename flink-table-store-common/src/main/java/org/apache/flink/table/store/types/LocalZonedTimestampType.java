@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.types;
 
-import org.apache.flink.table.api.ValidationException;
-
 import java.util.Objects;
 
 /**
@@ -53,7 +51,7 @@ public final class LocalZonedTimestampType extends DataType {
     public LocalZonedTimestampType(boolean isNullable, int precision) {
         super(isNullable, DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE);
         if (precision < MIN_PRECISION || precision > MAX_PRECISION) {
-            throw new ValidationException(
+            throw new IllegalArgumentException(
                     String.format(
                             "Timestamp with local time zone precision must be between %d and %d (both inclusive).",
                             MIN_PRECISION, MAX_PRECISION));

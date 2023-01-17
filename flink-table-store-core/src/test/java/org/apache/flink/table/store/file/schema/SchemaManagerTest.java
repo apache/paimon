@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
@@ -293,7 +292,7 @@ public class SchemaManagerTest {
                         () ->
                                 retryArtificialException(
                                         () -> manager.commitNewVersion(updateSchema)))
-                .isInstanceOf(TableException.class)
+                .isInstanceOf(RuntimeException.class)
                 .hasMessage(
                         "Cannot define any primary key in an append-only table. "
                                 + "Set 'write-mode'='change-log' if still want to keep the primary key definition.");

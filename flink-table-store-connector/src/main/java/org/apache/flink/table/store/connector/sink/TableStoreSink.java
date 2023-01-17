@@ -28,6 +28,7 @@ import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
+import org.apache.flink.table.store.connector.FlinkCatalog;
 import org.apache.flink.table.store.connector.FlinkConnectorOptions;
 import org.apache.flink.table.store.connector.TableStoreDataStreamSinkProvider;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
@@ -49,7 +50,7 @@ import java.util.Map;
 import static org.apache.flink.table.store.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
 
-/** Table sink to create {@link StoreSink}. */
+/** Table sink to create sink. */
 public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning {
 
     private final ObjectIdentifier tableIdentifier;
@@ -129,7 +130,10 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
                                                 dataStream.getExecutionEnvironment(),
                                                 dataStream.getTransformation()))
                                 .withLockFactory(
-                                        Lock.factory(lockFactory, tableIdentifier.toObjectPath()))
+                                        Lock.factory(
+                                                lockFactory,
+                                                FlinkCatalog.toIdentifier(
+                                                        tableIdentifier.toObjectPath())))
                                 .withLogSinkFunction(logSinkFunction)
                                 .withOverwritePartition(overwrite ? staticPartitions : null)
                                 .withParallelism(conf.get(FlinkConnectorOptions.SINK_PARALLELISM))

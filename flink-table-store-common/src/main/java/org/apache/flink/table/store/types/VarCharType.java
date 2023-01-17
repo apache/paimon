@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.types;
 
-import org.apache.flink.table.api.ValidationException;
-
 import java.util.Objects;
 
 /**
@@ -48,7 +46,7 @@ public final class VarCharType extends DataType {
     public VarCharType(boolean isNullable, int length) {
         super(isNullable, DataTypeRoot.VARCHAR);
         if (length < MIN_LENGTH) {
-            throw new ValidationException(
+            throw new IllegalArgumentException(
                     String.format(
                             "Variable character string length must be between %d and %d (both inclusive).",
                             MIN_LENGTH, MAX_LENGTH));

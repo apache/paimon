@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.Table;
@@ -33,19 +32,19 @@ public abstract class AbstractCatalog implements Catalog {
     protected static final String DB_SUFFIX = ".db";
 
     @Override
-    public Path getTableLocation(ObjectPath tablePath) {
-        if (tablePath.getObjectName().contains(SYSTEM_TABLE_SPLITTER)) {
+    public Path getTableLocation(Identifier identifier) {
+        if (identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Table name[%s] cannot contain '%s' separator",
-                            tablePath.getObjectName(), SYSTEM_TABLE_SPLITTER));
+                            identifier.getObjectName(), SYSTEM_TABLE_SPLITTER));
         }
-        return new Path(databasePath(tablePath.getDatabaseName()), tablePath.getObjectName());
+        return new Path(databasePath(identifier.getDatabaseName()), identifier.getObjectName());
     }
 
     @Override
-    public Table getTable(ObjectPath tablePath) throws TableNotExistException {
-        String inputTableName = tablePath.getObjectName();
+    public Table getTable(Identifier identifier) throws TableNotExistException {
+        String inputTableName = identifier.getObjectName();
         if (inputTableName.contains(SYSTEM_TABLE_SPLITTER)) {
             String[] splits = StringUtils.split(inputTableName, SYSTEM_TABLE_SPLITTER);
             if (splits.length != 2) {
@@ -55,15 +54,15 @@ public abstract class AbstractCatalog implements Catalog {
             }
             String table = splits[0];
             String type = splits[1];
-            ObjectPath originTablePath = new ObjectPath(tablePath.getDatabaseName(), table);
-            if (!tableExists(originTablePath)) {
-                throw new TableNotExistException(tablePath);
+            Identifier originidentifier = new Identifier(identifier.getDatabaseName(), table);
+            if (!tableExists(originidentifier)) {
+                throw new TableNotExistException(identifier);
             }
-            Path location = getTableLocation(originTablePath);
+            Path location = getTableLocation(originidentifier);
             return SystemTableLoader.load(type, location);
         } else {
-            TableSchema tableSchema = getTableSchema(tablePath);
-            return FileStoreTableFactory.create(getTableLocation(tablePath), tableSchema);
+            TableSchema tableSchema = getTableSchema(identifier);
+            return FileStoreTableFactory.create(getTableLocation(identifier), tableSchema);
         }
     }
 
