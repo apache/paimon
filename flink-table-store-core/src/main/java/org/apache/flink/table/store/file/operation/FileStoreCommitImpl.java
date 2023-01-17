@@ -296,13 +296,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                         + " does not belong to this partition");
                     }
                 }
+
+                partitionFilters.add(partitionFilter);
             }
-            partitionFilters.add(partitionFilter);
+        }
+
+        Predicate partitionFilter;
+        if (partitionFilters.size() == 0) {
+            partitionFilter = null;
+        } else if (partitionFilters.size() == 1) {
+            partitionFilter = partitionFilters.get(0);
+        } else {
+            partitionFilter = PredicateBuilder.or(partitionFilters);
         }
 
         // overwrite new files
         tryOverwrite(
-                PredicateBuilder.or(partitionFilters),
+                partitionFilter,
                 appendTableFiles,
                 committable.identifier(),
                 committable.logOffsets());
