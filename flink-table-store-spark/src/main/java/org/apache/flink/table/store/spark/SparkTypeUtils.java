@@ -50,6 +50,7 @@ import org.apache.spark.sql.types.UserDefinedType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Utils for spark {@link DataType}. */
 public class SparkTypeUtils {
@@ -191,6 +192,8 @@ public class SparkTypeUtils {
 
     private static class SparkToFlinkTypeVisitor {
 
+        private final AtomicInteger currentIndex = new AtomicInteger(0);
+
         static org.apache.flink.table.store.types.DataType visit(DataType type) {
             return visit(type, new SparkToFlinkTypeVisitor());
         }
@@ -238,7 +241,9 @@ public class SparkTypeUtils {
                 org.apache.flink.table.store.types.DataType fieldType =
                         fieldResults.get(i).copy(field.nullable());
                 String comment = field.getComment().getOrElse(() -> null);
-                newFields.add(new DataField(i, field.name(), fieldType, comment));
+                newFields.add(
+                        new DataField(
+                                currentIndex.getAndIncrement(), field.name(), fieldType, comment));
             }
 
             return new RowType(newFields);

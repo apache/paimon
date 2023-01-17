@@ -487,4 +487,23 @@ public class SparkReadITCase extends SparkReadTestBase {
                 .isEqualTo(
                         "[[3,WrappedArray(true, false),2], [4,WrappedArray(true, false, true),3]]");
     }
+
+    @Test
+    public void testCreateNestedField() {
+        spark.sql(
+                "CREATE TABLE tablestore.default.nested_table ( a INT, b STRUCT<b1: STRUCT<b11: INT, b12 INT>, b2 BIGINT>)");
+        assertThat(
+                        spark.sql("SHOW CREATE TABLE tablestore.default.nested_table")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo(
+                        String.format(
+                                "[[CREATE TABLE nested_table (\n"
+                                        + "  `a` INT,\n"
+                                        + "  `b` STRUCT<`b1`: STRUCT<`b11`: INT, `b12`: INT>, `b2`: BIGINT>)\n"
+                                        + "TBLPROPERTIES(\n"
+                                        + "  'path' = '%s')\n"
+                                        + "]]",
+                                new Path(warehousePath, "default.db/nested_table")));
+    }
 }
