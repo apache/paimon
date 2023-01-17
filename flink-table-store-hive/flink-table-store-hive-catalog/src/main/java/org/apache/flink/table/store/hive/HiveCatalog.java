@@ -275,16 +275,16 @@ public class HiveCatalog extends AbstractCatalog {
         return hiveConf.get(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
     }
 
-    private void checkIdentifierUpperCase(Identifier Identifier) {
+    private void checkIdentifierUpperCase(Identifier identifier) {
         checkState(
-                Identifier.getDatabaseName().equals(Identifier.getDatabaseName().toLowerCase()),
+                identifier.getDatabaseName().equals(identifier.getDatabaseName().toLowerCase()),
                 String.format(
                         "Database name[%s] cannot contain upper case",
-                        Identifier.getDatabaseName()));
+                        identifier.getDatabaseName()));
         checkState(
-                Identifier.getObjectName().equals(Identifier.getObjectName().toLowerCase()),
+                identifier.getObjectName().equals(identifier.getObjectName().toLowerCase()),
                 String.format(
-                        "Table name[%s] cannot contain upper case", Identifier.getObjectName()));
+                        "Table name[%s] cannot contain upper case", identifier.getObjectName()));
     }
 
     private void checkFieldNamesUpperCase(List<String> fieldNames) {
