@@ -42,7 +42,7 @@ class SortCodeGenerator(val input: RowType, val sortSpec: SortSpec) {
   /** Chunks for long, int, short, byte */
   private val POSSIBLE_CHUNK_SIZES = Array(8, 4, 2, 1)
 
-  /** For get${operator} set${operator} of [[org.apache.flink.core.memory.MemorySegment]] */
+  /** For get${operator} set${operator} of MemorySegment. */
   private val BYTE_OPERATOR_MAPPING = Map(8 -> "Long", 4 -> "Int", 2 -> "Short", 1 -> "")
 
   /** For primitive define */

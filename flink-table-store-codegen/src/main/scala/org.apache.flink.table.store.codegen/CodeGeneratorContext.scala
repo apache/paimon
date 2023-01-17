@@ -20,7 +20,7 @@ package org.apache.flink.table.store.codegen
 import org.apache.flink.table.store.codegen.GenerateUtils.{newName, newNames}
 import org.apache.flink.table.store.data.InternalSerializers
 import org.apache.flink.table.store.types.DataType
-import org.apache.flink.util.InstantiationUtil
+import org.apache.flink.table.store.utils.InstantiationUtil
 
 import scala.collection.mutable
 

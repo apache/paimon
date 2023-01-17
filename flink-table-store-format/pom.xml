@@ -44,18 +44,9 @@ under the License.
             <scope>provided</scope>
         </dependency>
 
-        <!-- flink dependencies -->
-
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-common</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>${flink.table.runtime}</artifactId>
+            <artifactId>flink-core</artifactId>
             <version>${flink.version}</version>
             <scope>provided</scope>
         </dependency>

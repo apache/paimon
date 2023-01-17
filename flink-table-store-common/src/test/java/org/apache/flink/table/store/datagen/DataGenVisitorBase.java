@@ -20,7 +20,6 @@ package org.apache.flink.table.store.datagen;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypeDefaultVisitor;
 import org.apache.flink.table.store.types.DateType;
@@ -59,7 +58,7 @@ public abstract class DataGenVisitorBase extends DataTypeDefaultVisitor<DataGene
 
     @Override
     protected DataGeneratorContainer defaultMethod(DataType dataType) {
-        throw new ValidationException("Unsupported type: " + dataType);
+        throw new RuntimeException("Unsupported type: " + dataType);
     }
 
     private interface SerializableSupplier<T> extends Supplier<T>, Serializable {}

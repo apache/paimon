@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.BigIntType;
@@ -195,7 +194,7 @@ public class DataTypeJsonParserTest {
     void testErrorMessage(TestSpec testSpec) {
         if (testSpec.expectedErrorMessage != null) {
             assertThatThrownBy(() -> parse(testSpec.jsonString))
-                    .isInstanceOf(ValidationException.class)
+                    .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining(testSpec.expectedErrorMessage);
         }
     }

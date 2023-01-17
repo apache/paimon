@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.types;
 
-import org.apache.flink.table.api.ValidationException;
-
 import java.util.Objects;
 
 /** Data type of a decimal number with fixed precision and scale. */
@@ -46,13 +44,13 @@ public class DecimalType extends DataType {
     public DecimalType(boolean isNullable, int precision, int scale) {
         super(isNullable, DataTypeRoot.DECIMAL);
         if (precision < MIN_PRECISION || precision > MAX_PRECISION) {
-            throw new ValidationException(
+            throw new IllegalArgumentException(
                     String.format(
                             "Decimal precision must be between %d and %d (both inclusive).",
                             MIN_PRECISION, MAX_PRECISION));
         }
         if (scale < MIN_SCALE || scale > precision) {
-            throw new ValidationException(
+            throw new IllegalArgumentException(
                     String.format(
                             "Decimal scale must be between %d and the precision %d (both inclusive).",
                             MIN_SCALE, precision));

@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.types.Row;
@@ -43,7 +42,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                                 batchSql(
                                         "CREATE TABLE pk_table (id INT PRIMARY KEY NOT ENFORCED, data STRING) "
                                                 + "WITH ('write-mode'='append-only')"))
-                .hasRootCauseInstanceOf(TableException.class)
+                .hasRootCauseInstanceOf(RuntimeException.class)
                 .hasRootCauseMessage(
                         "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if still "
                                 + "want to keep the primary key definition.");

@@ -26,8 +26,8 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.Objects;
 
-import static org.apache.flink.table.utils.EncodingUtils.escapeIdentifier;
-import static org.apache.flink.table.utils.EncodingUtils.escapeSingleQuotes;
+import static org.apache.flink.table.store.utils.EncodingUtils.escapeIdentifier;
+import static org.apache.flink.table.store.utils.EncodingUtils.escapeSingleQuotes;
 
 /** Defines the field of a row type. */
 public final class DataField implements Serializable {

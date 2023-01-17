@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.types;
 
-import org.apache.flink.table.api.ValidationException;
-
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import javax.annotation.Nullable;
@@ -360,15 +358,15 @@ public final class DataTypeJsonParser {
             return tokens.get(lastValidToken).cursorPosition + 1;
         }
 
-        private ValidationException parsingError(String cause, @Nullable Throwable t) {
-            return new ValidationException(
+        private IllegalArgumentException parsingError(String cause, @Nullable Throwable t) {
+            return new IllegalArgumentException(
                     String.format(
                             "Could not parse type at position %d: %s\n Input type string: %s",
                             lastCursor(), cause, inputString),
                     t);
         }
 
-        private ValidationException parsingError(String cause) {
+        private IllegalArgumentException parsingError(String cause) {
             return parsingError(cause, null);
         }
 

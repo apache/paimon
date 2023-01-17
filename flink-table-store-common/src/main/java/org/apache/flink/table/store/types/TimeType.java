@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.types;
 
-import org.apache.flink.table.api.ValidationException;
-
 import java.util.Objects;
 
 /**
@@ -49,7 +47,7 @@ public final class TimeType extends DataType {
     public TimeType(boolean isNullable, int precision) {
         super(isNullable, DataTypeRoot.TIME_WITHOUT_TIME_ZONE);
         if (precision < MIN_PRECISION || precision > MAX_PRECISION) {
-            throw new ValidationException(
+            throw new IllegalArgumentException(
                     String.format(
                             "Time precision must be between %d and %d (both inclusive).",
                             MIN_PRECISION, MAX_PRECISION));

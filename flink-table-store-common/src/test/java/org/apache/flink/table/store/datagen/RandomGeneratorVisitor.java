@@ -22,7 +22,6 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.GenericArray;
@@ -318,7 +317,7 @@ public class RandomGeneratorVisitor extends DataGenVisitorBase {
 
     @Override
     protected DataGeneratorContainer defaultMethod(DataType dataType) {
-        throw new ValidationException("Unsupported type: " + dataType);
+        throw new RuntimeException("Unsupported type: " + dataType);
     }
 
     private static RandomGenerator<BinaryString> getRandomStringGenerator(int length) {

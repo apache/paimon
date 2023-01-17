@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.store.types.DataType;
 
 import java.io.Serializable;
@@ -64,7 +63,7 @@ public abstract class FieldAggregator implements Serializable {
                     fieldAggregator = new FieldBoolAndAgg(fieldType);
                     break;
                 default:
-                    throw new ValidationException(
+                    throw new RuntimeException(
                             "Use unsupported aggregation or spell aggregate function incorrectly!");
             }
         }

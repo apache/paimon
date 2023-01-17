@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.table.source.snapshot;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -191,7 +190,7 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
         if (schema.primaryKeys().size() > 0
                 && mergeEngineDesc.containsKey(mergeEngine)
                 && options.changelogProducer() != FULL_COMPACTION) {
-            throw new ValidationException(
+            throw new RuntimeException(
                     mergeEngineDesc.get(mergeEngine)
                             + " continuous reading is not supported. "
                             + "You can use full compaction changelog producer to support streaming reading.");
