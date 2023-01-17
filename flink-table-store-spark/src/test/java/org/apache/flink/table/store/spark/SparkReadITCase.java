@@ -504,6 +504,6 @@ public class SparkReadITCase extends SparkReadTestBase {
                                         + "TBLPROPERTIES(\n"
                                         + "  'path' = '%s')\n"
                                         + "]]",
-                                new Path(warehousePath, "default.db/nested_table").toString()));
+                                new Path(warehousePath, "default.db/nested_table")));
     }
 }
