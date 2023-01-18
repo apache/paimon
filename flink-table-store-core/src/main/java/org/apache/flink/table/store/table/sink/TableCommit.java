@@ -39,7 +39,7 @@ public class TableCommit implements AutoCloseable {
     private final FileStoreCommit commit;
     @Nullable private final FileStoreExpire expire;
 
-    @Nullable private Map<String, String> overwritePartition = null;
+    @Nullable private List<Map<String, String>> overwritePartitions = null;
     @Nullable private Lock lock;
 
     public TableCommit(FileStoreCommit commit, @Nullable FileStoreExpire expire) {
@@ -48,7 +48,15 @@ public class TableCommit implements AutoCloseable {
     }
 
     public TableCommit withOverwritePartition(@Nullable Map<String, String> overwritePartition) {
-        this.overwritePartition = overwritePartition;
+        if (overwritePartition != null) {
+            this.overwritePartitions = Collections.singletonList(overwritePartition);
+        }
+        return this;
+    }
+
+    public TableCommit withOverwritePartitions(
+            @Nullable List<Map<String, String>> overwritePartitions) {
+        this.overwritePartitions = overwritePartitions;
         return this;
     }
 
@@ -81,7 +89,7 @@ public class TableCommit implements AutoCloseable {
     }
 
     public void commit(List<ManifestCommittable> committables) {
-        if (overwritePartition == null) {
+        if (overwritePartitions == null) {
             for (ManifestCommittable committable : committables) {
                 commit.commit(committable, new HashMap<>());
             }
@@ -99,7 +107,7 @@ public class TableCommit implements AutoCloseable {
                 // TODO maybe it can be produced by CommitterOperator
                 committable = new ManifestCommittable(Long.MAX_VALUE);
             }
-            commit.overwrite(overwritePartition, committable, new HashMap<>());
+            commit.overwrite(overwritePartitions, committable, new HashMap<>());
         }
 
         if (expire != null) {

@@ -157,29 +157,23 @@ INSERT OVERWRITE MyTable SELECT * FROM MyTable WHERE false
 
 {{< /tabs >}}
 
-## Purging a Partition
+## Purging Partitions
 
-Particularly, you can use `INSERT OVERWRITE` to purge data of a partition by inserting empty value to the partition:
+Currently, Table Store supports two ways to purge partitions.
 
-{{< tabs "purge-partition-syntax" >}}
+1. Like purging tables, you can use `INSERT OVERWRITE` to purge data of partitions by inserting empty value to them.
+
+2. Method #1 dose not support to drop multiple partitions. In case that you need to drop multiple partitions, you can submit the drop-partition job through `flink run`.
+
+{{< tabs "purge-partitions-syntax" >}}
 
 {{< tab "Flink" >}}
 
 ```sql
+-- Syntax
 INSERT OVERWRITE MyTable PARTITION (key1 = value1, key2 = value2, ...) SELECT selectSpec FROM MyTable WHERE false
-```
 
-{{< /tab >}}
-
-{{< /tabs >}}
-
-The following SQL is an example:
-
-{{< tabs "purge-partition-example" >}}
-
-{{< tab "Flink" >}}
-
-```sql
+-- The following SQL is an example:
 -- table definition
 CREATE TABLE MyTable (
     k0 INT,
@@ -192,6 +186,36 @@ INSERT OVERWRITE MyTable PARTITION (k0 = 0) SELECT k1, v FROM MyTable WHERE fals
 
 -- or
 INSERT OVERWRITE MyTable PARTITION (k0 = 0, k1 = 0) SELECT v FROM MyTable WHERE false
+```
+
+{{< /tab >}}
+
+{{< tab "Flink Job" >}}
+
+Run the following command to submit a drop-partition job for the table.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    -c org.apache.flink.table.store.connector.action.FlinkActions \
+    /path/to/flink-table-store-dist-{{< version >}}.jar \
+    drop-partition \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name>
+    --partition <partition_spec>
+    [--partition <partition_spec> ...]
+
+partition_spec:
+key1=value1,key2=value2...
+```
+
+For more information of drop-partition, see
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    -c org.apache.flink.table.store.connector.action.FlinkActions \
+    /path/to/flink-table-store-dist-{{< version >}}.jar \
+    drop-partition --help
 ```
 
 {{< /tab >}}

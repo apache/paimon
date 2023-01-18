@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.format.avro;
 
-import org.apache.flink.api.java.typeutils.RowTypeInfo;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypeRoot;
@@ -36,11 +35,7 @@ import org.apache.avro.SchemaBuilder;
 
 import java.util.List;
 
-/**
- * Converts an Avro schema into Flink's type information. It uses {@link RowTypeInfo} for
- * representing objects and converts Avro types into types that are compatible with Flink's Table &
- * SQL API.
- */
+/** Converts an Avro schema into Flink's type information. */
 public class AvroSchemaConverter {
 
     private AvroSchemaConverter() {

@@ -18,9 +18,6 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 
 import org.apache.spark.sql.AnalysisException;
@@ -29,6 +26,7 @@ import org.apache.spark.sql.Row;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -42,12 +40,16 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     public void testSetAndRemoveOption() {
         spark.sql("ALTER TABLE tablestore.default.t1 SET TBLPROPERTIES('xyc' 'unknown1')");
 
-        Map<String, String> options = schema1().options();
+        Map<String, String> options =
+                rowsToMap(
+                        spark.sql("SELECT * FROM tablestore.default.`t1$options`").collectAsList());
         assertThat(options).containsEntry("xyc", "unknown1");
 
         spark.sql("ALTER TABLE tablestore.default.t1 UNSET TBLPROPERTIES('xyc')");
 
-        options = schema1().options();
+        options =
+                rowsToMap(
+                        spark.sql("SELECT * FROM tablestore.default.`t1$options`").collectAsList());
         assertThat(options).doesNotContainKey("xyc");
 
         assertThatThrownBy(
@@ -58,13 +60,17 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                 .hasMessageContaining("Alter primary key is not supported");
     }
 
+    private Map<String, String> rowsToMap(List<Row> rows) {
+        Map<String, String> map = new HashMap<>();
+        rows.forEach(r -> map.put(r.getString(0), r.getString(1)));
+
+        return map;
+    }
+
     @Test
-    public void testAddColumn() throws Exception {
-        Path tablePath = new Path(warehousePath, "default.db/testAddColumn");
-        SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
-        testHelper1.write(GenericRow.of(1, 2L, BinaryString.fromString("1")));
-        testHelper1.write(GenericRow.of(5, 6L, BinaryString.fromString("3")));
-        testHelper1.commit();
+    public void testAddColumn() {
+        createTable("testAddColumn");
+        writeTable("testAddColumn", "(1, 2L, '1')", "(5, 6L, '3')");
 
         spark.sql("ALTER TABLE tablestore.default.testAddColumn ADD COLUMN d STRING");
 
@@ -80,9 +86,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testAddNotNullColumn() throws Exception {
-        Path tablePath = new Path(warehousePath, "default.db/testAddNotNullColumn");
-        createTestHelper(tablePath);
+    public void testAddNotNullColumn() {
+        createTable("testAddNotNullColumn");
 
         List<Row> beforeAdd =
                 spark.sql("SHOW CREATE TABLE tablestore.default.testAddNotNullColumn")
@@ -106,12 +111,9 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testRenameColumn() throws Exception {
-        Path tablePath = new Path(warehousePath, "default.db/testRenameColumn");
-        SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
-        testHelper1.write(GenericRow.of(1, 2L, BinaryString.fromString("1")));
-        testHelper1.write(GenericRow.of(5, 6L, BinaryString.fromString("3")));
-        testHelper1.commit();
+    public void testRenameColumn() {
+        createTable("testRenameColumn");
+        writeTable("testRenameColumn", "(1, 2L, '1')", "(5, 6L, '3')");
 
         List<Row> beforeRename =
                 spark.sql("SHOW CREATE TABLE tablestore.default.testRenameColumn").collectAsList();
@@ -189,11 +191,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @Test
     public void testDropSingleColumn() throws Exception {
-        Path tablePath = new Path(warehousePath, "default.db/testDropSingleColumn");
-        SimpleTableTestHelper testHelper = createTestHelper(tablePath);
-        testHelper.write(GenericRow.of(1, 2L, BinaryString.fromString("1")));
-        testHelper.write(GenericRow.of(5, 6L, BinaryString.fromString("3")));
-        testHelper.commit();
+        createTable("testDropSingleColumn");
+        writeTable("testDropSingleColumn", "(1, 2L, '1')", "(5, 6L, '3')");
 
         List<Row> beforeDrop =
                 spark.sql("SHOW CREATE TABLE tablestore.default.testDropSingleColumn")
@@ -227,8 +226,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @Test
     public void testDropColumns() throws Exception {
-        Path tablePath = new Path(warehousePath, "default.db/testDropColumns");
-        createTestHelper(tablePath);
+        createTable("testDropColumns");
 
         List<Row> beforeRename =
                 spark.sql("SHOW CREATE TABLE tablestore.default.testDropColumns").collectAsList();
@@ -343,11 +341,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     @Disabled
     @Test
     public void testAlterColumnType() throws Exception {
-        Path tablePath = new Path(warehousePath, "default.db/testAlterColumnType");
-        SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
-        testHelper1.write(GenericRow.of(1, 2L, BinaryString.fromString("1")));
-        testHelper1.write(GenericRow.of(5, 6L, BinaryString.fromString("3")));
-        testHelper1.commit();
+        createTable("testAlterColumnType");
+        writeTable("testAlterColumnType", "(1, 2L, '1')", "(5, 6L, '3')");
 
         spark.sql("ALTER TABLE tablestore.default.testAlterColumnType ALTER COLUMN a TYPE BIGINT");
         innerTestSimpleType(spark.table("tablestore.default.testAlterColumnType"));
@@ -403,6 +398,12 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @Test
     public void testAlterTableColumnComment() {
+        createTable("testAlterTableColumnComment");
+        Row row =
+                spark.sql("SHOW CREATE TABLE tablestore.default.`testAlterTableColumnComment`")
+                        .collectAsList()
+                        .get(0);
+        System.out.println(row);
         assertThat(getField(schema1(), 0).description()).isNull();
 
         spark.sql("ALTER TABLE tablestore.default.t1 ALTER COLUMN a COMMENT 'a new comment'");
@@ -455,11 +456,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     @Test
     public void testSchemaEvolution() throws Exception {
         // Create table with fields [a, b, c] and insert 2 records
-        Path tablePath = new Path(warehousePath, "default.db/testSchemaEvolution");
-        SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
-        testHelper1.write(GenericRow.of(1, 2L, BinaryString.fromString("3")));
-        testHelper1.write(GenericRow.of(4, 5L, BinaryString.fromString("6")));
-        testHelper1.commit();
+        createTable("testSchemaEvolution");
+        writeTable("testSchemaEvolution", "(1, 2L, '3')", "(4, 5L, '6')");
         assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
                 .isEqualTo("[[1,2,3], [4,5,6]]");
         assertThat(
@@ -479,10 +477,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution RENAME COLUMN a to aa");
         spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution RENAME COLUMN c to a");
         spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution RENAME COLUMN b to c");
-        SimpleTableTestHelper testHelper2 = createTestHelperWithoutDDL(tablePath);
-        testHelper2.write(GenericRow.of(7, 8L, BinaryString.fromString("9")));
-        testHelper2.write(GenericRow.of(10, 11L, BinaryString.fromString("12")));
-        testHelper2.commit();
+        writeTable("testSchemaEvolution", "(7, 8L, '9')", "(10, 11L, '12')");
         assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
                 .isEqualTo("[[1,2,3], [4,5,6], [7,8,9], [10,11,12]]");
         assertThat(
@@ -501,10 +496,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
         // Drop fields "aa", "c" and the fields are [a], insert 2 records
         spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution DROP COLUMNS aa, c");
-        SimpleTableTestHelper testHelper3 = createTestHelperWithoutDDL(tablePath);
-        testHelper3.write(GenericRow.of(BinaryString.fromString("13")));
-        testHelper3.write(GenericRow.of(BinaryString.fromString("14")));
-        testHelper3.commit();
+        writeTable("testSchemaEvolution", "('13')", "('14')");
         assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
                 .isEqualTo("[[3], [6], [9], [12], [13], [14]]");
         assertThat(
@@ -518,10 +510,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         // Add new fields "d", "c", "b" and the fields are [a, d, c, b], insert 2 records
         spark.sql(
                 "ALTER TABLE tablestore.default.testSchemaEvolution ADD COLUMNS (d INT, c INT, b INT)");
-        SimpleTableTestHelper testHelper4 = createTestHelperWithoutDDL(tablePath);
-        testHelper4.write(GenericRow.of(BinaryString.fromString("15"), 16, 17, 18));
-        testHelper4.write(GenericRow.of(BinaryString.fromString("19"), 20, 21, 22));
-        testHelper4.commit();
+        writeTable("testSchemaEvolution", "('15', 16, 17, 18)", "('19', 20, 21, 22)");
         assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
                 .isEqualTo(
                         "[[3,null,null,null], "

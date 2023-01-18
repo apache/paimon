@@ -24,7 +24,6 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
@@ -1107,7 +1106,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 .containsExactlyInAnyOrder(changelogRow("+I", "US Dollar", 102L, "2022-06-20"));
         assertThatThrownBy(() -> insertInto(table, "('US Dollar', 102, '2022-06-20')"))
                 .rootCause()
-                .isInstanceOf(TableException.class)
+                .isInstanceOf(RuntimeException.class)
                 .hasMessage(
                         String.format(
                                 "Try to write partition {dt=2022-06-20} with a new bucket num %d, but the previous bucket num is 2. "

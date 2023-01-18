@@ -45,6 +45,7 @@ import org.apache.flink.table.descriptors.Schema;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.store.file.catalog.Catalog;
+import org.apache.flink.table.store.file.catalog.Identifier;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -159,9 +160,9 @@ public class FlinkCatalog extends AbstractCatalog {
             throws TableNotExistException, CatalogException {
         Table table;
         try {
-            table = catalog.getTable(tablePath);
+            table = catalog.getTable(toIdentifier(tablePath));
         } catch (Catalog.TableNotExistException e) {
-            throw new TableNotExistException(getName(), e.tablePath());
+            throw new TableNotExistException(getName(), tablePath);
         }
 
         if (table instanceof FileStoreTable) {
@@ -170,7 +171,7 @@ public class FlinkCatalog extends AbstractCatalog {
             // add path to source and sink
             catalogTable
                     .getOptions()
-                    .put(PATH.key(), catalog.getTableLocation(tablePath).toString());
+                    .put(PATH.key(), catalog.getTableLocation(toIdentifier(tablePath)).toString());
             return catalogTable;
         } else {
             return new SystemCatalogTable(table);
@@ -179,16 +180,16 @@ public class FlinkCatalog extends AbstractCatalog {
 
     @Override
     public boolean tableExists(ObjectPath tablePath) throws CatalogException {
-        return catalog.tableExists(tablePath);
+        return catalog.tableExists(toIdentifier(tablePath));
     }
 
     @Override
     public void dropTable(ObjectPath tablePath, boolean ignoreIfNotExists)
             throws TableNotExistException, CatalogException {
         try {
-            catalog.dropTable(tablePath, ignoreIfNotExists);
+            catalog.dropTable(toIdentifier(tablePath), ignoreIfNotExists);
         } catch (Catalog.TableNotExistException e) {
-            throw new TableNotExistException(getName(), e.tablePath());
+            throw new TableNotExistException(getName(), tablePath);
         }
     }
 
@@ -217,9 +218,11 @@ public class FlinkCatalog extends AbstractCatalog {
 
         try {
             catalog.createTable(
-                    tablePath, FlinkCatalog.fromCatalogTable(catalogTable), ignoreIfExists);
+                    toIdentifier(tablePath),
+                    FlinkCatalog.fromCatalogTable(catalogTable),
+                    ignoreIfExists);
         } catch (Catalog.TableAlreadyExistException e) {
-            throw new TableAlreadyExistException(getName(), e.tablePath());
+            throw new TableAlreadyExistException(getName(), tablePath);
         } catch (Catalog.DatabaseNotExistException e) {
             throw new DatabaseNotExistException(getName(), e.database());
         }
@@ -265,9 +268,9 @@ public class FlinkCatalog extends AbstractCatalog {
                         });
 
         try {
-            catalog.alterTable(tablePath, changes, ignoreIfNotExists);
+            catalog.alterTable(toIdentifier(tablePath), changes, ignoreIfNotExists);
         } catch (Catalog.TableNotExistException e) {
-            throw new TableNotExistException(getName(), e.tablePath());
+            throw new TableNotExistException(getName(), tablePath);
         }
     }
 
@@ -370,6 +373,10 @@ public class FlinkCatalog extends AbstractCatalog {
                 primaryKeys,
                 options,
                 catalogTable.getComment());
+    }
+
+    public static Identifier toIdentifier(ObjectPath path) {
+        return new Identifier(path.getDatabaseName(), path.getObjectName());
     }
 
     // --------------------- unsupported methods ----------------------------
