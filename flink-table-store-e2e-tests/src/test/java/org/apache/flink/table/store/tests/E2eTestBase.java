@@ -113,6 +113,7 @@ public abstract class E2eTestBase {
             for (String s : hiveServices) {
                 environment.withLogConsumer(s + "_1", new Slf4jLogConsumer(LOG));
             }
+            // Increase timeout from 60s (default value) to 180s
             environment.waitingFor(
                     "hive-server_1",
                     Wait.forLogMessage(".*Starting HiveServer2.*", 1)
