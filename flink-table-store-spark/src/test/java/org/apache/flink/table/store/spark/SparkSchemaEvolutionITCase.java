@@ -110,6 +110,22 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testRenameTable() {
+        // TODO: add test case for hive catalog table
+        spark.sql("USE tablestore");
+        spark.sql(
+                "CREATE TABLE testRenameTable (\n"
+                        + "a BIGINT,\n"
+                        + "b STRING) USING tablestore\n"
+                        + "COMMENT 'table comment'\n"
+                        + "PARTITIONED BY (a)\n");
+        assertThatThrownBy(
+                        () -> spark.sql("ALTER TABLE testRenameTable RENAME TO testRenameTable1"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Cannot rename FileSystem catalog tables");
+    }
+
+    @Test
     public void testRenameColumn() {
         createTable("testRenameColumn");
         writeTable("testRenameColumn", "(1, 2L, '1')", "(5, 6L, '3')");

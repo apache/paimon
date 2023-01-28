@@ -160,6 +160,11 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
+    public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists) {
+        throw new UnsupportedOperationException("Cannot rename FileSystem catalog tables");
+    }
+
+    @Override
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException {
