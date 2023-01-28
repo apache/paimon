@@ -442,17 +442,17 @@ public abstract class SchemaEvolutionTableTestBase {
     }
 
     protected List<String> getResult(
-            TableRead read, List<Split> splits, Function<RowData, String> rowDataToString) {
+            TableRead read, List<Split> splits, Function<InternalRow, String> rowDataToString) {
         try {
-            List<ConcatRecordReader.ReaderSupplier<RowData>> readers = new ArrayList<>();
+            List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
             for (Split split : splits) {
                 readers.add(() -> read.createReader(split));
             }
-            RecordReader<RowData> recordReader = ConcatRecordReader.create(readers);
-            RecordReaderIterator<RowData> iterator = new RecordReaderIterator<>(recordReader);
+            RecordReader<InternalRow> recordReader = ConcatRecordReader.create(readers);
+            RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(recordReader);
             List<String> result = new ArrayList<>();
             while (iterator.hasNext()) {
-                RowData rowData = iterator.next();
+                InternalRow rowData = iterator.next();
                 result.add(rowDataToString.apply(rowData));
             }
             iterator.close();
@@ -463,13 +463,13 @@ public abstract class SchemaEvolutionTableTestBase {
     }
 
     protected List<String> getResult(
-            TableRead read, List<Split> splits, List<RowData.FieldGetter> fieldGetterList) {
+            TableRead read, List<Split> splits, List<InternalRow.FieldGetter> fieldGetterList) {
         return getResult(
                 read,
                 splits,
                 row -> {
                     List<String> stringResultList = new ArrayList<>(fieldGetterList.size());
-                    for (RowData.FieldGetter getter : fieldGetterList) {
+                    for (InternalRow.FieldGetter getter : fieldGetterList) {
                         Object result = getter.getFieldOrNull(row);
                         stringResultList.add(
                                 result == null

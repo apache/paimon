@@ -60,7 +60,7 @@ public class LeafPredicate implements Predicate {
 
     public LeafPredicate(
             LeafFunction function,
-            LogicalType type,
+            DataType type,
             int fieldIndex,
             String fieldName,
             List<Object> literals,

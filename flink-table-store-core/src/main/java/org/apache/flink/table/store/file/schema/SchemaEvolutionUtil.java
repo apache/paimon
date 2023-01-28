@@ -35,7 +35,6 @@ import org.apache.flink.table.store.types.MultisetType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.ProjectedRow;
 import org.apache.flink.table.store.utils.RowDataUtils;
-import org.apache.flink.table.types.logical.LogicalType;
 
 import javax.annotation.Nullable;
 
@@ -295,14 +294,13 @@ public class SchemaEvolutionUtil {
                     }
 
                     DataType dataValueType = dataField.type().copy(true);
-                    LogicalType predicateType = predicate.type().copy(true);
+                    DataType predicateType = predicate.type().copy(true);
                     CastExecutor<Object, Object> castExecutor =
                             dataValueType.equals(predicateType)
                                     ? null
                                     : (CastExecutor<Object, Object>)
                                             CastExecutors.resolve(
-                                                    toLogicalType(dataField.type()),
-                                                    predicate.type());
+                                                    dataField.type(), predicate.type());
                     return Optional.of(
                             new LeafPredicate(
                                     predicate.function(),
@@ -421,8 +419,7 @@ public class SchemaEvolutionUtil {
                     // data
                     converterMapping[i] =
                             new FieldGetterCastExecutor(
-                                    RowDataUtils.createNullCheckingFieldGetter(
-                                            toLogicalType(dataField.type()), i),
+                                    RowDataUtils.createNullCheckingFieldGetter(dataField.type(), i),
                                     CastExecutors.identityCastExecutor());
                 } else {
                     // TODO support column type evolution in nested type
@@ -436,12 +433,10 @@ public class SchemaEvolutionUtil {
                     // data
                     converterMapping[i] =
                             new FieldGetterCastExecutor(
-                                    RowDataUtils.createNullCheckingFieldGetter(
-                                            toLogicalType(dataField.type()), i),
+                                    RowDataUtils.createNullCheckingFieldGetter(dataField.type(), i),
                                     checkNotNull(
                                             CastExecutors.resolve(
-                                                    toLogicalType(dataField.type()),
-                                                    toLogicalType(tableField.type()))));
+                                                    dataField.type(), tableField.type())));
                     castExist = true;
                 }
             }

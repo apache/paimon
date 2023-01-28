@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -32,16 +32,15 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.types.LogicalTypeConversion.toLogicalType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base test class of file data for column type evolution. */
 public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTestBase {
-    protected static List<RowData.FieldGetter> getFieldGetterList(FileStoreTable table) {
+    protected static List<InternalRow.FieldGetter> getFieldGetterList(FileStoreTable table) {
         return Arrays.asList(
                 RowDataUtils.createFieldGetters(
                         table.schema().fields().stream()
-                                .map(f -> toLogicalType(f.type()))
+                                .map(f -> f.type())
                                 .collect(Collectors.toList())));
     }
 
@@ -57,7 +56,7 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     DataTableScan.DataFilePlan plan = table.newScan().plan();
-                    List<RowData.FieldGetter> fieldGetterList = getFieldGetterList(table);
+                    List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     // scan all data with original column type
                     assertThat(getResult(table.newRead(), plan.splits(), fieldGetterList))
                             .containsExactlyInAnyOrder(
@@ -69,7 +68,7 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     DataTableScan.DataFilePlan plan = table.newScan().plan();
-                    List<RowData.FieldGetter> fieldGetterList = getFieldGetterList(table);
+                    List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     assertThat(getResult(table.newRead(), plan.splits(), fieldGetterList))
                             .containsExactlyInAnyOrder(
                                     "2|200|201|202.0|203|204.00|205.0|206.0|207.00|208|209|210",
@@ -104,7 +103,7 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(6, 200L, 500L);
                     DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
-                    List<RowData.FieldGetter> fieldGetterList = getFieldGetterList(table);
+                    List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     assertThat(getResult(table.newRead(), plan.splits(), fieldGetterList))
                             .containsExactlyInAnyOrder(
                                     "2|200|201|202.00|203|204|205|206.0|207.0|208|1970-07-29T00:00|210",
@@ -128,7 +127,7 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
                                             new PredicateBuilder(table.schema().logicalRowType())
                                                     .between(6, 200F, 500F))
                                     .plan();
-                    List<RowData.FieldGetter> fieldGetterList = getFieldGetterList(table);
+                    List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     assertThat(getResult(table.newRead(), plan.splits(), fieldGetterList))
                             .containsExactlyInAnyOrder(
                                     "2|200|201|202.0|203|204.00|205.0|206.0|207.00|208|209|210",
@@ -150,7 +149,7 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(4, (short) 200, (short) 500);
                     DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
-                    List<RowData.FieldGetter> fieldGetterList = getFieldGetterList(table);
+                    List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     assertThat(getResult(table.newRead(), plan.splits(), fieldGetterList))
                             .containsExactlyInAnyOrder(
                                     "2|200|201|202.00|203|204|205|206.0|207.0|208|1970-07-29T00:00|210",
@@ -168,7 +167,7 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
                                             new PredicateBuilder(table.schema().logicalRowType())
                                                     .between(4, 200, 500))
                                     .plan();
-                    List<RowData.FieldGetter> fieldGetterList = getFieldGetterList(table);
+                    List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     assertThat(getResult(table.newRead(), plan.splits(), fieldGetterList))
                             .containsExactlyInAnyOrder(
                                     "2|200|201|202.0|203|204.00|205.0|206.0|207.00|208|209|210",

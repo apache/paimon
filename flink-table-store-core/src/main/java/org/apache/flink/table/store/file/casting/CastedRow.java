@@ -18,48 +18,47 @@
 
 package org.apache.flink.table.store.file.casting;
 
-import org.apache.flink.table.data.ArrayData;
-import org.apache.flink.table.data.DecimalData;
-import org.apache.flink.table.data.MapData;
-import org.apache.flink.table.data.RawValueData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.data.TimestampData;
-import org.apache.flink.types.RowKind;
+import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.InternalArray;
+import org.apache.flink.table.store.data.InternalMap;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.types.RowKind;
 
 /**
- * An implementation of {@link RowData} which provides a casted view of the underlying {@link
- * RowData}.
+ * An implementation of {@link InternalRow} which provides a casted view of the underlying {@link
+ * InternalRow}.
  *
- * <p>It reads data from underlying {@link RowData} according to source logical type and casts it
- * with specific {@link CastExecutor}.
+ * <p>It reads data from underlying {@link InternalRow} according to source logical type and casts
+ * it with specific {@link CastExecutor}.
  *
  * <p>Note: This class supports only top-level castings, not nested castings.
  */
-public class CastedRowData implements RowData {
+public class CastedRow implements InternalRow {
 
     private final FieldGetterCastExecutor[] castMapping;
 
-    private RowData row;
+    private InternalRow row;
 
-    protected CastedRowData(FieldGetterCastExecutor[] castMapping) {
+    protected CastedRow(FieldGetterCastExecutor[] castMapping) {
         this.castMapping = castMapping;
     }
 
     /**
-     * Replaces the underlying {@link RowData} backing this {@link CastedRowData}.
+     * Replaces the underlying {@link InternalRow} backing this {@link CastedRow}.
      *
      * <p>This method replaces the row data in place and does not return a new object. This is done
      * for performance reasons.
      */
-    public CastedRowData replaceRow(RowData row) {
+    public CastedRow replaceRow(InternalRow row) {
         this.row = row;
         return this;
     }
 
     @Override
-    public int getArity() {
-        return row.getArity();
+    public int getFieldCount() {
+        return row.getFieldCount();
     }
 
     @Override
@@ -113,27 +112,22 @@ public class CastedRowData implements RowData {
     }
 
     @Override
-    public StringData getString(int pos) {
+    public BinaryString getString(int pos) {
         return castMapping == null ? row.getString(pos) : castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
-    public DecimalData getDecimal(int pos, int precision, int scale) {
+    public Decimal getDecimal(int pos, int precision, int scale) {
         return castMapping == null
                 ? row.getDecimal(pos, precision, scale)
                 : castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
-    public TimestampData getTimestamp(int pos, int precision) {
+    public Timestamp getTimestamp(int pos, int precision) {
         return castMapping == null
                 ? row.getTimestamp(pos, precision)
                 : castMapping[pos].getFieldOrNull(row);
-    }
-
-    @Override
-    public <T> RawValueData<T> getRawValue(int pos) {
-        return castMapping == null ? row.getRawValue(pos) : castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
@@ -142,29 +136,29 @@ public class CastedRowData implements RowData {
     }
 
     @Override
-    public ArrayData getArray(int pos) {
+    public InternalArray getArray(int pos) {
         return castMapping == null ? row.getArray(pos) : castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
-    public MapData getMap(int pos) {
+    public InternalMap getMap(int pos) {
         return castMapping == null ? row.getMap(pos) : castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
-    public RowData getRow(int pos, int numFields) {
+    public InternalRow getRow(int pos, int numFields) {
         return castMapping == null
                 ? row.getRow(pos, numFields)
                 : castMapping[pos].getFieldOrNull(row);
     }
 
     /**
-     * Create an empty {@link CastedRowData} starting from a {@code casting} array.
+     * Create an empty {@link CastedRow} starting from a {@code casting} array.
      *
      * @see FieldGetterCastExecutor
-     * @see CastedRowData
+     * @see CastedRow
      */
-    public static CastedRowData from(FieldGetterCastExecutor[] castMapping) {
-        return new CastedRowData(castMapping);
+    public static CastedRow from(FieldGetterCastExecutor[] castMapping) {
+        return new CastedRow(castMapping);
     }
 }

@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
@@ -57,7 +57,7 @@ public class ChangelogWithKeyColumnTypeFileDataTest extends ColumnTypeFileDataTe
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(6, 200L, 500L);
                     DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
-                    List<RowData.FieldGetter> fieldGetterList = getFieldGetterList(table);
+                    List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     assertThat(getResult(table.newRead(), plan.splits(), fieldGetterList))
                             .containsExactlyInAnyOrder(
                                     "2|200|201|202.00|203|204|205|206.0|207.0|208|1970-07-29T00:00|210",
@@ -78,7 +78,7 @@ public class ChangelogWithKeyColumnTypeFileDataTest extends ColumnTypeFileDataTe
                                             new PredicateBuilder(table.schema().logicalRowType())
                                                     .between(6, 200F, 500F))
                                     .plan();
-                    List<RowData.FieldGetter> fieldGetterList = getFieldGetterList(table);
+                    List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     assertThat(getResult(table.newRead(), plan.splits(), fieldGetterList))
                             .containsExactlyInAnyOrder(
                                     "2|200|201|202.0|203|204.00|205.0|206.0|207.00|208|209|210",

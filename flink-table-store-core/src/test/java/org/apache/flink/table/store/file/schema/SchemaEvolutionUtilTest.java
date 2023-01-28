@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Equal;
 import org.apache.flink.table.store.file.predicate.IsNotNull;
 import org.apache.flink.table.store.file.predicate.IsNull;
@@ -32,6 +32,7 @@ import org.apache.flink.table.store.types.DecimalType;
 import org.apache.flink.table.store.types.DoubleType;
 import org.apache.flink.table.store.types.FloatType;
 import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.utils.ProjectedRow;
 import org.apache.flink.table.store.utils.Projection;
 
 import org.junit.jupiter.api.Test;
@@ -90,7 +91,7 @@ public class SchemaEvolutionUtilTest {
         int[] table2Projection =
                 new int[] {4, 2, 0}; // project (8, b, int), (5, f, bigint), (1, c, double)
 
-        RowData dataValue = GenericRowData.of(1234);
+        InternalRow dataValue = GenericRow.of(1234);
         IndexCastMapping table1DataIndexMapping =
                 SchemaEvolutionUtil.createIndexCastMapping(
                         table1Projection, tableFields1, dataProjection, dataFields);
@@ -98,8 +99,8 @@ public class SchemaEvolutionUtilTest {
 
         // Get (null, 1234L) from data value
         assertThat(table1DataIndexMapping.getCastMapping().length).isEqualTo(2);
-        ProjectedRowData projectedDataRow1 =
-                ProjectedRowData.from(table1DataIndexMapping.getIndexMapping());
+        ProjectedRow projectedDataRow1 =
+                ProjectedRow.from(table1DataIndexMapping.getIndexMapping());
         projectedDataRow1.replaceRow(dataValue);
         Object table1Field1Value =
                 table1DataIndexMapping.getCastMapping()[0].getFieldOrNull(projectedDataRow1);
@@ -115,8 +116,8 @@ public class SchemaEvolutionUtilTest {
 
         // Get (null, null, 1234.0D) from data value
         assertThat(table2DataIndexMapping.getCastMapping().length).isEqualTo(3);
-        ProjectedRowData projectedDataRow2 =
-                ProjectedRowData.from(table2DataIndexMapping.getIndexMapping());
+        ProjectedRow projectedDataRow2 =
+                ProjectedRow.from(table2DataIndexMapping.getIndexMapping());
         projectedDataRow2.replaceRow(dataValue);
         Object table2Field1Value =
                 table2DataIndexMapping.getCastMapping()[0].getFieldOrNull(projectedDataRow2);
@@ -133,9 +134,9 @@ public class SchemaEvolutionUtilTest {
                         table2Projection, tableFields2, table1Projection, tableFields1);
         assertThat(table2Table1IndexMapping.getIndexMapping()).containsExactly(-1, 0, 1);
 
-        RowData table1Data = GenericRowData.of(123, 321L);
-        ProjectedRowData projectedDataRow3 =
-                ProjectedRowData.from(table2Table1IndexMapping.getIndexMapping());
+        InternalRow table1Data = GenericRow.of(123, 321L);
+        ProjectedRow projectedDataRow3 =
+                ProjectedRow.from(table2Table1IndexMapping.getIndexMapping());
         projectedDataRow3.replaceRow(table1Data);
         // Get (null, 123L, 321.0D) from table1 data
         assertThat(table2Table1IndexMapping.getCastMapping().length).isEqualTo(3);
@@ -172,9 +173,9 @@ public class SchemaEvolutionUtilTest {
         assertThat(table1DataIndexMapping.getIndexMapping()).containsExactly(0, 1, 2, 3, -1, 4);
 
         // Get (1, 2, 3, (byte) 4, null, 5L) from data value
-        RowData dataValue = GenericRowData.of(1, 2, 3L, (byte) 4, 5);
-        ProjectedRowData projectedDataValue =
-                ProjectedRowData.from(table1DataIndexMapping.getIndexMapping());
+        InternalRow dataValue = GenericRow.of(1, 2, 3L, (byte) 4, 5);
+        ProjectedRow projectedDataValue =
+                ProjectedRow.from(table1DataIndexMapping.getIndexMapping());
         projectedDataValue.replaceRow(dataValue);
         assertThat(table1DataIndexMapping.getCastMapping().length).isEqualTo(6);
         int table1Field1Value =
@@ -208,9 +209,9 @@ public class SchemaEvolutionUtilTest {
                 .containsExactly(0, 1, 2, 3, -1, 4, 5);
 
         // Get (1, 2, 3, (byte) 4, null, 5L, 6.0D) from data value
-        RowData table1Value = GenericRowData.of(1, 2, 3L, (byte) 4, 5, 6L);
-        ProjectedRowData projectedTableValue =
-                ProjectedRowData.from(table2Table1IndexMapping.getIndexMapping());
+        InternalRow table1Value = GenericRow.of(1, 2, 3L, (byte) 4, 5, 6L);
+        ProjectedRow projectedTableValue =
+                ProjectedRow.from(table2Table1IndexMapping.getIndexMapping());
         projectedTableValue.replaceRow(table1Value);
         assertThat(table2Table1IndexMapping.getCastMapping().length).isEqualTo(7);
         int table2Field1Value =
@@ -294,7 +295,7 @@ public class SchemaEvolutionUtilTest {
         predicates.add(
                 new LeafPredicate(
                         Equal.INSTANCE,
-                        DataTypes.DOUBLE().getLogicalType(),
+                        DataTypes.DOUBLE(),
                         0,
                         "c",
                         Collections.singletonList(1.0D)));

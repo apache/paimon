@@ -18,15 +18,12 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.store.data.InternalRow;
-
 import org.apache.commons.lang3.StringUtils;
 import org.apache.spark.sql.AnalysisException;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -467,20 +464,15 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     @Test
     public void testSchemaEvolution() throws Exception {
         // Create table with fields [a, b, c] and insert 2 records
-        Path tablePath = new Path(warehousePath, "default.db/testSchemaEvolution");
-        SimpleTableTestHelper testHelper1 =
-                createTestHelper(
-                        tablePath,
-                        Arrays.asList(
-                                new RowType.RowField("a", new IntType(false)),
-                                new RowType.RowField("b", new BigIntType(false)),
-                                new RowType.RowField("c", new VarCharType(10)),
-                                new RowType.RowField("d", new IntType(false)),
-                                new RowType.RowField("e", new IntType(false)),
-                                new RowType.RowField("f", new IntType(false))));
-        testHelper1.write(GenericRowData.of(1, 2L, StringData.fromString("3"), 4, 5, 6));
-        testHelper1.write(GenericRowData.of(7, 8L, StringData.fromString("9"), 10, 11, 12));
-        testHelper1.commit();
+        spark.sql(
+                "CREATE TABLE tablestore.default.testSchemaEvolution("
+                        + "a INT NOT NULL, "
+                        + "b BIGINT NOT NULL, "
+                        + "c VARCHAR(10), "
+                        + "d INT NOT NULL, "
+                        + "e INT NOT NULL, "
+                        + "f INT NOT NULL)");
+        writeTable("testSchemaEvolution", "(1, 2L, '3', 4, 5, 6)", "(7, 8L, '9', 10, 11, 12)");
         assertThat(
                         spark.table("tablestore.default.testSchemaEvolution").collectAsList()
                                 .stream()
@@ -511,10 +503,10 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution ALTER COLUMN b TYPE bigint");
         spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution RENAME COLUMN f to ff");
         spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution ALTER COLUMN ff TYPE float");
-        SimpleTableTestHelper testHelper2 = createTestHelperWithoutDDL(tablePath);
-        testHelper2.write(GenericRowData.of(13L, 14L, StringData.fromString("15"), 16L, 17, 18.0F));
-        testHelper2.write(GenericRowData.of(19L, 20L, StringData.fromString("21"), 22L, 23, 24.0F));
-        testHelper2.commit();
+        writeTable(
+                "testSchemaEvolution",
+                "(13L, 14L, '15', 16L, 17, 18.0F)",
+                "(19L, 20L, '21', 22L, 23, 24.0F)");
         assertThat(
                         spark.table("tablestore.default.testSchemaEvolution").collectAsList()
                                 .stream()
@@ -542,10 +534,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         // Drop fields aa, c, e, the fields are [(3, a, string), (4, b, bigint), (6, ff, float)] and
         // insert 2 records
         spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution DROP COLUMNS aa, c, e");
-        SimpleTableTestHelper testHelper3 = createTestHelperWithoutDDL(tablePath);
-        testHelper3.write(GenericRowData.of(StringData.fromString("25"), 26L, 27.0F));
-        testHelper3.write(GenericRowData.of(StringData.fromString("28"), 29L, 30.0F));
-        testHelper3.commit();
+        writeTable("testSchemaEvolution", "('25', 26L, 27.0F)", "('28', 29L, 30.0)");
 
         assertThat(
                         spark.table("tablestore.default.testSchemaEvolution").collectAsList()
@@ -570,10 +559,10 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         // (7, d, int), (8, c, int), (9, e, int)] insert 2 records
         spark.sql(
                 "ALTER TABLE tablestore.default.testSchemaEvolution ADD COLUMNS (d INT, c INT, e INT)");
-        SimpleTableTestHelper testHelper4 = createTestHelperWithoutDDL(tablePath);
-        testHelper4.write(GenericRowData.of(StringData.fromString("31"), 32L, 33.0F, 34, 35, 36));
-        testHelper4.write(GenericRowData.of(StringData.fromString("37"), 38L, 39.0F, 40, 41, 42));
-        testHelper4.commit();
+        writeTable(
+                "testSchemaEvolution",
+                "('31', 32L, 33.0F, 34, 35, 36)",
+                "('37', 38L, 39.0F, 40, 41, 42)");
 
         assertThat(
                         spark.table("tablestore.default.testSchemaEvolution").collectAsList()
