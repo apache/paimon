@@ -42,12 +42,16 @@ public abstract class AbstractFileRecordIterator<V> implements RecordReader.Reco
     }
 
     protected InternalRow mappingRowData(InternalRow rowData) {
-        final InternalRow projection =
-                projectedRow == null
-                        ? rowData
-                        : (rowData == null ? null : projectedRow.replaceRow(rowData));
-        return castedRow == null
-                ? projection
-                : (projection == null ? null : castedRow.replaceRow(projection));
+        if (rowData == null) {
+            return null;
+        }
+        if (projectedRow != null) {
+            rowData = projectedRow.replaceRow(rowData);
+        }
+        if (castedRow != null) {
+            rowData = castedRow.replaceRow(rowData);
+        }
+
+        return rowData;
     }
 }

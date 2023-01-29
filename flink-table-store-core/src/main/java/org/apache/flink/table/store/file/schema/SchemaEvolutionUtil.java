@@ -145,7 +145,19 @@ public class SchemaEvolutionUtil {
         int[] indexMapping = createIndexMapping(tableProjectFields, dataProjectFields);
         FieldGetterCastExecutor[] castMapping =
                 createCastFieldGetterMapping(tableProjectFields, dataProjectFields, indexMapping);
-        return new IndexCastMapping(indexMapping, castMapping);
+        return new IndexCastMapping() {
+            @Nullable
+            @Override
+            public int[] getIndexMapping() {
+                return indexMapping;
+            }
+
+            @Nullable
+            @Override
+            public FieldGetterCastExecutor[] getCastMapping() {
+                return castMapping;
+            }
+        };
     }
 
     private static List<DataField> projectDataFields(int[] projection, List<DataField> dataFields) {
@@ -300,15 +312,22 @@ public class SchemaEvolutionUtil {
                                     ? null
                                     : (CastExecutor<Object, Object>)
                                             CastExecutors.resolve(
-                                                    dataField.type(), predicate.type());
+                                                    predicate.type(), dataField.type());
+                    // Convert value from predicate type to underlying data type which may lose
+                    // information, for example, convert double value to int. But it doesn't matter
+                    // because it just for predicate push down and the data will be filtered
+                    // correctly after reading.
+                    List<Object> literals =
+                            predicate.literals().stream()
+                                    .map(v -> castExecutor == null ? v : castExecutor.cast(v))
+                                    .collect(Collectors.toList());
                     return Optional.of(
                             new LeafPredicate(
                                     predicate.function(),
-                                    predicate.type(),
+                                    dataField.type(),
                                     indexOf(dataField, idToDataFields),
                                     dataField.name(),
-                                    predicate.literals(),
-                                    castExecutor == null ? null : castExecutor::cast));
+                                    literals));
                 };
 
         for (Predicate predicate : filters) {

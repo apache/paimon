@@ -23,23 +23,10 @@ import org.apache.flink.table.store.file.casting.FieldGetterCastExecutor;
 import javax.annotation.Nullable;
 
 /** Class includes index mapping and cast mapping. */
-public class IndexCastMapping {
-    @Nullable private final int[] indexMapping;
-    @Nullable private final FieldGetterCastExecutor[] castMapping;
-
-    public IndexCastMapping(
-            @Nullable int[] indexMapping, @Nullable FieldGetterCastExecutor[] castMapping) {
-        this.indexMapping = indexMapping;
-        this.castMapping = castMapping;
-    }
+public interface IndexCastMapping {
+    @Nullable
+    int[] getIndexMapping();
 
     @Nullable
-    public int[] getIndexMapping() {
-        return indexMapping;
-    }
-
-    @Nullable
-    public FieldGetterCastExecutor[] getCastMapping() {
-        return castMapping;
-    }
+    FieldGetterCastExecutor[] getCastMapping();
 }
