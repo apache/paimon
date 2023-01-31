@@ -279,6 +279,10 @@ public class SparkTypeUtils {
                 return new DoubleType();
             } else if (atomic instanceof org.apache.spark.sql.types.StringType) {
                 return new VarCharType(VarCharType.MAX_LENGTH);
+            } else if (atomic instanceof org.apache.spark.sql.types.VarcharType) {
+                return new VarCharType(((org.apache.spark.sql.types.VarcharType) atomic).length());
+            } else if (atomic instanceof org.apache.spark.sql.types.CharType) {
+                return new CharType(((org.apache.spark.sql.types.CharType) atomic).length());
             } else if (atomic instanceof org.apache.spark.sql.types.DateType) {
                 return new DateType();
             } else if (atomic instanceof org.apache.spark.sql.types.TimestampType) {

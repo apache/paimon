@@ -31,6 +31,7 @@ import org.testcontainers.containers.wait.strategy.Wait;
 
 import java.io.File;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -112,8 +113,11 @@ public abstract class E2eTestBase {
             for (String s : hiveServices) {
                 environment.withLogConsumer(s + "_1", new Slf4jLogConsumer(LOG));
             }
+            // Increase timeout from 60s (default value) to 180s
             environment.waitingFor(
-                    "hive-server_1", Wait.forLogMessage(".*Starting HiveServer2.*", 1));
+                    "hive-server_1",
+                    Wait.forLogMessage(".*Starting HiveServer2.*", 1)
+                            .withStartupTimeout(Duration.ofSeconds(180)));
         }
         if (withSpark) {
             List<String> sparkServices = Arrays.asList("spark-master", "spark-worker");
