@@ -113,6 +113,24 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testCreateTable() {
+        spark.sql(
+                "CREATE TABLE tablestore.default.testCreateTable(\n"
+                        + "a BIGINT,\n"
+                        + "b VARCHAR(10),\n"
+                        + "c CHAR(10))");
+        assertThat(
+                        spark.sql("SELECT fields FROM tablestore.default.`testCreateTable$schemas`")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo(
+                        "[[["
+                                + "{\"id\":0,\"name\":\"a\",\"type\":\"BIGINT\"},"
+                                + "{\"id\":1,\"name\":\"b\",\"type\":\"VARCHAR(10)\"},"
+                                + "{\"id\":2,\"name\":\"c\",\"type\":\"CHAR(10)\"}]]]");
+    }
+
+    @Test
     public void testCreateTableWithNullablePk() {
         spark.sql("USE tablestore");
         spark.sql(
