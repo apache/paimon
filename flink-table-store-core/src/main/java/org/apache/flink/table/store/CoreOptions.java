@@ -98,6 +98,20 @@ public class CoreOptions implements Serializable {
                     .defaultValue("orc")
                     .withDescription("Specify the message format of data files.");
 
+    public static final ConfigOption<String> ORC_BLOOM_FILTER_FORMAT =
+            ConfigOptions.key("orc.bloom.filter.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "A comma-separated list of columns for which to create a bloon filter when writing");
+
+    public static final ConfigOption<Double> ORC_BLOOM_FILTER_FPP =
+            ConfigOptions.key("orc.bloom.filter.fpp")
+                    .doubleType()
+                    .defaultValue(0.05D)
+                    .withDescription(
+                            "Define the default false positive probability for bloom filters");
+
     public static final ConfigOption<String> MANIFEST_FORMAT =
             ConfigOptions.key("manifest.format")
                     .stringType()
