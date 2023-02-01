@@ -541,6 +541,7 @@ under the License.
                                     <include>org.apache.hive.shims:hive-shims-0.23</include>
                                     <include>org.apache.hive:hive-serde</include>
                                     <include>org.apache.hive:hive-metastore</include>
+                                    <include>org.apache.hive:hive-storage-api</include>
                                 </includes>
                             </artifactSet>
                             <relocations>
