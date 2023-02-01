@@ -18,19 +18,18 @@
 
 package org.apache.flink.table.store.format.parquet;
 
-import org.apache.flink.core.fs.FSDataInputStream;
+import org.apache.flink.table.store.fs.SeekableInputStream;
 
 import org.apache.parquet.io.DelegatingSeekableInputStream;
-import org.apache.parquet.io.SeekableInputStream;
 
 import java.io.IOException;
 
 /** A {@link SeekableInputStream} for table store. */
 public class ParquetInputStream extends DelegatingSeekableInputStream {
 
-    private final FSDataInputStream in;
+    private final SeekableInputStream in;
 
-    public ParquetInputStream(FSDataInputStream in) {
+    public ParquetInputStream(SeekableInputStream in) {
         super(in);
         this.in = in;
     }

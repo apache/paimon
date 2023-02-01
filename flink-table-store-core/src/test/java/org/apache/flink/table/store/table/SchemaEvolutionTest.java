@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.DataFormatTestUtil;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
@@ -29,6 +28,8 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderUtils;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -69,7 +70,7 @@ public class SchemaEvolutionTest {
     @BeforeEach
     public void beforeEach() {
         tablePath = new Path(tempDir.toUri());
-        schemaManager = new SchemaManager(tablePath);
+        schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         commitUser = UUID.randomUUID().toString();
     }
 
@@ -84,7 +85,7 @@ public class SchemaEvolutionTest {
                         "");
         schemaManager.commitNewVersion(updateSchema);
 
-        FileStoreTable table = FileStoreTableFactory.create(tablePath);
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
 
         TableWrite write = table.newWrite(commitUser);
         write.write(GenericRow.of(1, 1L));
@@ -94,7 +95,7 @@ public class SchemaEvolutionTest {
 
         schemaManager.commitChanges(
                 Collections.singletonList(SchemaChange.addColumn("f3", new BigIntType())));
-        table = FileStoreTableFactory.create(tablePath);
+        table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
 
         write = table.newWrite(commitUser);
         write.write(GenericRow.of(3, 3L, 3L));

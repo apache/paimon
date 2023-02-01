@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.format.parquet;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FileStatsExtractor;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataTypeRoot;
 import org.apache.flink.table.store.types.DecimalType;
@@ -63,8 +64,8 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
     }
 
     @Override
-    public FieldStats[] extract(Path path) throws IOException {
-        Map<String, Statistics> stats = ParquetUtil.extractColumnStats(path);
+    public FieldStats[] extract(FileIO fileIO, Path path) throws IOException {
+        Map<String, Statistics> stats = ParquetUtil.extractColumnStats(fileIO, path);
 
         return IntStream.range(0, rowType.getFieldCount())
                 .mapToObj(

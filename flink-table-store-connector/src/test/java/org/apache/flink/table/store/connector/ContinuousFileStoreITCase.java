@@ -21,6 +21,7 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.types.Row;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
@@ -133,7 +134,8 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
         iterator.close();
 
-        SnapshotManager snapshotManager = new SnapshotManager(getTableDirectory("T1"));
+        SnapshotManager snapshotManager =
+                new SnapshotManager(LocalFileIO.create(), getTableDirectory("T1"));
         List<Snapshot> snapshots =
                 new ArrayList<>(ImmutableList.copyOf(snapshotManager.snapshots()));
         snapshots.sort(Comparator.comparingLong(Snapshot::timeMillis));

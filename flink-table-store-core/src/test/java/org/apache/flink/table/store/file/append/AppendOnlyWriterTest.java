@@ -21,7 +21,6 @@ package org.apache.flink.table.store.file.append;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.BinaryString;
@@ -33,6 +32,8 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
@@ -105,7 +106,7 @@ public class AppendOnlyWriterTest {
         assertThat(meta).isNotNull();
 
         Path path = pathFactory.toPath(meta.fileName());
-        assertThat(path.getFileSystem().exists(path)).isTrue();
+        assertThat(LocalFileIO.create().exists(path)).isTrue();
 
         assertThat(meta.rowCount()).isEqualTo(1L);
         assertThat(meta.minKey()).isEqualTo(EMPTY_ROW);
@@ -166,7 +167,7 @@ public class AppendOnlyWriterTest {
             DataFileMeta meta = inc.newFilesIncrement().newFiles().get(0);
 
             Path path = pathFactory.toPath(meta.fileName());
-            assertThat(path.getFileSystem().exists(path)).isTrue();
+            assertThat(LocalFileIO.create().exists(path)).isTrue();
 
             assertThat(meta.rowCount()).isEqualTo(100L);
             assertThat(meta.minKey()).isEqualTo(EMPTY_ROW);
@@ -207,7 +208,7 @@ public class AppendOnlyWriterTest {
         int id = 0;
         for (DataFileMeta meta : firstInc.newFilesIncrement().newFiles()) {
             Path path = pathFactory.toPath(meta.fileName());
-            assertThat(path.getFileSystem().exists(path)).isTrue();
+            assertThat(LocalFileIO.create().exists(path)).isTrue();
 
             assertThat(meta.rowCount()).isEqualTo(1000L);
             assertThat(meta.minKey()).isEqualTo(EMPTY_ROW);
@@ -306,12 +307,14 @@ public class AppendOnlyWriterTest {
         LinkedList<DataFileMeta> toCompact = new LinkedList<>(scannedFiles);
         return new Tuple2<>(
                 new AppendOnlyWriter(
+                        LocalFileIO.create(),
                         SCHEMA_ID,
                         fileFormat,
                         targetFileSize,
                         AppendOnlyWriterTest.SCHEMA,
                         getMaxSequenceNumber(toCompact),
                         new AppendOnlyCompactManager(
+                                LocalFileIO.create(),
                                 Executors.newSingleThreadScheduledExecutor(
                                         new ExecutorThreadFactory("compaction-thread")),
                                 toCompact,

@@ -20,6 +20,7 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.fs.FileIOFinder;
 
 import java.util.Map;
 
@@ -29,7 +30,8 @@ public class AppendOnlyFileDataTableTest extends FileDataFilterTestBase {
     @Override
     protected FileStoreTable createFileStoreTable(Map<Long, TableSchema> tableSchemas) {
         SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
-        return new AppendOnlyFileStoreTable(tablePath, schemaManager.latest().get()) {
+        return new AppendOnlyFileStoreTable(
+                FileIOFinder.find(tablePath), tablePath, schemaManager.latest().get()) {
             @Override
             protected SchemaManager schemaManager() {
                 return schemaManager;

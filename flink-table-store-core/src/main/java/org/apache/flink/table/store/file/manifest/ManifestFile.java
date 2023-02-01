@@ -19,9 +19,6 @@
 package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.RollingFileWriter;
 import org.apache.flink.table.store.file.io.SingleFileWriter;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -32,6 +29,9 @@ import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 import org.apache.flink.table.store.format.FieldStatsCollector;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FormatReaderFactory;
+import org.apache.flink.table.store.format.FormatWriterFactory;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.RowType;
 
 import java.io.IOException;
@@ -43,24 +43,27 @@ import java.util.List;
  */
 public class ManifestFile {
 
+    private final FileIO fileIO;
     private final SchemaManager schemaManager;
     private final long schemaId;
     private final RowType partitionType;
     private final ManifestEntrySerializer serializer;
     private final FormatReaderFactory readerFactory;
-    private final BulkWriter.Factory<InternalRow> writerFactory;
+    private final FormatWriterFactory writerFactory;
     private final FileStorePathFactory pathFactory;
     private final long suggestedFileSize;
 
     private ManifestFile(
+            FileIO fileIO,
             SchemaManager schemaManager,
             long schemaId,
             RowType partitionType,
             ManifestEntrySerializer serializer,
             FormatReaderFactory readerFactory,
-            BulkWriter.Factory<InternalRow> writerFactory,
+            FormatWriterFactory writerFactory,
             FileStorePathFactory pathFactory,
             long suggestedFileSize) {
+        this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
         this.partitionType = partitionType;
@@ -79,7 +82,7 @@ public class ManifestFile {
     public List<ManifestEntry> read(String fileName) {
         try {
             return FileUtils.readListFromFile(
-                    pathFactory.toManifestFilePath(fileName), serializer, readerFactory);
+                    fileIO, pathFactory.toManifestFilePath(fileName), serializer, readerFactory);
         } catch (IOException e) {
             throw new RuntimeException("Failed to read manifest file " + fileName, e);
         }
@@ -105,7 +108,7 @@ public class ManifestFile {
     }
 
     public void delete(String fileName) {
-        FileUtils.deleteOrWarn(pathFactory.toManifestFilePath(fileName));
+        fileIO.deleteQuietly(pathFactory.toManifestFilePath(fileName));
     }
 
     private class ManifestEntryWriter extends SingleFileWriter<ManifestEntry, ManifestFileMeta> {
@@ -116,8 +119,8 @@ public class ManifestFile {
         private long numAddedFiles = 0;
         private long numDeletedFiles = 0;
 
-        ManifestEntryWriter(BulkWriter.Factory<InternalRow> factory, Path path) {
-            super(factory, path, serializer::toRow);
+        ManifestEntryWriter(FormatWriterFactory factory, Path path) {
+            super(ManifestFile.this.fileIO, factory, path, serializer::toRow);
 
             this.partitionStatsCollector = new FieldStatsCollector(partitionType);
             this.partitionStatsSerializer = new FieldStatsArraySerializer(partitionType);
@@ -145,7 +148,7 @@ public class ManifestFile {
         public ManifestFileMeta result() throws IOException {
             return new ManifestFileMeta(
                     path.getName(),
-                    path.getFileSystem().getFileStatus(path).getLen(),
+                    fileIO.getFileSize(path),
                     numAddedFiles,
                     numDeletedFiles,
                     partitionStatsSerializer.toBinary(partitionStatsCollector.extract()),
@@ -153,12 +156,10 @@ public class ManifestFile {
         }
     }
 
-    /**
-     * Creator of {@link ManifestFile}. It reueses {@link BulkFormat} and {@link BulkWriter.Factory}
-     * from {@link FileFormat}.
-     */
+    /** Creator of {@link ManifestFile}. */
     public static class Factory {
 
+        private final FileIO fileIO;
         private final SchemaManager schemaManager;
         private final long schemaId;
         private final RowType partitionType;
@@ -167,12 +168,14 @@ public class ManifestFile {
         private final long suggestedFileSize;
 
         public Factory(
+                FileIO fileIO,
                 SchemaManager schemaManager,
                 long schemaId,
                 RowType partitionType,
                 FileFormat fileFormat,
                 FileStorePathFactory pathFactory,
                 long suggestedFileSize) {
+            this.fileIO = fileIO;
             this.schemaManager = schemaManager;
             this.schemaId = schemaId;
             this.partitionType = partitionType;
@@ -184,6 +187,7 @@ public class ManifestFile {
         public ManifestFile create() {
             RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.schema());
             return new ManifestFile(
+                    fileIO,
                     schemaManager,
                     schemaId,
                     partitionType,

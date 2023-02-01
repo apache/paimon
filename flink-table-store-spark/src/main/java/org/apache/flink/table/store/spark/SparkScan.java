@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.Split;
@@ -46,16 +45,13 @@ public class SparkScan implements Scan, SupportsReportStatistics {
     protected final Table table;
     private final List<Predicate> predicates;
     private final int[] projectedFields;
-    private final Configuration conf;
 
     private List<Split> splits;
 
-    public SparkScan(
-            Table table, List<Predicate> predicates, int[] projectedFields, Configuration conf) {
+    public SparkScan(Table table, List<Predicate> predicates, int[] projectedFields) {
         this.table = table;
         this.predicates = predicates;
         this.projectedFields = projectedFields;
-        this.conf = conf;
     }
 
     @Override
@@ -81,7 +77,7 @@ public class SparkScan implements Scan, SupportsReportStatistics {
 
             @Override
             public PartitionReaderFactory createReaderFactory() {
-                return new SparkReaderFactory(table, projectedFields, predicates, conf);
+                return new SparkReaderFactory(table, projectedFields, predicates);
             }
         };
     }

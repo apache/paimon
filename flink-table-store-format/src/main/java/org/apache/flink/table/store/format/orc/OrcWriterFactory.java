@@ -21,10 +21,13 @@ package org.apache.flink.table.store.format.orc;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.core.fs.FSDataOutputStream;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.format.FormatWriter;
+import org.apache.flink.table.store.format.FormatWriterFactory;
 import org.apache.flink.table.store.format.orc.writer.OrcBulkWriter;
 import org.apache.flink.table.store.format.orc.writer.PhysicalWriterImpl;
 import org.apache.flink.table.store.format.orc.writer.Vectorizer;
+import org.apache.flink.table.store.fs.PositionOutputStream;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
@@ -43,13 +46,11 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  * A factory that creates an ORC {@link BulkWriter}. The factory takes a user supplied {@link
  * Vectorizer} implementation to convert the element into an {@link
  * org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch}.
- *
- * @param <T> The type of element to write.
  */
 @PublicEvolving
-public class OrcWriterFactory<T> implements BulkWriter.Factory<T> {
+public class OrcWriterFactory implements FormatWriterFactory {
 
-    private final Vectorizer<T> vectorizer;
+    private final Vectorizer<InternalRow> vectorizer;
     private final Properties writerProperties;
     private final Map<String, String> confMap;
 
@@ -61,7 +62,7 @@ public class OrcWriterFactory<T> implements BulkWriter.Factory<T> {
      * @param vectorizer The vectorizer implementation to convert input record to a
      *     VectorizerRowBatch.
      */
-    public OrcWriterFactory(Vectorizer<T> vectorizer) {
+    public OrcWriterFactory(Vectorizer<InternalRow> vectorizer) {
         this(vectorizer, new Configuration());
     }
 
@@ -71,7 +72,7 @@ public class OrcWriterFactory<T> implements BulkWriter.Factory<T> {
      * @param vectorizer The vectorizer implementation to convert input record to a
      *     VectorizerRowBatch.
      */
-    public OrcWriterFactory(Vectorizer<T> vectorizer, Configuration configuration) {
+    public OrcWriterFactory(Vectorizer<InternalRow> vectorizer, Configuration configuration) {
         this(vectorizer, null, configuration);
     }
 
@@ -84,7 +85,9 @@ public class OrcWriterFactory<T> implements BulkWriter.Factory<T> {
      * @param writerProperties Properties that can be used in ORC WriterOptions.
      */
     public OrcWriterFactory(
-            Vectorizer<T> vectorizer, Properties writerProperties, Configuration configuration) {
+            Vectorizer<InternalRow> vectorizer,
+            Properties writerProperties,
+            Configuration configuration) {
         this.vectorizer = checkNotNull(vectorizer);
         this.writerProperties = writerProperties;
         this.confMap = new HashMap<>();
@@ -96,7 +99,7 @@ public class OrcWriterFactory<T> implements BulkWriter.Factory<T> {
     }
 
     @Override
-    public BulkWriter<T> create(FSDataOutputStream out) throws IOException {
+    public FormatWriter create(PositionOutputStream out) throws IOException {
         OrcFile.WriterOptions opts = getWriterOptions();
         opts.physicalWriter(new PhysicalWriterImpl(out, opts));
 
@@ -105,7 +108,7 @@ public class OrcWriterFactory<T> implements BulkWriter.Factory<T> {
         // to the give output stream directly. However, the path would be used as
         // the key of writer in the ORC memory manager, thus we need to make it unique.
         Path unusedPath = new Path(UUID.randomUUID().toString());
-        return new OrcBulkWriter<>(vectorizer, new WriterImpl(null, unusedPath, opts));
+        return new OrcBulkWriter(vectorizer, new WriterImpl(null, unusedPath, opts));
     }
 
     @VisibleForTesting

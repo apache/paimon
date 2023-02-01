@@ -18,10 +18,11 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.sink.TableCommit;
@@ -172,11 +173,11 @@ public abstract class SparkReadTestBase {
     }
 
     protected TableSchema schema1() {
-        return FileStoreTableFactory.create(tablePath1).schema();
+        return FileStoreTableFactory.create(LocalFileIO.create(), tablePath1).schema();
     }
 
     protected TableSchema schema2() {
-        return FileStoreTableFactory.create(tablePath2).schema();
+        return FileStoreTableFactory.create(LocalFileIO.create(), tablePath2).schema();
     }
 
     protected boolean fieldIsNullable(DataField field) {
@@ -212,6 +213,7 @@ public abstract class SparkReadTestBase {
     private static void writeTable(String tableName, GenericRow... rows) throws Exception {
         FileStoreTable fileStoreTable =
                 FileStoreTableFactory.create(
+                        LocalFileIO.create(),
                         new Path(warehousePath, String.format("default.db/%s", tableName)));
         TableWrite writer = fileStoreTable.newWrite(COMMIT_USER);
         TableCommit commit = fileStoreTable.newCommit(COMMIT_USER);

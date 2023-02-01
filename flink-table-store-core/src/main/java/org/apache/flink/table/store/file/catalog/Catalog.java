@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.Table;
 
 import java.util.List;

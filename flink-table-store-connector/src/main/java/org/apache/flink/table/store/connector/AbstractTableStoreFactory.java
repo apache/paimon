@@ -39,6 +39,7 @@ import org.apache.flink.table.store.connector.source.TableStoreSource;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
+import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.types.logical.RowType;
@@ -70,13 +71,14 @@ public abstract class AbstractTableStoreFactory
                         == RuntimeExecutionMode.STREAMING;
         if (origin instanceof SystemCatalogTable) {
             return new SystemTableSource(((SystemCatalogTable) origin).table(), isStreamingMode);
+        } else {
+            return new TableStoreSource(
+                    context.getObjectIdentifier(),
+                    buildFileStoreTable(context),
+                    isStreamingMode,
+                    context,
+                    createOptionalLogStoreFactory(context).orElse(null));
         }
-        return new TableStoreSource(
-                context.getObjectIdentifier(),
-                buildFileStoreTable(context),
-                isStreamingMode,
-                context,
-                createOptionalLogStoreFactory(context).orElse(null));
     }
 
     @Override
@@ -136,10 +138,19 @@ public abstract class AbstractTableStoreFactory
         }
     }
 
+    static CatalogOptions createCatalogOptions(DynamicTableFactory.Context context) {
+        return FlinkUtils.catalogOptions(
+                context.getCatalogTable().getOptions(), context.getConfiguration());
+    }
+
     static FileStoreTable buildFileStoreTable(DynamicTableFactory.Context context) {
-        FileStoreTable table =
-                FileStoreTableFactory.create(
-                        Configuration.fromMap(context.getCatalogTable().getOptions()));
+        CatalogTable origin = context.getCatalogTable().getOrigin();
+        FileStoreTable table;
+        if (origin instanceof DataCatalogTable) {
+            table = ((DataCatalogTable) origin).table();
+        } else {
+            table = FileStoreTableFactory.create(createCatalogOptions(context));
+        }
 
         TableSchema tableSchema = table.schema();
         UpdateSchema updateSchema = FlinkCatalog.fromCatalogTable(context.getCatalogTable());

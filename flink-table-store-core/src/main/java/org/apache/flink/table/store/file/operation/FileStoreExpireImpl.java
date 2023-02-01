@@ -19,15 +19,15 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterables;
 
@@ -60,6 +60,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreExpireImpl.class);
 
+    private final FileIO fileIO;
     private final int numRetainedMin;
     // snapshots exceeding any constraint will be expired
     private final int numRetainedMax;
@@ -73,6 +74,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private Lock lock;
 
     public FileStoreExpireImpl(
+            FileIO fileIO,
             int numRetainedMin,
             int numRetainedMax,
             long millisRetained,
@@ -80,6 +82,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory) {
+        this.fileIO = fileIO;
         this.numRetainedMin = numRetainedMin;
         this.numRetainedMax = numRetainedMax;
         this.millisRetained = millisRetained;
@@ -218,7 +221,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
 
             // delete snapshot
-            FileUtils.deleteOrWarn(snapshotManager.snapshotPath(id));
+            fileIO.deleteQuietly(snapshotManager.snapshotPath(id));
         }
 
         writeEarliestHint(endExclusiveId);
@@ -254,14 +257,14 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         }
         dataFileToDelete.forEach(
                 (path, extraFiles) -> {
-                    FileUtils.deleteOrWarn(path);
-                    extraFiles.forEach(FileUtils::deleteOrWarn);
+                    fileIO.deleteQuietly(path);
+                    extraFiles.forEach(fileIO::deleteQuietly);
                 });
     }
 
     private void expireChangelogFiles(String manifestListName) {
         for (ManifestEntry changelogEntry : getManifestEntriesFromManifestList(manifestListName)) {
-            FileUtils.deleteOrWarn(
+            fileIO.deleteQuietly(
                     new Path(
                             pathFactory.bucketPath(
                                     changelogEntry.partition(), changelogEntry.bucket()),

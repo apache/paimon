@@ -18,9 +18,10 @@
 
 package org.apache.flink.table.store.hive;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowType;
@@ -198,7 +199,7 @@ public class HiveTableSchemaTest {
     }
 
     private void createSchema() throws Exception {
-        new SchemaManager(new Path(tempDir.toString()))
+        new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()))
                 .commitNewVersion(
                         new UpdateSchema(
                                 ROW_TYPE,

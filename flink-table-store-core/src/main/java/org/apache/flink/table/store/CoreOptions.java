@@ -28,10 +28,11 @@ import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.configuration.description.Description;
 import org.apache.flink.configuration.description.InlineElement;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.util.Preconditions;
 
 import java.io.Serializable;
@@ -431,6 +432,10 @@ public class CoreOptions implements Serializable {
     }
 
     public static Path path(Configuration options) {
+        return new Path(options.get(PATH));
+    }
+
+    public static Path path(Options options) {
         return new Path(options.get(PATH));
     }
 

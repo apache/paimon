@@ -14,5 +14,5 @@
 # limitations under the License.
 
 org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem$TestAtomicRenameFileSystemFactory
-org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem$FailingAtomicRenameFileSystemFactory
+org.apache.flink.table.store.file.utils.FailingFileIO$FailingAtomicRenameFileSystemFactory
 org.apache.flink.table.store.file.utils.UnsafeLocalFileSystem$UnsafeLocalFileSystemFactory

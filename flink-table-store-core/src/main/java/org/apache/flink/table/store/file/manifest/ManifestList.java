@@ -19,15 +19,16 @@
 package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.core.fs.FSDataOutputStream;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FormatReaderFactory;
+import org.apache.flink.table.store.format.FormatWriter;
+import org.apache.flink.table.store.format.FormatWriterFactory;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.PositionOutputStream;
 import org.apache.flink.table.store.types.RowType;
 
 import java.io.IOException;
@@ -39,16 +40,19 @@ import java.util.List;
  */
 public class ManifestList {
 
+    private final FileIO fileIO;
     private final ManifestFileMetaSerializer serializer;
     private final FormatReaderFactory readerFactory;
-    private final BulkWriter.Factory<InternalRow> writerFactory;
+    private final FormatWriterFactory writerFactory;
     private final FileStorePathFactory pathFactory;
 
     private ManifestList(
+            FileIO fileIO,
             ManifestFileMetaSerializer serializer,
             FormatReaderFactory readerFactory,
-            BulkWriter.Factory<InternalRow> writerFactory,
+            FormatWriterFactory writerFactory,
             FileStorePathFactory pathFactory) {
+        this.fileIO = fileIO;
         this.serializer = serializer;
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
@@ -58,7 +62,7 @@ public class ManifestList {
     public List<ManifestFileMeta> read(String fileName) {
         try {
             return FileUtils.readListFromFile(
-                    pathFactory.toManifestListPath(fileName), serializer, readerFactory);
+                    fileIO, pathFactory.toManifestListPath(fileName), serializer, readerFactory);
         } catch (IOException e) {
             throw new RuntimeException("Failed to read manifest list " + fileName, e);
         }
@@ -74,17 +78,16 @@ public class ManifestList {
         try {
             return write(metas, path);
         } catch (Throwable e) {
-            FileUtils.deleteOrWarn(path);
+            fileIO.deleteQuietly(path);
             throw new RuntimeException(
                     "Exception occurs when writing manifest list " + path + ". Clean up.", e);
         }
     }
 
     private String write(List<ManifestFileMeta> metas, Path path) throws IOException {
-        FileSystem fs = path.getFileSystem();
-        try (FSDataOutputStream out = fs.create(path, FileSystem.WriteMode.NO_OVERWRITE)) {
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
             // Initialize the bulk writer to accept the ManifestFileMeta.
-            BulkWriter<InternalRow> writer = writerFactory.create(out);
+            FormatWriter writer = writerFactory.create(out);
             try {
                 for (ManifestFileMeta manifest : metas) {
                     writer.addElement(serializer.toRow(manifest));
@@ -98,7 +101,7 @@ public class ManifestList {
     }
 
     public void delete(String fileName) {
-        FileUtils.deleteOrWarn(pathFactory.toManifestListPath(fileName));
+        fileIO.deleteQuietly(pathFactory.toManifestListPath(fileName));
     }
 
     /**
@@ -107,12 +110,17 @@ public class ManifestList {
      */
     public static class Factory {
 
+        private final FileIO fileIO;
         private final RowType partitionType;
         private final FileFormat fileFormat;
         private final FileStorePathFactory pathFactory;
 
         public Factory(
-                RowType partitionType, FileFormat fileFormat, FileStorePathFactory pathFactory) {
+                FileIO fileIO,
+                RowType partitionType,
+                FileFormat fileFormat,
+                FileStorePathFactory pathFactory) {
+            this.fileIO = fileIO;
             this.partitionType = partitionType;
             this.fileFormat = fileFormat;
             this.pathFactory = pathFactory;
@@ -121,6 +129,7 @@ public class ManifestList {
         public ManifestList create() {
             RowType metaType = VersionedObjectSerializer.versionType(ManifestFileMeta.schema());
             return new ManifestList(
+                    fileIO,
                     new ManifestFileMetaSerializer(),
                     fileFormat.createReaderFactory(metaType),
                     fileFormat.createWriterFactory(metaType),

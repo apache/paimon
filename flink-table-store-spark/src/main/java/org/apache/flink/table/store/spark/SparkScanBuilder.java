@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.table.Table;
 
@@ -37,15 +36,13 @@ public class SparkScanBuilder
         implements ScanBuilder, SupportsPushDownFilters, SupportsPushDownRequiredColumns {
 
     private final Table table;
-    private final Configuration conf;
 
     private List<Predicate> predicates = new ArrayList<>();
     private Filter[] pushedFilters;
     private int[] projectedFields;
 
-    public SparkScanBuilder(Table table, Configuration conf) {
+    public SparkScanBuilder(Table table) {
         this.table = table;
-        this.conf = conf;
     }
 
     @Override
@@ -83,6 +80,6 @@ public class SparkScanBuilder
 
     @Override
     public Scan build() {
-        return new SparkScan(table, predicates, projectedFields, conf);
+        return new SparkScan(table, predicates, projectedFields);
     }
 }

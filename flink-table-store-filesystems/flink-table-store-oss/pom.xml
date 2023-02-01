@@ -34,13 +34,6 @@
     <dependencies>
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-core</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
             <artifactId>flink-table-store-common</artifactId>
             <version>${project.version}</version>
             <scope>provided</scope>
@@ -48,8 +41,8 @@
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-oss-fs-hadoop</artifactId>
-            <version>${flink.version}</version>
+            <artifactId>flink-table-store-oss-impl</artifactId>
+            <version>${project.version}</version>
             <scope>runtime</scope>
             <optional>true</optional>
             <exclusions>
@@ -77,8 +70,8 @@
                             <artifactItems>
                                 <artifactItem>
                                     <groupId>org.apache.flink</groupId>
-                                    <artifactId>flink-oss-fs-hadoop</artifactId>
-                                    <version>${flink.version}</version>
+                                    <artifactId>flink-table-store-oss-impl</artifactId>
+                                    <version>${project.version}</version>
                                     <type>jar</type>
                                     <overWrite>true</overWrite>
                                     <destFileName>flink-table-store-plugin-oss.jar</destFileName>

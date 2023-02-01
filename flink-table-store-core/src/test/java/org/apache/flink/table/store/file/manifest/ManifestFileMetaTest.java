@@ -19,17 +19,19 @@
 package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.BinaryRowWriter;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
-import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
+import org.apache.flink.table.store.file.utils.FailingFileIO;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.FileIOFinder;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
 
@@ -109,26 +111,21 @@ public class ManifestFileMetaTest {
     @RepeatedTest(10)
     public void testCleanUpForException() throws IOException {
         String failingName = UUID.randomUUID().toString();
-        FailingAtomicRenameFileSystem.reset(failingName, 1, 10);
+        FailingFileIO.reset(failingName, 1, 10);
         List<ManifestFileMeta> input = new ArrayList<>();
         createData(ThreadLocalRandom.current().nextInt(5), input, null);
         ManifestFile failingManifestFile =
-                createManifestFile(
-                        FailingAtomicRenameFileSystem.getFailingPath(
-                                failingName, tempDir.toString()));
+                createManifestFile(FailingFileIO.getFailingPath(failingName, tempDir.toString()));
 
         try {
             ManifestFileMeta.merge(input, failingManifestFile, 500, 3);
         } catch (Throwable e) {
-            assertThat(e)
-                    .hasRootCauseExactlyInstanceOf(
-                            FailingAtomicRenameFileSystem.ArtificialException.class);
+            assertThat(e).hasRootCauseExactlyInstanceOf(FailingFileIO.ArtificialException.class);
             // old files should be kept untouched, while new files should be cleaned up
             Path manifestDir = new Path(tempDir.toString() + "/manifest");
-            FileSystem fs = manifestDir.getFileSystem();
             assertThat(
                             new TreeSet<>(
-                                    Arrays.stream(fs.listStatus(manifestDir))
+                                    Arrays.stream(LocalFileIO.create().listStatus(manifestDir))
                                             .map(s -> s.getPath().getName())
                                             .collect(Collectors.toList())))
                     .isEqualTo(
@@ -139,14 +136,17 @@ public class ManifestFileMetaTest {
         }
     }
 
-    private ManifestFile createManifestFile(String path) {
+    private ManifestFile createManifestFile(String pathStr) {
+        Path path = new Path(pathStr);
+        FileIO fileIO = FileIOFinder.find(path);
         return new ManifestFile.Factory(
-                        new SchemaManager(new Path(path)),
+                        fileIO,
+                        new SchemaManager(fileIO, path),
                         0,
                         PARTITION_TYPE,
                         avro,
                         new FileStorePathFactory(
-                                new Path(path),
+                                path,
                                 PARTITION_TYPE,
                                 "default",
                                 CoreOptions.FILE_FORMAT.defaultValue()),

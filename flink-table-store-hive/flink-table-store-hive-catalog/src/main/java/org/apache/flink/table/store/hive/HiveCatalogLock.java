@@ -37,8 +37,8 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.concurrent.Callable;
 
-import static org.apache.flink.table.store.CatalogOptions.LOCK_ACQUIRE_TIMEOUT;
-import static org.apache.flink.table.store.CatalogOptions.LOCK_CHECK_MAX_SLEEP;
+import static org.apache.flink.table.store.options.CatalogOptions.LOCK_ACQUIRE_TIMEOUT;
+import static org.apache.flink.table.store.options.CatalogOptions.LOCK_CHECK_MAX_SLEEP;
 
 /** Hive {@link CatalogLock}. */
 public class HiveCatalogLock implements CatalogLock {

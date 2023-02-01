@@ -23,7 +23,6 @@ import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.KeyValue;
@@ -31,6 +30,8 @@ import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -77,7 +78,8 @@ public class FileStoreSourceSplitReaderTest {
 
     @BeforeEach
     public void beforeEach() throws Exception {
-        SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
+        SchemaManager schemaManager =
+                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
         schemaManager.commitNewVersion(
                 new UpdateSchema(
                         toDataType(

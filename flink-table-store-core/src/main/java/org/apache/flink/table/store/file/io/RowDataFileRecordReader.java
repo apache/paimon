@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FormatReaderFactory;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 
 import javax.annotation.Nullable;
 
@@ -35,9 +36,12 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
     @Nullable private final int[] indexMapping;
 
     public RowDataFileRecordReader(
-            Path path, FormatReaderFactory readerFactory, @Nullable int[] indexMapping)
+            FileIO fileIO,
+            Path path,
+            FormatReaderFactory readerFactory,
+            @Nullable int[] indexMapping)
             throws IOException {
-        this.reader = FileUtils.createFormatReader(readerFactory, path);
+        this.reader = FileUtils.createFormatReader(fileIO, readerFactory, path);
         this.indexMapping = indexMapping;
     }
 

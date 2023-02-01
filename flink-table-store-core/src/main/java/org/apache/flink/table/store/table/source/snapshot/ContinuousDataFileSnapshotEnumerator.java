@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.util.Preconditions;
@@ -51,12 +52,13 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
     private @Nullable Long nextSnapshotId;
 
     public ContinuousDataFileSnapshotEnumerator(
+            FileIO fileIO,
             Path tablePath,
             DataTableScan scan,
             StartingScanner startingScanner,
             FollowUpScanner followUpScanner,
             @Nullable Long nextSnapshotId) {
-        this.snapshotManager = new SnapshotManager(tablePath);
+        this.snapshotManager = new SnapshotManager(fileIO, tablePath);
         this.scan = scan;
         this.startingScanner = startingScanner;
         this.followUpScanner = followUpScanner;
@@ -115,12 +117,18 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
                         ? new CompactedStartingScanner()
                         : new FullStartingScanner();
         return new ContinuousDataFileSnapshotEnumerator(
-                table.location(), scan, startingScanner, createFollowUpScanner(table, scan), null);
+                table.fileIO(),
+                table.location(),
+                scan,
+                startingScanner,
+                createFollowUpScanner(table, scan),
+                null);
     }
 
     public static ContinuousDataFileSnapshotEnumerator create(
             DataTable table, DataTableScan scan, @Nullable Long nextSnapshotId) {
         return new ContinuousDataFileSnapshotEnumerator(
+                table.fileIO(),
                 table.location(),
                 scan,
                 createStartingScanner(table),

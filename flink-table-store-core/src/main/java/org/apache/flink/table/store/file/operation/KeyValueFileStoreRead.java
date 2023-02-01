@@ -38,6 +38,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.format.FileFormatDiscover;
+import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.ProjectedRow;
@@ -77,6 +78,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     @Nullable private int[][] valueProjection;
 
     public KeyValueFileStoreRead(
+            FileIO fileIO,
             SchemaManager schemaManager,
             long schemaId,
             RowType keyType,
@@ -89,6 +91,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         this.tableSchema = schemaManager.schema(schemaId);
         this.readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
+                        fileIO,
                         schemaManager,
                         schemaId,
                         keyType,

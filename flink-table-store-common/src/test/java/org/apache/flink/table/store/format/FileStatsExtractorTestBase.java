@@ -18,10 +18,6 @@
 
 package org.apache.flink.table.store.format;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.core.fs.FSDataOutputStream;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.GenericArray;
@@ -29,8 +25,11 @@ import org.apache.flink.table.store.data.GenericMap;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalArray;
 import org.apache.flink.table.store.data.InternalMap;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.PositionOutputStream;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.BinaryType;
 import org.apache.flink.table.store.types.CharType;
@@ -64,16 +63,17 @@ public abstract class FileStatsExtractorTestBase {
 
     @TempDir java.nio.file.Path tempDir;
 
+    private final FileIO fileIO = new LocalFileIO();
+
     @Test
     public void testExtract() throws Exception {
         FileFormat format = createFormat();
         RowType rowType = rowType();
 
-        BulkWriter.Factory<InternalRow> writerFactory = format.createWriterFactory(rowType);
+        FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
         Path path = new Path(tempDir.toString() + "/test");
-        FSDataOutputStream out =
-                path.getFileSystem().create(path, FileSystem.WriteMode.NO_OVERWRITE);
-        BulkWriter<InternalRow> writer = writerFactory.create(out);
+        PositionOutputStream out = new LocalFileIO().newOutputStream(path, false);
+        FormatWriter writer = writerFactory.create(out);
 
         List<GenericRow> data = createData(rowType);
         for (GenericRow row : data) {
@@ -89,7 +89,7 @@ public abstract class FileStatsExtractorTestBase {
 
         FileStatsExtractor extractor = format.createStatsExtractor(rowType).get();
         assertThat(extractor).isNotNull();
-        FieldStats[] actual = extractor.extract(path);
+        FieldStats[] actual = extractor.extract(fileIO, path);
         assertThat(actual).isEqualTo(expected);
     }
 

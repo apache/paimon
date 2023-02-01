@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.fs.Path;
 
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;

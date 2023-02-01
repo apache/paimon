@@ -25,6 +25,7 @@ import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreWrite;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.format.FileFormatDiscover;
+import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.types.RowType;
 
 import java.util.Comparator;
@@ -36,13 +37,14 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     private final RowType rowType;
 
     public AppendOnlyFileStore(
+            FileIO fileIO,
             SchemaManager schemaManager,
             long schemaId,
             CoreOptions options,
             RowType partitionType,
             RowType bucketKeyType,
             RowType rowType) {
-        super(schemaManager, schemaId, options, partitionType);
+        super(fileIO, schemaManager, schemaId, options, partitionType);
         this.bucketKeyType = bucketKeyType;
         this.rowType = rowType;
     }
@@ -55,12 +57,18 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     @Override
     public AppendOnlyFileStoreRead newRead() {
         return new AppendOnlyFileStoreRead(
-                schemaManager, schemaId, rowType, FileFormatDiscover.of(options), pathFactory());
+                fileIO,
+                schemaManager,
+                schemaId,
+                rowType,
+                FileFormatDiscover.of(options),
+                pathFactory());
     }
 
     @Override
     public AppendOnlyFileStoreWrite newWrite(String commitUser) {
         return new AppendOnlyFileStoreWrite(
+                fileIO,
                 newRead(),
                 schemaId,
                 commitUser,

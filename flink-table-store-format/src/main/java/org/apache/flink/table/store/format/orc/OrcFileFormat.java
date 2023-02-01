@@ -27,6 +27,7 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.store.format.FormatReaderFactory;
+import org.apache.flink.table.store.format.FormatWriterFactory;
 import org.apache.flink.table.store.format.orc.filter.OrcFileStatsExtractor;
 import org.apache.flink.table.store.format.orc.filter.OrcFilters;
 import org.apache.flink.table.store.format.orc.filter.OrcPredicateFunctionVisitor;
@@ -114,7 +115,7 @@ public class OrcFileFormat extends FileFormat {
      * @return The factory of the {@link BulkWriter}
      */
     @Override
-    public BulkWriter.Factory<InternalRow> createWriterFactory(RowType type) {
+    public FormatWriterFactory createWriterFactory(RowType type) {
         DataType refinedType = refineDataType(type);
         DataType[] orcTypes = getFieldTypes(refinedType).toArray(new DataType[0]);
 
@@ -122,7 +123,7 @@ public class OrcFileFormat extends FileFormat {
         Vectorizer<InternalRow> vectorizer =
                 new RowDataVectorizer(typeDescription.toString(), orcTypes);
 
-        return new OrcWriterFactory<>(vectorizer, orcProperties, writerConf);
+        return new OrcWriterFactory(vectorizer, orcProperties, writerConf);
     }
 
     private static Properties getOrcProperties(ReadableConfig options) {

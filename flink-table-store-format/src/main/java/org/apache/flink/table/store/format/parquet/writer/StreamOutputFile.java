@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.format.parquet.writer;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.core.fs.FSDataOutputStream;
 
 import org.apache.parquet.io.OutputFile;
 import org.apache.parquet.io.PositionOutputStream;
@@ -30,7 +29,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
  * An implementation of Parquet's {@link OutputFile} interface that goes against a Flink {@link
- * FSDataOutputStream}.
+ * PositionOutputStream}.
  *
  * <p>Because the implementation goes against an open stream, rather than open its own streams
  * against a file, instances can create one stream only.
@@ -40,7 +39,7 @@ public class StreamOutputFile implements OutputFile {
 
     private static final long DEFAULT_BLOCK_SIZE = 64L * 1024L * 1024L;
 
-    private final FSDataOutputStream stream;
+    private final org.apache.flink.table.store.fs.PositionOutputStream stream;
 
     private final AtomicBoolean used;
 
@@ -50,7 +49,7 @@ public class StreamOutputFile implements OutputFile {
      *
      * @param stream The stream to write to.
      */
-    public StreamOutputFile(FSDataOutputStream stream) {
+    public StreamOutputFile(org.apache.flink.table.store.fs.PositionOutputStream stream) {
         this.stream = checkNotNull(stream);
         this.used = new AtomicBoolean(false);
     }

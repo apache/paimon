@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.casting.CastExecutors;
 import org.apache.flink.table.store.file.operation.Lock;
@@ -32,9 +30,9 @@ import org.apache.flink.table.store.file.schema.SchemaChange.SetOption;
 import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnComment;
 import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnNullability;
 import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnType;
-import org.apache.flink.table.store.file.utils.AtomicFileWriter;
-import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataType;
@@ -70,11 +68,13 @@ public class SchemaManager implements Serializable {
 
     private static final String SCHEMA_PREFIX = "schema-";
 
+    private final FileIO fileIO;
     private final Path tableRoot;
 
     @Nullable private transient Lock lock;
 
-    public SchemaManager(Path tableRoot) {
+    public SchemaManager(FileIO fileIO, Path tableRoot) {
+        this.fileIO = fileIO;
         this.tableRoot = tableRoot;
     }
 
@@ -86,7 +86,7 @@ public class SchemaManager implements Serializable {
     /** @return latest schema. */
     public Optional<TableSchema> latest() {
         try {
-            return listVersionedFiles(schemaDirectory(), SCHEMA_PREFIX)
+            return listVersionedFiles(fileIO, schemaDirectory(), SCHEMA_PREFIX)
                     .reduce(Math::max)
                     .map(this::schema);
         } catch (IOException e) {
@@ -102,7 +102,7 @@ public class SchemaManager implements Serializable {
     /** List all schema IDs. */
     public List<Long> listAllIds() {
         try {
-            return listVersionedFiles(schemaDirectory(), SCHEMA_PREFIX)
+            return listVersionedFiles(fileIO, schemaDirectory(), SCHEMA_PREFIX)
                     .collect(Collectors.toList());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -406,14 +406,7 @@ public class SchemaManager implements Serializable {
         CoreOptions.validateTableSchema(newSchema);
 
         Path schemaPath = toSchemaPath(newSchema.id());
-        FileSystem fs = schemaPath.getFileSystem();
-        Callable<Boolean> callable =
-                () -> {
-                    if (fs.exists(schemaPath)) {
-                        return false;
-                    }
-                    return AtomicFileWriter.writeFileUtf8(schemaPath, newSchema.toString());
-                };
+        Callable<Boolean> callable = () -> fileIO.writeFileUtf8(schemaPath, newSchema.toString());
         if (lock == null) {
             return callable.call();
         }
@@ -423,8 +416,7 @@ public class SchemaManager implements Serializable {
     /** Read schema for schema id. */
     public TableSchema schema(long id) {
         try {
-            return JsonSerdeUtil.fromJson(
-                    FileUtils.readFileUtf8(toSchemaPath(id)), TableSchema.class);
+            return JsonSerdeUtil.fromJson(fileIO.readFileUtf8(toSchemaPath(id)), TableSchema.class);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

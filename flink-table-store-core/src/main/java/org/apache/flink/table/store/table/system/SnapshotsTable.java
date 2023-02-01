@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.system;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
@@ -29,6 +28,8 @@ import org.apache.flink.table.store.file.utils.IteratorRecordReader;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.SerializationUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -72,9 +73,11 @@ public class SnapshotsTable implements Table {
                                     4, "commit_kind", SerializationUtils.newStringType(false)),
                             new DataField(5, "commit_time", new TimestampType(false, 3))));
 
+    private final FileIO fileIO;
     private final Path location;
 
-    public SnapshotsTable(Path location) {
+    public SnapshotsTable(FileIO fileIO, Path location) {
+        this.fileIO = fileIO;
         this.location = location;
     }
 
@@ -100,12 +103,17 @@ public class SnapshotsTable implements Table {
 
     @Override
     public TableRead newRead() {
-        return new SnapshotsRead();
+        return new SnapshotsRead(fileIO);
     }
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new SnapshotsTable(location);
+        return new SnapshotsTable(fileIO, location);
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return fileIO;
     }
 
     private class SnapshotsScan implements TableScan {
@@ -118,7 +126,7 @@ public class SnapshotsTable implements Table {
 
         @Override
         public Plan plan() {
-            return () -> Collections.singletonList(new SnapshotsSplit(location));
+            return () -> Collections.singletonList(new SnapshotsSplit(fileIO, location));
         }
     }
 
@@ -126,16 +134,18 @@ public class SnapshotsTable implements Table {
 
         private static final long serialVersionUID = 1L;
 
+        private final FileIO fileIO;
         private final Path location;
 
-        private SnapshotsSplit(Path location) {
+        private SnapshotsSplit(FileIO fileIO, Path location) {
+            this.fileIO = fileIO;
             this.location = location;
         }
 
         @Override
         public long rowCount() {
             try {
-                return new SnapshotManager(location).snapshotCount();
+                return new SnapshotManager(fileIO, location).snapshotCount();
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -161,7 +171,12 @@ public class SnapshotsTable implements Table {
 
     private static class SnapshotsRead implements TableRead {
 
+        private final FileIO fileIO;
         private int[][] projection;
+
+        public SnapshotsRead(FileIO fileIO) {
+            this.fileIO = fileIO;
+        }
 
         @Override
         public TableRead withFilter(Predicate predicate) {
@@ -181,7 +196,7 @@ public class SnapshotsTable implements Table {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((SnapshotsSplit) split).location;
-            Iterator<Snapshot> snapshots = new SnapshotManager(location).snapshots();
+            Iterator<Snapshot> snapshots = new SnapshotManager(fileIO, location).snapshots();
             Iterator<InternalRow> rows = Iterators.transform(snapshots, this::toRow);
             if (projection != null) {
                 rows =

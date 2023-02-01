@@ -19,12 +19,13 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.sink.TableCommit;
 
 import java.util.Map;
@@ -37,10 +38,12 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
+    protected final FileIO fileIO;
     protected final Path path;
     protected final TableSchema tableSchema;
 
-    public AbstractFileStoreTable(Path path, TableSchema tableSchema) {
+    public AbstractFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
+        this.fileIO = fileIO;
         this.path = path;
         this.tableSchema = tableSchema;
     }
@@ -81,12 +84,17 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     protected SchemaManager schemaManager() {
-        return new SchemaManager(path);
+        return new SchemaManager(fileIO(), path);
     }
 
     @Override
     public CoreOptions options() {
         return store().options();
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return fileIO;
     }
 
     @Override

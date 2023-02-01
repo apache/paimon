@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.Decimal;
@@ -32,8 +30,10 @@ import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
-import org.apache.flink.table.store.file.utils.TraceableFileSystem;
+import org.apache.flink.table.store.file.utils.TraceableFileIO;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.FileIOFinder;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -112,6 +112,7 @@ public abstract class SchemaEvolutionTableTestBase {
             Arrays.asList("a", "b", "c", "d", "e");
 
     protected Path tablePath;
+    protected FileIO fileIO;
     protected String commitUser;
     protected final Configuration tableConfig = new Configuration();
 
@@ -119,7 +120,8 @@ public abstract class SchemaEvolutionTableTestBase {
 
     @BeforeEach
     public void before() throws Exception {
-        tablePath = new Path(TestAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString());
+        tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
+        fileIO = FileIOFinder.find(tablePath);
         commitUser = UUID.randomUUID().toString();
         tableConfig.set(CoreOptions.PATH, tablePath.toString());
         tableConfig.set(CoreOptions.BUCKET, 2);
@@ -128,14 +130,10 @@ public abstract class SchemaEvolutionTableTestBase {
     @AfterEach
     public void after() throws IOException {
         // assert all connections are closed
-        FileSystem fileSystem = tablePath.getFileSystem();
-        assertThat(fileSystem).isInstanceOf(TraceableFileSystem.class);
-        TraceableFileSystem traceableFileSystem = (TraceableFileSystem) fileSystem;
-
         java.util.function.Predicate<Path> pathPredicate =
                 path -> path.toString().contains(tempDir.toString());
-        assertThat(traceableFileSystem.openInputStreams(pathPredicate)).isEmpty();
-        assertThat(traceableFileSystem.openOutputStreams(pathPredicate)).isEmpty();
+        assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();
+        assertThat(TraceableFileIO.openOutputStreams(pathPredicate)).isEmpty();
     }
 
     protected List<String> getPrimaryKeyNames() {
@@ -442,7 +440,7 @@ public abstract class SchemaEvolutionTableTestBase {
         private final Map<Long, TableSchema> tableSchemas;
 
         public TestingSchemaManager(Path tableRoot, Map<Long, TableSchema> tableSchemas) {
-            super(tableRoot);
+            super(FileIOFinder.find(tableRoot), tableRoot);
             this.tableSchemas = tableSchemas;
         }
 

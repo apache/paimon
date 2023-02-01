@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.append;
 
 import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 
 import org.junit.jupiter.api.Test;
 
@@ -202,6 +203,7 @@ public class AppendOnlyCompactManagerTest {
         long targetFileSize = 1024;
         AppendOnlyCompactManager manager =
                 new AppendOnlyCompactManager(
+                        LocalFileIO.create(),
                         null, // not used
                         new LinkedList<>(toCompactBeforePick),
                         minFileNum,

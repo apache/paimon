@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -104,7 +104,7 @@ public class CompactionChangelogFollowUpScannerTest extends SnapshotEnumeratorTe
 
     @Override
     protected FileStoreTable createFileStoreTable() throws Exception {
-        Configuration conf = new Configuration();
+        Options conf = new Options();
         conf.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.FULL_COMPACTION);
         return createFileStoreTable(conf);
     }

@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.format.parquet;
 
-import org.apache.flink.core.fs.FileStatus;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.FileStatus;
+import org.apache.flink.table.store.fs.Path;
 
 import org.apache.parquet.io.InputFile;
 import org.apache.parquet.io.SeekableInputStream;
@@ -30,16 +30,15 @@ import java.io.IOException;
 /** A {@link InputFile} for table store. */
 public class ParquetInputFile implements InputFile {
 
-    private final FileSystem fs;
+    private final FileIO fileIO;
     private final FileStatus stat;
 
-    public static ParquetInputFile fromPath(Path path) throws IOException {
-        FileSystem fs = path.getFileSystem();
-        return new ParquetInputFile(fs, fs.getFileStatus(path));
+    public static ParquetInputFile fromPath(FileIO fileIO, Path path) throws IOException {
+        return new ParquetInputFile(fileIO, fileIO.getFileStatus(path));
     }
 
-    private ParquetInputFile(FileSystem fs, FileStatus stat) {
-        this.fs = fs;
+    private ParquetInputFile(FileIO fileIO, FileStatus stat) {
+        this.fileIO = fileIO;
         this.stat = stat;
     }
 
@@ -54,7 +53,7 @@ public class ParquetInputFile implements InputFile {
 
     @Override
     public SeekableInputStream newStream() throws IOException {
-        return new ParquetInputStream(fs.open(stat.getPath()));
+        return new ParquetInputStream(fileIO.newInputStream(stat.getPath()));
     }
 
     @Override

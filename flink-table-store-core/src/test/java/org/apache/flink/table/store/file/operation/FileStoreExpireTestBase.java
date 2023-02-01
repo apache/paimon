@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
@@ -29,6 +28,9 @@ import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunct
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
@@ -44,6 +46,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Base test class for {@link FileStoreExpireImpl}. */
 public class FileStoreExpireTestBase {
 
+    protected final FileIO fileIO = new LocalFileIO();
     protected TestKeyValueGenerator gen;
     @TempDir java.nio.file.Path tempDir;
     protected TestFileStore store;
@@ -54,7 +57,7 @@ public class FileStoreExpireTestBase {
         gen = new TestKeyValueGenerator();
         store = createStore();
         snapshotManager = store.snapshotManager();
-        SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
+        SchemaManager schemaManager = new SchemaManager(fileIO, new Path(tempDir.toUri()));
         schemaManager.commitNewVersion(
                 new UpdateSchema(
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,

@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.types.RowType;
 
 import java.util.Comparator;
@@ -39,16 +40,19 @@ import java.util.Comparator;
  */
 public abstract class AbstractFileStore<T> implements FileStore<T> {
 
+    protected final FileIO fileIO;
     protected final SchemaManager schemaManager;
     protected final long schemaId;
     protected final CoreOptions options;
     protected final RowType partitionType;
 
     public AbstractFileStore(
+            FileIO fileIO,
             SchemaManager schemaManager,
             long schemaId,
             CoreOptions options,
             RowType partitionType) {
+        this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
         this.options = options;
@@ -65,12 +69,13 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public SnapshotManager snapshotManager() {
-        return new SnapshotManager(options.path());
+        return new SnapshotManager(fileIO, options.path());
     }
 
     @VisibleForTesting
     public ManifestFile.Factory manifestFileFactory() {
         return new ManifestFile.Factory(
+                fileIO,
                 schemaManager,
                 schemaId,
                 partitionType,
@@ -81,7 +86,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @VisibleForTesting
     public ManifestList.Factory manifestListFactory() {
-        return new ManifestList.Factory(partitionType, options.manifestFormat(), pathFactory());
+        return new ManifestList.Factory(
+                fileIO, partitionType, options.manifestFormat(), pathFactory());
     }
 
     @Override
@@ -97,6 +103,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public FileStoreCommitImpl newCommit(String commitUser) {
         return new FileStoreCommitImpl(
+                fileIO,
                 schemaId,
                 commitUser,
                 partitionType,
@@ -114,6 +121,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public FileStoreExpireImpl newExpire() {
         return new FileStoreExpireImpl(
+                fileIO,
                 options.snapshotNumRetainMin(),
                 options.snapshotNumRetainMax(),
                 options.snapshotTimeRetain().toMillis(),

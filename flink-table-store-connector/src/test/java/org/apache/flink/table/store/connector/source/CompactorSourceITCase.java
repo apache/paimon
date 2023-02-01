@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector.source;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
@@ -30,6 +29,8 @@ import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.sink.TableCommit;
@@ -281,7 +282,7 @@ public class CompactorSourceITCase extends AbstractTestBase {
     }
 
     private FileStoreTable createFileStoreTable() throws Exception {
-        SchemaManager schemaManager = new SchemaManager(tablePath);
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         TableSchema tableSchema =
                 schemaManager.commitNewVersion(
                         new UpdateSchema(
@@ -290,6 +291,6 @@ public class CompactorSourceITCase extends AbstractTestBase {
                                 Arrays.asList("dt", "hh", "k"),
                                 Collections.emptyMap(),
                                 ""));
-        return FileStoreTableFactory.create(tablePath, tableSchema);
+        return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }
 }

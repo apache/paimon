@@ -18,17 +18,17 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FileStatsExtractor;
+import org.apache.flink.table.store.format.FormatWriterFactory;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.RowType;
 
 import org.slf4j.Logger;
@@ -67,7 +67,8 @@ public class KeyValueDataFileWriter
     private long maxSeqNumber = Long.MIN_VALUE;
 
     public KeyValueDataFileWriter(
-            BulkWriter.Factory<InternalRow> factory,
+            FileIO fileIO,
+            FormatWriterFactory factory,
             Path path,
             Function<KeyValue, InternalRow> converter,
             RowType keyType,
@@ -75,7 +76,13 @@ public class KeyValueDataFileWriter
             @Nullable FileStatsExtractor fileStatsExtractor,
             long schemaId,
             int level) {
-        super(factory, path, converter, KeyValue.schema(keyType, valueType), fileStatsExtractor);
+        super(
+                fileIO,
+                factory,
+                path,
+                converter,
+                KeyValue.schema(keyType, valueType),
+                fileStatsExtractor);
 
         this.keyType = keyType;
         this.valueType = valueType;
@@ -139,7 +146,7 @@ public class KeyValueDataFileWriter
 
         return new DataFileMeta(
                 path.getName(),
-                FileUtils.getFileSize(path),
+                fileIO.getFileSize(path),
                 recordCount(),
                 minKey,
                 keySerializer.toBinaryRow(maxKey).copy(),

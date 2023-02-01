@@ -19,13 +19,14 @@
 package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
-import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
+import org.apache.flink.table.store.file.utils.FailingFileIO;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.fs.FileIOFinder;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.io.TempDir;
@@ -59,22 +60,17 @@ public class ManifestListTest {
     @RepeatedTest(10)
     public void testCleanUpForException() throws IOException {
         String failingName = UUID.randomUUID().toString();
-        FailingAtomicRenameFileSystem.reset(failingName, 1, 3);
+        FailingFileIO.reset(failingName, 1, 3);
         List<ManifestFileMeta> metas = generateData();
         ManifestList manifestList =
-                createManifestList(
-                        FailingAtomicRenameFileSystem.getFailingPath(
-                                failingName, tempDir.toString()));
+                createManifestList(FailingFileIO.getFailingPath(failingName, tempDir.toString()));
 
         try {
             manifestList.write(metas);
         } catch (Throwable e) {
-            assertThat(e)
-                    .hasRootCauseExactlyInstanceOf(
-                            FailingAtomicRenameFileSystem.ArtificialException.class);
+            assertThat(e).hasRootCauseExactlyInstanceOf(FailingFileIO.ArtificialException.class);
             Path manifestDir = new Path(tempDir.toString() + "/manifest");
-            FileSystem fs = manifestDir.getFileSystem();
-            assertThat(fs.listStatus(manifestDir)).isEmpty();
+            assertThat(LocalFileIO.create().listStatus(manifestDir)).isEmpty();
         }
     }
 
@@ -91,14 +87,19 @@ public class ManifestListTest {
         return metas;
     }
 
-    private ManifestList createManifestList(String path) {
+    private ManifestList createManifestList(String pathStr) {
+        Path path = new Path(pathStr);
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
-                        new Path(path),
+                        path,
                         TestKeyValueGenerator.DEFAULT_PART_TYPE,
                         "default",
                         CoreOptions.FILE_FORMAT.defaultValue());
-        return new ManifestList.Factory(TestKeyValueGenerator.DEFAULT_PART_TYPE, avro, pathFactory)
+        return new ManifestList.Factory(
+                        FileIOFinder.find(path),
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                        avro,
+                        pathFactory)
                 .create();
     }
 }

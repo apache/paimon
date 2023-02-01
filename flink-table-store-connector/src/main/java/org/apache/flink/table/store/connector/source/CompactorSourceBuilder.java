@@ -100,6 +100,7 @@ public class CompactorSourceBuilder {
                     null,
                     (table, scan, nextSnapshotId) ->
                             new ContinuousDataFileSnapshotEnumerator(
+                                    table.fileIO(),
                                     table.location(),
                                     scan,
                                     new ContinuousCompactorStartingScanner(),
@@ -113,6 +114,7 @@ public class CompactorSourceBuilder {
                     null,
                     (table, scan) ->
                             new StaticDataFileSnapshotEnumerator(
+                                    table.fileIO(),
                                     table.location(),
                                     scan,
                                     // static compactor source will compact all current files

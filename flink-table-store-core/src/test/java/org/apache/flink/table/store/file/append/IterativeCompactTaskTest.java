@@ -20,6 +20,7 @@ package org.apache.flink.table.store.file.append;
 
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 
 import org.junit.jupiter.api.Test;
 
@@ -263,7 +264,14 @@ public class IterativeCompactTaskTest {
                 int minFileNum,
                 int maxFileNum,
                 AppendOnlyCompactManager.CompactRewriter rewriter) {
-            super(inputs, targetFileSize, minFileNum, maxFileNum, rewriter, null);
+            super(
+                    LocalFileIO.create(),
+                    inputs,
+                    targetFileSize,
+                    minFileNum,
+                    maxFileNum,
+                    rewriter,
+                    null);
             deleted = new HashSet<>();
         }
 

@@ -18,14 +18,15 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -87,9 +88,9 @@ public abstract class CommitterOperatorTestBase {
     }
 
     protected FileStoreTable createFileStoreTable() throws Exception {
-        Configuration conf = new Configuration();
+        Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
-        SchemaManager schemaManager = new SchemaManager(tablePath);
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         schemaManager.commitNewVersion(
                 new UpdateSchema(
                         ROW_TYPE,
@@ -97,6 +98,6 @@ public abstract class CommitterOperatorTestBase {
                         Collections.emptyList(),
                         conf.toMap(),
                         ""));
-        return FileStoreTableFactory.create(conf);
+        return FileStoreTableFactory.create(LocalFileIO.create(), conf);
     }
 }

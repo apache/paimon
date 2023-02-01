@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.mapred;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.FileStoreTestUtils;
 import org.apache.flink.table.store.RowDataContainer;
@@ -26,6 +25,7 @@ import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -63,9 +63,9 @@ public class TableStoreRecordReaderTest {
 
     @Test
     public void testPk() throws Exception {
-        Configuration conf = new Configuration();
-        conf.setString(CoreOptions.PATH, tempDir.toString());
-        conf.setString(CoreOptions.FILE_FORMAT, "avro");
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, tempDir.toString());
+        conf.set(CoreOptions.FILE_FORMAT, "avro");
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -101,9 +101,9 @@ public class TableStoreRecordReaderTest {
 
     @Test
     public void testValueCount() throws Exception {
-        Configuration conf = new Configuration();
-        conf.setString(CoreOptions.PATH, tempDir.toString());
-        conf.setString(CoreOptions.FILE_FORMAT, "avro");
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, tempDir.toString());
+        conf.set(CoreOptions.FILE_FORMAT, "avro");
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -140,9 +140,9 @@ public class TableStoreRecordReaderTest {
 
     @Test
     public void testProjectionPushdown() throws Exception {
-        Configuration conf = new Configuration();
-        conf.setString(CoreOptions.PATH, tempDir.toString());
-        conf.setString(CoreOptions.FILE_FORMAT, "avro");
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, tempDir.toString());
+        conf.set(CoreOptions.FILE_FORMAT, "avro");
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,

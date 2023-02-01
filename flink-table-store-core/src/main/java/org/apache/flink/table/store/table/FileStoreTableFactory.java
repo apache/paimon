@@ -19,27 +19,43 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.options.Options;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
 
 import static org.apache.flink.table.store.CoreOptions.PATH;
 
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
 
-    public static FileStoreTable create(Path path) {
-        Configuration conf = new Configuration();
-        conf.set(PATH, path.toString());
-        return create(conf);
+    public static FileStoreTable create(CatalogOptions options) {
+        FileIO fileIO;
+        try {
+            fileIO = FileIO.get(CoreOptions.path(options.options()), options);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return create(fileIO, options.options());
     }
 
-    public static FileStoreTable create(Configuration conf) {
-        Path tablePath = CoreOptions.path(conf);
+    public static FileStoreTable create(FileIO fileIO, Path path) {
+        Options options = new Options();
+        options.set(PATH, path.toString());
+        return create(fileIO, options);
+    }
+
+    public static FileStoreTable create(FileIO fileIO, Options options) {
+        Path tablePath = CoreOptions.path(options);
         TableSchema tableSchema =
-                new SchemaManager(tablePath)
+                new SchemaManager(fileIO, tablePath)
                         .latest()
                         .orElseThrow(
                                 () ->
@@ -47,24 +63,24 @@ public class FileStoreTableFactory {
                                                 "Schema file not found in location "
                                                         + tablePath
                                                         + ". Please create table first."));
-        return create(tablePath, tableSchema, conf);
+        return create(fileIO, tablePath, tableSchema, options);
     }
 
-    public static FileStoreTable create(Path tablePath, TableSchema tableSchema) {
-        return create(tablePath, tableSchema, new Configuration());
+    public static FileStoreTable create(FileIO fileIO, Path tablePath, TableSchema tableSchema) {
+        return create(fileIO, tablePath, tableSchema, new Options());
     }
 
     public static FileStoreTable create(
-            Path tablePath, TableSchema tableSchema, Configuration dynamicOptions) {
+            FileIO fileIO, Path tablePath, TableSchema tableSchema, Options dynamicOptions) {
         FileStoreTable table;
         if (Configuration.fromMap(tableSchema.options()).get(CoreOptions.WRITE_MODE)
                 == WriteMode.APPEND_ONLY) {
-            table = new AppendOnlyFileStoreTable(tablePath, tableSchema);
+            table = new AppendOnlyFileStoreTable(fileIO, tablePath, tableSchema);
         } else {
             if (tableSchema.primaryKeys().isEmpty()) {
-                table = new ChangelogValueCountFileStoreTable(tablePath, tableSchema);
+                table = new ChangelogValueCountFileStoreTable(fileIO, tablePath, tableSchema);
             } else {
-                table = new ChangelogWithKeyFileStoreTable(tablePath, tableSchema);
+                table = new ChangelogWithKeyFileStoreTable(fileIO, tablePath, tableSchema);
             }
         }
 
