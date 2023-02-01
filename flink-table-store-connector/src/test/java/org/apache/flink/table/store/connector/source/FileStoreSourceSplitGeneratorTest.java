@@ -28,7 +28,6 @@ import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import javax.annotation.Nullable;
 
@@ -43,8 +42,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FileStoreSourceSplitGenerator}. */
 public class FileStoreSourceSplitGeneratorTest {
-
-    @TempDir java.nio.file.Path tempDir;
 
     @Test
     public void test() {
@@ -80,8 +77,9 @@ public class FileStoreSourceSplitGeneratorTest {
                 AbstractDataTableScan.generateSplits(
                         1L,
                         false,
+                        false,
                         Collections::singletonList,
-                        plan.groupByPartFiles(plan.files(FileKind.ADD)));
+                        FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.ADD)));
         DataTableScan.DataFilePlan tableScanPlan = new DataTableScan.DataFilePlan(1L, scanSplits);
 
         List<FileStoreSourceSplit> splits =

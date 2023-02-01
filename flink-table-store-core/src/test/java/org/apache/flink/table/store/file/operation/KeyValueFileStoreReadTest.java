@@ -242,6 +242,7 @@ public class KeyValueFileStoreReadTest {
                                     entry.getValue().stream()
                                             .map(ManifestEntry::file)
                                             .collect(Collectors.toList()),
+                                    false,
                                     false));
             RecordReaderIterator<KeyValue> actualIterator = new RecordReaderIterator<>(reader);
             while (actualIterator.hasNext()) {

@@ -225,54 +225,46 @@ public class ReadWriteTableTestUtil {
     public static void testBatchRead(String query, List<Row> expected) throws Exception {
         CloseableIterator<Row> resultItr = bEnv.executeSql(query).collect();
         try (BlockingIterator<Row, Row> iterator = BlockingIterator.of(resultItr)) {
-            if (expected.isEmpty()) {
-                assertThat(resultItr.hasNext()).isFalse();
-            } else {
+            if (!expected.isEmpty()) {
                 assertThat(
                                 iterator.collect(
                                         expected.size(), TIME_OUT.getSize(), TIME_OUT.getUnit()))
                         .containsExactlyInAnyOrderElementsOf(expected);
             }
+            assertThat(resultItr.hasNext()).isFalse();
         }
     }
 
     public static BlockingIterator<Row, Row> testStreamingRead(String query, List<Row> expected)
             throws Exception {
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
-
-        if (expected.isEmpty()) {
-            assertNoMoreRecords(iterator);
-        } else {
-            assertThat(iterator.collect(expected.size()))
-                    .containsExactlyInAnyOrderElementsOf(expected);
-        }
-
+        validateStreamingReadResult(iterator, expected);
         return iterator;
     }
 
     public static BlockingIterator<Row, Row> testStreamingReadWithReadFirst(
             String source, String sink, String query, List<Row> expected) throws Exception {
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
-
         insertIntoFromTable(source, sink);
-
-        if (expected.isEmpty()) {
-            assertNoMoreRecords(iterator);
-        } else {
-            assertThat(iterator.collect(expected.size()))
-                    .containsExactlyInAnyOrderElementsOf(expected);
-        }
-
+        validateStreamingReadResult(iterator, expected);
         return iterator;
     }
 
-    public static void assertNoMoreRecords(BlockingIterator<Row, Row> iterator) throws Exception {
+    public static void validateStreamingReadResult(
+            BlockingIterator<Row, Row> streamingItr, List<Row> expected) throws Exception {
+        if (!expected.isEmpty()) {
+            assertThat(streamingItr.collect(expected.size()))
+                    .containsExactlyInAnyOrderElementsOf(expected);
+        }
+        assertNoMoreRecords(streamingItr);
+    }
+
+    public static void assertNoMoreRecords(BlockingIterator<Row, Row> iterator) {
         List<Row> expectedRecords = Collections.emptyList();
         try {
             // set expectation size to 1 to let time pass by until timeout
             // just wait 5s to avoid too long time
             expectedRecords = iterator.collect(1, 5L, TimeUnit.SECONDS);
-            iterator.close();
         } catch (TimeoutException ignored) {
             // don't throw exception
         }

@@ -62,6 +62,7 @@ public class TableStoreInputSplitTest {
                                         .filter(d -> d.partition.equals(wantedPartition))
                                         .map(d -> d.meta)
                                         .collect(Collectors.toList()),
+                                false,
                                 false));
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();

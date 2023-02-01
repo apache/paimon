@@ -401,6 +401,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to create underlying storage when reading and writing the table.");
 
+    public static final ConfigOption<Boolean> STREAMING_READ_OVERWRITE =
+            ConfigOptions.key("streaming-read-overwrite")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to read the changes from overwrite in streaming mode.");
+
     private final Configuration options;
 
     public CoreOptions(Map<String, String> options) {
@@ -602,6 +609,10 @@ public class CoreOptions implements Serializable {
 
     public boolean writeOnly() {
         return options.get(WRITE_ONLY);
+    }
+
+    public boolean streamingReadOverwrite() {
+        return options.get(STREAMING_READ_OVERWRITE);
     }
 
     /** Specifies the merge engine for table with primary key. */
@@ -841,7 +852,7 @@ public class CoreOptions implements Serializable {
                                     !SYSTEM_FIELD_NAMES.contains(f),
                                     String.format(
                                             "Field name[%s] in schema cannot be exist in [%s]",
-                                            f, SYSTEM_FIELD_NAMES.toString()));
+                                            f, SYSTEM_FIELD_NAMES));
                             checkState(
                                     !f.startsWith(KEY_FIELD_PREFIX),
                                     String.format(
@@ -854,6 +865,11 @@ public class CoreOptions implements Serializable {
             throw new RuntimeException(
                     "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if "
                             + "still want to keep the primary key definition.");
+        }
+
+        if (schema.primaryKeys().isEmpty() && options.streamingReadOverwrite()) {
+            throw new RuntimeException(
+                    "Doesn't support streaming read the changes from overwrite when the primary keys are not defined.");
         }
     }
 

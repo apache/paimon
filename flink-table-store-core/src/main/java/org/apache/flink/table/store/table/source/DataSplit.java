@@ -45,13 +45,17 @@ public class DataSplit implements Split {
     private List<DataFileMeta> files;
     private boolean isIncremental;
 
+    // when needReverse, the RowKind of records from this split should be reversed to DELETE
+    private boolean needReverse;
+
     public DataSplit(
             long snapshotId,
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> files,
-            boolean isIncremental) {
-        init(snapshotId, partition, bucket, files, isIncremental);
+            boolean isIncremental,
+            boolean needReverse) {
+        init(snapshotId, partition, bucket, files, isIncremental, needReverse);
     }
 
     private void init(
@@ -59,12 +63,14 @@ public class DataSplit implements Split {
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> files,
-            boolean isIncremental) {
+            boolean isIncremental,
+            boolean needReverse) {
         this.snapshotId = snapshotId;
         this.partition = partition;
         this.bucket = bucket;
         this.files = files;
         this.isIncremental = isIncremental;
+        this.needReverse = needReverse;
     }
 
     public long snapshotId() {
@@ -85,6 +91,10 @@ public class DataSplit implements Split {
 
     public boolean isIncremental() {
         return isIncremental;
+    }
+
+    public boolean needReverse() {
+        return needReverse;
     }
 
     @Override
@@ -122,7 +132,13 @@ public class DataSplit implements Split {
 
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
         DataSplit split = DataSplit.deserialize(new DataInputViewStreamWrapper(in));
-        init(split.snapshotId, split.partition, split.bucket, split.files, split.isIncremental);
+        init(
+                split.snapshotId,
+                split.partition,
+                split.bucket,
+                split.files,
+                split.isIncremental,
+                split.needReverse);
     }
 
     public void serialize(DataOutputView out) throws IOException {
@@ -135,6 +151,7 @@ public class DataSplit implements Split {
             dataFileSer.serialize(file, out);
         }
         out.writeBoolean(isIncremental);
+        out.writeBoolean(needReverse);
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
@@ -147,6 +164,7 @@ public class DataSplit implements Split {
         for (int i = 0; i < fileNumber; i++) {
             files.add(dataFileSer.deserialize(in));
         }
-        return new DataSplit(snapshotId, partition, bucket, files, in.readBoolean());
+        return new DataSplit(
+                snapshotId, partition, bucket, files, in.readBoolean(), in.readBoolean());
     }
 }

@@ -24,6 +24,7 @@ import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.FileKind;
+import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -118,16 +119,34 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     @Override
-    public DataFilePlan plan() {
+    public DataFilePlan plan(boolean isOverwrite) {
+        if (isOverwrite) {
+            withKind(ScanKind.DELTA);
+        }
         FileStoreScan.Plan plan = scan.plan();
         Long snapshotId = plan.snapshotId();
 
-        List<DataSplit> splits =
+        List<ManifestEntry> addPart = plan.files(FileKind.ADD);
+        List<ManifestEntry> deletePart = plan.files(FileKind.DELETE);
+
+        List<DataSplit> splits = new ArrayList<>();
+        if (isOverwrite) {
+            splits.addAll(
+                    generateSplits(
+                            snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
+                            scanKind != ScanKind.ALL,
+                            true,
+                            splitGenerator(pathFactory),
+                            FileStoreScan.Plan.groupByPartFiles(deletePart)));
+        }
+        splits.addAll(
                 generateSplits(
                         snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
                         scanKind != ScanKind.ALL,
+                        false,
                         splitGenerator(pathFactory),
-                        plan.groupByPartFiles(plan.files(FileKind.ADD)));
+                        FileStoreScan.Plan.groupByPartFiles(addPart)));
+
         return new DataFilePlan(snapshotId, splits);
     }
 
@@ -135,6 +154,7 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     public static List<DataSplit> generateSplits(
             long snapshotId,
             boolean isIncremental,
+            boolean needReverse,
             SplitGenerator splitGenerator,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
         List<DataSplit> splits = new ArrayList<>();
@@ -148,13 +168,23 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                     // Don't split when incremental
                     splits.add(
                             new DataSplit(
-                                    snapshotId, partition, bucket, bucketEntry.getValue(), true));
+                                    snapshotId,
+                                    partition,
+                                    bucket,
+                                    bucketEntry.getValue(),
+                                    true,
+                                    needReverse));
                 } else {
                     splitGenerator.split(bucketEntry.getValue()).stream()
                             .map(
                                     files ->
                                             new DataSplit(
-                                                    snapshotId, partition, bucket, files, false))
+                                                    snapshotId,
+                                                    partition,
+                                                    bucket,
+                                                    files,
+                                                    false,
+                                                    needReverse))
                             .forEach(splits::add);
                 }
             }
