@@ -41,6 +41,6 @@ public class AvroWriterFactory<T> {
     }
 
     public AvroBulkWriter<T> create(PositionOutputStream out) throws IOException {
-        return new AvroBulkWriter<T>(avroBuilder.createWriter(new CloseShieldOutputStream(out)));
+        return new AvroBulkWriter<>(avroBuilder.createWriter(new CloseShieldOutputStream(out)));
     }
 }

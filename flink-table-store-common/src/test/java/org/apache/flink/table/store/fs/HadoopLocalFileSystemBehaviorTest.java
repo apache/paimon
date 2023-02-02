@@ -43,7 +43,7 @@ class HadoopLocalFileSystemBehaviorTest extends FileIOBehaviorTestBase {
     }
 
     @Override
-    protected Path getBasePath() throws Exception {
+    protected Path getBasePath() {
         return new Path(tmp.toUri());
     }
 

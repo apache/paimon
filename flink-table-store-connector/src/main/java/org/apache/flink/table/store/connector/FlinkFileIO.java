@@ -21,6 +21,7 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.core.fs.FSDataInputStream;
 import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
+import org.apache.flink.core.fs.FileSystem.WriteMode;
 import org.apache.flink.core.fs.FileSystemKind;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileStatus;
@@ -64,7 +65,11 @@ public class FlinkFileIO implements FileIO {
     @Override
     public PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException {
         org.apache.flink.core.fs.Path flinkPath = path(path);
-        return new FlinkPositionOutputStream(getFileSystem(flinkPath).create(flinkPath, overwrite));
+        return new FlinkPositionOutputStream(
+                getFileSystem(flinkPath)
+                        .create(
+                                flinkPath,
+                                overwrite ? WriteMode.OVERWRITE : WriteMode.NO_OVERWRITE));
     }
 
     @Override

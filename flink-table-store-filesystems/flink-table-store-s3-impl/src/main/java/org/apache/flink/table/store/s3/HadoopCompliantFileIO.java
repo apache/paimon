@@ -215,7 +215,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         }
 
         @Override
-        public long getPos() throws IOException {
+        public long getPos() {
             return out.getPos();
         }
 
@@ -260,7 +260,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
         @Override
         public boolean isDir() {
-            return status.isDir();
+            return status.isDirectory();
         }
 
         @Override

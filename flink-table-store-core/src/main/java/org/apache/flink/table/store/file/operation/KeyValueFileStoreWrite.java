@@ -66,7 +66,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final CoreOptions options;
-    private final FileStorePathFactory pathFactory;
     private final FileIO fileIO;
 
     public KeyValueFileStoreWrite(
@@ -107,7 +106,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.mfFactory = mfFactory;
         this.options = options;
-        this.pathFactory = pathFactory;
     }
 
     @Override

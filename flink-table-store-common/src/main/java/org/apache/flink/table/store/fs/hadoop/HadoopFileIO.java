@@ -277,7 +277,7 @@ public class HadoopFileIO implements FileIO {
 
         @Override
         public boolean isDir() {
-            return status.isDir();
+            return status.isDirectory();
         }
 
         @Override

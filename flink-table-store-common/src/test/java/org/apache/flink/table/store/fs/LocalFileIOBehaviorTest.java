@@ -28,12 +28,12 @@ public class LocalFileIOBehaviorTest extends FileIOBehaviorTestBase {
     @TempDir private java.nio.file.Path tmp;
 
     @Override
-    protected FileIO getFileSystem() throws Exception {
+    protected FileIO getFileSystem() {
         return new LocalFileIO();
     }
 
     @Override
-    protected Path getBasePath() throws Exception {
+    protected Path getBasePath() {
         return new Path(tmp.toUri());
     }
 }

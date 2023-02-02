@@ -72,7 +72,7 @@ public class PhysicalWriterImpl implements PhysicalWriter {
     private final boolean writeVariableLengthBlocks;
 
     private CompressionCodec codec;
-    private PositionOutputStream out;
+    private final PositionOutputStream out;
     private long headerLength;
     private long stripeStart;
     private long blockOffset;
@@ -113,7 +113,7 @@ public class PhysicalWriterImpl implements PhysicalWriter {
     }
 
     @Override
-    public OutputReceiver createDataStream(StreamName name) throws IOException {
+    public OutputReceiver createDataStream(StreamName name) {
         BufferedStream result = streams.get(name);
 
         if (result == null) {
