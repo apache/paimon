@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.BigIntType;
@@ -140,7 +141,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                         + "COMMENT 'table comment'\n"
                         + "TBLPROPERTIES ('primary-key' = 'a')");
         Path tablePath = new Path(warehousePath, "default.db/PkTable");
-        TableSchema schema = FileStoreTableFactory.create(tablePath).schema();
+        TableSchema schema = FileStoreTableFactory.create(LocalFileIO.create(), tablePath).schema();
         assertThat(schema.logicalRowType().getTypeAt(0).isNullable()).isFalse();
     }
 
@@ -322,7 +323,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                 .hasMessageContaining("Change 'write-mode' is not supported yet");
 
         Path tablePath = new Path(warehousePath, String.format("default.db/%s", tableName));
-        TableSchema schema = FileStoreTableFactory.create(tablePath).schema();
+        TableSchema schema = FileStoreTableFactory.create(LocalFileIO.create(), tablePath).schema();
         assertThat(schema.fields()).containsExactlyElementsOf(fields);
         assertThat(schema.options()).containsEntry("foo", "bar");
         assertThat(schema.options()).doesNotContainKey("primary-key");

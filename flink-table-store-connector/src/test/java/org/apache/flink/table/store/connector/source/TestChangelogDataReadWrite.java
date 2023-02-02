@@ -20,7 +20,6 @@ package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.GenericRow;
@@ -41,6 +40,8 @@ import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
@@ -108,7 +109,7 @@ public class TestChangelogDataReadWrite {
                         RowType.of(new IntType()),
                         "default",
                         CoreOptions.FILE_FORMAT.defaultValue());
-        this.snapshotManager = new SnapshotManager(new Path(root));
+        this.snapshotManager = new SnapshotManager(LocalFileIO.create(), new Path(root));
         this.service = service;
         this.commitUser = UUID.randomUUID().toString();
     }
@@ -128,7 +129,8 @@ public class TestChangelogDataReadWrite {
                     rowDataIteratorCreator) {
         KeyValueFileStoreRead read =
                 new KeyValueFileStoreRead(
-                        new SchemaManager(tablePath),
+                        LocalFileIO.create(),
+                        new SchemaManager(LocalFileIO.create(), tablePath),
                         0,
                         KEY_TYPE,
                         VALUE_TYPE,
@@ -179,7 +181,8 @@ public class TestChangelogDataReadWrite {
                 new CoreOptions(Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "avro"));
         RecordWriter<KeyValue> writer =
                 new KeyValueFileStoreWrite(
-                                new SchemaManager(tablePath),
+                                LocalFileIO.create(),
+                                new SchemaManager(LocalFileIO.create(), tablePath),
                                 0,
                                 commitUser,
                                 KEY_TYPE,

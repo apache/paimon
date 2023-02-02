@@ -18,9 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.BinaryRowWriter;
 import org.apache.flink.table.store.data.BinaryString;
@@ -35,8 +32,10 @@ import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
-import org.apache.flink.table.store.file.utils.TraceableFileSystem;
+import org.apache.flink.table.store.file.utils.TraceableFileIO;
+import org.apache.flink.table.store.fs.FileIOFinder;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -130,20 +129,16 @@ public abstract class FileStoreTableTestBase {
 
     @BeforeEach
     public void before() {
-        tablePath = new Path(TestAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString());
+        tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
         commitUser = UUID.randomUUID().toString();
     }
 
     @AfterEach
     public void after() throws IOException {
         // assert all connections are closed
-        FileSystem fileSystem = tablePath.getFileSystem();
-        assertThat(fileSystem).isInstanceOf(TraceableFileSystem.class);
-        TraceableFileSystem traceableFileSystem = (TraceableFileSystem) fileSystem;
-
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
-        assertThat(traceableFileSystem.openInputStreams(pathPredicate)).isEmpty();
-        assertThat(traceableFileSystem.openOutputStreams(pathPredicate)).isEmpty();
+        assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();
+        assertThat(TraceableFileIO.openOutputStreams(pathPredicate)).isEmpty();
     }
 
     @Test
@@ -348,7 +343,8 @@ public abstract class FileStoreTableTestBase {
             assertThat(file.level()).isEqualTo(0);
         }
 
-        SnapshotManager snapshotManager = new SnapshotManager(table.location());
+        SnapshotManager snapshotManager =
+                new SnapshotManager(FileIOFinder.find(tablePath), table.location());
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         assertThat(latestSnapshotId).isNotNull();
         for (int i = 1; i <= latestSnapshotId; i++) {
@@ -441,6 +437,6 @@ public abstract class FileStoreTableTestBase {
         return createFileStoreTable(1);
     }
 
-    protected abstract FileStoreTable createFileStoreTable(Consumer<Configuration> configure)
+    protected abstract FileStoreTable createFileStoreTable(Consumer<Options> configure)
             throws Exception;
 }

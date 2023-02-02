@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.filesystem.FileSystems;
+import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 
+import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.connector.catalog.SessionConfigSupport;
 import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.expressions.Transform;
@@ -66,13 +66,11 @@ public class SparkSource implements DataSourceRegister, SessionConfigSupport {
     @Override
     public Table getTable(
             StructType schema, Transform[] partitioning, Map<String, String> options) {
-        Configuration configuration =
-                Configuration.fromMap(SparkCaseSensitiveConverter.convert(options));
-        FileSystems.initialize(CoreOptions.path(options), configuration);
-        return new SparkTable(
-                FileStoreTableFactory.create(Configuration.fromMap(options)),
-                Lock.emptyFactory(),
-                configuration);
+        CatalogOptions catalogOptions =
+                CatalogOptions.create(
+                        Options.fromMap(options),
+                        SparkSession.active().sessionState().newHadoopConf());
+        return new SparkTable(FileStoreTableFactory.create(catalogOptions), Lock.emptyFactory());
     }
 
     @Override

@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
@@ -30,6 +29,8 @@ import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.AbstractDataTableScan;
@@ -241,14 +242,13 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Override
-    protected FileStoreTable createFileStoreTable(Consumer<Configuration> configure)
-            throws Exception {
-        Configuration conf = new Configuration();
+    protected FileStoreTable createFileStoreTable(Consumer<Options> configure) throws Exception {
+        Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
         conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
         configure.accept(conf);
         TableSchema tableSchema =
-                new SchemaManager(tablePath)
+                new SchemaManager(LocalFileIO.create(), tablePath)
                         .commitNewVersion(
                                 new UpdateSchema(
                                         ROW_TYPE,
@@ -256,6 +256,6 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                         Collections.emptyList(),
                                         conf.toMap(),
                                         ""));
-        return new AppendOnlyFileStoreTable(tablePath, tableSchema);
+        return new AppendOnlyFileStoreTable(LocalFileIO.create(), tablePath, tableSchema);
     }
 }

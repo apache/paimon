@@ -19,13 +19,14 @@
 package org.apache.flink.table.store.format.avro;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.IteratorResultIterator;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FormatReaderFactory;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.utils.Pool;
+import org.apache.flink.util.IOUtils;
 
 import org.apache.avro.Schema;
 import org.apache.avro.file.DataFileReader;
@@ -56,14 +57,14 @@ public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
     }
 
     @Override
-    public AvroReader createReader(Path file) throws IOException {
-        return createReader(file, createReusedAvroRecord(), createConverter());
+    public AvroReader createReader(FileIO fileIO, Path file) throws IOException {
+        return createReader(fileIO, file, createReusedAvroRecord(), createConverter());
     }
 
-    private AvroReader createReader(Path file, A reuse, Function<A, InternalRow> converter)
+    private AvroReader createReader(
+            FileIO fileIO, Path file, A reuse, Function<A, InternalRow> converter)
             throws IOException {
-        long end = file.getFileSystem().getFileStatus(file).getLen();
-        return new AvroReader(file, 0, end, -1, 0, reuse, converter);
+        return new AvroReader(fileIO, file, 0, fileIO.getFileSize(file), -1, 0, reuse, converter);
     }
 
     protected abstract A createReusedAvroRecord();
@@ -72,6 +73,7 @@ public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
 
     private class AvroReader implements RecordReader<InternalRow> {
 
+        private final FileIO fileIO;
         private final DataFileReader<A> reader;
         private final Function<A, InternalRow> converter;
 
@@ -81,6 +83,7 @@ public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
         private long currentRecordsToSkip;
 
         private AvroReader(
+                FileIO fileIO,
                 Path path,
                 long offset,
                 long end,
@@ -89,6 +92,7 @@ public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
                 A reuse,
                 Function<A, InternalRow> converter)
                 throws IOException {
+            this.fileIO = fileIO;
             this.reader = createReaderFromPath(path);
             if (blockStart >= 0) {
                 reader.seek(blockStart);
@@ -108,12 +112,16 @@ public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
         }
 
         private DataFileReader<A> createReaderFromPath(Path path) throws IOException {
-            FileSystem fileSystem = path.getFileSystem();
             DatumReader<A> datumReader = new GenericDatumReader<>(null, readerSchema);
             SeekableInput in =
-                    new FSDataInputStreamWrapper(
-                            fileSystem.open(path), fileSystem.getFileStatus(path).getLen());
-            return (DataFileReader<A>) DataFileReader.openReader(in, datumReader);
+                    new SeekableInputStreamWrapper(
+                            fileIO.newInputStream(path), fileIO.getFileSize(path));
+            try {
+                return (DataFileReader<A>) DataFileReader.openReader(in, datumReader);
+            } catch (Throwable e) {
+                IOUtils.closeQuietly(in);
+                throw e;
+            }
         }
 
         @Nullable

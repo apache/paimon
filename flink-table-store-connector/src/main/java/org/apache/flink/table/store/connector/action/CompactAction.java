@@ -20,17 +20,18 @@ package org.apache.flink.table.store.connector.action;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.connector.FlinkUtils;
 import org.apache.flink.table.store.connector.sink.CompactorSinkBuilder;
 import org.apache.flink.table.store.connector.source.CompactorSourceBuilder;
 import org.apache.flink.table.store.connector.utils.StreamExecutionEnvironmentUtils;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 
@@ -53,10 +54,15 @@ public class CompactAction implements Action {
     private final CompactorSinkBuilder sinkBuilder;
 
     CompactAction(Path tablePath) {
-        Configuration tableOptions = new Configuration();
+        Options tableOptions = new Options();
         tableOptions.set(CoreOptions.PATH, tablePath.toString());
         tableOptions.set(CoreOptions.WRITE_ONLY, false);
-        FileStoreTable table = FileStoreTableFactory.create(tableOptions);
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        FlinkUtils.catalogOptions(
+                                tableOptions.toMap(),
+                                StreamExecutionEnvironment.getExecutionEnvironment()
+                                        .getConfiguration()));
 
         sourceBuilder = new CompactorSourceBuilder(tablePath.toString(), table);
         sinkBuilder = new CompactorSinkBuilder(table);

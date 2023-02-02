@@ -34,6 +34,7 @@ import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.types.RowType;
 
@@ -47,6 +48,7 @@ import static org.apache.flink.table.store.file.io.DataFileMeta.getMaxSequenceNu
 /** {@link FileStoreWrite} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow> {
 
+    private final FileIO fileIO;
     private final AppendOnlyFileStoreRead read;
     private final long schemaId;
     private final RowType rowType;
@@ -59,6 +61,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
     private final boolean skipCompaction;
 
     public AppendOnlyFileStoreWrite(
+            FileIO fileIO,
             AppendOnlyFileStoreRead read,
             long schemaId,
             String commitUser,
@@ -68,6 +71,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
             FileStoreScan scan,
             CoreOptions options) {
         super(commitUser, snapshotManager, scan);
+        this.fileIO = fileIO;
         this.read = read;
         this.schemaId = schemaId;
         this.rowType = rowType;
@@ -115,6 +119,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                 skipCompaction
                         ? new NoopCompactManager()
                         : new AppendOnlyCompactManager(
+                                fileIO,
                                 compactExecutor,
                                 restored,
                                 compactionMinFileNum,
@@ -123,6 +128,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                                 compactRewriter(partition, bucket),
                                 factory);
         return new AppendOnlyWriter(
+                fileIO,
                 schemaId,
                 fileFormat,
                 targetFileSize,
@@ -141,6 +147,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
             }
             RowDataRollingFileWriter rewriter =
                     new RowDataRollingFileWriter(
+                            fileIO,
                             schemaId,
                             fileFormat,
                             targetFileSize,

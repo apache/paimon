@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.configuration.MemorySize;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.Snapshot;
@@ -33,9 +31,10 @@ import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.file.utils.AtomicFileWriter;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
@@ -84,6 +83,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitImpl.class);
 
+    private final FileIO fileIO;
     private final long schemaId;
     private final String commitUser;
     private final RowType partitionType;
@@ -102,6 +102,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean createEmptyCommit;
 
     public FileStoreCommitImpl(
+            FileIO fileIO,
             long schemaId,
             String commitUser,
             RowType partitionType,
@@ -114,6 +115,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             MemorySize manifestTargetSize,
             int manifestMergeMinCount,
             @Nullable Comparator<InternalRow> keyComparator) {
+        this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.commitUser = commitUser;
         this.partitionType = partitionType;
@@ -538,16 +540,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         boolean success;
         try {
-            FileSystem fs = newSnapshotPath.getFileSystem();
             Callable<Boolean> callable =
                     () -> {
-                        if (fs.exists(newSnapshotPath)) {
-                            return false;
-                        }
-
                         boolean committed =
-                                AtomicFileWriter.writeFileUtf8(
-                                        newSnapshotPath, newSnapshot.toJson());
+                                fileIO.writeFileUtf8(newSnapshotPath, newSnapshot.toJson());
                         if (committed) {
                             snapshotManager.commitLatestHint(newSnapshotId);
                         }
@@ -562,7 +558,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                         // as we're relying on external locking, we can first
                                         // check if file exist then rename to work around this
                                         // case
-                                        !fs.exists(newSnapshotPath) && callable.call());
+                                        !fileIO.exists(newSnapshotPath) && callable.call());
             } else {
                 success = callable.call();
             }

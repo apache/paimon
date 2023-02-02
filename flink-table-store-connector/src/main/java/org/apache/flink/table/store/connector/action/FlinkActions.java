@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.connector.action;
 
-import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.fs.Path;
 
 import java.util.Optional;
 

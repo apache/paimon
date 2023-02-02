@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.format.parquet;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.columnar.ColumnVector;
 import org.apache.flink.table.store.data.columnar.ColumnarRow;
@@ -31,6 +30,8 @@ import org.apache.flink.table.store.file.utils.RecordReader.RecordIterator;
 import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.format.parquet.reader.ColumnReader;
 import org.apache.flink.table.store.format.parquet.reader.ParquetDecimalVector;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypeRoot;
 import org.apache.flink.table.store.types.RowType;
@@ -92,16 +93,16 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     }
 
     @Override
-    public ParquetReader createReader(Path filePath) throws IOException {
+    public ParquetReader createReader(FileIO fileIO, Path filePath) throws IOException {
         final long splitOffset = 0;
-        final long splitLength = filePath.getFileSystem().getFileStatus(filePath).getLen();
+        final long splitLength = fileIO.getFileSize(filePath);
 
         ParquetReadOptions.Builder builder =
                 ParquetReadOptions.builder().withRange(splitOffset, splitOffset + splitLength);
         setReadOptions(builder);
 
         ParquetFileReader reader =
-                new ParquetFileReader(ParquetInputFile.fromPath(filePath), builder.build());
+                new ParquetFileReader(ParquetInputFile.fromPath(fileIO, filePath), builder.build());
         MessageType fileSchema = reader.getFileMetaData().getSchema();
         MessageType requestedSchema = clipParquetSchema(fileSchema);
         reader.setRequestedSchema(requestedSchema);

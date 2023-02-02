@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.system;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
@@ -29,6 +28,8 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.IteratorRecordReader;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.Table;
@@ -118,6 +119,11 @@ public class BucketsTable implements DataTable {
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
         return new BucketsTable(wrapped.copy(dynamicOptions), isContinuous);
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return wrapped.fileIO();
     }
 
     private class BucketsRead implements TableRead {

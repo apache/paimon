@@ -19,7 +19,11 @@
 package org.apache.flink.table.store.connector.action;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.flink.core.fs.Path;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.connector.FlinkUtils;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.sink.TableCommit;
@@ -44,7 +48,14 @@ public class DropPartitionAction implements Action {
     private final TableCommit commit;
 
     DropPartitionAction(Path tablePath, List<Map<String, String>> partitions) {
-        FileStoreTable table = FileStoreTableFactory.create(tablePath);
+        Options tableOptions = new Options();
+        tableOptions.set(CoreOptions.PATH, tablePath.toString());
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        FlinkUtils.catalogOptions(
+                                tableOptions.toMap(),
+                                StreamExecutionEnvironment.getExecutionEnvironment()
+                                        .getConfiguration()));
         this.commit =
                 table.newCommit(UUID.randomUUID().toString()).withOverwritePartitions(partitions);
     }

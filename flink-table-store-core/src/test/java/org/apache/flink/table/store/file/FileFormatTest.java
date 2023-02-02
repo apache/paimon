@@ -18,17 +18,18 @@
 
 package org.apache.flink.table.store.file;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.FSDataOutputStream;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.format.FormatWriter;
+import org.apache.flink.table.store.format.FormatWriterFactory;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.PositionOutputStream;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
 
@@ -51,16 +52,14 @@ public class FileFormatTest {
         RowType rowType = RowType.of(new IntType(), new IntType());
 
         Path path = new Path(tempDir.toUri().toString(), "1.avro");
-        FileSystem fs = path.getFileSystem();
-
         // write
 
         List<InternalRow> expected = new ArrayList<>();
         expected.add(GenericRow.of(1, 11));
         expected.add(GenericRow.of(2, 22));
         expected.add(GenericRow.of(3, 33));
-        FSDataOutputStream out = fs.create(path, FileSystem.WriteMode.NO_OVERWRITE);
-        BulkWriter<InternalRow> writer = avro.createWriterFactory(rowType).create(out);
+        PositionOutputStream out = LocalFileIO.create().newOutputStream(path, false);
+        FormatWriter writer = avro.createWriterFactory(rowType).create(out);
         for (InternalRow row : expected) {
             writer.addElement(row);
         }
@@ -68,7 +67,8 @@ public class FileFormatTest {
         out.close();
 
         // read
-        RecordReader<InternalRow> reader = avro.createReaderFactory(rowType).createReader(path);
+        RecordReader<InternalRow> reader =
+                avro.createReaderFactory(rowType).createReader(LocalFileIO.create(), path);
         List<InternalRow> result = new ArrayList<>();
         RecordReaderUtils.forEachRemaining(
                 reader, rowData -> result.add(GenericRow.of(rowData.getInt(0), rowData.getInt(1))));
@@ -78,15 +78,12 @@ public class FileFormatTest {
 
     @Test
     public void testUnsupportedOption(@TempDir java.nio.file.Path tempDir) {
-        BulkWriter.Factory<InternalRow> writerFactory =
+        FormatWriterFactory writerFactory =
                 createFileFormat("_unsupported").createWriterFactory(RowType.of(new IntType()));
         Path path = new Path(tempDir.toUri().toString(), "1.avro");
         Assertions.assertThrows(
                 RuntimeException.class,
-                () ->
-                        writerFactory.create(
-                                path.getFileSystem()
-                                        .create(path, FileSystem.WriteMode.NO_OVERWRITE)),
+                () -> writerFactory.create(LocalFileIO.create().newOutputStream(path, false)),
                 "Unrecognized codec: _unsupported");
     }
 

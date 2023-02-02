@@ -18,13 +18,13 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.factories.ManagedTableFactory;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.util.Preconditions;
 
@@ -91,8 +91,15 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
     public void onCreateTable(Context context, boolean ignoreIfExists) {
         Map<String, String> options = context.getCatalogTable().getOptions();
         Path path = CoreOptions.path(options);
+        FileIO fileIO;
         try {
-            if (path.getFileSystem().exists(path) && !ignoreIfExists) {
+            fileIO = FileIO.get(path, createCatalogOptions(context));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+
+        try {
+            if (fileIO.exists(path) && !ignoreIfExists) {
                 throw new TableException(
                         String.format(
                                 "Failed to create file store path. "
@@ -107,7 +114,7 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
                                 context.getObjectIdentifier().asSerializableString(),
                                 context.getObjectIdentifier().asSerializableString()));
             }
-            path.getFileSystem().mkdirs(path);
+            fileIO.mkdirs(path);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -126,7 +133,7 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
         // update schema
         // TODO pass lock
         try {
-            new SchemaManager(path)
+            new SchemaManager(fileIO, path)
                     .commitNewVersion(FlinkCatalog.fromCatalogTable(context.getCatalogTable()));
         } catch (IllegalStateException e) {
             throw e;
@@ -150,8 +157,9 @@ public class TableStoreManagedFactory extends AbstractTableStoreFactory
     public void onDropTable(Context context, boolean ignoreIfNotExists) {
         Path path = CoreOptions.path(context.getCatalogTable().getOptions());
         try {
-            if (path.getFileSystem().exists(path)) {
-                path.getFileSystem().delete(path, true);
+            FileIO fileIO = FileIO.get(path, createCatalogOptions(context));
+            if (fileIO.exists(path)) {
+                fileIO.delete(path, true);
             } else if (!ignoreIfNotExists) {
                 throw new TableException(
                         String.format(

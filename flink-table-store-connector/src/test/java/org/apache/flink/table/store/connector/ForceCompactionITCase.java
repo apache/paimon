@@ -26,6 +26,7 @@ import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.VarCharType;
@@ -233,7 +234,7 @@ public class ForceCompactionITCase extends CatalogITCaseBase {
                         CoreOptions.FILE_FORMAT.defaultValue());
 
         List<ManifestFileMeta> manifestFileMetas =
-                new ManifestList.Factory(partType, avro, pathFactory)
+                new ManifestList.Factory(LocalFileIO.create(), partType, avro, pathFactory)
                         .create()
                         .read(snapshot.deltaManifestList());
         assertThat(manifestFileMetas.get(0).numDeletedFiles()).isGreaterThanOrEqualTo(1);

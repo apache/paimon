@@ -19,13 +19,12 @@
 package org.apache.flink.table.store.format.parquet;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.store.format.FormatReaderFactory;
+import org.apache.flink.table.store.format.FormatWriterFactory;
 import org.apache.flink.table.store.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Projection;
@@ -59,8 +58,8 @@ public class ParquetFileFormat extends FileFormat {
     }
 
     @Override
-    public BulkWriter.Factory<InternalRow> createWriterFactory(RowType type) {
-        return new ParquetWriterFactory<>(
+    public FormatWriterFactory createWriterFactory(RowType type) {
+        return new ParquetWriterFactory(
                 new RowDataParquetBuilder(type, getParquetConfiguration(formatOptions)));
     }
 

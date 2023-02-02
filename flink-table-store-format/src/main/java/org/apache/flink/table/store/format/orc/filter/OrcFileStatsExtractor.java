@@ -18,13 +18,14 @@
 
 package org.apache.flink.table.store.format.orc.filter;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.store.format.orc.OrcReaderFactory;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DecimalType;
 import org.apache.flink.table.store.types.RowType;
@@ -58,8 +59,8 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
     }
 
     @Override
-    public FieldStats[] extract(Path path) throws IOException {
-        try (Reader reader = OrcReaderFactory.createReader(new Configuration(), path)) {
+    public FieldStats[] extract(FileIO fileIO, Path path) throws IOException {
+        try (Reader reader = OrcReaderFactory.createReader(new Configuration(), fileIO, path)) {
             long rowCount = reader.getNumberOfRows();
             ColumnStatistics[] columnStatistics = reader.getStatistics();
             TypeDescription schema = reader.getSchema();

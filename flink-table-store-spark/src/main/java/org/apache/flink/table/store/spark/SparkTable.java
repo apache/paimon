@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.table.DataTable;
@@ -56,18 +55,16 @@ public class SparkTable
 
     private final Table table;
     private final Lock.Factory lockFactory;
-    private final Configuration conf;
 
-    public SparkTable(Table table, Lock.Factory lockFactory, Configuration conf) {
+    public SparkTable(Table table, Lock.Factory lockFactory) {
         this.table = table;
         this.lockFactory = lockFactory;
-        this.conf = conf;
     }
 
     @Override
     public ScanBuilder newScanBuilder(CaseInsensitiveStringMap options) {
         // options is already merged into table
-        return new SparkScanBuilder(table, conf);
+        return new SparkScanBuilder(table);
     }
 
     @Override
@@ -102,7 +99,7 @@ public class SparkTable
 
     @Override
     public WriteBuilder newWriteBuilder(LogicalWriteInfo info) {
-        return new SparkWriteBuilder(castToWritable(table), info.queryId(), lockFactory, conf);
+        return new SparkWriteBuilder(castToWritable(table), info.queryId(), lockFactory);
     }
 
     @Override

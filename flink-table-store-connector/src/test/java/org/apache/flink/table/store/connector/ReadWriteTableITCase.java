@@ -20,7 +20,6 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
@@ -38,6 +37,8 @@ import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
@@ -1069,9 +1070,9 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         // create table
         Path path = CoreOptions.path(context.getCatalogTable().getOptions());
-        path.getFileSystem().mkdirs(path);
+        LocalFileIO.create().mkdirs(path);
         // update schema
-        new SchemaManager(path)
+        new SchemaManager(LocalFileIO.create(), path)
                 .commitNewVersion(FlinkCatalog.fromCatalogTable(context.getCatalogTable()));
 
         DynamicTableSink tableSink =

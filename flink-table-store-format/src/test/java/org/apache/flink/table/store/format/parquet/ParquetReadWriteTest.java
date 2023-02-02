@@ -18,10 +18,7 @@
 
 package org.apache.flink.table.store.format.parquet;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.GenericArray;
@@ -30,7 +27,10 @@ import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.format.FormatWriter;
 import org.apache.flink.table.store.format.parquet.writer.RowDataParquetBuilder;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.BooleanType;
@@ -231,7 +231,7 @@ public class ParquetReadWriteTest {
 
         AtomicInteger cnt = new AtomicInteger(0);
         forEachRemaining(
-                format.createReader(testPath),
+                format.createReader(new LocalFileIO(), testPath),
                 row -> {
                     int i = cnt.get();
                     assertThat(row.getDouble(0)).isEqualTo(i);
@@ -269,7 +269,7 @@ public class ParquetReadWriteTest {
 
         AtomicInteger cnt = new AtomicInteger(0);
         forEachRemaining(
-                format.createReader(testPath),
+                format.createReader(new LocalFileIO(), testPath),
                 row -> {
                     int i = cnt.get();
                     assertThat(row.getDouble(0)).isEqualTo(i);
@@ -294,10 +294,9 @@ public class ParquetReadWriteTest {
         Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
         Configuration conf = new Configuration();
         conf.setInteger("parquet.block.size", rowGroupSize);
-        ParquetWriterFactory<InternalRow> factory =
-                new ParquetWriterFactory<>(new RowDataParquetBuilder(ROW_TYPE, conf));
-        BulkWriter<InternalRow> writer =
-                factory.create(path.getFileSystem().create(path, FileSystem.WriteMode.OVERWRITE));
+        ParquetWriterFactory factory =
+                new ParquetWriterFactory(new RowDataParquetBuilder(ROW_TYPE, conf));
+        FormatWriter writer = factory.create(new LocalFileIO().newOutputStream(path, false));
         for (InternalRow row : rows) {
             writer.addElement(row);
         }
@@ -317,7 +316,7 @@ public class ParquetReadWriteTest {
             throw new IOException(e);
         }
 
-        RecordReader<InternalRow> reader = format.createReader(path);
+        RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), path);
 
         AtomicInteger cnt = new AtomicInteger(0);
         final AtomicReference<InternalRow> previousRow = new AtomicReference<>();

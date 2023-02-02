@@ -31,6 +31,7 @@ import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.FileIO;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,6 +43,7 @@ import static org.apache.flink.table.store.file.predicate.PredicateBuilder.trans
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
 public abstract class AbstractDataTableScan implements DataTableScan {
 
+    protected final FileIO fileIO;
     private final FileStoreScan scan;
     private final TableSchema tableSchema;
     private final FileStorePathFactory pathFactory;
@@ -50,10 +52,12 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     private ScanKind scanKind = ScanKind.ALL;
 
     protected AbstractDataTableScan(
+            FileIO fileIO,
             FileStoreScan scan,
             TableSchema tableSchema,
             FileStorePathFactory pathFactory,
             CoreOptions options) {
+        this.fileIO = fileIO;
         this.scan = scan;
         this.tableSchema = tableSchema;
         this.pathFactory = pathFactory;
@@ -167,6 +171,6 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     public SnapshotManager snapshotManager() {
-        return new SnapshotManager(pathFactory.root());
+        return new SnapshotManager(fileIO, pathFactory.root());
     }
 }

@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.GenericRow;
@@ -26,6 +25,8 @@ import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
@@ -85,9 +86,8 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
     }
 
     @Override
-    protected FileStoreTable createFileStoreTable(Consumer<Configuration> configure)
-            throws Exception {
-        Configuration conf = new Configuration();
+    protected FileStoreTable createFileStoreTable(Consumer<Options> configure) throws Exception {
+        Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
         conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         // Run with minimal memory to ensure a more intense preempt
@@ -96,7 +96,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
         conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(pages * 1024));
         conf.set(CoreOptions.PAGE_SIZE, new MemorySize(1024));
         configure.accept(conf);
-        SchemaManager schemaManager = new SchemaManager(tablePath);
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         TableSchema schema =
                 schemaManager.commitNewVersion(
                         new UpdateSchema(
@@ -105,6 +105,6 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
                                 Arrays.asList("pt", "a"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogWithKeyFileStoreTable(tablePath, schema);
+        return new ChangelogWithKeyFileStoreTable(LocalFileIO.create(), tablePath, schema);
     }
 }

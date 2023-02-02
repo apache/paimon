@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.RowDataSerializer;
@@ -35,6 +34,8 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.fs.FileIOFinder;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
@@ -260,7 +261,8 @@ public class KeyValueFileStoreReadTest {
             KeyValueFieldsExtractor extractor,
             MergeFunctionFactory<KeyValue> mfFactory)
             throws Exception {
-        SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
+        Path path = new Path(tempDir.toUri());
+        SchemaManager schemaManager = new SchemaManager(FileIOFinder.find(path), path);
         boolean valueCountMode = mfFactory.create() instanceof ValueCountMergeFunction;
         schemaManager.commitNewVersion(
                 new UpdateSchema(

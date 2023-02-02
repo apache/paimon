@@ -26,6 +26,7 @@ import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.types.Row;
 
 import org.junit.Test;
@@ -70,7 +71,8 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
                         "CREATE TEMPORARY TABLE IF NOT EXISTS `S0` (f0 INT) WITH ('connector' = 'datagen')",
                         "CREATE TABLE IF NOT EXISTS `T3` (f0 INT) WITH ('bucket' = '2')",
                         "CREATE TABLE IF NOT EXISTS `T4` (f0 INT)"));
-        SchemaManager schemaManager = new SchemaManager(getTableDirectory("T3"));
+        SchemaManager schemaManager =
+                new SchemaManager(LocalFileIO.create(), getTableDirectory("T3"));
         assertLatestSchema(schemaManager, 0L, 2);
 
         String streamSql =
@@ -114,7 +116,8 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
         // check snapshot and schema
         Snapshot lastSnapshot = findLatestSnapshot("T3");
         assertThat(lastSnapshot).isNotNull();
-        SnapshotManager snapshotManager = new SnapshotManager(getTableDirectory("T3"));
+        SnapshotManager snapshotManager =
+                new SnapshotManager(LocalFileIO.create(), getTableDirectory("T3"));
         for (long snapshotId = lastSnapshot.id();
                 snapshotId > snapshotAfterRescale.id();
                 snapshotId--) {
@@ -178,7 +181,8 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
         Snapshot snapshot = findLatestSnapshot(tableName);
         assertThat(snapshot).isNotNull();
 
-        SchemaManager schemaManager = new SchemaManager(getTableDirectory(tableName));
+        SchemaManager schemaManager =
+                new SchemaManager(LocalFileIO.create(), getTableDirectory(tableName));
         assertSnapshotSchema(schemaManager, snapshot.schemaId(), 0L, 2);
 
         // for managed table schema id remains unchanged, for catalog table id increase from 0 to 1

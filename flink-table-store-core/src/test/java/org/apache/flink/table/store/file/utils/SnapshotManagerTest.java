@@ -18,7 +18,8 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -32,7 +33,8 @@ public class SnapshotManagerTest {
 
     @Test
     public void testSnapshotPath() {
-        SnapshotManager snapshotManager = new SnapshotManager(new Path(tempDir.toString()));
+        SnapshotManager snapshotManager =
+                new SnapshotManager(LocalFileIO.create(), new Path(tempDir.toString()));
         for (int i = 0; i < 20; i++) {
             assertThat(snapshotManager.snapshotPath(i))
                     .isEqualTo(new Path(tempDir.toString() + "/snapshot/snapshot-" + i));

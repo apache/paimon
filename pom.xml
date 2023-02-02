@@ -124,6 +124,7 @@ under the License.
         <flink.test.utils>flink-test-utils</flink.test.utils>
         <janino.version>3.0.11</janino.version>
         <mockito.version>3.4.6</mockito.version>
+        <jaxb.api.version>2.3.1</jaxb.api.version>
     </properties>
 
     <dependencies>

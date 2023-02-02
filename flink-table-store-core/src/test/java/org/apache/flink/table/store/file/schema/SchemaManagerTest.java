@@ -18,10 +18,11 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
+import org.apache.flink.table.store.file.utils.FailingFileIO;
+import org.apache.flink.table.store.fs.FileIOFinder;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DoubleType;
@@ -50,7 +51,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem.retryArtificialException;
+import static org.apache.flink.table.store.file.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -73,9 +74,10 @@ public class SchemaManagerTest {
     public void beforeEach() throws IOException {
         // for failure tests
         String failingName = UUID.randomUUID().toString();
-        FailingAtomicRenameFileSystem.reset(failingName, 100, 100);
-        String root = FailingAtomicRenameFileSystem.getFailingPath(failingName, tempDir.toString());
-        manager = new SchemaManager(new Path(root));
+        FailingFileIO.reset(failingName, 100, 100);
+        String root = FailingFileIO.getFailingPath(failingName, tempDir.toString());
+        Path path = new Path(root);
+        manager = new SchemaManager(FileIOFinder.find(path), path);
     }
 
     @AfterEach

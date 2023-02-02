@@ -18,16 +18,19 @@
 
 package org.apache.flink.table.store.s3;
 
-import org.apache.flink.core.fs.FileSystemFactory;
-import org.apache.flink.table.store.plugin.FileSystemLoader;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.FileIOLoader;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.PluginFileIO;
+import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.plugin.PluginLoader;
 
 /** A {@link PluginLoader} to load oss. */
-public class S3Loader implements FileSystemLoader {
+public class S3Loader implements FileIOLoader {
 
     private static final String S3_JAR = "flink-table-store-plugin-s3.jar";
 
-    private static final String S3_CLASS = "org.apache.flink.fs.s3hadoop.S3FileSystemFactory";
+    private static final String S3_CLASS = "org.apache.flink.table.store.s3.S3FileIO";
 
     // Singleton lazy initialization
 
@@ -42,7 +45,34 @@ public class S3Loader implements FileSystemLoader {
     }
 
     @Override
-    public FileSystemFactory load() {
-        return getLoader().newInstance(S3_CLASS);
+    public String getScheme() {
+        return "s3";
+    }
+
+    @Override
+    public FileIO load(Path path) {
+        return new S3PluginFileIO();
+    }
+
+    private static class S3PluginFileIO extends PluginFileIO {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public boolean isObjectStore() {
+            return true;
+        }
+
+        @Override
+        protected FileIO createFileIO(Path path) {
+            FileIO fileIO = getLoader().newInstance(S3_CLASS);
+            fileIO.configure(CatalogOptions.create(options));
+            return fileIO;
+        }
+
+        @Override
+        protected ClassLoader pluginClassLoader() {
+            return getLoader().submoduleClassLoader();
+        }
     }
 }
