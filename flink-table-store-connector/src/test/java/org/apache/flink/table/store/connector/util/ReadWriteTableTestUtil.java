@@ -235,6 +235,7 @@ public class ReadWriteTableTestUtil {
         }
     }
 
+    // Note: if expected is empty, the iterator will be closed
     public static BlockingIterator<Row, Row> testStreamingRead(String query, List<Row> expected)
             throws Exception {
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
@@ -242,6 +243,7 @@ public class ReadWriteTableTestUtil {
         return iterator;
     }
 
+    // Note: if expected is empty, the iterator will be closed
     public static BlockingIterator<Row, Row> testStreamingReadWithReadFirst(
             String source, String sink, String query, List<Row> expected) throws Exception {
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
@@ -250,16 +252,19 @@ public class ReadWriteTableTestUtil {
         return iterator;
     }
 
+    // Note: if expected is empty, the iterator will be closed
     public static void validateStreamingReadResult(
             BlockingIterator<Row, Row> streamingItr, List<Row> expected) throws Exception {
-        if (!expected.isEmpty()) {
+        if (expected.isEmpty()) {
+            assertNoMoreRecords(streamingItr);
+        } else {
             assertThat(streamingItr.collect(expected.size()))
                     .containsExactlyInAnyOrderElementsOf(expected);
         }
-        assertNoMoreRecords(streamingItr);
     }
 
-    public static void assertNoMoreRecords(BlockingIterator<Row, Row> iterator) {
+    // Note: the iterator will be closed
+    public static void assertNoMoreRecords(BlockingIterator<Row, Row> iterator) throws Exception {
         List<Row> expectedRecords = Collections.emptyList();
         try {
             // set expectation size to 1 to let time pass by until timeout
@@ -267,6 +272,7 @@ public class ReadWriteTableTestUtil {
             expectedRecords = iterator.collect(1, 5L, TimeUnit.SECONDS);
         } catch (TimeoutException ignored) {
             // don't throw exception
+            iterator.close();
         }
         assertThat(expectedRecords).isEmpty();
     }

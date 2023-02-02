@@ -156,8 +156,6 @@ public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBas
                         changelogRow("+I", "Yen", 20L, "2022-01-03"),
                         changelogRow("+I", "Yen", 20L, "2022-01-04")));
 
-        streamItr.close();
-
         // filter on partition
         testStreamingRead(
                         buildQuery(table, "*", "WHERE dt = '2022-01-01'"),
@@ -466,7 +464,6 @@ public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBas
                                 changelogRow("+U", "Euro", 100L, "2022-01-02")));
 
         assertNoMoreRecords(streamItr);
-        streamItr.close();
 
         // test partition filter
         table =
