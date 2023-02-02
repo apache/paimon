@@ -299,12 +299,10 @@ public class HiveCatalogITCase {
         Assert.assertTrue(tables.contains("t3"));
         Assert.assertFalse(tables.contains("t1"));
 
-        // hive engine rename the location by default, but the HiveRunner framework does not modify
-        // the location by default.
         Identifier identifier = new Identifier("test_db", "t3");
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
-        Path tablePath = catalog.getTableLocation(identifier);
+        org.apache.flink.table.store.fs.Path tablePath = catalog.getTableLocation(identifier);
         Assert.assertEquals(tablePath.toString(), path + "test_db.db" + File.separator + "t3");
 
         // TODO: the hiverunner (4.0) has a bug ,it can not rename the table path correctly ,

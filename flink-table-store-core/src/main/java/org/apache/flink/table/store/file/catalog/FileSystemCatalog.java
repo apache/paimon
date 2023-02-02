@@ -160,8 +160,23 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists) {
-        throw new UnsupportedOperationException("Cannot rename FileSystem catalog tables");
+    public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
+            throws TableNotExistException, TableAlreadyExistException {
+        Path fromPath = getTableLocation(fromTable);
+        if (!tableExists(fromPath)) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+
+            throw new TableNotExistException(fromTable);
+        }
+
+        Path toPath = getTableLocation(toTable);
+        if (tableExists(toPath)) {
+            throw new TableAlreadyExistException(toTable);
+        }
+
+        uncheck(() -> fileIO.rename(fromPath, toPath));
     }
 
     @Override
