@@ -37,7 +37,7 @@ import static org.apache.flink.configuration.ConfigOptions.key;
 
 /** Configuration for {@link FileIO}. */
 public class CatalogOptions {
-
+s
     public static final ConfigOption<String> WAREHOUSE =
             ConfigOptions.key("warehouse")
                     .stringType()

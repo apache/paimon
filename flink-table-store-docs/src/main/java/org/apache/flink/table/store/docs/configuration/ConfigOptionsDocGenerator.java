@@ -71,6 +71,8 @@ public class ConfigOptionsDocGenerator {
 
     static final OptionsClassLocation[] LOCATIONS =
             new OptionsClassLocation[] {
+                new OptionsClassLocation(
+                        "flink-table-store-common", "org.apache.flink.table.store.options"),
                 new OptionsClassLocation("flink-table-store-core", "org.apache.flink.table.store"),
                 new OptionsClassLocation(
                         "flink-table-store-connector", "org.apache.flink.table.store.connector"),
