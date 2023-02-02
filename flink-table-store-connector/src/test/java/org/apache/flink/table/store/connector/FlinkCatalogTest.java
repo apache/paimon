@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.Catalog;
@@ -37,6 +35,9 @@ import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.options.Options;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -73,11 +74,13 @@ public class FlinkCatalogTest {
     @Before
     public void beforeEach() throws IOException {
         String path = TEMPORARY_FOLDER.newFolder().toURI().toString();
-        Configuration conf = new Configuration();
+        Options conf = new Options();
         conf.setString("warehouse", path);
         catalog =
                 FlinkCatalogFactory.createCatalog(
-                        "test-catalog", conf, FlinkCatalogTest.class.getClassLoader());
+                        "test-catalog",
+                        CatalogOptions.create(conf),
+                        FlinkCatalogTest.class.getClassLoader());
     }
 
     private ResolvedSchema createSchema() {

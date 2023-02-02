@@ -20,13 +20,13 @@
 package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.api.common.accumulators.LongCounter;
-import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.format.FileStatsExtractor;
+import org.apache.flink.table.store.format.FormatWriterFactory;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.RowType;
 
 import javax.annotation.Nullable;
@@ -45,13 +45,14 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     private final FieldStatsArraySerializer statsArraySerializer;
 
     public RowDataFileWriter(
-            BulkWriter.Factory<InternalRow> factory,
+            FileIO fileIO,
+            FormatWriterFactory factory,
             Path path,
             RowType writeSchema,
             @Nullable FileStatsExtractor fileStatsExtractor,
             long schemaId,
             LongCounter seqNumCounter) {
-        super(factory, path, Function.identity(), writeSchema, fileStatsExtractor);
+        super(fileIO, factory, path, Function.identity(), writeSchema, fileStatsExtractor);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
         this.statsArraySerializer = new FieldStatsArraySerializer(writeSchema);
@@ -68,7 +69,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         BinaryTableStats stats = statsArraySerializer.toBinary(fieldStats());
         return DataFileMeta.forAppend(
                 path.getName(),
-                FileUtils.getFileSize(path),
+                fileIO.getFileSize(path),
                 recordCount(),
                 stats,
                 seqNumCounter.getLocalValue() - super.recordCount(),

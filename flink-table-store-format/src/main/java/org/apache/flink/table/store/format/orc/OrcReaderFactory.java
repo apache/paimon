@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.format.orc;
 
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.columnar.ColumnVector;
 import org.apache.flink.table.store.data.columnar.ColumnarRow;
@@ -29,6 +28,8 @@ import org.apache.flink.table.store.file.utils.RecordReader.RecordIterator;
 import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.format.fs.HadoopReadOnlyFileSystem;
 import org.apache.flink.table.store.format.orc.filter.OrcFilters;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Pool;
@@ -91,7 +92,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
     // ------------------------------------------------------------------------
 
     @Override
-    public OrcVectorizedReader createReader(Path file) throws IOException {
+    public OrcVectorizedReader createReader(FileIO fileIO, Path file) throws IOException {
         Pool<OrcReaderBatch> poolOfBatches = createPoolOfBatches(1);
         RecordReader orcReader =
                 createRecordReader(
@@ -99,9 +100,10 @@ public class OrcReaderFactory implements FormatReaderFactory {
                         schema,
                         selectedFields,
                         conjunctPredicates,
+                        fileIO,
                         file,
                         0,
-                        file.getFileSystem().getFileStatus(file).getLen());
+                        fileIO.getFileSize(file));
 
         return new OrcVectorizedReader(orcReader, poolOfBatches);
     }
@@ -244,11 +246,12 @@ public class OrcReaderFactory implements FormatReaderFactory {
             TypeDescription schema,
             int[] selectedFields,
             List<OrcFilters.Predicate> conjunctPredicates,
-            org.apache.flink.core.fs.Path path,
+            FileIO fileIO,
+            org.apache.flink.table.store.fs.Path path,
             long splitStart,
             long splitLength)
             throws IOException {
-        org.apache.orc.Reader orcReader = createReader(conf, path);
+        org.apache.orc.Reader orcReader = createReader(conf, fileIO, path);
 
         // get offset and length for the stripes that start in the split
         Tuple2<Long, Long> offsetAndLength =
@@ -338,7 +341,9 @@ public class OrcReaderFactory implements FormatReaderFactory {
     }
 
     public static org.apache.orc.Reader createReader(
-            org.apache.hadoop.conf.Configuration conf, org.apache.flink.core.fs.Path path)
+            org.apache.hadoop.conf.Configuration conf,
+            FileIO fileIO,
+            org.apache.flink.table.store.fs.Path path)
             throws IOException {
         // open ORC file and create reader
         org.apache.hadoop.fs.Path hPath = new org.apache.hadoop.fs.Path(path.toUri());
@@ -346,7 +351,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
         OrcFile.ReaderOptions readerOptions = OrcFile.readerOptions(conf);
 
         // configure filesystem from Flink filesystem
-        readerOptions.filesystem(new HadoopReadOnlyFileSystem(path.getFileSystem()));
+        readerOptions.filesystem(new HadoopReadOnlyFileSystem(fileIO));
 
         return OrcFile.createReader(hPath, readerOptions);
     }

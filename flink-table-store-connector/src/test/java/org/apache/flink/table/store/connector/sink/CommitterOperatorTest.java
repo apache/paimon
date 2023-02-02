@@ -25,6 +25,7 @@ import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -121,7 +122,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness.snapshot(cpId, 1);
         testHarness.notifyOfCompletedCheckpoint(cpId);
 
-        SnapshotManager snapshotManager = new SnapshotManager(tablePath);
+        SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
 
         // should create 10 snapshots
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(cpId);

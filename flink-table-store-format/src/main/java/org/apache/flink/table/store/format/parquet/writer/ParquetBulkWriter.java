@@ -20,6 +20,8 @@ package org.apache.flink.table.store.format.parquet.writer;
 
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.serialization.BulkWriter;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.format.FormatWriter;
 
 import org.apache.parquet.hadoop.ParquetWriter;
 
@@ -27,28 +29,24 @@ import java.io.IOException;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
-/**
- * A simple {@link BulkWriter} implementation that wraps a {@link ParquetWriter}.
- *
- * @param <T> The type of records written.
- */
+/** A simple {@link BulkWriter} implementation that wraps a {@link ParquetWriter}. */
 @PublicEvolving
-public class ParquetBulkWriter<T> implements BulkWriter<T> {
+public class ParquetBulkWriter implements FormatWriter {
 
     /** The ParquetWriter to write to. */
-    private final ParquetWriter<T> parquetWriter;
+    private final ParquetWriter<InternalRow> parquetWriter;
 
     /**
      * Creates a new ParquetBulkWriter wrapping the given ParquetWriter.
      *
      * @param parquetWriter The ParquetWriter to write to.
      */
-    public ParquetBulkWriter(ParquetWriter<T> parquetWriter) {
+    public ParquetBulkWriter(ParquetWriter<InternalRow> parquetWriter) {
         this.parquetWriter = checkNotNull(parquetWriter, "parquetWriter");
     }
 
     @Override
-    public void addElement(T datum) throws IOException {
+    public void addElement(InternalRow datum) throws IOException {
         parquetWriter.write(datum);
     }
 

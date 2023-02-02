@@ -32,8 +32,15 @@
     <packaging>pom</packaging>
 
     <modules>
+        <module>flink-table-store-hadoop-shaded</module>
         <module>flink-table-store-oss</module>
+        <module>flink-table-store-oss-impl</module>
         <module>flink-table-store-s3</module>
+        <module>flink-table-store-s3-impl</module>
     </modules>
+
+    <properties>
+        <fs.hadoopshaded.version>3.3.4</fs.hadoopshaded.version>
+    </properties>
 
 </project>

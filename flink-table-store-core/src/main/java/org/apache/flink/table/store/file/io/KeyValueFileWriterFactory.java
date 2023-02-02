@@ -19,16 +19,15 @@
 package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
+import org.apache.flink.table.store.format.FormatWriterFactory;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.RowType;
 
 import javax.annotation.Nullable;
@@ -36,22 +35,25 @@ import javax.annotation.Nullable;
 /** A factory to create {@link FileWriter}s for writing {@link KeyValue} files. */
 public class KeyValueFileWriterFactory {
 
+    private final FileIO fileIO;
     private final long schemaId;
     private final RowType keyType;
     private final RowType valueType;
-    private final BulkWriter.Factory<InternalRow> writerFactory;
+    private final FormatWriterFactory writerFactory;
     @Nullable private final FileStatsExtractor fileStatsExtractor;
     private final DataFilePathFactory pathFactory;
     private final long suggestedFileSize;
 
     private KeyValueFileWriterFactory(
+            FileIO fileIO,
             long schemaId,
             RowType keyType,
             RowType valueType,
-            BulkWriter.Factory<InternalRow> writerFactory,
+            FormatWriterFactory writerFactory,
             @Nullable FileStatsExtractor fileStatsExtractor,
             DataFilePathFactory pathFactory,
             long suggestedFileSize) {
+        this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.keyType = keyType;
         this.valueType = valueType;
@@ -88,6 +90,7 @@ public class KeyValueFileWriterFactory {
     private KeyValueDataFileWriter createDataFileWriter(Path path, int level) {
         KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
         return new KeyValueDataFileWriter(
+                fileIO,
                 writerFactory,
                 path,
                 kvSerializer::toRow,
@@ -99,10 +102,11 @@ public class KeyValueFileWriterFactory {
     }
 
     public void deleteFile(String filename) {
-        FileUtils.deleteOrWarn(pathFactory.toPath(filename));
+        fileIO.deleteQuietly(pathFactory.toPath(filename));
     }
 
     public static Builder builder(
+            FileIO fileIO,
             long schemaId,
             RowType keyType,
             RowType valueType,
@@ -110,12 +114,13 @@ public class KeyValueFileWriterFactory {
             FileStorePathFactory pathFactory,
             long suggestedFileSize) {
         return new Builder(
-                schemaId, keyType, valueType, fileFormat, pathFactory, suggestedFileSize);
+                fileIO, schemaId, keyType, valueType, fileFormat, pathFactory, suggestedFileSize);
     }
 
     /** Builder of {@link KeyValueFileWriterFactory}. */
     public static class Builder {
 
+        private final FileIO fileIO;
         private final long schemaId;
         private final RowType keyType;
         private final RowType valueType;
@@ -124,12 +129,14 @@ public class KeyValueFileWriterFactory {
         private final long suggestedFileSize;
 
         private Builder(
+                FileIO fileIO,
                 long schemaId,
                 RowType keyType,
                 RowType valueType,
                 FileFormat fileFormat,
                 FileStorePathFactory pathFactory,
                 long suggestedFileSize) {
+            this.fileIO = fileIO;
             this.schemaId = schemaId;
             this.keyType = keyType;
             this.valueType = valueType;
@@ -141,6 +148,7 @@ public class KeyValueFileWriterFactory {
         public KeyValueFileWriterFactory build(BinaryRow partition, int bucket) {
             RowType recordType = KeyValue.schema(keyType, valueType);
             return new KeyValueFileWriterFactory(
+                    fileIO,
                     schemaId,
                     keyType,
                     valueType,

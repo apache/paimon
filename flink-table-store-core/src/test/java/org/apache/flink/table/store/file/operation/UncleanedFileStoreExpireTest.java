@@ -18,9 +18,8 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.table.store.fs.Path;
 
 import org.junit.jupiter.api.Test;
 
@@ -70,7 +69,7 @@ public class UncleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         // delete some unused files
         int numFilesToDelete = random.nextInt(unusedFileList.size());
         for (int i = 0; i < numFilesToDelete; i++) {
-            FileUtils.deleteOrWarn(unusedFileList.get(i));
+            fileIO.deleteQuietly(unusedFileList.get(i));
         }
 
         expire.expire();

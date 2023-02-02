@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector.action;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.data.DataFormatTestUtil;
 import org.apache.flink.table.store.data.GenericRow;
@@ -29,6 +28,8 @@ import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.sink.TableCommit;
@@ -81,11 +82,11 @@ public class ActionITCaseBase extends AbstractTestBase {
             List<String> primaryKeys,
             Map<String, String> options)
             throws Exception {
-        SchemaManager schemaManager = new SchemaManager(tablePath);
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         TableSchema tableSchema =
                 schemaManager.commitNewVersion(
                         new UpdateSchema(rowType, partitionKeys, primaryKeys, options, ""));
-        return FileStoreTableFactory.create(tablePath, tableSchema);
+        return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }
 
     protected GenericRow rowData(Object... values) {

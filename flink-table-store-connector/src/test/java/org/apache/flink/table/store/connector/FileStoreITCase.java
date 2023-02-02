@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -41,7 +39,10 @@ import org.apache.flink.table.store.connector.source.StaticFileStoreSource;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
-import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
+import org.apache.flink.table.store.file.utils.FailingFileIO;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.types.logical.IntType;
@@ -76,7 +77,7 @@ import static org.apache.flink.table.store.CoreOptions.BUCKET;
 import static org.apache.flink.table.store.CoreOptions.FILE_FORMAT;
 import static org.apache.flink.table.store.CoreOptions.PATH;
 import static org.apache.flink.table.store.connector.LogicalTypeConversion.toDataType;
-import static org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem.retryArtificialException;
+import static org.apache.flink.table.store.file.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -370,8 +371,8 @@ public class FileStoreITCase extends AbstractTestBase {
     public static FileStoreTable buildFileStoreTable(
             boolean noFail, TemporaryFolder temporaryFolder, int[] partitions, int[] primaryKey)
             throws Exception {
-        Configuration options = buildConfiguration(noFail, temporaryFolder.newFolder());
-        Path tablePath = new CoreOptions(options).path();
+        Options options = buildConfiguration(noFail, temporaryFolder.newFolder());
+        Path tablePath = new CoreOptions(options.toMap()).path();
         UpdateSchema updateSchema =
                 new UpdateSchema(
                         toDataType(TABLE_TYPE),
@@ -385,22 +386,21 @@ public class FileStoreITCase extends AbstractTestBase {
                         "");
         return retryArtificialException(
                 () -> {
-                    new SchemaManager(tablePath).commitNewVersion(updateSchema);
-                    return FileStoreTableFactory.create(options);
+                    new SchemaManager(LocalFileIO.create(), tablePath)
+                            .commitNewVersion(updateSchema);
+                    return FileStoreTableFactory.create(LocalFileIO.create(), options);
                 });
     }
 
-    public static Configuration buildConfiguration(boolean noFail, File folder) {
-        Configuration options = new Configuration();
+    public static Options buildConfiguration(boolean noFail, File folder) {
+        Options options = new Options();
         options.set(BUCKET, NUM_BUCKET);
         if (noFail) {
             options.set(PATH, folder.toURI().toString());
         } else {
             String failingName = UUID.randomUUID().toString();
-            FailingAtomicRenameFileSystem.reset(failingName, 3, 100);
-            options.set(
-                    PATH,
-                    FailingAtomicRenameFileSystem.getFailingPath(failingName, folder.getPath()));
+            FailingFileIO.reset(failingName, 3, 100);
+            options.set(PATH, FailingFileIO.getFailingPath(failingName, folder.getPath()));
         }
         options.set(FILE_FORMAT, "avro");
         return options;

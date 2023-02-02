@@ -18,9 +18,10 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.util.Preconditions;
@@ -39,8 +40,8 @@ public class StaticDataFileSnapshotEnumerator implements SnapshotEnumerator {
     private boolean hasNext;
 
     public StaticDataFileSnapshotEnumerator(
-            Path tablePath, DataTableScan scan, StartingScanner startingScanner) {
-        this.snapshotManager = new SnapshotManager(tablePath);
+            FileIO fileIO, Path tablePath, DataTableScan scan, StartingScanner startingScanner) {
+        this.snapshotManager = new SnapshotManager(fileIO, tablePath);
         this.scan = scan;
         this.startingScanner = startingScanner;
 
@@ -94,7 +95,8 @@ public class StaticDataFileSnapshotEnumerator implements SnapshotEnumerator {
             throw new UnsupportedOperationException("Unknown startup mode " + startupMode.name());
         }
 
-        return new StaticDataFileSnapshotEnumerator(table.location(), scan, startingScanner);
+        return new StaticDataFileSnapshotEnumerator(
+                table.fileIO(), table.location(), scan, startingScanner);
     }
 
     // ------------------------------------------------------------------------

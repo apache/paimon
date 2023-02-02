@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.BinaryRowWriter;
 import org.apache.flink.table.store.data.GenericRow;
@@ -30,7 +28,11 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
-import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
+import org.apache.flink.table.store.file.utils.TraceableFileIO;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.FileIOFinder;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.source.Split;
@@ -64,11 +66,13 @@ public abstract class SnapshotEnumeratorTestBase {
     @TempDir java.nio.file.Path tempDir;
 
     protected Path tablePath;
+    protected FileIO fileIO;
     protected String commitUser;
 
     @BeforeEach
     public void before() {
-        tablePath = new Path(TestAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString());
+        tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
+        fileIO = FileIOFinder.find(tablePath);
         commitUser = UUID.randomUUID().toString();
     }
 
@@ -114,11 +118,11 @@ public abstract class SnapshotEnumeratorTestBase {
     }
 
     protected FileStoreTable createFileStoreTable() throws Exception {
-        return createFileStoreTable(new Configuration());
+        return createFileStoreTable(new Options());
     }
 
-    protected FileStoreTable createFileStoreTable(Configuration conf) throws Exception {
-        SchemaManager schemaManager = new SchemaManager(tablePath);
+    protected FileStoreTable createFileStoreTable(Options conf) throws Exception {
+        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         TableSchema tableSchema =
                 schemaManager.commitNewVersion(
                         new UpdateSchema(
@@ -127,6 +131,6 @@ public abstract class SnapshotEnumeratorTestBase {
                                 Arrays.asList("pt", "a"),
                                 conf.toMap(),
                                 ""));
-        return FileStoreTableFactory.create(tablePath, tableSchema, conf);
+        return FileStoreTableFactory.create(fileIO, tablePath, tableSchema, conf);
     }
 }

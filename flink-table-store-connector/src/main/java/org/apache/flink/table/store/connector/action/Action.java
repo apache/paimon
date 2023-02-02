@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.connector.action;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.fs.Path;
 
 import javax.annotation.Nullable;
 

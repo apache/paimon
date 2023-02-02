@@ -33,7 +33,7 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
-import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
+import org.apache.flink.table.store.file.utils.FailingFileIO;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
@@ -64,12 +64,12 @@ public class SinkSavepointITCase extends AbstractTestBase {
         path = TEMPORARY_FOLDER.newFolder().toPath().toString();
         // for failure tests
         failingName = UUID.randomUUID().toString();
-        FailingAtomicRenameFileSystem.reset(failingName, 100, 500);
+        FailingFileIO.reset(failingName, 100, 500);
     }
 
     @Test(timeout = 180000)
     public void testRecoverFromSavepoint() throws Exception {
-        String failingPath = FailingAtomicRenameFileSystem.getFailingPath(failingName, path);
+        String failingPath = FailingFileIO.getFailingPath(failingName, path);
         String savepointPath = null;
         JobID jobId;
         ClusterClient<?> client = MINI_CLUSTER_RESOURCE.getClusterClient();
@@ -171,8 +171,7 @@ public class SinkSavepointITCase extends AbstractTestBase {
                         "  'type' = 'table-store',",
                         "  'warehouse' = '" + failingPath + "'",
                         ")");
-        FailingAtomicRenameFileSystem.retryArtificialException(
-                () -> tEnv.executeSql(createCatalogSql));
+        FailingFileIO.retryArtificialException(() -> tEnv.executeSql(createCatalogSql));
 
         tEnv.executeSql("USE CATALOG my_catalog");
 
@@ -185,13 +184,11 @@ public class SinkSavepointITCase extends AbstractTestBase {
                         "  'bucket' = '2',",
                         "  'file.format' = 'avro'",
                         ")");
-        FailingAtomicRenameFileSystem.retryArtificialException(
-                () -> tEnv.executeSql(createSinkSql));
+        FailingFileIO.retryArtificialException(() -> tEnv.executeSql(createSinkSql));
 
         String insertIntoSql = "INSERT INTO T SELECT * FROM default_catalog.default_database.S";
         JobID jobId =
-                FailingAtomicRenameFileSystem.retryArtificialException(
-                                () -> tEnv.executeSql(insertIntoSql))
+                FailingFileIO.retryArtificialException(() -> tEnv.executeSql(insertIntoSql))
                         .getJobClient()
                         .get()
                         .getJobID();
@@ -207,7 +204,7 @@ public class SinkSavepointITCase extends AbstractTestBase {
         EnvironmentSettings settings = EnvironmentSettings.newInstance().inBatchMode().build();
         TableEnvironment tEnv = TableEnvironment.create(settings);
         // no failure should occur when checking for answer
-        FailingAtomicRenameFileSystem.reset(failingName, 0, 1);
+        FailingFileIO.reset(failingName, 0, 1);
 
         String createCatalogSql =
                 String.join(

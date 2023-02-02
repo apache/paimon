@@ -19,12 +19,13 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FieldStatsCollector;
 import org.apache.flink.table.store.format.FileStatsExtractor;
+import org.apache.flink.table.store.format.FormatWriterFactory;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.util.Preconditions;
 
@@ -45,12 +46,13 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
     @Nullable private FieldStatsCollector fieldStatsCollector = null;
 
     public StatsCollectingSingleFileWriter(
-            BulkWriter.Factory<InternalRow> factory,
+            FileIO fileIO,
+            FormatWriterFactory factory,
             Path path,
             Function<T, InternalRow> converter,
             RowType writeSchema,
             @Nullable FileStatsExtractor fileStatsExtractor) {
-        super(factory, path, converter);
+        super(fileIO, factory, path, converter);
         this.fileStatsExtractor = fileStatsExtractor;
         if (this.fileStatsExtractor == null) {
             this.fieldStatsCollector = new FieldStatsCollector(writeSchema);
@@ -68,7 +70,7 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
     public FieldStats[] fieldStats() throws IOException {
         Preconditions.checkState(closed, "Cannot access metric unless the writer is closed.");
         if (fileStatsExtractor != null) {
-            return fileStatsExtractor.extract(path);
+            return fileStatsExtractor.extract(fileIO, path);
         } else {
             return fieldStatsCollector.extract();
         }

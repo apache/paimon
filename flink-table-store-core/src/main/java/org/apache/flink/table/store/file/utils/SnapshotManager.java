@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.util.Preconditions;
 
 import org.slf4j.Logger;
@@ -31,7 +31,6 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
 
@@ -48,9 +47,11 @@ public class SnapshotManager {
     private static final int READ_HINT_RETRY_NUM = 3;
     private static final int READ_HINT_RETRY_INTERVAL = 1;
 
+    private final FileIO fileIO;
     private final Path tablePath;
 
-    public SnapshotManager(Path tablePath) {
+    public SnapshotManager(FileIO fileIO, Path tablePath) {
+        this.fileIO = fileIO;
         this.tablePath = tablePath;
     }
 
@@ -63,13 +64,13 @@ public class SnapshotManager {
     }
 
     public Snapshot snapshot(long snapshotId) {
-        return Snapshot.fromPath(snapshotPath(snapshotId));
+        return Snapshot.fromPath(fileIO, snapshotPath(snapshotId));
     }
 
     public boolean snapshotExists(long snapshotId) {
         Path path = snapshotPath(snapshotId);
         try {
-            return path.getFileSystem().exists(path);
+            return fileIO.exists(path);
         } catch (IOException e) {
             throw new RuntimeException(
                     "Failed to determine if snapshot #" + snapshotId + " exists in path " + path,
@@ -150,11 +151,11 @@ public class SnapshotManager {
     }
 
     public long snapshotCount() throws IOException {
-        return listVersionedFiles(snapshotDirectory(), SNAPSHOT_PREFIX).count();
+        return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX).count();
     }
 
     public Iterator<Snapshot> snapshots() throws IOException {
-        return listVersionedFiles(snapshotDirectory(), SNAPSHOT_PREFIX)
+        return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
                 .map(this::snapshot)
                 .iterator();
     }
@@ -181,8 +182,7 @@ public class SnapshotManager {
 
     private @Nullable Long findLatest() throws IOException {
         Path snapshotDir = snapshotDirectory();
-        FileSystem fs = snapshotDir.getFileSystem();
-        if (!fs.exists(snapshotDir)) {
+        if (!fileIO.exists(snapshotDir)) {
             return null;
         }
 
@@ -200,8 +200,7 @@ public class SnapshotManager {
 
     private @Nullable Long findEarliest() throws IOException {
         Path snapshotDir = snapshotDirectory();
-        FileSystem fs = snapshotDir.getFileSystem();
-        if (!fs.exists(snapshotDir)) {
+        if (!fileIO.exists(snapshotDir)) {
             return null;
         }
 
@@ -220,7 +219,7 @@ public class SnapshotManager {
         int retryNumber = 0;
         while (retryNumber++ < READ_HINT_RETRY_NUM) {
             try {
-                return Long.parseLong(FileUtils.readFileUtf8(path));
+                return Long.parseLong(fileIO.readFileUtf8(path));
             } catch (Exception ignored) {
             }
             try {
@@ -233,7 +232,9 @@ public class SnapshotManager {
 
     private Long findByListFiles(BinaryOperator<Long> reducer) throws IOException {
         Path snapshotDir = snapshotDirectory();
-        return listVersionedFiles(snapshotDir, SNAPSHOT_PREFIX).reduce(reducer).orElse(null);
+        return listVersionedFiles(fileIO, snapshotDir, SNAPSHOT_PREFIX)
+                .reduce(reducer)
+                .orElse(null);
     }
 
     public void commitLatestHint(long snapshotId) throws IOException {
@@ -246,14 +247,8 @@ public class SnapshotManager {
 
     private void commitHint(long snapshotId, String fileName) throws IOException {
         Path snapshotDir = snapshotDirectory();
-        FileSystem fs = snapshotDir.getFileSystem();
         Path hintFile = new Path(snapshotDir, fileName);
-        Path tempFile = new Path(snapshotDir, UUID.randomUUID() + "-" + fileName + ".temp");
-        FileUtils.writeFileUtf8(tempFile, String.valueOf(snapshotId));
-        fs.delete(hintFile, false);
-        boolean success = fs.rename(tempFile, hintFile);
-        if (!success) {
-            fs.delete(tempFile, false);
-        }
+        fileIO.delete(hintFile, false);
+        fileIO.writeFileUtf8(hintFile, String.valueOf(snapshotId));
     }
 }

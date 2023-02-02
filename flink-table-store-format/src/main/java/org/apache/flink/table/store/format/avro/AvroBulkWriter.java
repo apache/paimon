@@ -25,7 +25,7 @@ import org.apache.avro.file.DataFileWriter;
 import java.io.IOException;
 
 /** A simple {@link BulkWriter} implementation that wraps an Avro {@link DataFileWriter}. */
-public class AvroBulkWriter<T> implements BulkWriter<T> {
+public class AvroBulkWriter<T> {
 
     /** The underlying Avro writer. */
     private final DataFileWriter<T> dataFileWriter;
@@ -39,17 +39,14 @@ public class AvroBulkWriter<T> implements BulkWriter<T> {
         this.dataFileWriter = dataFileWriter;
     }
 
-    @Override
     public void addElement(T element) throws IOException {
         dataFileWriter.append(element);
     }
 
-    @Override
     public void flush() throws IOException {
         dataFileWriter.flush();
     }
 
-    @Override
     public void finish() throws IOException {
         dataFileWriter.close();
     }

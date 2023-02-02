@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.codegen.RecordComparator;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.BinaryString;
@@ -29,6 +28,7 @@ import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.SchemaEvolutionTableTestBase;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.BigIntType;

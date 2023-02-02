@@ -18,7 +18,8 @@
 
 package org.apache.flink.table.store.table.system;
 
-import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.Table;
 
@@ -30,16 +31,16 @@ import static org.apache.flink.table.store.table.system.SnapshotsTable.SNAPSHOTS
 /** Loader to load system {@link Table}s. */
 public class SystemTableLoader {
 
-    public static Table load(String type, Path location) {
+    public static Table load(String type, FileIO fileIO, Path location) {
         switch (type.toLowerCase()) {
             case SNAPSHOTS:
-                return new SnapshotsTable(location);
+                return new SnapshotsTable(fileIO, location);
             case OPTIONS:
-                return new OptionsTable(location);
+                return new OptionsTable(fileIO, location);
             case SCHEMAS:
-                return new SchemasTable(location);
+                return new SchemasTable(fileIO, location);
             case AUDIT_LOG:
-                return new AuditLogTable(FileStoreTableFactory.create(location));
+                return new AuditLogTable(FileStoreTableFactory.create(fileIO, location));
             default:
                 throw new UnsupportedOperationException("Unsupported system table type: " + type);
         }

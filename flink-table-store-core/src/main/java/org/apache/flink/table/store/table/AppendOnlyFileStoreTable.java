@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.AppendOnlyFileStore;
@@ -29,6 +28,8 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
@@ -50,13 +51,13 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     private transient AppendOnlyFileStore lazyStore;
 
-    AppendOnlyFileStoreTable(Path path, TableSchema tableSchema) {
-        super(path, tableSchema);
+    AppendOnlyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
+        super(fileIO, path, tableSchema);
     }
 
     @Override
     protected FileStoreTable copy(TableSchema newTableSchema) {
-        return new AppendOnlyFileStoreTable(path, newTableSchema);
+        return new AppendOnlyFileStoreTable(fileIO, path, newTableSchema);
     }
 
     @Override
@@ -64,6 +65,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         if (lazyStore == null) {
             lazyStore =
                     new AppendOnlyFileStore(
+                            fileIO,
                             schemaManager(),
                             tableSchema.id(),
                             new CoreOptions(tableSchema.options()),
@@ -77,7 +79,8 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public AbstractDataTableScan newScan() {
         AppendOnlyFileStoreScan scan = store().newScan();
-        return new AbstractDataTableScan(scan, tableSchema, store().pathFactory(), options()) {
+        return new AbstractDataTableScan(
+                fileIO, scan, tableSchema, store().pathFactory(), options()) {
             @Override
             protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
                 return new AppendOnlySplitGenerator(

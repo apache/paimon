@@ -20,12 +20,14 @@ package org.apache.flink.table.store.hive;
 
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.table.store.CatalogOptions;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.util.Preconditions;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
@@ -51,7 +53,7 @@ public class HiveCatalogFactory implements CatalogFactory {
     }
 
     @Override
-    public Catalog create(String warehouse, Configuration options) {
+    public Catalog create(FileIO fileIO, Path warehouse, CatalogOptions options) {
         String uri =
                 Preconditions.checkNotNull(
                         options.get(CatalogOptions.URI),
@@ -60,12 +62,12 @@ public class HiveCatalogFactory implements CatalogFactory {
                                 + IDENTIFIER
                                 + " catalog");
 
-        org.apache.hadoop.conf.Configuration hadoopConfig =
-                new org.apache.hadoop.conf.Configuration();
+        Configuration hadoopConfig = new Configuration();
         options.toMap().forEach(hadoopConfig::set);
         hadoopConfig.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
-        hadoopConfig.set(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouse);
+        hadoopConfig.set(
+                HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouse.toUri().toString());
 
-        return new HiveCatalog(hadoopConfig, options.get(METASTORE_CLIENT_CLASS));
+        return new HiveCatalog(fileIO, hadoopConfig, options.get(METASTORE_CLIENT_CLASS));
     }
 }

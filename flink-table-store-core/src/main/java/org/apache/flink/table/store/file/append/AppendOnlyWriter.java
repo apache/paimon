@@ -29,6 +29,7 @@ import org.apache.flink.table.store.file.io.NewFilesIncrement;
 import org.apache.flink.table.store.file.io.RowDataRollingFileWriter;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.util.Preconditions;
@@ -46,6 +47,7 @@ import static org.apache.flink.table.store.file.io.DataFileMeta.getMaxSequenceNu
  */
 public class AppendOnlyWriter implements RecordWriter<InternalRow> {
 
+    private final FileIO fileIO;
     private final long schemaId;
     private final FileFormat fileFormat;
     private final long targetFileSize;
@@ -61,6 +63,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
     private RowDataRollingFileWriter writer;
 
     public AppendOnlyWriter(
+            FileIO fileIO,
             long schemaId,
             FileFormat fileFormat,
             long targetFileSize,
@@ -69,6 +72,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
             CompactManager compactManager,
             boolean forceCompact,
             DataFilePathFactory pathFactory) {
+        this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
         this.targetFileSize = targetFileSize;
@@ -149,7 +153,13 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
 
     private RowDataRollingFileWriter createRollingRowWriter() {
         return new RowDataRollingFileWriter(
-                schemaId, fileFormat, targetFileSize, writeSchema, pathFactory, seqNumCounter);
+                fileIO,
+                schemaId,
+                fileFormat,
+                targetFileSize,
+                writeSchema,
+                pathFactory,
+                seqNumCounter);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

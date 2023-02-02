@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
@@ -34,6 +33,8 @@ import org.apache.flink.table.operations.Operation;
 import org.apache.flink.table.operations.ddl.CreateCatalogOperation;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
@@ -140,7 +141,8 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
 
     @Nullable
     protected Snapshot findLatestSnapshot(String tableName) {
-        SnapshotManager snapshotManager = new SnapshotManager(getTableDirectory(tableName));
+        SnapshotManager snapshotManager =
+                new SnapshotManager(LocalFileIO.create(), getTableDirectory(tableName));
         Long id = snapshotManager.latestSnapshotId();
         return id == null ? null : snapshotManager.snapshot(id);
     }

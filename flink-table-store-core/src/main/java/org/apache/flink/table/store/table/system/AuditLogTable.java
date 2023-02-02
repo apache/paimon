@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.system;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.InternalRow;
@@ -29,6 +28,8 @@ import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.predicate.PredicateReplaceVisitor;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.Table;
@@ -122,6 +123,11 @@ public class AuditLogTable implements DataTable {
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
         return new AuditLogTable(dataTable.copy(dynamicOptions));
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return dataTable.fileIO();
     }
 
     /** Push down predicate to dataScan and dataRead. */

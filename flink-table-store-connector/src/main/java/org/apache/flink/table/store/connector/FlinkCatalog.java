@@ -166,13 +166,7 @@ public class FlinkCatalog extends AbstractCatalog {
         }
 
         if (table instanceof FileStoreTable) {
-            CatalogTable catalogTable =
-                    toCatalogTable(((FileStoreTable) table).schema().toUpdateSchema());
-            // add path to source and sink
-            catalogTable
-                    .getOptions()
-                    .put(PATH.key(), catalog.getTableLocation(toIdentifier(tablePath)).toString());
-            return catalogTable;
+            return toCatalogTable((FileStoreTable) table);
         } else {
             return new SystemCatalogTable(table);
         }
@@ -315,7 +309,8 @@ public class FlinkCatalog extends AbstractCatalog {
         }
     }
 
-    private CatalogTableImpl toCatalogTable(UpdateSchema updateSchema) {
+    private CatalogTableImpl toCatalogTable(FileStoreTable table) {
+        UpdateSchema updateSchema = table.schema().toUpdateSchema();
         TableSchema schema;
         Map<String, String> newOptions = new HashMap<>(updateSchema.options());
 
@@ -343,8 +338,8 @@ public class FlinkCatalog extends AbstractCatalog {
             schema = builder.build();
         }
 
-        return new CatalogTableImpl(
-                schema, updateSchema.partitionKeys(), newOptions, updateSchema.comment());
+        return new DataCatalogTable(
+                table, schema, updateSchema.partitionKeys(), newOptions, updateSchema.comment());
     }
 
     public static UpdateSchema fromCatalogTable(CatalogTable catalogTable) {

@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.data.BinaryString;
@@ -30,6 +29,8 @@ import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -379,6 +380,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         SnapshotEnumerator enumerator =
                 new ContinuousDataFileSnapshotEnumerator(
+                        LocalFileIO.create(),
                         tablePath,
                         table.newScan(),
                         new FullStartingScanner(),
@@ -696,18 +698,17 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Override
-    protected FileStoreTable createFileStoreTable(Consumer<Configuration> configure)
-            throws Exception {
+    protected FileStoreTable createFileStoreTable(Consumer<Options> configure) throws Exception {
         return createFileStoreTable(configure, ROW_TYPE);
     }
 
-    private FileStoreTable createFileStoreTable(Consumer<Configuration> configure, RowType rowType)
+    private FileStoreTable createFileStoreTable(Consumer<Options> configure, RowType rowType)
             throws Exception {
-        Configuration conf = new Configuration();
+        Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
         conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         configure.accept(conf);
-        SchemaManager schemaManager = new SchemaManager(tablePath);
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         TableSchema tableSchema =
                 schemaManager.commitNewVersion(
                         new UpdateSchema(
@@ -716,6 +717,6 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 Arrays.asList("pt", "a"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogWithKeyFileStoreTable(tablePath, tableSchema);
+        return new ChangelogWithKeyFileStoreTable(LocalFileIO.create(), tablePath, tableSchema);
     }
 }

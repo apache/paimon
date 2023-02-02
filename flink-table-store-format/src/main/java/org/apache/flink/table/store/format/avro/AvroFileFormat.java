@@ -22,12 +22,14 @@ import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FormatReaderFactory;
+import org.apache.flink.table.store.format.FormatWriter;
+import org.apache.flink.table.store.format.FormatWriterFactory;
+import org.apache.flink.table.store.fs.PositionOutputStream;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Projection;
@@ -43,7 +45,6 @@ import org.apache.avro.io.DatumWriter;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.util.List;
 import java.util.function.Function;
 
@@ -81,7 +82,7 @@ public class AvroFileFormat extends FileFormat {
     }
 
     @Override
-    public BulkWriter.Factory<InternalRow> createWriterFactory(RowType type) {
+    public FormatWriterFactory createWriterFactory(RowType type) {
         return new RowDataAvroWriterFactory(type, formatOptions.get(AVRO_OUTPUT_CODEC));
     }
 
@@ -113,9 +114,7 @@ public class AvroFileFormat extends FileFormat {
      * A {@link BulkWriter.Factory} to convert {@link InternalRow} to {@link GenericRecord} and wrap
      * {@link AvroWriterFactory}.
      */
-    private static class RowDataAvroWriterFactory implements BulkWriter.Factory<InternalRow> {
-
-        private static final long serialVersionUID = 1L;
+    private static class RowDataAvroWriterFactory implements FormatWriterFactory {
 
         private final AvroWriterFactory<GenericRecord> factory;
         private final RowType rowType;
@@ -124,32 +123,28 @@ public class AvroFileFormat extends FileFormat {
             this.rowType = rowType;
             this.factory =
                     new AvroWriterFactory<>(
-                            new AvroBuilder<GenericRecord>() {
-                                @Override
-                                public DataFileWriter<GenericRecord> createWriter(OutputStream out)
-                                        throws IOException {
-                                    Schema schema = AvroSchemaConverter.convertToSchema(rowType);
-                                    DatumWriter<GenericRecord> datumWriter =
-                                            new GenericDatumWriter<>(schema);
-                                    DataFileWriter<GenericRecord> dataFileWriter =
-                                            new DataFileWriter<>(datumWriter);
+                            out -> {
+                                Schema schema = AvroSchemaConverter.convertToSchema(rowType);
+                                DatumWriter<GenericRecord> datumWriter =
+                                        new GenericDatumWriter<>(schema);
+                                DataFileWriter<GenericRecord> dataFileWriter =
+                                        new DataFileWriter<>(datumWriter);
 
-                                    if (codec != null) {
-                                        dataFileWriter.setCodec(CodecFactory.fromString(codec));
-                                    }
-                                    dataFileWriter.create(schema, out);
-                                    return dataFileWriter;
+                                if (codec != null) {
+                                    dataFileWriter.setCodec(CodecFactory.fromString(codec));
                                 }
+                                dataFileWriter.create(schema, out);
+                                return dataFileWriter;
                             });
         }
 
         @Override
-        public BulkWriter<InternalRow> create(FSDataOutputStream out) throws IOException {
-            BulkWriter<GenericRecord> writer = factory.create(out);
+        public FormatWriter create(PositionOutputStream out) throws IOException {
+            AvroBulkWriter<GenericRecord> writer = factory.create(out);
             RowDataToAvroConverters.RowDataToAvroConverter converter =
                     RowDataToAvroConverters.createConverter(rowType);
             Schema schema = AvroSchemaConverter.convertToSchema(rowType);
-            return new BulkWriter<InternalRow>() {
+            return new FormatWriter() {
 
                 @Override
                 public void addElement(InternalRow element) throws IOException {

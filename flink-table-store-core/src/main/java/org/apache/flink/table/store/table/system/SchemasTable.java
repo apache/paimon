@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.system;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
@@ -29,6 +28,8 @@ import org.apache.flink.table.store.file.utils.IteratorRecordReader;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.SerializationUtils;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -68,9 +69,11 @@ public class SchemasTable implements Table {
                             new DataField(4, "options", SerializationUtils.newStringType(false)),
                             new DataField(5, "comment", SerializationUtils.newStringType(true))));
 
+    private final FileIO fileIO;
     private final Path location;
 
-    public SchemasTable(Path location) {
+    public SchemasTable(FileIO fileIO, Path location) {
+        this.fileIO = fileIO;
         this.location = location;
     }
 
@@ -96,12 +99,17 @@ public class SchemasTable implements Table {
 
     @Override
     public TableRead newRead() {
-        return new SchemasRead();
+        return new SchemasRead(fileIO);
     }
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new SchemasTable(location);
+        return new SchemasTable(fileIO, location);
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return fileIO;
     }
 
     private class SchemasScan implements TableScan {
@@ -113,7 +121,7 @@ public class SchemasTable implements Table {
 
         @Override
         public Plan plan() {
-            return () -> Collections.singletonList(new SchemasSplit(location));
+            return () -> Collections.singletonList(new SchemasSplit(fileIO, location));
         }
     }
 
@@ -122,15 +130,17 @@ public class SchemasTable implements Table {
 
         private static final long serialVersionUID = 1L;
 
+        private final FileIO fileIO;
         private final Path location;
 
-        private SchemasSplit(Path location) {
+        private SchemasSplit(FileIO fileIO, Path location) {
+            this.fileIO = fileIO;
             this.location = location;
         }
 
         @Override
         public long rowCount() {
-            return new SchemaManager(location).listAllIds().size();
+            return new SchemaManager(fileIO, location).listAllIds().size();
         }
 
         @Override
@@ -154,7 +164,12 @@ public class SchemasTable implements Table {
     /** {@link TableRead} implementation for {@link SchemasTable}. */
     private static class SchemasRead implements TableRead {
 
+        private final FileIO fileIO;
         private int[][] projection;
+
+        public SchemasRead(FileIO fileIO) {
+            this.fileIO = fileIO;
+        }
 
         @Override
         public TableRead withFilter(Predicate predicate) {
@@ -173,7 +188,8 @@ public class SchemasTable implements Table {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((SchemasSplit) split).location;
-            Iterator<TableSchema> schemas = new SchemaManager(location).listAll().iterator();
+            Iterator<TableSchema> schemas =
+                    new SchemaManager(fileIO, location).listAll().iterator();
             Iterator<InternalRow> rows = Iterators.transform(schemas, this::toRow);
             if (projection != null) {
                 rows =

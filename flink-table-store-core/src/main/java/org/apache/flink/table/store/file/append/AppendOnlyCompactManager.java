@@ -24,7 +24,7 @@ import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactTask;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
-import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.util.Preconditions;
 
 import java.util.ArrayList;
@@ -40,6 +40,7 @@ import java.util.concurrent.ExecutorService;
 /** Compact manager for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyCompactManager extends CompactFutureManager {
 
+    private final FileIO fileIO;
     private final ExecutorService executor;
     private final LinkedList<DataFileMeta> toCompact;
     private final int minFileNum;
@@ -49,6 +50,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     private final DataFilePathFactory pathFactory;
 
     public AppendOnlyCompactManager(
+            FileIO fileIO,
             ExecutorService executor,
             LinkedList<DataFileMeta> toCompact,
             int minFileNum,
@@ -56,6 +58,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
             long targetFileSize,
             CompactRewriter rewriter,
             DataFilePathFactory pathFactory) {
+        this.fileIO = fileIO;
         this.executor = executor;
         this.toCompact = toCompact;
         this.minFileNum = minFileNum;
@@ -82,6 +85,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
         taskFuture =
                 executor.submit(
                         new AppendOnlyCompactManager.IterativeCompactTask(
+                                fileIO,
                                 toCompact,
                                 targetFileSize,
                                 minFileNum,
@@ -182,6 +186,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
      */
     public static class IterativeCompactTask extends CompactTask {
 
+        private final FileIO fileIO;
         private final long targetFileSize;
         private final int minFileNum;
         private final int maxFileNum;
@@ -189,6 +194,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
         private final DataFilePathFactory factory;
 
         public IterativeCompactTask(
+                FileIO fileIO,
                 List<DataFileMeta> inputs,
                 long targetFileSize,
                 int minFileNum,
@@ -196,6 +202,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
                 CompactRewriter rewriter,
                 DataFilePathFactory factory) {
             super(inputs);
+            this.fileIO = fileIO;
             this.targetFileSize = targetFileSize;
             this.minFileNum = minFileNum;
             this.maxFileNum = maxFileNum;
@@ -240,7 +247,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
 
         @VisibleForTesting
         void delete(DataFileMeta tmpFile) {
-            FileUtils.deleteOrWarn(factory.toPath(tmpFile.fileName()));
+            fileIO.deleteQuietly(factory.toPath(tmpFile.fileName()));
         }
     }
 

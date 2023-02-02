@@ -18,7 +18,8 @@
 
 package org.apache.flink.table.store.format.parquet;
 
-import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.DataField;
 
 import org.apache.parquet.ParquetReadOptions;
@@ -43,8 +44,9 @@ public class ParquetUtil {
      * @return result sets as map, key is column name, value is statistics (for example, null count,
      *     minimum value, maximum value)
      */
-    public static Map<String, Statistics> extractColumnStats(Path path) throws IOException {
-        ParquetMetadata parquetMetadata = getParquetReader(path).getFooter();
+    public static Map<String, Statistics> extractColumnStats(FileIO fileIO, Path path)
+            throws IOException {
+        ParquetMetadata parquetMetadata = getParquetReader(fileIO, path).getFooter();
         List<BlockMetaData> blockMetaDataList = parquetMetadata.getBlocks();
         Map<String, Statistics> resultStats = new HashMap<>();
         for (BlockMetaData blockMetaData : blockMetaDataList) {
@@ -71,9 +73,9 @@ public class ParquetUtil {
      * @param path the path of parquet files to be read
      * @return parquet reader, used for reading footer, status, etc.
      */
-    public static ParquetFileReader getParquetReader(Path path) throws IOException {
+    public static ParquetFileReader getParquetReader(FileIO fileIO, Path path) throws IOException {
         return ParquetFileReader.open(
-                ParquetInputFile.fromPath(path), ParquetReadOptions.builder().build());
+                ParquetInputFile.fromPath(fileIO, path), ParquetReadOptions.builder().build());
     }
 
     static void assertStatsClass(

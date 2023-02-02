@@ -18,16 +18,17 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.filesystem.FileSystems;
+import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.util.Preconditions;
 
+import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
@@ -68,14 +69,15 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
 
     private String name = null;
     private Catalog catalog = null;
-    private Configuration conf = null;
 
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
         this.name = name;
-        conf = Configuration.fromMap(SparkCaseSensitiveConverter.convert(options));
-        FileSystems.initialize(CatalogFactory.warehouse(conf), conf);
-        this.catalog = CatalogFactory.createCatalog(conf);
+        CatalogOptions catalogOptions =
+                CatalogOptions.create(
+                        Options.fromMap(options),
+                        SparkSession.active().sessionState().newHadoopConf());
+        this.catalog = CatalogFactory.createCatalog(catalogOptions);
     }
 
     @Override
@@ -203,8 +205,7 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         try {
             return new SparkTable(
                     catalog.getTable(toIdentifier(ident)),
-                    Lock.factory(catalog.lockFactory().orElse(null), toIdentifier(ident)),
-                    conf);
+                    Lock.factory(catalog.lockFactory().orElse(null), toIdentifier(ident)));
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
         }

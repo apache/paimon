@@ -21,7 +21,6 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.CheckpointingMode;
@@ -31,7 +30,8 @@ import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.store.connector.action.FlinkActions;
-import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
+import org.apache.flink.table.store.file.utils.FailingFileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.test.util.MiniClusterWithClientResource;
 import org.apache.flink.test.util.TestBaseUtils;
@@ -422,10 +422,10 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
         assert LIMIT > NUM_VALUES;
 
         String failingName = UUID.randomUUID().toString();
-        String failingPath = FailingAtomicRenameFileSystem.getFailingPath(failingName, path);
+        String failingPath = FailingFileIO.getFailingPath(failingName, path);
 
         // no failure when creating catalog and table
-        FailingAtomicRenameFileSystem.reset(failingName, 0, 1);
+        FailingFileIO.reset(failingName, 0, 1);
         tEnv.executeSql(
                 String.format(
                         "CREATE CATALOG testCatalog WITH ('type'='table-store', 'warehouse'='%s')",
@@ -468,7 +468,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
         List<TableResult> results = new ArrayList<>();
 
         if (enableFailure) {
-            FailingAtomicRenameFileSystem.reset(failingName, 100, 1000);
+            FailingFileIO.reset(failingName, 100, 1000);
         }
         for (int i = 0; i < numProducers; i++) {
             // for the last `NUM_PARTS * NUM_KEYS` records, we update every key to a specific value
@@ -493,7 +493,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
             // run test SQL
             int idx = i;
             TableResult result =
-                    FailingAtomicRenameFileSystem.retryArtificialException(
+                    FailingFileIO.retryArtificialException(
                             () ->
                                     tEnv.executeSql(
                                             "INSERT INTO T /*+ OPTIONS('sink.parallelism' = '2') */ SELECT * FROM myView"

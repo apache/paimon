@@ -18,12 +18,13 @@
 
 package org.apache.flink.table.store.format;
 
-import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 
 import java.io.IOException;
 
 /** Extracts statistics directly from file. */
 public interface FileStatsExtractor {
 
-    FieldStats[] extract(Path path) throws IOException;
+    FieldStats[] extract(FileIO fileIO, Path path) throws IOException;
 }

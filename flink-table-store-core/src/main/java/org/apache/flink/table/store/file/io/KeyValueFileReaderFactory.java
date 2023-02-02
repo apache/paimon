@@ -29,6 +29,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.store.format.FormatKey;
+import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Projection;
 
@@ -43,6 +44,7 @@ import java.util.Map;
 /** Factory to create {@link RecordReader}s for reading {@link KeyValue} files. */
 public class KeyValueFileReaderFactory {
 
+    private final FileIO fileIO;
     private final SchemaManager schemaManager;
     private final long schemaId;
     private final RowType keyType;
@@ -53,12 +55,14 @@ public class KeyValueFileReaderFactory {
     private final DataFilePathFactory pathFactory;
 
     private KeyValueFileReaderFactory(
+            FileIO fileIO,
             SchemaManager schemaManager,
             long schemaId,
             RowType keyType,
             RowType valueType,
             BulkFormatMapping.BulkFormatMappingBuilder bulkFormatMappingBuilder,
             DataFilePathFactory pathFactory) {
+        this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
         this.keyType = keyType;
@@ -81,6 +85,7 @@ public class KeyValueFileReaderFactory {
                                     formatIdentifier, tableSchema, dataSchema);
                         });
         return new KeyValueDataFileRecordReader(
+                fileIO,
                 bulkFormatMapping.getReaderFactory(),
                 pathFactory.toPath(fileName),
                 keyType,
@@ -90,6 +95,7 @@ public class KeyValueFileReaderFactory {
     }
 
     public static Builder builder(
+            FileIO fileIO,
             SchemaManager schemaManager,
             long schemaId,
             RowType keyType,
@@ -98,6 +104,7 @@ public class KeyValueFileReaderFactory {
             FileStorePathFactory pathFactory,
             KeyValueFieldsExtractor extractor) {
         return new Builder(
+                fileIO,
                 schemaManager,
                 schemaId,
                 keyType,
@@ -110,6 +117,7 @@ public class KeyValueFileReaderFactory {
     /** Builder for {@link KeyValueFileReaderFactory}. */
     public static class Builder {
 
+        private final FileIO fileIO;
         private final SchemaManager schemaManager;
         private final long schemaId;
         private final RowType keyType;
@@ -125,6 +133,7 @@ public class KeyValueFileReaderFactory {
         private RowType projectedValueType;
 
         private Builder(
+                FileIO fileIO,
                 SchemaManager schemaManager,
                 long schemaId,
                 RowType keyType,
@@ -132,6 +141,7 @@ public class KeyValueFileReaderFactory {
                 FileFormatDiscover formatDiscover,
                 FileStorePathFactory pathFactory,
                 KeyValueFieldsExtractor extractor) {
+            this.fileIO = fileIO;
             this.schemaManager = schemaManager;
             this.schemaId = schemaId;
             this.keyType = keyType;
@@ -171,6 +181,7 @@ public class KeyValueFileReaderFactory {
             RowType projectedKeyType = projectKeys ? this.projectedKeyType : keyType;
 
             return new KeyValueFileReaderFactory(
+                    fileIO,
                     schemaManager,
                     schemaId,
                     projectedKeyType,
@@ -181,8 +192,8 @@ public class KeyValueFileReaderFactory {
         }
 
         private void applyProjection() {
-            projectedKeyType = (RowType) Projection.of(keyProjection).project(keyType);
-            projectedValueType = (RowType) Projection.of(valueProjection).project(valueType);
+            projectedKeyType = Projection.of(keyProjection).project(keyType);
+            projectedValueType = Projection.of(valueProjection).project(valueType);
         }
     }
 }

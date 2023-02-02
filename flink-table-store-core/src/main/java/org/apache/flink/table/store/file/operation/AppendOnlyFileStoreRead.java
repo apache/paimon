@@ -32,6 +32,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.store.format.FormatKey;
+import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Projection;
@@ -49,6 +50,7 @@ import static org.apache.flink.table.store.file.predicate.PredicateBuilder.split
 /** {@link FileStoreRead} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
 
+    private final FileIO fileIO;
     private final SchemaManager schemaManager;
     private final long schemaId;
     private final RowType rowType;
@@ -61,11 +63,13 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
     @Nullable private List<Predicate> filters;
 
     public AppendOnlyFileStoreRead(
+            FileIO fileIO,
             SchemaManager schemaManager,
             long schemaId,
             RowType rowType,
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory) {
+        this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
         this.rowType = rowType;
@@ -129,6 +133,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
             suppliers.add(
                     () ->
                             new RowDataFileRecordReader(
+                                    fileIO,
                                     dataFilePathFactory.toPath(file.fileName()),
                                     bulkFormatMapping.getReaderFactory(),
                                     bulkFormatMapping.getIndexMapping()));

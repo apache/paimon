@@ -18,16 +18,19 @@
 
 package org.apache.flink.table.store.oss;
 
-import org.apache.flink.core.fs.FileSystemFactory;
-import org.apache.flink.table.store.plugin.FileSystemLoader;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.FileIOLoader;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.PluginFileIO;
+import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.plugin.PluginLoader;
 
 /** A {@link PluginLoader} to load oss. */
-public class OSSLoader implements FileSystemLoader {
+public class OSSLoader implements FileIOLoader {
 
     private static final String OSS_JAR = "flink-table-store-plugin-oss.jar";
 
-    private static final String OSS_CLASS = "org.apache.flink.fs.osshadoop.OSSFileSystemFactory";
+    private static final String OSS_CLASS = "org.apache.flink.table.store.oss.OSSFileIO";
 
     // Singleton lazy initialization
 
@@ -42,7 +45,34 @@ public class OSSLoader implements FileSystemLoader {
     }
 
     @Override
-    public FileSystemFactory load() {
-        return getLoader().newInstance(OSS_CLASS);
+    public String getScheme() {
+        return "oss";
+    }
+
+    @Override
+    public FileIO load(Path path) {
+        return new OSSPluginFileIO();
+    }
+
+    private static class OSSPluginFileIO extends PluginFileIO {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public boolean isObjectStore() {
+            return true;
+        }
+
+        @Override
+        protected FileIO createFileIO(Path path) {
+            FileIO fileIO = getLoader().newInstance(OSS_CLASS);
+            fileIO.configure(CatalogOptions.create(options));
+            return fileIO;
+        }
+
+        @Override
+        protected ClassLoader pluginClassLoader() {
+            return getLoader().submoduleClassLoader();
+        }
     }
 }

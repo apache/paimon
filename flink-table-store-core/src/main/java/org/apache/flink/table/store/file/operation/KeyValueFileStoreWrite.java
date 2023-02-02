@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.core.fs.FileSystemKind;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
@@ -43,13 +42,12 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.format.FileFormatDiscover;
+import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.types.RowType;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -68,9 +66,10 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final CoreOptions options;
-    private final FileStorePathFactory pathFactory;
+    private final FileIO fileIO;
 
     public KeyValueFileStoreWrite(
+            FileIO fileIO,
             SchemaManager schemaManager,
             long schemaId,
             String commitUser,
@@ -84,8 +83,10 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             CoreOptions options,
             KeyValueFieldsExtractor extractor) {
         super(commitUser, snapshotManager, scan, options);
+        this.fileIO = fileIO;
         this.readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
+                        fileIO,
                         schemaManager,
                         schemaId,
                         keyType,
@@ -95,6 +96,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         extractor);
         this.writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
+                        fileIO,
                         schemaId,
                         keyType,
                         valueType,
@@ -104,7 +106,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.mfFactory = mfFactory;
         this.options = options;
-        this.pathFactory = pathFactory;
     }
 
     @Override
@@ -170,12 +171,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     private boolean bufferSpillable() {
-        try {
-            return options.writeBufferSpillable(
-                    pathFactory.root().getFileSystem().getKind() != FileSystemKind.FILE_SYSTEM);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        return options.writeBufferSpillable(fileIO.isObjectStore());
     }
 
     private CompactManager createCompactManager(

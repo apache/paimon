@@ -18,9 +18,10 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.TableType;
 
 import org.junit.jupiter.api.Test;
@@ -28,8 +29,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 
-import static org.apache.flink.table.store.CatalogOptions.TABLE_TYPE;
-import static org.apache.flink.table.store.CatalogOptions.WAREHOUSE;
+import static org.apache.flink.table.store.options.CatalogOptions.TABLE_TYPE;
+import static org.apache.flink.table.store.options.CatalogOptions.WAREHOUSE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -39,29 +40,30 @@ public class CatalogFactoryTest {
     @Test
     public void testAutomaticCreatePath(@TempDir java.nio.file.Path path) {
         Path root = new Path(path.toUri().toString());
-        Configuration options = new Configuration();
+        Options options = new Options();
         options.set(WAREHOUSE, new Path(root, "warehouse").toString());
-        assertThat(CatalogFactory.createCatalog(options).listDatabases()).isEmpty();
+        assertThat(CatalogFactory.createCatalog(CatalogOptions.create(options)).listDatabases())
+                .isEmpty();
     }
 
     @Test
     public void testNotDirectory(@TempDir java.nio.file.Path path) throws IOException {
         Path root = new Path(path.toUri().toString());
         Path warehouse = new Path(root, "warehouse");
-        FileUtils.writeFileUtf8(warehouse, "");
-        Configuration options = new Configuration();
+        LocalFileIO.create().writeFileUtf8(warehouse, "");
+        Options options = new Options();
         options.set(WAREHOUSE, warehouse.toString());
-        assertThatThrownBy(() -> CatalogFactory.createCatalog(options))
+        assertThatThrownBy(() -> CatalogFactory.createCatalog(CatalogOptions.create(options)))
                 .hasMessageContaining("should be a directory");
     }
 
     @Test
     public void testNonManagedTable(@TempDir java.nio.file.Path path) {
         Path root = new Path(path.toUri().toString());
-        Configuration options = new Configuration();
+        Options options = new Options();
         options.set(WAREHOUSE, new Path(root, "warehouse").toString());
         options.set(TABLE_TYPE, TableType.EXTERNAL);
-        assertThatThrownBy(() -> CatalogFactory.createCatalog(options))
+        assertThatThrownBy(() -> CatalogFactory.createCatalog(CatalogOptions.create(options)))
                 .hasMessageContaining("Only managed table is supported in File system catalog.");
     }
 }

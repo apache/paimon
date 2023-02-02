@@ -19,9 +19,11 @@
 package org.apache.flink.table.store.hive;
 
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.filesystem.FileSystems;
+import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.options.Options;
+import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataType;
 
@@ -40,8 +42,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.stream.Collectors;
-
-import static org.apache.flink.table.store.TableStoreJobConf.extractCatalogConfig;
 
 /** Column names, types and comments of a Hive table. */
 public class HiveSchema {
@@ -78,18 +78,10 @@ public class HiveSchema {
                             + "so location property must be set.");
         }
         Path path = new Path(location);
-        if (configuration != null) {
-            FileSystems.initialize(path, extractCatalogConfig(configuration));
-        }
-        TableSchema tableSchema =
-                new SchemaManager(path)
-                        .latest()
-                        .orElseThrow(
-                                () ->
-                                        new IllegalArgumentException(
-                                                "Schema file not found in location "
-                                                        + location
-                                                        + ". Please create table first."));
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path.toUri().toString());
+        CatalogOptions catalogOptions = CatalogOptions.create(options, configuration);
+        TableSchema tableSchema = FileStoreTableFactory.create(catalogOptions).schema();
 
         if (properties.containsKey(serdeConstants.LIST_COLUMNS)
                 && properties.containsKey(serdeConstants.LIST_COLUMN_TYPES)) {

@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.format.orc.writer;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.core.fs.FSDataOutputStream;
+import org.apache.flink.table.store.fs.PositionOutputStream;
 
 import com.google.protobuf.CodedOutputStream;
 import org.apache.orc.CompressionCodec;
@@ -48,7 +48,7 @@ import static org.apache.orc.impl.WriterImpl.getEstimatedBufferSize;
  * A slightly customised clone of {@link org.apache.orc.impl.PhysicalFsWriter}.
  *
  * <p>Whereas PhysicalFsWriter implementation works on the basis of a Path, this implementation
- * leverages Flink's {@link FSDataOutputStream} to write the compressed data.
+ * leverages Flink's {@link PositionOutputStream} to write the compressed data.
  *
  * <p>NOTE: If the ORC dependency version is updated, this file may have to be updated as well to be
  * in sync with the new version's PhysicalFsWriter.
@@ -72,14 +72,14 @@ public class PhysicalWriterImpl implements PhysicalWriter {
     private final boolean writeVariableLengthBlocks;
 
     private CompressionCodec codec;
-    private FSDataOutputStream out;
+    private final PositionOutputStream out;
     private long headerLength;
     private long stripeStart;
     private long blockOffset;
     private int metadataLength;
     private int footerLength;
 
-    public PhysicalWriterImpl(FSDataOutputStream out, OrcFile.WriterOptions opts)
+    public PhysicalWriterImpl(PositionOutputStream out, OrcFile.WriterOptions opts)
             throws IOException {
         if (opts.isEnforceBufferSize()) {
             this.bufferSize = opts.getBufferSize();
@@ -113,7 +113,7 @@ public class PhysicalWriterImpl implements PhysicalWriter {
     }
 
     @Override
-    public OutputReceiver createDataStream(StreamName name) throws IOException {
+    public OutputReceiver createDataStream(StreamName name) {
         BufferedStream result = streams.get(name);
 
         if (result == null) {
@@ -342,9 +342,9 @@ public class PhysicalWriterImpl implements PhysicalWriter {
     }
 
     private static class DirectStream implements OutputReceiver {
-        private final FSDataOutputStream output;
+        private final PositionOutputStream output;
 
-        DirectStream(FSDataOutputStream output) {
+        DirectStream(PositionOutputStream output) {
             this.output = output;
         }
 
@@ -374,7 +374,7 @@ public class PhysicalWriterImpl implements PhysicalWriter {
             output.clear();
         }
 
-        void spillToDiskAndClear(FSDataOutputStream raw) throws IOException {
+        void spillToDiskAndClear(PositionOutputStream raw) throws IOException {
             if (!isSuppressed) {
                 for (ByteBuffer buffer : output) {
                     raw.write(

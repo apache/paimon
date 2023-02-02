@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.KeyComparatorSupplier;
 import org.apache.flink.table.store.format.FileFormatDiscover;
+import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.types.RowType;
 
 import java.util.Comparator;
@@ -46,6 +47,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final MergeFunctionFactory<KeyValue> mfFactory;
 
     public KeyValueFileStore(
+            FileIO fileIO,
             SchemaManager schemaManager,
             long schemaId,
             CoreOptions options,
@@ -55,7 +57,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             RowType valueType,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             MergeFunctionFactory<KeyValue> mfFactory) {
-        super(schemaManager, schemaId, options, partitionType);
+        super(fileIO, schemaManager, schemaId, options, partitionType);
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
         this.valueType = valueType;
@@ -72,6 +74,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     @Override
     public KeyValueFileStoreRead newRead() {
         return new KeyValueFileStoreRead(
+                fileIO,
                 schemaManager,
                 schemaId,
                 keyType,
@@ -86,6 +89,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     @Override
     public KeyValueFileStoreWrite newWrite(String commitUser) {
         return new KeyValueFileStoreWrite(
+                fileIO,
                 schemaManager,
                 schemaId,
                 commitUser,

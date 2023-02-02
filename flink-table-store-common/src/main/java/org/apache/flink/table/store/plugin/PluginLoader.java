@@ -135,4 +135,8 @@ public class PluginLoader {
             throw new RuntimeException(e);
         }
     }
+
+    public ClassLoader submoduleClassLoader() {
+        return submoduleClassLoader;
+    }
 }

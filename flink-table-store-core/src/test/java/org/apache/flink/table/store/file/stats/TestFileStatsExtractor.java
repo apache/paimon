@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.stats;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
@@ -27,6 +26,8 @@ import org.apache.flink.table.store.format.FieldStatsCollector;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.store.format.FormatReaderFactory;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.RowType;
 
 import java.io.IOException;
@@ -47,10 +48,11 @@ public class TestFileStatsExtractor implements FileStatsExtractor {
     }
 
     @Override
-    public FieldStats[] extract(Path path) throws IOException {
+    public FieldStats[] extract(FileIO fileIO, Path path) throws IOException {
         IdentityObjectSerializer serializer = new IdentityObjectSerializer(rowType);
         FormatReaderFactory readerFactory = format.createReaderFactory(rowType);
-        List<InternalRow> records = FileUtils.readListFromFile(path, serializer, readerFactory);
+        List<InternalRow> records =
+                FileUtils.readListFromFile(fileIO, path, serializer, readerFactory);
         FieldStatsCollector statsCollector = new FieldStatsCollector(rowType);
         for (InternalRow record : records) {
             statsCollector.collect(record);

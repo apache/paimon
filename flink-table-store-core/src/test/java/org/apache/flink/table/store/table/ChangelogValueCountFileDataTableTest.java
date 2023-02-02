@@ -46,7 +46,8 @@ public class ChangelogValueCountFileDataTableTest extends FileDataFilterTestBase
     @Override
     protected FileStoreTable createFileStoreTable(Map<Long, TableSchema> tableSchemas) {
         SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
-        return new ChangelogValueCountFileStoreTable(tablePath, schemaManager.latest().get()) {
+        return new ChangelogValueCountFileStoreTable(
+                fileIO, tablePath, schemaManager.latest().get()) {
             @Override
             protected SchemaManager schemaManager() {
                 return schemaManager;

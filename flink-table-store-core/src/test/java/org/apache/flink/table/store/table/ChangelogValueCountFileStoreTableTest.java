@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
@@ -29,6 +27,9 @@ import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
@@ -195,17 +196,16 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         assertThat(splits).isEmpty();
         // check that no changelog file is produced
         Path bucketPath = DataFilePathFactory.bucketPath(table.location(), "1", 0);
-        assertThat(bucketPath.getFileSystem().listStatus(bucketPath)).isNullOrEmpty();
+        assertThat(LocalFileIO.create().listStatus(bucketPath)).isNullOrEmpty();
     }
 
     @Override
-    protected FileStoreTable createFileStoreTable(Consumer<Configuration> configure)
-            throws Exception {
-        Configuration conf = new Configuration();
+    protected FileStoreTable createFileStoreTable(Consumer<Options> configure) throws Exception {
+        Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
         conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         configure.accept(conf);
-        SchemaManager schemaManager = new SchemaManager(tablePath);
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         TableSchema tableSchema =
                 schemaManager.commitNewVersion(
                         new UpdateSchema(
@@ -214,6 +214,6 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogValueCountFileStoreTable(tablePath, tableSchema);
+        return new ChangelogValueCountFileStoreTable(LocalFileIO.create(), tablePath, tableSchema);
     }
 }
