@@ -54,6 +54,11 @@ public class ReverseReader implements RecordReader<KeyValue> {
                 if (kv == null) {
                     return null;
                 }
+                if (kv.valueKind() == RowKind.UPDATE_BEFORE || kv.valueKind() == RowKind.DELETE) {
+                    throw new IllegalStateException(
+                            "In reverse reader, the value kind of records cannot be UPDATE_BEFORE or DELETE.");
+                }
+
                 return kv.replaceValueKind(RowKind.DELETE);
             }
 

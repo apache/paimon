@@ -100,7 +100,7 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
                     && scan.supportStreamingReadOverwrite()) {
                 LOG.debug("Find overwrite snapshot id {}.", nextSnapshotId);
                 DataTableScan.DataFilePlan overwritePlan =
-                        scan.withSnapshot(nextSnapshotId).plan(true);
+                        scan.withSnapshot(nextSnapshotId).planOverwriteChanges();
                 nextSnapshotId++;
                 return overwritePlan;
             } else if (followUpScanner.shouldScanSnapshot(snapshot)) {

@@ -24,6 +24,7 @@ import org.apache.flink.table.store.file.AppendOnlyFileStore;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreRead;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
+import org.apache.flink.table.store.file.operation.ReverseReader;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -81,6 +82,18 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         AppendOnlyFileStoreScan scan = store().newScan();
         return new AbstractDataTableScan(
                 fileIO, scan, tableSchema, store().pathFactory(), options()) {
+            /**
+             * Currently, the streaming read of overwrite is implemented by reversing the {@link
+             * RowKind} of overwrote records to {@link RowKind#DELETE}, so only tables that have
+             * primary key support it.
+             *
+             * @see ReverseReader
+             */
+            @Override
+            public boolean supportStreamingReadOverwrite() {
+                return false;
+            }
+
             @Override
             protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
                 return new AppendOnlySplitGenerator(

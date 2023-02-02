@@ -177,12 +177,18 @@ public class AuditLogTable implements DataTable {
         }
 
         @Override
-        public DataTableScan.DataFilePlan plan(boolean isOverwrite) {
-            if (isOverwrite) {
-                throw new UnsupportedOperationException(
-                        "AuditLogTable doesn't supported overwrite plan yet.");
-            }
+        public DataTableScan.DataFilePlan plan() {
             return dataScan.plan();
+        }
+
+        @Override
+        public DataFilePlan planOverwriteChanges() {
+            return dataScan.planOverwriteChanges();
+        }
+
+        @Override
+        public boolean supportStreamingReadOverwrite() {
+            return dataScan.supportStreamingReadOverwrite();
         }
     }
 

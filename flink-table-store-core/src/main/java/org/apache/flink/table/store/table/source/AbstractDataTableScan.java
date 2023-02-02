@@ -24,7 +24,6 @@ import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.FileKind;
-import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -119,33 +118,43 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     @Override
-    public DataFilePlan plan(boolean isOverwrite) {
-        if (isOverwrite) {
-            withKind(ScanKind.DELTA);
-        }
+    public DataFilePlan plan() {
         FileStoreScan.Plan plan = scan.plan();
         Long snapshotId = plan.snapshotId();
 
-        List<ManifestEntry> addPart = plan.files(FileKind.ADD);
-        List<ManifestEntry> deletePart = plan.files(FileKind.DELETE);
-
-        List<DataSplit> splits = new ArrayList<>();
-        if (isOverwrite) {
-            splits.addAll(
-                    generateSplits(
-                            snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
-                            scanKind != ScanKind.ALL,
-                            true,
-                            splitGenerator(pathFactory),
-                            FileStoreScan.Plan.groupByPartFiles(deletePart)));
-        }
-        splits.addAll(
+        List<DataSplit> splits =
                 generateSplits(
                         snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
                         scanKind != ScanKind.ALL,
                         false,
                         splitGenerator(pathFactory),
-                        FileStoreScan.Plan.groupByPartFiles(addPart)));
+                        FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.ADD)));
+        return new DataFilePlan(snapshotId, splits);
+    }
+
+    @Override
+    public DataFilePlan planOverwriteChanges() {
+        withKind(ScanKind.DELTA);
+        FileStoreScan.Plan plan = scan.plan();
+        Long snapshotId = plan.snapshotId();
+
+        List<DataSplit> splits = new ArrayList<>();
+
+        splits.addAll(
+                generateSplits(
+                        snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
+                        true,
+                        true,
+                        splitGenerator(pathFactory),
+                        FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.DELETE))));
+
+        splits.addAll(
+                generateSplits(
+                        snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
+                        true,
+                        false,
+                        splitGenerator(pathFactory),
+                        FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.ADD))));
 
         return new DataFilePlan(snapshotId, splits);
     }
@@ -154,7 +163,7 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     public static List<DataSplit> generateSplits(
             long snapshotId,
             boolean isIncremental,
-            boolean needReverse,
+            boolean reverseRowKind,
             SplitGenerator splitGenerator,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
         List<DataSplit> splits = new ArrayList<>();
@@ -173,7 +182,7 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                                     bucket,
                                     bucketEntry.getValue(),
                                     true,
-                                    needReverse));
+                                    reverseRowKind));
                 } else {
                     splitGenerator.split(bucketEntry.getValue()).stream()
                             .map(
@@ -184,7 +193,7 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                                                     bucket,
                                                     files,
                                                     false,
-                                                    needReverse))
+                                                    reverseRowKind))
                             .forEach(splits::add);
                 }
             }

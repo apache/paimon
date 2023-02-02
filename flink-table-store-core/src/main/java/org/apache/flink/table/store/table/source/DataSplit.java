@@ -45,8 +45,9 @@ public class DataSplit implements Split {
     private List<DataFileMeta> files;
     private boolean isIncremental;
 
-    // when needReverse, the RowKind of records from this split should be reversed to DELETE
-    private boolean needReverse;
+    // when reverseRowKind is true, the RowKind of records from this split should be reversed to
+    // DELETE
+    private boolean reverseRowKind;
 
     public DataSplit(
             long snapshotId,
@@ -54,8 +55,8 @@ public class DataSplit implements Split {
             int bucket,
             List<DataFileMeta> files,
             boolean isIncremental,
-            boolean needReverse) {
-        init(snapshotId, partition, bucket, files, isIncremental, needReverse);
+            boolean reverseRowKind) {
+        init(snapshotId, partition, bucket, files, isIncremental, reverseRowKind);
     }
 
     private void init(
@@ -64,13 +65,13 @@ public class DataSplit implements Split {
             int bucket,
             List<DataFileMeta> files,
             boolean isIncremental,
-            boolean needReverse) {
+            boolean reverseRowKind) {
         this.snapshotId = snapshotId;
         this.partition = partition;
         this.bucket = bucket;
         this.files = files;
         this.isIncremental = isIncremental;
-        this.needReverse = needReverse;
+        this.reverseRowKind = reverseRowKind;
     }
 
     public long snapshotId() {
@@ -93,8 +94,8 @@ public class DataSplit implements Split {
         return isIncremental;
     }
 
-    public boolean needReverse() {
-        return needReverse;
+    public boolean reverseRowKind() {
+        return reverseRowKind;
     }
 
     @Override
@@ -119,12 +120,12 @@ public class DataSplit implements Split {
                 && Objects.equals(partition, split.partition)
                 && Objects.equals(files, split.files)
                 && isIncremental == split.isIncremental
-                && needReverse == split.needReverse;
+                && reverseRowKind == split.reverseRowKind;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(partition, bucket, files, isIncremental, needReverse);
+        return Objects.hash(partition, bucket, files, isIncremental, reverseRowKind);
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -139,7 +140,7 @@ public class DataSplit implements Split {
                 split.bucket,
                 split.files,
                 split.isIncremental,
-                split.needReverse);
+                split.reverseRowKind);
     }
 
     public void serialize(DataOutputView out) throws IOException {
@@ -152,7 +153,7 @@ public class DataSplit implements Split {
             dataFileSer.serialize(file, out);
         }
         out.writeBoolean(isIncremental);
-        out.writeBoolean(needReverse);
+        out.writeBoolean(reverseRowKind);
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {

@@ -38,16 +38,12 @@ public interface DataTableScan extends TableScan {
     @Override
     DataTableScan withFilter(Predicate predicate);
 
-    default DataTableScan.DataFilePlan plan() {
-        return plan(false);
-    }
+    DataTableScan.DataFilePlan plan();
 
-    /** @param isOverwrite whether to extract plan from an overwrite snapshot */
-    DataTableScan.DataFilePlan plan(boolean isOverwrite);
+    /** to extract plan from overwrite changes. */
+    DataTableScan.DataFilePlan planOverwriteChanges();
 
-    default boolean supportStreamingReadOverwrite() {
-        return false;
-    }
+    boolean supportStreamingReadOverwrite();
 
     /** Scanning plan containing snapshot ID and input splits. */
     class DataFilePlan implements Plan {

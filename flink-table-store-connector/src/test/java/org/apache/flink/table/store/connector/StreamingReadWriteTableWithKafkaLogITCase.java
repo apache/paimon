@@ -144,6 +144,7 @@ public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBas
 
         // check no changelog generated for streaming read
         assertNoMoreRecords(streamItr);
+        streamItr.close();
 
         // batch read to check data refresh
         testBatchRead(
@@ -464,6 +465,7 @@ public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBas
                                 changelogRow("+U", "Euro", 100L, "2022-01-02")));
 
         assertNoMoreRecords(streamItr);
+        streamItr.close();
 
         // test partition filter
         table =
