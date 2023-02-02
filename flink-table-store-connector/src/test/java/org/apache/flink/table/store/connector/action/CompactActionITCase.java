@@ -42,6 +42,8 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeoutException;
 
 /** IT cases for {@link CompactAction}. */
 public class CompactActionITCase extends ActionITCaseBase {
@@ -53,7 +55,7 @@ public class CompactActionITCase extends ActionITCaseBase {
             RowType.of(FIELD_TYPES, new String[] {"k", "v", "hh", "dt"});
 
     @Test
-    @Timeout(60000)
+    @Timeout(60)
     public void testBatchCompact() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.WRITE_ONLY.key(), "true");
@@ -84,7 +86,7 @@ public class CompactActionITCase extends ActionITCaseBase {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        env.setParallelism(2);
+        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
         new CompactAction(tablePath).withPartitions(getSpecifiedPartitions()).build(env);
         env.execute();
 
@@ -106,7 +108,6 @@ public class CompactActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    @Timeout(60000)
     public void testStreamingCompact() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "full-compaction");
@@ -148,27 +149,16 @@ public class CompactActionITCase extends ActionITCaseBase {
         env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
         env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
         env.getCheckpointConfig().setCheckpointInterval(500);
-        env.setParallelism(2);
+        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
         new CompactAction(tablePath).withPartitions(getSpecifiedPartitions()).build(env);
         env.executeAsync();
 
-        while (true) {
-            plan = snapshotEnumerator.enumerate();
-            if (plan != null) {
-                break;
-            }
-            Thread.sleep(1000);
-        }
-
         // first full compaction
-        List<String> actual = new ArrayList<>();
-        while (plan != null) {
-            actual.addAll(getResult(table.newRead(), plan.splits(), ROW_TYPE));
-            plan = snapshotEnumerator.enumerate();
-        }
-        actual.sort(String::compareTo);
-        Assertions.assertEquals(
-                Arrays.asList("+I[1, 100, 15, 20221208]", "+I[1, 100, 15, 20221209]"), actual);
+        validateResult(
+                table,
+                snapshotEnumerator,
+                Arrays.asList("+I[1, 100, 15, 20221208]", "+I[1, 100, 15, 20221209]"),
+                60_000);
 
         // incremental records
         writeData(
@@ -176,28 +166,16 @@ public class CompactActionITCase extends ActionITCaseBase {
                 rowData(1, 101, 16, BinaryString.fromString("20221208")),
                 rowData(1, 101, 15, BinaryString.fromString("20221209")));
 
-        while (true) {
-            plan = snapshotEnumerator.enumerate();
-            if (plan != null) {
-                break;
-            }
-            Thread.sleep(1000);
-        }
-
         // second full compaction
-        actual = new ArrayList<>();
-        while (plan != null) {
-            actual.addAll(getResult(table.newRead(), plan.splits(), ROW_TYPE));
-            plan = snapshotEnumerator.enumerate();
-        }
-        actual.sort(String::compareTo);
-        Assertions.assertEquals(
+        validateResult(
+                table,
+                snapshotEnumerator,
                 Arrays.asList(
                         "+U[1, 101, 15, 20221208]",
                         "+U[1, 101, 15, 20221209]",
                         "-U[1, 100, 15, 20221208]",
                         "-U[1, 100, 15, 20221209]"),
-                actual);
+                60_000);
 
         // assert dedicated compact job will expire snapshots
         Assertions.assertEquals(
@@ -215,5 +193,32 @@ public class CompactActionITCase extends ActionITCaseBase {
         partition2.put("hh", "15");
 
         return Arrays.asList(partition1, partition2);
+    }
+
+    private void validateResult(
+            FileStoreTable table,
+            SnapshotEnumerator snapshotEnumerator,
+            List<String> expected,
+            long timeout)
+            throws Exception {
+        List<String> actual = new ArrayList<>();
+        long start = System.currentTimeMillis();
+        while (actual.size() != expected.size()) {
+            DataTableScan.DataFilePlan plan = snapshotEnumerator.enumerate();
+            if (plan != null) {
+                actual.addAll(getResult(table.newRead(), plan.splits(), ROW_TYPE));
+            }
+            if (System.currentTimeMillis() - start > timeout) {
+                break;
+            }
+        }
+        if (actual.size() != expected.size()) {
+            throw new TimeoutException(
+                    String.format(
+                            "Cannot collect %s records in %s milliseconds.",
+                            expected.size(), timeout));
+        }
+        actual.sort(String::compareTo);
+        Assertions.assertEquals(expected, actual);
     }
 }
