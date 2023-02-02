@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
@@ -31,6 +30,8 @@ import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
 
@@ -76,7 +77,8 @@ public class KeyValueFileStoreScanTest {
                         .build();
         snapshotManager = store.snapshotManager();
 
-        SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
+        SchemaManager schemaManager =
+                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
         schemaManager.commitNewVersion(
                 new UpdateSchema(
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,

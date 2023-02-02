@@ -20,8 +20,6 @@ package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
-import org.apache.flink.core.fs.FileStatus;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.data.BinaryRow;
@@ -49,6 +47,9 @@ import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.fs.FileStatus;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.SchemaEvolutionTableTestBase;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.IntType;
@@ -105,7 +106,7 @@ public class MergeTreeTest {
         comparator = Comparator.comparingInt(o -> o.getInt(0));
         recreateMergeTree(1024 * 1024);
         Path bucketDir = writerFactory.pathFactory().toPath("ignore").getParent();
-        bucketDir.getFileSystem().mkdirs(bucketDir);
+        LocalFileIO.create().mkdirs(bucketDir);
     }
 
     private SchemaManager createTestingSchemaManager(Path path) {
@@ -136,6 +137,7 @@ public class MergeTreeTest {
         FileFormat flushingAvro = new FlushingFileFormat("avro");
         KeyValueFileReaderFactory.Builder readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
+                        LocalFileIO.create(),
                         createTestingSchemaManager(path),
                         0,
                         keyType,
@@ -167,7 +169,13 @@ public class MergeTreeTest {
         compactReaderFactory = readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
         KeyValueFileWriterFactory.Builder writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
-                        0, keyType, valueType, flushingAvro, pathFactory, options.targetFileSize());
+                        LocalFileIO.create(),
+                        0,
+                        keyType,
+                        valueType,
+                        flushingAvro,
+                        pathFactory,
+                        options.targetFileSize());
         writerFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
         compactWriterFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
         writer = createMergeTreeWriter(Collections.emptyList());
@@ -292,7 +300,7 @@ public class MergeTreeTest {
 
         Path bucketDir = writerFactory.pathFactory().toPath("ignore").getParent();
         Set<String> files =
-                Arrays.stream(bucketDir.getFileSystem().listStatus(bucketDir))
+                Arrays.stream(LocalFileIO.create().listStatus(bucketDir))
                         .map(FileStatus::getPath)
                         .map(Path::getName)
                         .collect(Collectors.toSet());

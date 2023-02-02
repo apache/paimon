@@ -33,4 +33,8 @@ under the License.
 		<suppress
 			files="org[\\/]apache[\\/]flink[\\/]table[\\/]store[\\/]benchmark[\\/]metric[\\/]cpu[\\/].*"
 			checks=".*"/>
+		<!-- Classes copied from AWS -->
+		<suppress
+				files="com[\\/]amazonaws[\\/]services[\\/]s3[\\/]model[\\/]transform[\\/]XmlResponsesSaxParser.java"
+				checks=".*"/>
 </suppressions>

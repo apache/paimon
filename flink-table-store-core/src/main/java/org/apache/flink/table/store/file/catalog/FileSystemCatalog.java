@@ -18,30 +18,27 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.core.fs.FileStatus;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.FileStatus;
+import org.apache.flink.table.store.fs.Path;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 
-import static org.apache.flink.table.store.file.utils.FileUtils.safelyListFileStatus;
-
-/** A catalog implementation for {@link FileSystem}. */
+/** A catalog implementation for {@link FileIO}. */
 public class FileSystemCatalog extends AbstractCatalog {
 
-    private final FileSystem fs;
     private final Path warehouse;
 
-    public FileSystemCatalog(Path warehouse) {
+    public FileSystemCatalog(FileIO fileIO, Path warehouse) {
+        super(fileIO);
         this.warehouse = warehouse;
-        this.fs = uncheck(warehouse::getFileSystem);
     }
 
     @Override
@@ -52,7 +49,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     public List<String> listDatabases() {
         List<String> databases = new ArrayList<>();
-        for (FileStatus status : uncheck(() -> safelyListFileStatus(warehouse))) {
+        for (FileStatus status : uncheck(() -> fileIO.listStatus(warehouse))) {
             Path path = status.getPath();
             if (status.isDir() && isDatabase(path)) {
                 databases.add(database(path));
@@ -63,7 +60,7 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public boolean databaseExists(String databaseName) {
-        return uncheck(() -> fs.exists(databasePath(databaseName)));
+        return uncheck(() -> fileIO.exists(databasePath(databaseName)));
     }
 
     @Override
@@ -75,7 +72,7 @@ public class FileSystemCatalog extends AbstractCatalog {
             }
             throw new DatabaseAlreadyExistException(name);
         }
-        uncheck(() -> fs.mkdirs(databasePath(name)));
+        uncheck(() -> fileIO.mkdirs(databasePath(name)));
     }
 
     @Override
@@ -93,7 +90,7 @@ public class FileSystemCatalog extends AbstractCatalog {
             throw new DatabaseNotEmptyException(name);
         }
 
-        uncheck(() -> fs.delete(databasePath(name), true));
+        uncheck(() -> fileIO.delete(databasePath(name), true));
     }
 
     @Override
@@ -103,7 +100,7 @@ public class FileSystemCatalog extends AbstractCatalog {
         }
 
         List<String> tables = new ArrayList<>();
-        for (FileStatus status : uncheck(() -> safelyListFileStatus(databasePath(databaseName)))) {
+        for (FileStatus status : uncheck(() -> fileIO.listStatus(databasePath(databaseName)))) {
             if (status.isDir() && tableExists(status.getPath())) {
                 tables.add(status.getPath().getName());
             }
@@ -114,7 +111,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     public TableSchema getTableSchema(Identifier identifier) throws TableNotExistException {
         Path path = getTableLocation(identifier);
-        return new SchemaManager(path)
+        return new SchemaManager(fileIO, path)
                 .latest()
                 .orElseThrow(() -> new TableNotExistException(identifier));
     }
@@ -124,8 +121,8 @@ public class FileSystemCatalog extends AbstractCatalog {
         return tableExists(getTableLocation(identifier));
     }
 
-    private boolean tableExists(Path identifier) {
-        return new SchemaManager(identifier).listAllIds().size() > 0;
+    private boolean tableExists(Path tablePath) {
+        return new SchemaManager(fileIO, tablePath).listAllIds().size() > 0;
     }
 
     @Override
@@ -140,7 +137,7 @@ public class FileSystemCatalog extends AbstractCatalog {
             throw new TableNotExistException(identifier);
         }
 
-        uncheck(() -> fs.delete(path, true));
+        uncheck(() -> fileIO.delete(path, true));
     }
 
     @Override
@@ -159,7 +156,7 @@ public class FileSystemCatalog extends AbstractCatalog {
             throw new TableAlreadyExistException(identifier);
         }
 
-        uncheck(() -> new SchemaManager(path).commitNewVersion(table));
+        uncheck(() -> new SchemaManager(fileIO, path).commitNewVersion(table));
     }
 
     @Override
@@ -169,7 +166,10 @@ public class FileSystemCatalog extends AbstractCatalog {
         if (!tableExists(identifier)) {
             throw new TableNotExistException(identifier);
         }
-        uncheck(() -> new SchemaManager(getTableLocation(identifier)).commitChanges(changes));
+        uncheck(
+                () ->
+                        new SchemaManager(fileIO, getTableLocation(identifier))
+                                .commitChanges(changes));
     }
 
     private static <T> T uncheck(Callable<T> callable) {

@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.system.SystemTableLoader;
@@ -30,6 +31,12 @@ import org.apache.commons.lang3.StringUtils;
 public abstract class AbstractCatalog implements Catalog {
 
     protected static final String DB_SUFFIX = ".db";
+
+    protected final FileIO fileIO;
+
+    protected AbstractCatalog(FileIO fileIO) {
+        this.fileIO = fileIO;
+    }
 
     @Override
     public Path getTableLocation(Identifier identifier) {
@@ -59,10 +66,10 @@ public abstract class AbstractCatalog implements Catalog {
                 throw new TableNotExistException(identifier);
             }
             Path location = getTableLocation(originidentifier);
-            return SystemTableLoader.load(type, location);
+            return SystemTableLoader.load(type, fileIO, location);
         } else {
             TableSchema tableSchema = getTableSchema(identifier);
-            return FileStoreTableFactory.create(getTableLocation(identifier), tableSchema);
+            return FileStoreTableFactory.create(fileIO, getTableLocation(identifier), tableSchema);
         }
     }
 

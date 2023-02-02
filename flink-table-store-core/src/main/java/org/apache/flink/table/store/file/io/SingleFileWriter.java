@@ -19,12 +19,12 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.core.fs.FSDataOutputStream;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.table.store.format.FormatWriter;
+import org.apache.flink.table.store.format.FormatWriterFactory;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.PositionOutputStream;
 import org.apache.flink.util.IOUtils;
 
 import org.slf4j.Logger;
@@ -44,26 +44,28 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
 
     private static final Logger LOG = LoggerFactory.getLogger(SingleFileWriter.class);
 
+    protected final FileIO fileIO;
     protected final Path path;
     private final Function<T, InternalRow> converter;
 
-    private final BulkWriter<InternalRow> writer;
-    private FSDataOutputStream out;
+    private final FormatWriter writer;
+    private PositionOutputStream out;
 
     private long recordCount;
     private long length;
     protected boolean closed;
 
     public SingleFileWriter(
-            BulkWriter.Factory<InternalRow> factory,
+            FileIO fileIO,
+            FormatWriterFactory factory,
             Path path,
             Function<T, InternalRow> converter) {
+        this.fileIO = fileIO;
         this.path = path;
         this.converter = converter;
 
         try {
-            FileSystem fs = path.getFileSystem();
-            out = fs.create(path, FileSystem.WriteMode.NO_OVERWRITE);
+            out = fileIO.newOutputStream(path, false);
             writer = factory.create(out);
         } catch (IOException e) {
             LOG.warn(
@@ -123,7 +125,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     @Override
     public void abort() {
         IOUtils.closeQuietly(out);
-        FileUtils.deleteOrWarn(path);
+        fileIO.deleteQuietly(path);
     }
 
     @Override

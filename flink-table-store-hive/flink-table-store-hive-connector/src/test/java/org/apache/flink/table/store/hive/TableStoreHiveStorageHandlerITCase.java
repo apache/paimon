@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.hive;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connectors.hive.FlinkEmbeddedHiveRunner;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.FileStoreTestUtils;
@@ -28,6 +27,7 @@ import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.hive.objectinspector.TableStoreObjectInspectorFactory;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -600,10 +600,10 @@ public class TableStoreHiveStorageHandlerITCase {
             List<InternalRow> data)
             throws Exception {
         String path = folder.newFolder().toURI().toString();
-        Configuration conf = new Configuration();
-        conf.setString(CoreOptions.PATH, path);
-        conf.setInteger(CoreOptions.BUCKET, 2);
-        conf.setString(CoreOptions.FILE_FORMAT, "avro");
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, path);
+        conf.set(CoreOptions.BUCKET, 2);
+        conf.set(CoreOptions.FILE_FORMAT, "avro");
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(conf, rowType, partitionKeys, primaryKeys);
 
@@ -613,10 +613,10 @@ public class TableStoreHiveStorageHandlerITCase {
     private String createAppendOnlyExternalTable(
             RowType rowType, List<String> partitionKeys, List<InternalRow> data) throws Exception {
         String path = folder.newFolder().toURI().toString();
-        Configuration conf = new Configuration();
-        conf.setString(CoreOptions.PATH, path);
-        conf.setInteger(CoreOptions.BUCKET, 2);
-        conf.setString(CoreOptions.FILE_FORMAT, "avro");
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, path);
+        conf.set(CoreOptions.BUCKET, 2);
+        conf.set(CoreOptions.FILE_FORMAT, "avro");
         conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
@@ -654,9 +654,9 @@ public class TableStoreHiveStorageHandlerITCase {
     @Test
     public void testReadAllSupportedTypes() throws Exception {
         String root = folder.newFolder().toString();
-        Configuration conf = new Configuration();
-        conf.setString(CoreOptions.PATH, root);
-        conf.setString(CoreOptions.FILE_FORMAT, "avro");
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, root);
+        conf.set(CoreOptions.FILE_FORMAT, "avro");
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -770,9 +770,9 @@ public class TableStoreHiveStorageHandlerITCase {
     @Test
     public void testPredicatePushDown() throws Exception {
         String path = folder.newFolder().toURI().toString();
-        Configuration conf = new Configuration();
-        conf.setString(CoreOptions.PATH, path);
-        conf.setString(CoreOptions.FILE_FORMAT, "avro");
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, path);
+        conf.set(CoreOptions.FILE_FORMAT, "avro");
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -859,9 +859,9 @@ public class TableStoreHiveStorageHandlerITCase {
     @Test
     public void testDateAndTimestamp() throws Exception {
         String path = folder.newFolder().toURI().toString();
-        Configuration conf = new Configuration();
-        conf.setString(CoreOptions.PATH, path);
-        conf.setString(CoreOptions.FILE_FORMAT, "avro");
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, path);
+        conf.set(CoreOptions.FILE_FORMAT, "avro");
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,

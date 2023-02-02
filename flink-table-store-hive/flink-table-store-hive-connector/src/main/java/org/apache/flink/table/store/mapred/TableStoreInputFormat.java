@@ -18,15 +18,14 @@
 
 package org.apache.flink.table.store.mapred;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.SearchArgumentToPredicateConverter;
 import org.apache.flink.table.store.TableStoreJobConf;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.filesystem.FileSystems;
+import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -77,10 +76,10 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
 
     private FileStoreTable createFileStoreTable(JobConf jobConf) {
         TableStoreJobConf wrapper = new TableStoreJobConf(jobConf);
-        Configuration conf = new Configuration();
-        conf.set(CoreOptions.PATH, wrapper.getLocation());
-        FileSystems.initialize(new Path(wrapper.getLocation()), wrapper.getCatalogConfig());
-        return FileStoreTableFactory.create(conf);
+        Options options = new Options();
+        options.set(CoreOptions.PATH, wrapper.getLocation());
+        CatalogOptions catalogOptions = CatalogOptions.create(options, jobConf);
+        return FileStoreTableFactory.create(catalogOptions);
     }
 
     private Optional<Predicate> createPredicate(TableSchema tableSchema, JobConf jobConf) {

@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
@@ -35,6 +34,8 @@ import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.sink.SequenceGenerator;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -63,13 +64,13 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     private transient KeyValueFileStore lazyStore;
 
-    ChangelogWithKeyFileStoreTable(Path path, TableSchema tableSchema) {
-        super(path, tableSchema);
+    ChangelogWithKeyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
+        super(fileIO, path, tableSchema);
     }
 
     @Override
     protected FileStoreTable copy(TableSchema newTableSchema) {
-        return new ChangelogWithKeyFileStoreTable(path, newTableSchema);
+        return new ChangelogWithKeyFileStoreTable(fileIO, path, newTableSchema);
     }
 
     @Override
@@ -106,6 +107,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
             KeyValueFieldsExtractor extractor = ChangelogWithKeyKeyValueFieldsExtractor.EXTRACTOR;
             lazyStore =
                     new KeyValueFileStore(
+                            fileIO(),
                             schemaManager(),
                             tableSchema.id(),
                             options,
@@ -148,7 +150,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public AbstractDataTableScan newScan() {
         KeyValueFileStoreScan scan = store().newScan();
-        return new AbstractDataTableScan(scan, tableSchema, store().pathFactory(), options()) {
+        return new AbstractDataTableScan(
+                fileIO(), scan, tableSchema, store().pathFactory(), options()) {
             @Override
             protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
                 return new MergeTreeSplitGenerator(

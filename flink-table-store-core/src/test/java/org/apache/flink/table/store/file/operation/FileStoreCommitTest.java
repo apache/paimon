@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
@@ -30,11 +28,12 @@ import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
-import org.apache.flink.table.store.file.utils.FileUtils;
+import org.apache.flink.table.store.file.utils.FailingFileIO;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.file.utils.TestAtomicRenameFileSystem;
-import org.apache.flink.table.store.file.utils.TraceableFileSystem;
+import org.apache.flink.table.store.file.utils.TraceableFileIO;
+import org.apache.flink.table.store.fs.FileIOFinder;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.RowKind;
 
 import org.junit.jupiter.api.AfterEach;
@@ -76,20 +75,14 @@ public class FileStoreCommitTest {
         gen = new TestKeyValueGenerator();
         // for failure tests
         failingName = UUID.randomUUID().toString();
-        FailingAtomicRenameFileSystem.reset(failingName, 100, 100);
+        FailingFileIO.reset(failingName, 100, 100);
     }
 
     @AfterEach
     public void afterEach() throws Exception {
-        FileSystem fs =
-                new Path(TestAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString())
-                        .getFileSystem();
-        assertThat(fs).isInstanceOf(TraceableFileSystem.class);
-        TraceableFileSystem tfs = (TraceableFileSystem) fs;
-
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
-        assertThat(tfs.openInputStreams(pathPredicate)).isEmpty();
-        assertThat(tfs.openOutputStreams(pathPredicate)).isEmpty();
+        assertThat(FailingFileIO.openInputStreams(pathPredicate)).isEmpty();
+        assertThat(FailingFileIO.openOutputStreams(pathPredicate)).isEmpty();
     }
 
     @ParameterizedTest
@@ -147,12 +140,12 @@ public class FileStoreCommitTest {
         Path snapshotDir = snapshotManager.snapshotDirectory();
         Path latest = new Path(snapshotDir, SnapshotManager.LATEST);
 
-        assertThat(latest.getFileSystem().exists(latest)).isTrue();
+        assertThat(new LocalFileIO().exists(latest)).isTrue();
 
         Long latestId = snapshotManager.latestSnapshotId();
 
         // remove latest hint file
-        latest.getFileSystem().delete(latest, false);
+        LocalFileIO.create().delete(latest, false);
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(latestId);
     }
@@ -164,7 +157,7 @@ public class FileStoreCommitTest {
         TestFileStore store = createStore(false);
         SnapshotManager snapshotManager = store.snapshotManager();
         Path firstSnapshotPath = snapshotManager.snapshotPath(Snapshot.FIRST_SNAPSHOT_ID);
-        FileUtils.deleteOrWarn(firstSnapshotPath);
+        LocalFileIO.create().deleteQuietly(firstSnapshotPath);
         // this test succeeds if this call does not fail
         store.newCommit(UUID.randomUUID().toString())
                 .filterCommitted(Collections.singletonList(new ManifestCommittable(999)));
@@ -518,10 +511,10 @@ public class FileStoreCommitTest {
             throws Exception {
         String root =
                 failing
-                        ? FailingAtomicRenameFileSystem.getFailingPath(
-                                failingName, tempDir.toString())
-                        : TestAtomicRenameFileSystem.SCHEME + "://" + tempDir.toString();
-        SchemaManager schemaManager = new SchemaManager(new Path(tempDir.toUri()));
+                        ? FailingFileIO.getFailingPath(failingName, tempDir.toString())
+                        : TraceableFileIO.SCHEME + "://" + tempDir.toString();
+        Path path = new Path(tempDir.toUri());
+        SchemaManager schemaManager = new SchemaManager(FileIOFinder.find(path), path);
         schemaManager.commitNewVersion(
                 new UpdateSchema(
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,

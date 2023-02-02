@@ -18,12 +18,13 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.sink.TableCommit;
@@ -46,7 +47,7 @@ public class SimpleTableTestHelper {
         Map<String, String> options = new HashMap<>();
         // orc is shaded, can not find shaded classes in ide
         options.put(CoreOptions.FILE_FORMAT.key(), "avro");
-        new SchemaManager(path)
+        new SchemaManager(LocalFileIO.create(), path)
                 .commitNewVersion(
                         new UpdateSchema(
                                 rowType,
@@ -54,9 +55,9 @@ public class SimpleTableTestHelper {
                                 Collections.emptyList(),
                                 options,
                                 ""));
-        Configuration conf = Configuration.fromMap(options);
+        Options conf = Options.fromMap(options);
         conf.setString("path", path.toString());
-        FileStoreTable table = FileStoreTableFactory.create(conf);
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), conf);
 
         String commitUser = "user";
         this.writer = table.newWrite(commitUser);

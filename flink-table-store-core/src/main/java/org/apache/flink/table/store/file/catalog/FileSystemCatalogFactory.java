@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.table.TableType;
 
-import static org.apache.flink.table.store.CatalogOptions.TABLE_TYPE;
+import static org.apache.flink.table.store.options.CatalogOptions.TABLE_TYPE;
 
 /** Factory to create {@link FileSystemCatalog}. */
 public class FileSystemCatalogFactory implements CatalogFactory {
@@ -35,11 +36,11 @@ public class FileSystemCatalogFactory implements CatalogFactory {
     }
 
     @Override
-    public Catalog create(String warehouse, Configuration options) {
+    public Catalog create(FileIO fileIO, Path warehouse, CatalogOptions options) {
         if (!TableType.MANAGED.equals(options.get(TABLE_TYPE))) {
             throw new IllegalArgumentException(
                     "Only managed table is supported in File system catalog.");
         }
-        return new FileSystemCatalog(new Path(warehouse));
+        return new FileSystemCatalog(fileIO, warehouse);
     }
 }

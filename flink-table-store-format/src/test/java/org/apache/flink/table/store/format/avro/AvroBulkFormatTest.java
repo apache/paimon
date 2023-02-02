@@ -18,12 +18,13 @@
 
 package org.apache.flink.table.store.format.avro;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderUtils;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.util.FileUtils;
 
 import org.apache.avro.Schema;
@@ -122,7 +123,8 @@ class AvroBulkFormatTest {
     void testReadWholeFileWithOneSplit() throws IOException {
         AvroBulkFormatTestUtils.TestingAvroBulkFormat bulkFormat =
                 new AvroBulkFormatTestUtils.TestingAvroBulkFormat();
-        RecordReader<InternalRow> reader = bulkFormat.createReader(new Path(tmpFile.toString()));
+        RecordReader<InternalRow> reader =
+                bulkFormat.createReader(new LocalFileIO(), new Path(tmpFile.toString()));
         AtomicInteger i = new AtomicInteger(0);
         RecordReaderUtils.forEachRemaining(
                 reader,

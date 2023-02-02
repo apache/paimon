@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.system;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
@@ -26,6 +25,8 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.IteratorRecordReader;
 import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -59,9 +60,11 @@ public class OptionsTable implements Table {
                             new DataField(0, "key", newStringType(false)),
                             new DataField(1, "value", newStringType(false))));
 
+    private final FileIO fileIO;
     private final Path location;
 
-    public OptionsTable(Path location) {
+    public OptionsTable(FileIO fileIO, Path location) {
+        this.fileIO = fileIO;
         this.location = location;
     }
 
@@ -87,12 +90,17 @@ public class OptionsTable implements Table {
 
     @Override
     public TableRead newRead() {
-        return new OptionsRead();
+        return new OptionsRead(fileIO);
     }
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new OptionsTable(location);
+        return new OptionsTable(fileIO, location);
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return null;
     }
 
     private class OptionsScan implements TableScan {
@@ -104,7 +112,7 @@ public class OptionsTable implements Table {
 
         @Override
         public Plan plan() {
-            return () -> Collections.singletonList(new OptionsSplit(location));
+            return () -> Collections.singletonList(new OptionsSplit(fileIO, location));
         }
     }
 
@@ -112,15 +120,17 @@ public class OptionsTable implements Table {
 
         private static final long serialVersionUID = 1L;
 
+        private final FileIO fileIO;
         private final Path location;
 
-        private OptionsSplit(Path location) {
+        private OptionsSplit(FileIO fileIO, Path location) {
+            this.fileIO = fileIO;
             this.location = location;
         }
 
         @Override
         public long rowCount() {
-            return options(location).size();
+            return options(fileIO, location).size();
         }
 
         @Override
@@ -143,7 +153,12 @@ public class OptionsTable implements Table {
 
     private static class OptionsRead implements TableRead {
 
+        private final FileIO fileIO;
         private int[][] projection;
+
+        public OptionsRead(FileIO fileIO) {
+            this.fileIO = fileIO;
+        }
 
         @Override
         public TableRead withFilter(Predicate predicate) {
@@ -163,7 +178,8 @@ public class OptionsTable implements Table {
             }
             Path location = ((OptionsSplit) split).location;
             Iterator<InternalRow> rows =
-                    Iterators.transform(options(location).entrySet().iterator(), this::toRow);
+                    Iterators.transform(
+                            options(fileIO, location).entrySet().iterator(), this::toRow);
             if (projection != null) {
                 rows =
                         Iterators.transform(
@@ -179,8 +195,8 @@ public class OptionsTable implements Table {
         }
     }
 
-    private static Map<String, String> options(Path location) {
-        return new SchemaManager(location)
+    private static Map<String, String> options(FileIO fileIO, Path location) {
+        return new SchemaManager(fileIO, location)
                 .latest()
                 .orElseThrow(() -> new RuntimeException("Table not exists."))
                 .options();

@@ -18,12 +18,13 @@
 
 package org.apache.flink.table.store.format.parquet;
 
-import org.apache.flink.annotation.PublicEvolving;
-import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.core.fs.FSDataOutputStream;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.format.FormatWriter;
+import org.apache.flink.table.store.format.FormatWriterFactory;
 import org.apache.flink.table.store.format.parquet.writer.ParquetBuilder;
 import org.apache.flink.table.store.format.parquet.writer.ParquetBulkWriter;
 import org.apache.flink.table.store.format.parquet.writer.StreamOutputFile;
+import org.apache.flink.table.store.fs.PositionOutputStream;
 
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.io.OutputFile;
@@ -31,32 +32,27 @@ import org.apache.parquet.io.OutputFile;
 import java.io.IOException;
 
 /**
- * A factory that creates a Parquet {@link BulkWriter}. The factory takes a user-supplied builder to
- * assemble Parquet's writer and then turns it into a Flink {@code BulkWriter}.
- *
- * @param <T> The type of record to write.
+ * A factory that creates a Parquet {@link FormatWriter}. The factory takes a user-supplied builder
+ * to assemble Parquet's writer and then turns it into a Flink {@code BulkWriter}.
  */
-@PublicEvolving
-public class ParquetWriterFactory<T> implements BulkWriter.Factory<T> {
-
-    private static final long serialVersionUID = 1L;
+public class ParquetWriterFactory implements FormatWriterFactory {
 
     /** The builder to construct the ParquetWriter. */
-    private final ParquetBuilder<T> writerBuilder;
+    private final ParquetBuilder<InternalRow> writerBuilder;
 
     /**
      * Creates a new ParquetWriterFactory using the given builder to assemble the ParquetWriter.
      *
      * @param writerBuilder The builder to construct the ParquetWriter.
      */
-    public ParquetWriterFactory(ParquetBuilder<T> writerBuilder) {
+    public ParquetWriterFactory(ParquetBuilder<InternalRow> writerBuilder) {
         this.writerBuilder = writerBuilder;
     }
 
     @Override
-    public BulkWriter<T> create(FSDataOutputStream stream) throws IOException {
+    public FormatWriter create(PositionOutputStream stream) throws IOException {
         final OutputFile out = new StreamOutputFile(stream);
-        final ParquetWriter<T> writer = writerBuilder.createWriter(out);
-        return new ParquetBulkWriter<>(writer);
+        final ParquetWriter<InternalRow> writer = writerBuilder.createWriter(out);
+        return new ParquetBulkWriter(writer);
     }
 }

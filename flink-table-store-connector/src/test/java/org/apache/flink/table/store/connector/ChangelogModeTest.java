@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.store.CoreOptions;
@@ -27,6 +26,8 @@ import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.kafka.KafkaLogStoreFactory;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -69,7 +70,7 @@ public class ChangelogModeTest {
             ChangelogMode expectSink,
             @Nullable LogStoreTableFactory logStoreTableFactory)
             throws Exception {
-        new SchemaManager(path)
+        new SchemaManager(LocalFileIO.create(), path)
                 .commitNewVersion(
                         new UpdateSchema(
                                 RowType.of(new IntType(), new IntType()),
@@ -77,7 +78,7 @@ public class ChangelogModeTest {
                                 Collections.singletonList("f0"),
                                 options.toMap(),
                                 ""));
-        FileStoreTable table = FileStoreTableFactory.create(path);
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), path);
 
         TableStoreSource source =
                 new TableStoreSource(identifier, table, true, null, logStoreTableFactory);

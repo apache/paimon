@@ -18,8 +18,7 @@
 
 package org.apache.flink.table.store.format.avro;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.core.fs.FSDataOutputStream;
+import org.apache.flink.table.store.fs.PositionOutputStream;
 
 import org.apache.avro.file.DataFileWriter;
 
@@ -31,8 +30,7 @@ import java.io.IOException;
  *
  * @param <T> The type of record to write.
  */
-public class AvroWriterFactory<T> implements BulkWriter.Factory<T> {
-    private static final long serialVersionUID = 1L;
+public class AvroWriterFactory<T> {
 
     /** The builder to construct the Avro {@link DataFileWriter}. */
     private final AvroBuilder<T> avroBuilder;
@@ -42,8 +40,7 @@ public class AvroWriterFactory<T> implements BulkWriter.Factory<T> {
         this.avroBuilder = avroBuilder;
     }
 
-    @Override
-    public BulkWriter<T> create(FSDataOutputStream out) throws IOException {
+    public AvroBulkWriter<T> create(PositionOutputStream out) throws IOException {
         return new AvroBulkWriter<>(avroBuilder.createWriter(new CloseShieldOutputStream(out)));
     }
 }

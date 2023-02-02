@@ -17,12 +17,10 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
-import org.apache.flink.table.store.filesystem.FileSystems;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.types.RowType;
@@ -46,14 +44,11 @@ public class SparkReaderFactory implements PartitionReaderFactory {
     private final Table table;
     private final int[] projectedFields;
     private final List<Predicate> predicates;
-    private final Configuration conf;
 
-    public SparkReaderFactory(
-            Table table, int[] projectedFields, List<Predicate> predicates, Configuration conf) {
+    public SparkReaderFactory(Table table, int[] projectedFields, List<Predicate> predicates) {
         this.table = table;
         this.projectedFields = projectedFields;
         this.predicates = predicates;
-        this.conf = conf;
     }
 
     private RowType readRowType() {
@@ -100,12 +95,5 @@ public class SparkReaderFactory implements PartitionReaderFactory {
                 }
             }
         };
-    }
-
-    private void readObject(java.io.ObjectInputStream in)
-            throws IOException, ClassNotFoundException {
-        in.defaultReadObject();
-        // TODO move file system initialization into common modules
-        FileSystems.initialize(table.location(), conf);
     }
 }

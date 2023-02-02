@@ -19,14 +19,16 @@
 package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
-import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
+import org.apache.flink.table.store.file.utils.FailingFileIO;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.format.FileFormat;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.FileIOFinder;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.io.TempDir;
@@ -67,22 +69,17 @@ public class ManifestFileTest {
     @RepeatedTest(10)
     public void testCleanUpForException() throws IOException {
         String failingName = UUID.randomUUID().toString();
-        FailingAtomicRenameFileSystem.reset(failingName, 1, 10);
+        FailingFileIO.reset(failingName, 1, 10);
         List<ManifestEntry> entries = generateData();
         ManifestFile manifestFile =
-                createManifestFile(
-                        FailingAtomicRenameFileSystem.getFailingPath(
-                                failingName, tempDir.toString()));
+                createManifestFile(FailingFileIO.getFailingPath(failingName, tempDir.toString()));
 
         try {
             manifestFile.write(entries);
         } catch (Throwable e) {
-            assertThat(e)
-                    .hasRootCauseExactlyInstanceOf(
-                            FailingAtomicRenameFileSystem.ArtificialException.class);
+            assertThat(e).hasRootCauseExactlyInstanceOf(FailingFileIO.ArtificialException.class);
             Path manifestDir = new Path(tempDir.toString() + "/manifest");
-            FileSystem fs = manifestDir.getFileSystem();
-            assertThat(fs.listStatus(manifestDir)).isEmpty();
+            assertThat(LocalFileIO.create().listStatus(manifestDir)).isEmpty();
         }
     }
 
@@ -94,16 +91,16 @@ public class ManifestFileTest {
         return entries;
     }
 
-    private ManifestFile createManifestFile(String path) {
+    private ManifestFile createManifestFile(String pathStr) {
+        Path path = new Path(pathStr);
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
-                        new Path(path),
-                        DEFAULT_PART_TYPE,
-                        "default",
-                        CoreOptions.FILE_FORMAT.defaultValue());
+                        path, DEFAULT_PART_TYPE, "default", CoreOptions.FILE_FORMAT.defaultValue());
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
+        FileIO fileIO = FileIOFinder.find(path);
         return new ManifestFile.Factory(
-                        new SchemaManager(new Path(path)),
+                        fileIO,
+                        new SchemaManager(fileIO, path),
                         0,
                         DEFAULT_PART_TYPE,
                         avro,

@@ -18,11 +18,11 @@
 
 package org.apache.flink.table.store.file;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
-import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -247,9 +247,9 @@ public class Snapshot {
         return JsonSerdeUtil.fromJson(json, Snapshot.class);
     }
 
-    public static Snapshot fromPath(Path path) {
+    public static Snapshot fromPath(FileIO fileIO, Path path) {
         try {
-            String json = FileUtils.readFileUtf8(path);
+            String json = fileIO.readFileUtf8(path);
             return Snapshot.fromJson(json);
         } catch (IOException e) {
             throw new RuntimeException("Fails to read snapshot from path " + path, e);

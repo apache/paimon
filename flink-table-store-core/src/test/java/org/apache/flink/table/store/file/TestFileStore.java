@@ -20,7 +20,6 @@ package org.apache.flink.table.store.file;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.RowDataSerializer;
@@ -45,6 +44,9 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.FileIOFinder;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.types.RowType;
@@ -82,6 +84,7 @@ public class TestFileStore extends KeyValueFileStore {
     public static final MemorySize PAGE_SIZE = MemorySize.parse("4 kb");
 
     private final String root;
+    private final FileIO fileIO;
     private final RowDataSerializer keySerializer;
     private final RowDataSerializer valueSerializer;
     private final String commitUser;
@@ -97,7 +100,8 @@ public class TestFileStore extends KeyValueFileStore {
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             MergeFunctionFactory<KeyValue> mfFactory) {
         super(
-                new SchemaManager(options.path()),
+                FileIOFinder.find(new Path(root)),
+                new SchemaManager(FileIOFinder.find(new Path(root)), options.path()),
                 0L,
                 options,
                 partitionType,
@@ -107,6 +111,7 @@ public class TestFileStore extends KeyValueFileStore {
                 keyValueFieldsExtractor,
                 mfFactory);
         this.root = root;
+        this.fileIO = FileIOFinder.find(new Path(root));
         this.keySerializer = new RowDataSerializer(keyType);
         this.valueSerializer = new RowDataSerializer(valueType);
         this.commitUser = UUID.randomUUID().toString();
@@ -121,6 +126,7 @@ public class TestFileStore extends KeyValueFileStore {
     public FileStoreExpireImpl newExpire(
             int numRetainedMin, int numRetainedMax, long millisRetained) {
         return new FileStoreExpireImpl(
+                fileIO,
                 numRetainedMin,
                 numRetainedMax,
                 millisRetained,
@@ -381,12 +387,12 @@ public class TestFileStore extends KeyValueFileStore {
         Path latest = new Path(snapshotDir, SnapshotManager.LATEST);
         if (actualFiles.remove(earliest)) {
             long earliestId = snapshotManager.readHint(SnapshotManager.EARLIEST);
-            earliest.getFileSystem().delete(earliest, false);
+            fileIO.delete(earliest, false);
             assertThat(earliestId <= snapshotManager.earliestSnapshotId()).isTrue();
         }
         if (actualFiles.remove(latest)) {
             long latestId = snapshotManager.readHint(SnapshotManager.LATEST);
-            latest.getFileSystem().delete(latest, false);
+            fileIO.delete(latest, false);
             assertThat(latestId <= snapshotManager.latestSnapshotId()).isTrue();
         }
         actualFiles.remove(latest);
@@ -405,7 +411,7 @@ public class TestFileStore extends KeyValueFileStore {
     private Set<Path> getFilesInUse() {
         Set<Path> result = new HashSet<>();
 
-        SchemaManager schemaManager = new SchemaManager(options.path());
+        SchemaManager schemaManager = new SchemaManager(fileIO, options.path());
         schemaManager.listAllIds().forEach(id -> result.add(schemaManager.toSchemaPath(id)));
 
         SnapshotManager snapshotManager = snapshotManager();
@@ -438,7 +444,7 @@ public class TestFileStore extends KeyValueFileStore {
         FileStoreScan scan = newScan();
 
         Path snapshotPath = snapshotManager.snapshotPath(snapshotId);
-        Snapshot snapshot = Snapshot.fromPath(snapshotPath);
+        Snapshot snapshot = Snapshot.fromPath(fileIO, snapshotPath);
 
         // snapshot file
         result.add(snapshotPath);

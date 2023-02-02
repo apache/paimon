@@ -18,9 +18,6 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.core.fs.FileStatus;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.GenericRow;
@@ -31,9 +28,14 @@ import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.format.FlushingFileFormat;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
-import org.apache.flink.table.store.file.utils.FailingAtomicRenameFileSystem;
+import org.apache.flink.table.store.file.utils.FailingFileIO;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReaderIterator;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.FileIOFinder;
+import org.apache.flink.table.store.fs.FileStatus;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.IntType;
@@ -116,13 +118,11 @@ public class KeyValueFileReadWriteTest {
     @RepeatedTest(10)
     public void testCleanUpForException() throws IOException {
         String failingName = UUID.randomUUID().toString();
-        FailingAtomicRenameFileSystem.reset(failingName, 1, 10);
+        FailingFileIO.reset(failingName, 1, 10);
         DataFileTestDataGenerator.Data data = gen.next();
         KeyValueFileWriterFactory writerFactory =
                 createWriterFactory(
-                        FailingAtomicRenameFileSystem.getFailingPath(
-                                failingName, tempDir.toString()),
-                        "avro");
+                        FailingFileIO.getFailingPath(failingName, tempDir.toString()), "avro");
 
         try {
             FileWriter<KeyValue, ?> writer = writerFactory.createRollingMergeTreeFileWriter(0);
@@ -130,18 +130,14 @@ public class KeyValueFileReadWriteTest {
         } catch (Throwable e) {
             if (e.getCause() != null) {
                 assertThat(e)
-                        .hasRootCauseExactlyInstanceOf(
-                                FailingAtomicRenameFileSystem.ArtificialException.class);
+                        .hasRootCauseExactlyInstanceOf(FailingFileIO.ArtificialException.class);
             } else {
-                assertThat(e)
-                        .isExactlyInstanceOf(
-                                FailingAtomicRenameFileSystem.ArtificialException.class);
+                assertThat(e).isExactlyInstanceOf(FailingFileIO.ArtificialException.class);
             }
             Path root = new Path(tempDir.toString());
-            FileSystem fs = root.getFileSystem();
-            for (FileStatus bucketStatus : fs.listStatus(root)) {
+            for (FileStatus bucketStatus : LocalFileIO.create().listStatus(root)) {
                 assertThat(bucketStatus.isDir()).isTrue();
-                assertThat(fs.listStatus(bucketStatus.getPath())).isEmpty();
+                assertThat(LocalFileIO.create().listStatus(bucketStatus.getPath())).isEmpty();
             }
         }
     }
@@ -237,15 +233,18 @@ public class KeyValueFileReadWriteTest {
                                                 kv.value().getInt(1))));
     }
 
-    protected KeyValueFileWriterFactory createWriterFactory(String path, String format) {
+    protected KeyValueFileWriterFactory createWriterFactory(String pathStr, String format) {
+        Path path = new Path(pathStr);
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
-                        new Path(path),
+                        path,
                         RowType.of(),
                         CoreOptions.PARTITION_DEFAULT_NAME.defaultValue(),
                         format);
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
+        FileIO fileIO = FileIOFinder.find(path);
         return KeyValueFileWriterFactory.builder(
+                        fileIO,
                         0,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
@@ -259,11 +258,14 @@ public class KeyValueFileReadWriteTest {
     }
 
     private KeyValueFileReaderFactory createReaderFactory(
-            String path, String format, int[][] keyProjection, int[][] valueProjection) {
-        FileStorePathFactory pathFactory = new FileStorePathFactory(new Path(path));
+            String pathStr, String format, int[][] keyProjection, int[][] valueProjection) {
+        Path path = new Path(pathStr);
+        FileIO fileIO = FileIOFinder.find(path);
+        FileStorePathFactory pathFactory = new FileStorePathFactory(path);
         KeyValueFileReaderFactory.Builder builder =
                 KeyValueFileReaderFactory.builder(
-                        createTestSchemaManager(new Path(path)),
+                        fileIO,
+                        createTestSchemaManager(path),
                         0,
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,

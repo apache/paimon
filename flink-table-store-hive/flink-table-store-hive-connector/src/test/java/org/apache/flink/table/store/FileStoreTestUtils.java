@@ -18,10 +18,11 @@
 
 package org.apache.flink.table.store;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.types.RowType;
@@ -34,19 +35,16 @@ import static org.apache.flink.table.store.CoreOptions.PATH;
 public class FileStoreTestUtils {
 
     public static FileStoreTable createFileStoreTable(
-            Configuration conf,
-            RowType rowType,
-            List<String> partitionKeys,
-            List<String> primaryKeys)
+            Options conf, RowType rowType, List<String> partitionKeys, List<String> primaryKeys)
             throws Exception {
         Path tablePath = CoreOptions.path(conf);
-        new SchemaManager(tablePath)
+        new SchemaManager(LocalFileIO.create(), tablePath)
                 .commitNewVersion(
                         new UpdateSchema(rowType, partitionKeys, primaryKeys, conf.toMap(), ""));
 
         // only path, other config should be read from file store.
-        conf = new Configuration();
+        conf = new Options();
         conf.set(PATH, tablePath.toString());
-        return FileStoreTableFactory.create(conf);
+        return FileStoreTableFactory.create(LocalFileIO.create(), conf);
     }
 }

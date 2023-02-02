@@ -18,8 +18,12 @@
 
 package org.apache.flink.table.store.format.orc;
 
-import org.apache.flink.core.fs.local.LocalDataOutputStream;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.format.orc.writer.RowDataVectorizer;
 import org.apache.flink.table.store.format.orc.writer.Vectorizer;
+import org.apache.flink.table.store.fs.local.LocalFileIO.LocalPositionOutputStream;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypes;
 
 import org.apache.hadoop.fs.Path;
 import org.apache.orc.MemoryManager;
@@ -40,22 +44,26 @@ class OrcWriterFactoryTest {
     @Test
     void testNotOverrideInMemoryManager(@TempDir java.nio.file.Path tmpDir) throws IOException {
         TestMemoryManager memoryManager = new TestMemoryManager();
-        OrcWriterFactory<Record> factory =
-                new TestOrcWriterFactory<>(
-                        new RecordVectorizer("struct<_col0:string,_col1:int>"), memoryManager);
-        factory.create(new LocalDataOutputStream(tmpDir.resolve("file1").toFile()));
-        factory.create(new LocalDataOutputStream(tmpDir.resolve("file2").toFile()));
+        OrcWriterFactory factory =
+                new TestOrcWriterFactory(
+                        new RowDataVectorizer(
+                                "struct<_col0:string,_col1:int>",
+                                new DataType[] {DataTypes.STRING(), DataTypes.INT()}),
+                        memoryManager);
+        factory.create(new LocalPositionOutputStream(tmpDir.resolve("file1").toFile()));
+        factory.create(new LocalPositionOutputStream(tmpDir.resolve("file2").toFile()));
 
         List<Path> addedWriterPath = memoryManager.getAddedWriterPath();
         assertThat(addedWriterPath).hasSize(2);
         assertThat(addedWriterPath.get(1)).isNotEqualTo(addedWriterPath.get(0));
     }
 
-    private static class TestOrcWriterFactory<T> extends OrcWriterFactory<T> {
+    private static class TestOrcWriterFactory extends OrcWriterFactory {
 
         private final MemoryManager memoryManager;
 
-        public TestOrcWriterFactory(Vectorizer<T> vectorizer, MemoryManager memoryManager) {
+        public TestOrcWriterFactory(
+                Vectorizer<InternalRow> vectorizer, MemoryManager memoryManager) {
             super(vectorizer);
             this.memoryManager = checkNotNull(memoryManager);
         }

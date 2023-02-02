@@ -18,15 +18,14 @@
 
 package org.apache.flink.table.store.format;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.FSDataOutputStream;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderUtils;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.PositionOutputStream;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
 
@@ -66,15 +65,14 @@ public class BulkFileFormatTest {
                 RowType.builder().fields(Arrays.asList(new IntType(), new IntType())).build();
 
         Path path = new Path(tempDir.toUri().toString(), "1." + format);
-        FileSystem fs = path.getFileSystem();
 
         // write
         List<InternalRow> expected = new ArrayList<>();
         expected.add(GenericRow.of(1, 1));
         expected.add(GenericRow.of(2, 2));
         expected.add(GenericRow.of(3, 3));
-        FSDataOutputStream out = fs.create(path, FileSystem.WriteMode.NO_OVERWRITE);
-        BulkWriter<InternalRow> writer = fileFormat.createWriterFactory(rowType).create(out);
+        PositionOutputStream out = new LocalFileIO().newOutputStream(path, false);
+        FormatWriter writer = fileFormat.createWriterFactory(rowType).create(out);
         for (InternalRow row : expected) {
             writer.addElement(row);
         }
@@ -83,7 +81,7 @@ public class BulkFileFormatTest {
 
         // read
         RecordReader<InternalRow> reader =
-                fileFormat.createReaderFactory(rowType).createReader(path);
+                fileFormat.createReaderFactory(rowType).createReader(new LocalFileIO(), path);
         List<InternalRow> result = new ArrayList<>();
         RecordReaderUtils.forEachRemaining(
                 reader, rowData -> result.add(GenericRow.of(rowData.getInt(0), rowData.getInt(0))));

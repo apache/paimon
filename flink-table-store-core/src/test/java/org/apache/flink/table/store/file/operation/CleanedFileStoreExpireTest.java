@@ -18,15 +18,14 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.FileKind;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
-import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -58,11 +57,11 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         BinaryRow partition = gen.getPartition(gen.next());
         Path bucketPath = store.pathFactory().bucketPath(partition, 0);
         Path myDataFile = new Path(bucketPath, "myDataFile");
-        FileUtils.writeFileUtf8(myDataFile, "1");
+        new LocalFileIO().writeFileUtf8(myDataFile, "1");
         Path extra1 = new Path(bucketPath, "extra1");
-        FileUtils.writeFileUtf8(extra1, "2");
+        fileIO.writeFileUtf8(extra1, "2");
         Path extra2 = new Path(bucketPath, "extra2");
-        FileUtils.writeFileUtf8(extra2, "3");
+        fileIO.writeFileUtf8(extra2, "3");
 
         // create DataFileMeta and ManifestEntry
         List<String> extraFiles = Arrays.asList("extra1", "extra2");
@@ -87,10 +86,9 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         expire.expireMergeTreeFiles(Arrays.asList(add, delete));
 
         // check
-        FileSystem fs = myDataFile.getFileSystem();
-        assertThat(fs.exists(myDataFile)).isFalse();
-        assertThat(fs.exists(extra1)).isFalse();
-        assertThat(fs.exists(extra2)).isFalse();
+        assertThat(fileIO.exists(myDataFile)).isFalse();
+        assertThat(fileIO.exists(extra1)).isFalse();
+        assertThat(fileIO.exists(extra2)).isFalse();
     }
 
     @Test
@@ -179,12 +177,12 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         Path snapshotDir = snapshotManager.snapshotDirectory();
         Path earliest = new Path(snapshotDir, SnapshotManager.EARLIEST);
 
-        assertThat(earliest.getFileSystem().exists(earliest)).isTrue();
+        assertThat(fileIO.exists(earliest)).isTrue();
 
         Long earliestId = snapshotManager.earliestSnapshotId();
 
         // remove earliest hint file
-        earliest.getFileSystem().delete(earliest, false);
+        fileIO.delete(earliest, false);
 
         assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(earliestId);
     }

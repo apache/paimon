@@ -18,7 +18,8 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.types.RowType;
@@ -40,4 +41,6 @@ public interface Table extends Serializable {
     TableRead newRead();
 
     Table copy(Map<String, String> dynamicOptions);
+
+    FileIO fileIO();
 }

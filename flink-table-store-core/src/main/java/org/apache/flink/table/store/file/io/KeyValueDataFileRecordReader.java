@@ -18,13 +18,14 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FormatReaderFactory;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.RowType;
 
 import javax.annotation.Nullable;
@@ -40,6 +41,7 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
     @Nullable private final int[] indexMapping;
 
     public KeyValueDataFileRecordReader(
+            FileIO fileIO,
             FormatReaderFactory readerFactory,
             Path path,
             RowType keyType,
@@ -47,7 +49,7 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
             int level,
             @Nullable int[] indexMapping)
             throws IOException {
-        this.reader = FileUtils.createFormatReader(readerFactory, path);
+        this.reader = FileUtils.createFormatReader(fileIO, readerFactory, path);
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;
         this.indexMapping = indexMapping;
