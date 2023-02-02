@@ -26,6 +26,7 @@ import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.utils.Pool;
+import org.apache.flink.util.IOUtils;
 
 import org.apache.avro.Schema;
 import org.apache.avro.file.DataFileReader;
@@ -115,7 +116,12 @@ public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
             SeekableInput in =
                     new SeekableInputStreamWrapper(
                             fileIO.newInputStream(path), fileIO.getFileSize(path));
-            return (DataFileReader<A>) DataFileReader.openReader(in, datumReader);
+            try {
+                return (DataFileReader<A>) DataFileReader.openReader(in, datumReader);
+            } catch (Throwable e) {
+                IOUtils.closeQuietly(in);
+                throw e;
+            }
         }
 
         @Nullable

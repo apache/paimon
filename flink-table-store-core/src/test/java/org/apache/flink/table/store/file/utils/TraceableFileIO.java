@@ -28,6 +28,7 @@ import org.apache.flink.table.store.fs.SeekableInputStream;
 import org.apache.flink.table.store.fs.SeekableInputStreamWrapper;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.utils.ThreadUtils;
 import org.apache.flink.util.function.SupplierWithException;
 
 import javax.annotation.concurrent.GuardedBy;
@@ -85,7 +86,7 @@ public class TraceableFileIO implements FileIO {
             throws IOException {
 
         final SupplierWithException<OutStream, IOException> wrappedStreamOpener =
-                () -> new OutStream(f, streamOpener.get(), this);
+                () -> new OutStream(ThreadUtils.currentStackString(), f, streamOpener.get(), this);
 
         return createStream(wrappedStreamOpener, OPEN_OUTPUT_STREAMS);
     }
@@ -95,7 +96,7 @@ public class TraceableFileIO implements FileIO {
             throws IOException {
 
         final SupplierWithException<InStream, IOException> wrappedStreamOpener =
-                () -> new InStream(f, streamOpener.get(), this);
+                () -> new InStream(ThreadUtils.currentStackString(), f, streamOpener.get(), this);
 
         return createStream(wrappedStreamOpener, OPEN_INPUT_STREAMS);
     }
@@ -170,15 +171,17 @@ public class TraceableFileIO implements FileIO {
 
     private static final class OutStream extends PositionOutputStreamWrapper {
 
+        private final String stack;
         private final Path file;
-
         private final TraceableFileIO fs;
 
         /** Flag tracking whether the stream was already closed, for proper inactivity tracking. */
         private final AtomicBoolean closed = new AtomicBoolean();
 
-        OutStream(Path file, PositionOutputStream originalStream, TraceableFileIO fs) {
+        OutStream(
+                String stack, Path file, PositionOutputStream originalStream, TraceableFileIO fs) {
             super(originalStream);
+            this.stack = stack;
             this.file = file;
             this.fs = checkNotNull(fs);
         }
@@ -193,19 +196,25 @@ public class TraceableFileIO implements FileIO {
                 }
             }
         }
+
+        @Override
+        public String toString() {
+            return "OutStream{" + "file=" + file + ", " + "stack=" + stack + '}';
+        }
     }
 
     private static final class InStream extends SeekableInputStreamWrapper {
 
         private final Path file;
-
+        private final String stack;
         private final TraceableFileIO fs;
 
         /** Flag tracking whether the stream was already closed, for proper inactivity tracking. */
         private final AtomicBoolean closed = new AtomicBoolean();
 
-        InStream(Path file, SeekableInputStream originalStream, TraceableFileIO fs) {
+        InStream(String stack, Path file, SeekableInputStream originalStream, TraceableFileIO fs) {
             super(originalStream);
+            this.stack = stack;
             this.fs = checkNotNull(fs);
             this.file = file;
         }
@@ -223,6 +232,11 @@ public class TraceableFileIO implements FileIO {
                     fs.unregisterInputStream(this);
                 }
             }
+        }
+
+        @Override
+        public String toString() {
+            return "InStream{" + "file=" + file + ", " + "stack=" + stack + '}';
         }
     }
 

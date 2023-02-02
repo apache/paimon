@@ -100,7 +100,7 @@ public class FailingFileIO extends TraceableFileIO {
         }
     }
 
-    private class FailingSeekableInputStreamWrapper extends SeekableInputStreamWrapper {
+    private static class FailingSeekableInputStreamWrapper extends SeekableInputStreamWrapper {
 
         private final String name;
 
@@ -121,7 +121,7 @@ public class FailingFileIO extends TraceableFileIO {
         }
     }
 
-    private class FailingPositionOutputStreamWrapper extends PositionOutputStreamWrapper {
+    private static class FailingPositionOutputStreamWrapper extends PositionOutputStreamWrapper {
 
         private final String name;
 
