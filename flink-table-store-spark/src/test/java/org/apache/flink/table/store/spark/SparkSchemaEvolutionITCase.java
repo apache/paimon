@@ -189,7 +189,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testDropSingleColumn() throws Exception {
+    public void testDropSingleColumn() {
         createTable("testDropSingleColumn");
         writeTable("testDropSingleColumn", "(1, 2L, '1')", "(5, 6L, '3')");
 
@@ -224,7 +224,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testDropColumns() throws Exception {
+    public void testDropColumns() {
         createTable("testDropColumns");
 
         List<Row> beforeRename =
@@ -330,7 +330,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testAlterColumnType() throws Exception {
+    public void testAlterColumnType() {
         createTable("testAlterColumnType");
         writeTable("testAlterColumnType", "(1, 2L, '1')", "(5, 6L, '3')");
 
@@ -462,16 +462,17 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
      * <p>Verify records in table above.
      */
     @Test
-    public void testSchemaEvolution() throws Exception {
+    public void testSchemaEvolution() {
         // Create table with fields [a, b, c] and insert 2 records
         spark.sql(
-                "CREATE TABLE tablestore.default.testSchemaEvolution("
-                        + "a INT NOT NULL, "
-                        + "b BIGINT NOT NULL, "
-                        + "c VARCHAR(10), "
-                        + "d INT NOT NULL, "
-                        + "e INT NOT NULL, "
-                        + "f INT NOT NULL)");
+                "CREATE TABLE tablestore.default.testSchemaEvolution(\n"
+                        + "a INT NOT NULL, \n"
+                        + "b BIGINT NOT NULL, \n"
+                        + "c VARCHAR(10), \n"
+                        + "d INT NOT NULL, \n"
+                        + "e INT NOT NULL, \n"
+                        + "f INT NOT NULL) \n"
+                        + "TBLPROPERTIES ('file.format'='avro')");
         writeTable("testSchemaEvolution", "(1, 2L, '3', 4, 5, 6)", "(7, 8L, '9', 10, 11, 12)");
         assertThat(
                         spark.table("tablestore.default.testSchemaEvolution").collectAsList()

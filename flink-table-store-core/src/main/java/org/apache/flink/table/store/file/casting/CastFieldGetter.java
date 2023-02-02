@@ -20,16 +20,14 @@ package org.apache.flink.table.store.file.casting;
 
 import org.apache.flink.table.store.data.InternalRow;
 
-import javax.annotation.Nonnull;
+/**
+ * Get field value from row with given pos and cast it according to specific {@link CastExecutor}.
+ */
+public class CastFieldGetter {
+    private final InternalRow.FieldGetter fieldGetter;
+    private final CastExecutor<Object, Object> castExecutor;
 
-/** Read data from row with given pos and cast it according to specific {@link CastExecutor}. */
-public class FieldGetterCastExecutor {
-    @Nonnull private final InternalRow.FieldGetter fieldGetter;
-    @Nonnull private final CastExecutor<Object, Object> castExecutor;
-
-    public FieldGetterCastExecutor(
-            @Nonnull InternalRow.FieldGetter fieldGetter,
-            @Nonnull CastExecutor<?, ?> castExecutor) {
+    public CastFieldGetter(InternalRow.FieldGetter fieldGetter, CastExecutor<?, ?> castExecutor) {
         this.fieldGetter = fieldGetter;
         this.castExecutor = (CastExecutor<Object, Object>) castExecutor;
     }

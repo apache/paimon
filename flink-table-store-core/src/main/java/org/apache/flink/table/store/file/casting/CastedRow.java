@@ -37,11 +37,11 @@ import org.apache.flink.table.store.types.RowKind;
  */
 public class CastedRow implements InternalRow {
 
-    private final FieldGetterCastExecutor[] castMapping;
+    private final CastFieldGetter[] castMapping;
 
     private InternalRow row;
 
-    protected CastedRow(FieldGetterCastExecutor[] castMapping) {
+    protected CastedRow(CastFieldGetter[] castMapping) {
         this.castMapping = castMapping;
     }
 
@@ -155,10 +155,10 @@ public class CastedRow implements InternalRow {
     /**
      * Create an empty {@link CastedRow} starting from a {@code casting} array.
      *
-     * @see FieldGetterCastExecutor
+     * @see CastFieldGetter
      * @see CastedRow
      */
-    public static CastedRow from(FieldGetterCastExecutor[] castMapping) {
+    public static CastedRow from(CastFieldGetter[] castMapping) {
         return new CastedRow(castMapping);
     }
 }

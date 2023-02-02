@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.casting.FieldGetterCastExecutor;
+import org.apache.flink.table.store.file.casting.CastFieldGetter;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.IndexCastMapping;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
@@ -38,12 +38,12 @@ import java.util.List;
 /** Class with index mapping and bulk format. */
 public class BulkFormatMapping {
     @Nullable private final int[] indexMapping;
-    @Nullable private final FieldGetterCastExecutor[] castMapping;
+    @Nullable private final CastFieldGetter[] castMapping;
     private final FormatReaderFactory bulkFormat;
 
     public BulkFormatMapping(
             int[] indexMapping,
-            @Nullable FieldGetterCastExecutor[] castMapping,
+            @Nullable CastFieldGetter[] castMapping,
             FormatReaderFactory bulkFormat) {
         this.indexMapping = indexMapping;
         this.castMapping = castMapping;
@@ -56,7 +56,7 @@ public class BulkFormatMapping {
     }
 
     @Nullable
-    public FieldGetterCastExecutor[] getCastMapping() {
+    public CastFieldGetter[] getCastMapping() {
         return castMapping;
     }
 

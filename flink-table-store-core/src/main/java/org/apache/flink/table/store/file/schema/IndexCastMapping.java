@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.store.file.casting.FieldGetterCastExecutor;
+import org.apache.flink.table.store.file.casting.CastFieldGetter;
 
 import javax.annotation.Nullable;
 
@@ -28,5 +28,5 @@ public interface IndexCastMapping {
     int[] getIndexMapping();
 
     @Nullable
-    FieldGetterCastExecutor[] getCastMapping();
+    CastFieldGetter[] getCastMapping();
 }

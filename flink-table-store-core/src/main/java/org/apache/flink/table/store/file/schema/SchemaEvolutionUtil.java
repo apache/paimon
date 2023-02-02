@@ -22,7 +22,7 @@ import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.casting.CastExecutor;
 import org.apache.flink.table.store.file.casting.CastExecutors;
-import org.apache.flink.table.store.file.casting.FieldGetterCastExecutor;
+import org.apache.flink.table.store.file.casting.CastFieldGetter;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateReplaceVisitor;
@@ -143,7 +143,7 @@ public class SchemaEvolutionUtil {
         List<DataField> dataProjectFields = projectDataFields(dataProjection, dataFields);
 
         int[] indexMapping = createIndexMapping(tableProjectFields, dataProjectFields);
-        FieldGetterCastExecutor[] castMapping =
+        CastFieldGetter[] castMapping =
                 createCastFieldGetterMapping(tableProjectFields, dataProjectFields, indexMapping);
         return new IndexCastMapping() {
             @Nullable
@@ -154,7 +154,7 @@ public class SchemaEvolutionUtil {
 
             @Nullable
             @Override
-            public FieldGetterCastExecutor[] getCastMapping() {
+            public CastFieldGetter[] getCastMapping() {
                 return castMapping;
             }
         };
@@ -419,17 +419,15 @@ public class SchemaEvolutionUtil {
      * @param indexMapping the index mapping from table fields to data fields
      * @return the getter and casting mapping
      */
-    private static FieldGetterCastExecutor[] createCastFieldGetterMapping(
+    private static CastFieldGetter[] createCastFieldGetterMapping(
             List<DataField> tableFields, List<DataField> dataFields, int[] indexMapping) {
-        FieldGetterCastExecutor[] converterMapping =
-                new FieldGetterCastExecutor[tableFields.size()];
+        CastFieldGetter[] converterMapping = new CastFieldGetter[tableFields.size()];
         boolean castExist = false;
         for (int i = 0; i < tableFields.size(); i++) {
             int dataIndex = indexMapping == null ? i : indexMapping[i];
             if (dataIndex < 0) {
                 converterMapping[i] =
-                        new FieldGetterCastExecutor(
-                                row -> null, CastExecutors.identityCastExecutor());
+                        new CastFieldGetter(row -> null, CastExecutors.identityCastExecutor());
             } else {
                 DataField tableField = tableFields.get(i);
                 DataField dataField = dataFields.get(dataIndex);
@@ -437,7 +435,7 @@ public class SchemaEvolutionUtil {
                     // Create getter with index i and projected row data will convert to underlying
                     // data
                     converterMapping[i] =
-                            new FieldGetterCastExecutor(
+                            new CastFieldGetter(
                                     RowDataUtils.createNullCheckingFieldGetter(dataField.type(), i),
                                     CastExecutors.identityCastExecutor());
                 } else {
@@ -451,7 +449,7 @@ public class SchemaEvolutionUtil {
                     // Create getter with index i and projected row data will convert to underlying
                     // data
                     converterMapping[i] =
-                            new FieldGetterCastExecutor(
+                            new CastFieldGetter(
                                     RowDataUtils.createNullCheckingFieldGetter(dataField.type(), i),
                                     checkNotNull(
                                             CastExecutors.resolve(

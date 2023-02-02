@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.io;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
-import org.apache.flink.table.store.file.casting.FieldGetterCastExecutor;
+import org.apache.flink.table.store.file.casting.CastFieldGetter;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FormatReaderFactory;
@@ -40,7 +40,7 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
     private final KeyValueSerializer serializer;
     private final int level;
     @Nullable private final int[] indexMapping;
-    @Nullable private final FieldGetterCastExecutor[] castMapping;
+    @Nullable private final CastFieldGetter[] castMapping;
 
     public KeyValueDataFileRecordReader(
             FileIO fileIO,
@@ -50,7 +50,7 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
             RowType valueType,
             int level,
             @Nullable int[] indexMapping,
-            @Nullable FieldGetterCastExecutor[] castMapping)
+            @Nullable CastFieldGetter[] castMapping)
             throws IOException {
         this.reader = FileUtils.createFormatReader(fileIO, readerFactory, path);
         this.serializer = new KeyValueSerializer(keyType, valueType);
@@ -80,7 +80,7 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
         private KeyValueDataFileRecordIterator(
                 RecordReader.RecordIterator<InternalRow> iterator,
                 @Nullable int[] indexMapping,
-                @Nullable FieldGetterCastExecutor[] castMapping) {
+                @Nullable CastFieldGetter[] castMapping) {
             super(indexMapping, castMapping);
             this.iterator = iterator;
         }

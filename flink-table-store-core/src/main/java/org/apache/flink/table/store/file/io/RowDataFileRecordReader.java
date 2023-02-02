@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.casting.FieldGetterCastExecutor;
+import org.apache.flink.table.store.file.casting.CastFieldGetter;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FormatReaderFactory;
@@ -35,14 +35,14 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
 
     private final RecordReader<InternalRow> reader;
     @Nullable private final int[] indexMapping;
-    @Nullable private final FieldGetterCastExecutor[] castMapping;
+    @Nullable private final CastFieldGetter[] castMapping;
 
     public RowDataFileRecordReader(
             FileIO fileIO,
             Path path,
             FormatReaderFactory readerFactory,
             @Nullable int[] indexMapping,
-            @Nullable FieldGetterCastExecutor[] castMapping)
+            @Nullable CastFieldGetter[] castMapping)
             throws IOException {
         this.reader = FileUtils.createFormatReader(fileIO, readerFactory, path);
         this.indexMapping = indexMapping;
@@ -70,7 +70,7 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
         private RowDataFileRecordIterator(
                 RecordIterator<InternalRow> iterator,
                 @Nullable int[] indexMapping,
-                @Nullable FieldGetterCastExecutor[] castMapping) {
+                @Nullable CastFieldGetter[] castMapping) {
             super(indexMapping, castMapping);
             this.iterator = iterator;
         }
