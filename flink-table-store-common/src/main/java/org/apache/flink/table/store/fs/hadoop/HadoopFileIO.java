@@ -123,7 +123,7 @@ public class HadoopFileIO implements FileIO {
     private FileSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
         if (fs == null) {
             synchronized (this) {
-                if (fs != null) {
+                if (fs == null) {
                     fs = createFileSystem(path);
                 }
             }
