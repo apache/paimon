@@ -127,6 +127,9 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         testBatchRead(buildSimpleQuery(table), initialRecords);
 
+        insertOverwritePartition(
+                table, "PARTITION (dt = '2022-01-02')", "('Euro', 100)", "('Yen', 1)");
+
         // batch read to check partition refresh
         testBatchRead(
                 buildQuery(table, "*", "WHERE dt IN ('2022-01-02')"),
@@ -400,9 +403,6 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         Collections.singletonList("dt"));
 
         insertIntoFromTable(temporaryTable, table);
-
-        sEnv.executeSql(String.format("INSERT INTO `%s` SELECT * FROM `%s`", table, temporaryTable))
-                .await();
 
         checkFileStorePath(table, Arrays.asList("dt=2022-01-01", "dt=2022-01-02"));
 

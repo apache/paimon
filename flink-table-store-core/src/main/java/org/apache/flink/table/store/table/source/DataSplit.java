@@ -118,12 +118,13 @@ public class DataSplit implements Split {
         return bucket == split.bucket
                 && Objects.equals(partition, split.partition)
                 && Objects.equals(files, split.files)
-                && isIncremental == split.isIncremental;
+                && isIncremental == split.isIncremental
+                && needReverse == split.needReverse;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(partition, bucket, files, isIncremental);
+        return Objects.hash(partition, bucket, files, isIncremental, needReverse);
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
