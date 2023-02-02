@@ -135,9 +135,6 @@ public class HadoopFileIO implements FileIO {
         return path.getFileSystem(hadoopConf.get());
     }
 
-    @Override
-    public void close() throws IOException {}
-
     private static class HadoopSeekableInputStream extends SeekableInputStream {
 
         /**

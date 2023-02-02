@@ -166,9 +166,6 @@ public class TraceableFileIO implements FileIO {
         }
     }
 
-    @Override
-    public void close() throws IOException {}
-
     private static final class OutStream extends PositionOutputStreamWrapper {
 
         private final String stack;

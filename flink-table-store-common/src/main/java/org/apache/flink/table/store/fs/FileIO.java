@@ -25,7 +25,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
-import java.io.Closeable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -40,7 +39,7 @@ import java.util.ServiceLoader;
 import java.util.UUID;
 
 /** File IO to read and write file. */
-public interface FileIO extends Serializable, Closeable {
+public interface FileIO extends Serializable {
 
     Logger LOG = LoggerFactory.getLogger(FileIO.class);
 
@@ -122,12 +121,6 @@ public interface FileIO extends Serializable, Closeable {
      * @return <code>true</code> if the renaming was successful, <code>false</code> otherwise
      */
     boolean rename(Path src, Path dst) throws IOException;
-
-    /**
-     * TODO S3 and OSS need this close, but no one has seriously closed it. Maybe we need a
-     * mechanism to ensure its closure?
-     */
-    void close() throws IOException;
 
     // -------------------------------------------------------------------------
     //                            utils

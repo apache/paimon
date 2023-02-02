@@ -73,11 +73,6 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    @Override
-    public void close() throws Exception {
-        fileIO.close();
-    }
-
     protected Path databasePath(String database) {
         return new Path(warehouse(), database + DB_SUFFIX);
     }

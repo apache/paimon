@@ -121,9 +121,6 @@ public class FlinkFileIO implements FileIO {
         return path.getFileSystem();
     }
 
-    @Override
-    public void close() throws IOException {}
-
     private static class FlinkSeekableInputStream extends SeekableInputStream {
 
         private final FSDataInputStream in;

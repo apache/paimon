@@ -29,9 +29,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** OSS {@link FileIO}. */
 public class OSSFileIO extends HadoopCompliantFileIO {
@@ -58,6 +61,12 @@ public class OSSFileIO extends HadoopCompliantFileIO {
                     put(OSS_SECURITY_TOKEN.toLowerCase(), OSS_SECURITY_TOKEN);
                 }
             };
+
+    /**
+     * Cache AliyunOSSFileSystem, at present, there is no good mechanism to ensure that the file
+     * system will be shut down, so here the fs cache is used to avoid resource leakage.
+     */
+    private static final Map<CacheKey, AliyunOSSFileSystem> CACHE = new ConcurrentHashMap<>();
 
     private Options hadoopOptions;
 
@@ -89,32 +98,64 @@ public class OSSFileIO extends HadoopCompliantFileIO {
     }
 
     @Override
-    protected FileSystem createFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
-        Configuration hadoopConf = new Configuration();
-        hadoopOptions.toMap().forEach(hadoopConf::set);
-        URI fsUri = path.toUri();
-        final String scheme = fsUri.getScheme();
-        final String authority = fsUri.getAuthority();
+    protected FileSystem createFileSystem(org.apache.hadoop.fs.Path path) {
+        final String scheme = path.toUri().getScheme();
+        final String authority = path.toUri().getAuthority();
+        return CACHE.computeIfAbsent(
+                new CacheKey(hadoopOptions, scheme, authority),
+                key -> {
+                    Configuration hadoopConf = new Configuration();
+                    key.options.toMap().forEach(hadoopConf::set);
+                    URI fsUri = path.toUri();
+                    if (scheme == null && authority == null) {
+                        fsUri = FileSystem.getDefaultUri(hadoopConf);
+                    } else if (scheme != null && authority == null) {
+                        URI defaultUri = FileSystem.getDefaultUri(hadoopConf);
+                        if (scheme.equals(defaultUri.getScheme())
+                                && defaultUri.getAuthority() != null) {
+                            fsUri = defaultUri;
+                        }
+                    }
 
-        if (scheme == null && authority == null) {
-            fsUri = FileSystem.getDefaultUri(hadoopConf);
-        } else if (scheme != null && authority == null) {
-            URI defaultUri = FileSystem.getDefaultUri(hadoopConf);
-            if (scheme.equals(defaultUri.getScheme()) && defaultUri.getAuthority() != null) {
-                fsUri = defaultUri;
-            }
-        }
-
-        AliyunOSSFileSystem fs = new AliyunOSSFileSystem();
-        fs.initialize(fsUri, hadoopConf);
-        return fs;
+                    AliyunOSSFileSystem fs = new AliyunOSSFileSystem();
+                    try {
+                        fs.initialize(fsUri, hadoopConf);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                    return fs;
+                });
     }
 
-    @Override
-    public synchronized void close() throws IOException {
-        if (fs != null) {
-            fs.close();
-            fs = null;
+    private static class CacheKey {
+
+        private final Options options;
+        private final String scheme;
+        private final String authority;
+
+        private CacheKey(Options options, String scheme, String authority) {
+            this.options = options;
+            this.scheme = scheme;
+            this.authority = authority;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            CacheKey cacheKey = (CacheKey) o;
+            return Objects.equals(options, cacheKey.options)
+                    && Objects.equals(scheme, cacheKey.scheme)
+                    && Objects.equals(authority, cacheKey.authority);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(options, scheme, authority);
         }
     }
 }

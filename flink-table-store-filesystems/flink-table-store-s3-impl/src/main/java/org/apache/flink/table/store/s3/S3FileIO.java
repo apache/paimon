@@ -29,7 +29,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.URI;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** S3 {@link FileIO}. */
 public class S3FileIO extends HadoopCompliantFileIO {
@@ -47,6 +51,12 @@ public class S3FileIO extends HadoopCompliantFileIO {
         {"fs.s3a.secret-key", "fs.s3a.secret.key"},
         {"fs.s3a.path-style-access", "fs.s3a.path.style.access"}
     };
+
+    /**
+     * Cache S3AFileSystem, at present, there is no good mechanism to ensure that the file system
+     * will be shut down, so here the fs cache is used to avoid resource leakage.
+     */
+    private static final Map<CacheKey, S3AFileSystem> CACHE = new ConcurrentHashMap<>();
 
     private Options hadoopOptions;
 
@@ -90,32 +100,64 @@ public class S3FileIO extends HadoopCompliantFileIO {
     }
 
     @Override
-    protected FileSystem createFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
-        Configuration hadoopConf = new Configuration();
-        hadoopOptions.toMap().forEach(hadoopConf::set);
-        URI fsUri = path.toUri();
-        final String scheme = fsUri.getScheme();
-        final String authority = fsUri.getAuthority();
+    protected FileSystem createFileSystem(org.apache.hadoop.fs.Path path) {
+        final String scheme = path.toUri().getScheme();
+        final String authority = path.toUri().getAuthority();
+        return CACHE.computeIfAbsent(
+                new CacheKey(hadoopOptions, scheme, authority),
+                key -> {
+                    Configuration hadoopConf = new Configuration();
+                    key.options.toMap().forEach(hadoopConf::set);
+                    URI fsUri = path.toUri();
+                    if (scheme == null && authority == null) {
+                        fsUri = FileSystem.getDefaultUri(hadoopConf);
+                    } else if (scheme != null && authority == null) {
+                        URI defaultUri = FileSystem.getDefaultUri(hadoopConf);
+                        if (scheme.equals(defaultUri.getScheme())
+                                && defaultUri.getAuthority() != null) {
+                            fsUri = defaultUri;
+                        }
+                    }
 
-        if (scheme == null && authority == null) {
-            fsUri = FileSystem.getDefaultUri(hadoopConf);
-        } else if (scheme != null && authority == null) {
-            URI defaultUri = FileSystem.getDefaultUri(hadoopConf);
-            if (scheme.equals(defaultUri.getScheme()) && defaultUri.getAuthority() != null) {
-                fsUri = defaultUri;
-            }
-        }
-
-        S3AFileSystem fs = new S3AFileSystem();
-        fs.initialize(fsUri, hadoopConf);
-        return fs;
+                    S3AFileSystem fs = new S3AFileSystem();
+                    try {
+                        fs.initialize(fsUri, hadoopConf);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                    return fs;
+                });
     }
 
-    @Override
-    public synchronized void close() throws IOException {
-        if (fs != null) {
-            fs.close();
-            fs = null;
+    private static class CacheKey {
+
+        private final Options options;
+        private final String scheme;
+        private final String authority;
+
+        private CacheKey(Options options, String scheme, String authority) {
+            this.options = options;
+            this.scheme = scheme;
+            this.authority = authority;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            CacheKey cacheKey = (CacheKey) o;
+            return Objects.equals(options, cacheKey.options)
+                    && Objects.equals(scheme, cacheKey.scheme)
+                    && Objects.equals(authority, cacheKey.authority);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(options, scheme, authority);
         }
     }
 }

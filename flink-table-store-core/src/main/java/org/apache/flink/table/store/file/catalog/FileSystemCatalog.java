@@ -190,6 +190,9 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
+    public void close() throws Exception {}
+
+    @Override
     protected String warehouse() {
         return warehouse.toString();
     }

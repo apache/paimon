@@ -24,6 +24,7 @@ import org.apache.flink.configuration.Configuration;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -89,5 +90,22 @@ public class Options implements Serializable {
 
     public Map<String, String> toMap() {
         return data;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        Options options = (Options) o;
+        return Objects.equals(data, options.data);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(data);
     }
 }

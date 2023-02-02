@@ -82,14 +82,6 @@ public abstract class PluginFileIO implements FileIO {
         return wrap(() -> fileIO(src).rename(src, dst));
     }
 
-    @Override
-    public synchronized void close() throws IOException {
-        if (lazyFileIO == null) {
-            lazyFileIO.close();
-            lazyFileIO = null;
-        }
-    }
-
     private FileIO fileIO(Path path) throws IOException {
         if (lazyFileIO == null) {
             synchronized (this) {

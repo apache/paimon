@@ -232,9 +232,6 @@ public class LocalFileIO implements FileIO {
         return new File(localPath);
     }
 
-    @Override
-    public void close() throws IOException {}
-
     /** Local {@link SeekableInputStream}. */
     public static class LocalSeekableInputStream extends SeekableInputStream {
 
