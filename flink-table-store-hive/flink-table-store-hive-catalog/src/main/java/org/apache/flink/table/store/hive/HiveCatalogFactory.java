@@ -62,7 +62,7 @@ public class HiveCatalogFactory implements CatalogFactory {
                                 + IDENTIFIER
                                 + " catalog");
 
-        Configuration hadoopConfig = options.hadoopConf();
+        Configuration hadoopConfig = new Configuration();
         options.toMap().forEach(hadoopConfig::set);
         hadoopConfig.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
         hadoopConfig.set(

@@ -161,7 +161,9 @@ public class StoreWriteOperator extends PrepareCommitOperator {
     public void close() throws Exception {
         super.close();
 
-        write.close();
+        if (write != null) {
+            write.close();
+        }
 
         if (logSinkFunction != null) {
             FunctionUtils.closeFunction(logSinkFunction);
