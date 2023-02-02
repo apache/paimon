@@ -42,7 +42,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
 
 /** IT cases for {@link CompactAction}. */
 public class CompactActionITCase extends ActionITCaseBase {
@@ -85,7 +84,7 @@ public class CompactActionITCase extends ActionITCaseBase {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        env.setParallelism(ThreadLocalRandom.current().nextInt(4) + 1);
+        env.setParallelism(2);
         new CompactAction(tablePath).withPartitions(getSpecifiedPartitions()).build(env);
         env.execute();
 
@@ -149,7 +148,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
         env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
         env.getCheckpointConfig().setCheckpointInterval(500);
-        env.setParallelism(ThreadLocalRandom.current().nextInt(4) + 1);
+        env.setParallelism(2);
         new CompactAction(tablePath).withPartitions(getSpecifiedPartitions()).build(env);
         env.executeAsync();
 
