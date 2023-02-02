@@ -147,7 +147,7 @@ public abstract class AbstractTableStoreFactory
         CatalogTable origin = context.getCatalogTable().getOrigin();
         FileStoreTable table;
         if (origin instanceof DataCatalogTable) {
-            table = ((DataCatalogTable) origin).table();
+            table = ((DataCatalogTable) origin).table().copy(origin.getOptions());
         } else {
             table = FileStoreTableFactory.create(createCatalogOptions(context));
         }
