@@ -26,7 +26,7 @@ import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link PartitionTimeExtractor} */
+/** Test for {@link PartitionTimeExtractor}. */
 public class PartitionTimeExtractorTest {
 
     @Test
