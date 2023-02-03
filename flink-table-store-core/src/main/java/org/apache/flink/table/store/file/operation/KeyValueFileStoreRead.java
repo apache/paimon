@@ -169,7 +169,10 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                                     file.schemaId(), fileName, file.level());
                         });
             }
-            return ConcatRecordReader.create(suppliers);
+            RecordReader<KeyValue> concatRecordReader = ConcatRecordReader.create(suppliers);
+            return split.reverseRowKind()
+                    ? new ReverseReader(concatRecordReader)
+                    : concatRecordReader;
         } else {
             // Sections are read by SortMergeReader, which sorts and merges records by keys.
             // So we cannot project keys or else the sorting will be incorrect.
