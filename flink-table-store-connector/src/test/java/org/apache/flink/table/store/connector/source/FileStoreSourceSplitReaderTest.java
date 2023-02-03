@@ -366,7 +366,7 @@ public class FileStoreSourceSplitReaderTest {
         assertThat(result).isEqualTo(expected.subList(0, 2));
 
         records = reader.fetch();
-        assertRecords(records, null, "id1", 0, Collections.emptyList());
+        assertRecords(records, "id1", null, 0, Collections.emptyList());
 
         reader.close();
     }
