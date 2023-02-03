@@ -91,7 +91,8 @@ public class KeyValueFileReaderFactory {
                 keyType,
                 valueType,
                 level,
-                bulkFormatMapping.getIndexMapping());
+                bulkFormatMapping.getIndexMapping(),
+                bulkFormatMapping.getCastMapping());
     }
 
     public static Builder builder(

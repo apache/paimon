@@ -27,15 +27,8 @@ import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.types.BigIntType;
-import org.apache.flink.table.store.types.BooleanType;
 import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DoubleType;
-import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.types.VarCharType;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -48,7 +41,6 @@ import org.junit.jupiter.api.BeforeAll;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -105,49 +97,6 @@ public abstract class SparkReadTestBase {
                 "t2",
                 "(3, array(null, null), struct(struct(2.0d, array(true, false)), 2L))",
                 "(4, array(null, 'EEE'), struct(struct(3.0d, array(true, false, true)), 3L))");
-    }
-
-    private static RowType rowType1() {
-        return new RowType(
-                Arrays.asList(
-                        new DataField(0, "a", new IntType(false)),
-                        new DataField(1, "b", new BigIntType()),
-                        new DataField(2, "c", new VarCharType())));
-    }
-
-    private static RowType rowType2() {
-        return new RowType(
-                Arrays.asList(
-                        new DataField(0, "a", new IntType(false), "comment about a"),
-                        new DataField(1, "b", new ArrayType(false, new VarCharType())),
-                        new DataField(
-                                2,
-                                "c",
-                                new RowType(
-                                        false,
-                                        Arrays.asList(
-                                                new DataField(
-                                                        3,
-                                                        "c1",
-                                                        new RowType(
-                                                                false,
-                                                                Arrays.asList(
-                                                                        new DataField(
-                                                                                4,
-                                                                                "c11",
-                                                                                new DoubleType()),
-                                                                        new DataField(
-                                                                                5,
-                                                                                "c12",
-                                                                                new ArrayType(
-                                                                                        false,
-                                                                                        new BooleanType()))))),
-                                                new DataField(
-                                                        6,
-                                                        "c2",
-                                                        new BigIntType(),
-                                                        "comment about c2"))),
-                                "comment about c")));
     }
 
     @AfterAll
