@@ -72,7 +72,7 @@ public interface FileStoreScan {
         }
 
         /** Return a map group by partition and bucket. */
-        default Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupByPartFiles(
+        static Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupByPartFiles(
                 List<ManifestEntry> files) {
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupBy = new HashMap<>();
             for (ManifestEntry entry : files) {

@@ -95,7 +95,15 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
 
             Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);
 
-            if (followUpScanner.shouldScanSnapshot(snapshot)) {
+            // first check changes of overwrite
+            if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE
+                    && scan.supportStreamingReadOverwrite()) {
+                LOG.debug("Find overwrite snapshot id {}.", nextSnapshotId);
+                DataTableScan.DataFilePlan overwritePlan =
+                        scan.withSnapshot(nextSnapshotId).planOverwriteChanges();
+                nextSnapshotId++;
+                return overwritePlan;
+            } else if (followUpScanner.shouldScanSnapshot(snapshot)) {
                 LOG.debug("Find snapshot id {}.", nextSnapshotId);
                 DataTableScan.DataFilePlan plan = followUpScanner.getPlan(nextSnapshotId, scan);
                 nextSnapshotId++;
