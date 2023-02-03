@@ -175,6 +175,7 @@ public class DataSplit implements Split {
         for (int i = 0; i < fileNumber; i++) {
             files.add(dataFileSer.deserialize(in));
         }
-        return new DataSplit(snapshotId, partition, bucket, files, in.readBoolean());
+        return new DataSplit(
+                snapshotId, partition, bucket, files, in.readBoolean(), in.readBoolean());
     }
 }
