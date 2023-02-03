@@ -20,6 +20,7 @@ package org.apache.flink.table.store.spark;
 
 import org.apache.flink.table.store.data.InternalRow;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.spark.sql.AnalysisException;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -551,6 +553,54 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                 .collectAsList()
                                 .toString())
                 .isEqualTo("[[15,18,17,16], [19,22,21,20]]");
+    }
+
+    @Test
+    public void testFilesTable() {
+        // Create table with fields [a, b, c] and insert 2 records
+        createTable("testFilesTable");
+        writeTable("testFilesTable", "(1, 2L, '3')", "(4, 5L, '6')");
+        assertThat(
+                        getFieldStatsList(
+                                spark.sql("SELECT * FROM tablestore.default.`testFilesTable$files`")
+                                        .collectAsList()))
+                .containsExactlyInAnyOrder("{a=0, b=0, c=0},{a=1, b=2, c=3},{a=4, b=5, c=6}");
+
+        // Add new fields d, e, f and the fields are [a, b, c, d, e, f], insert 2 records
+        spark.sql(
+                "ALTER TABLE tablestore.default.testFilesTable ADD COLUMNS (d INT, e INT, f INT)");
+        writeTable("testFilesTable", "(7, 8L, '9', 10, 11, 12)", "(13, 14L, '15', 16, 17, 18)");
+        assertThat(
+                        getFieldStatsList(
+                                spark.sql("SELECT * FROM tablestore.default.`testFilesTable$files`")
+                                        .collectAsList()))
+                .containsExactlyInAnyOrder(
+                        "{a=0, b=0, c=0, d=2, e=2, f=2},{a=1, b=2, c=3, d=null, e=null, f=null},{a=4, b=5, c=6, d=null, e=null, f=null}",
+                        "{a=0, b=0, c=0, d=0, e=0, f=0},{a=7, b=8, c=15, d=10, e=11, f=12},{a=13, b=14, c=9, d=16, e=17, f=18}");
+
+        // Drop fields c, e and the fields are [a, b, d, f], insert 2 records
+        spark.sql("ALTER TABLE tablestore.default.testFilesTable DROP COLUMNS c, e");
+        writeTable("testFilesTable", "(19, 20L, 21, 22)", "(23, 24L, 25, 26)");
+        assertThat(
+                        getFieldStatsList(
+                                spark.sql("SELECT * FROM tablestore.default.`testFilesTable$files`")
+                                        .collectAsList()))
+                .containsExactlyInAnyOrder(
+                        "{a=0, b=0, d=2, f=2},{a=1, b=2, d=null, f=null},{a=4, b=5, d=null, f=null}",
+                        "{a=0, b=0, d=0, f=0},{a=7, b=8, d=10, f=12},{a=13, b=14, d=16, f=18}",
+                        "{a=0, b=0, d=0, f=0},{a=19, b=20, d=21, f=22},{a=23, b=24, d=25, f=26}");
+    }
+
+    private List<String> getFieldStatsList(List<Row> fieldStatsRows) {
+        return fieldStatsRows.stream()
+                .map(
+                        v ->
+                                StringUtils.join(
+                                        new Object[] {
+                                            v.getString(11), v.getString(12), v.getString(13)
+                                        },
+                                        ","))
+                .collect(Collectors.toList());
     }
 
     private String buildTableProperties(String tablePath) {

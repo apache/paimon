@@ -283,9 +283,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     // called by multiple threads
     // ------------------------------------------------------------------------
 
-    /** Note: Keep this thread-safe. */
-    protected TableSchema scanTableSchema() {
-        return scanTableSchema(this.schemaId);
+    protected long tableSchemaId() {
+        return schemaId;
     }
 
     /** Note: Keep this thread-safe. */
