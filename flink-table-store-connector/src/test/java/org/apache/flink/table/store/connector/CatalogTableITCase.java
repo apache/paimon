@@ -18,9 +18,10 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.types.Row;
 
@@ -166,7 +167,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         // TODO should use sql for schema evolution after flink supports it.
         SchemaManager schemaManager =
-                new SchemaManager(new Path(path, String.format("default.db/%s", tableName)));
+                new SchemaManager(
+                        LocalFileIO.create(),
+                        new Path(path, String.format("default.db/%s", tableName)));
         sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S2'), (1, 1, 2, 'S1')", tableName));
 
         // The result fields are [a->INT, p -> INT, b->BIGINT, c->STRING, d->INT, e->INT, f->INT]

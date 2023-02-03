@@ -52,6 +52,8 @@ import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -171,9 +173,14 @@ public class FilesTable implements Table {
 
         @Override
         public long rowCount() {
-            return dataFilePlan().splits.stream().mapToLong(s -> s.files().size()).sum();
+            DataTableScan.DataFilePlan plan = dataFilePlan();
+            if (plan == null) {
+                return 0;
+            }
+            return plan.splits.stream().mapToLong(s -> s.files().size()).sum();
         }
 
+        @Nullable
         private DataTableScan.DataFilePlan dataFilePlan() {
             return StaticDataFileSnapshotEnumerator.create(storeTable, storeTable.newScan())
                     .enumerate();
@@ -225,6 +232,10 @@ public class FilesTable implements Table {
             }
             FilesSplit filesSplit = (FilesSplit) split;
             DataTableScan.DataFilePlan dataFilePlan = filesSplit.dataFilePlan();
+            if (dataFilePlan == null) {
+                return new IteratorRecordReader<>(Collections.emptyIterator());
+            }
+
             List<Iterator<InternalRow>> iteratorList = new ArrayList<>();
             // dataFilePlan.snapshotId indicates there's no files in the table, use the newest
             // schema id directly
