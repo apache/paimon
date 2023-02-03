@@ -28,7 +28,7 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 
 /** Utility class to make a {@link Configuration Hadoop Configuration} serializable. */
 public final class SerializableHadoopConfigWrapper implements Serializable {

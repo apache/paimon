@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.table.store.utils.Preconditions;
 import org.apache.flink.util.DockerImageVersions;
-import org.apache.flink.util.Preconditions;
 
 import com.amazonaws.auth.AWSStaticCredentialsProvider;
 import com.amazonaws.auth.BasicAWSCredentials;

@@ -41,8 +41,8 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 
-import static org.apache.flink.util.Preconditions.checkArgument;
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 
 /** A continuously monitoring enumerator. */
 public class ContinuousFileSplitEnumerator

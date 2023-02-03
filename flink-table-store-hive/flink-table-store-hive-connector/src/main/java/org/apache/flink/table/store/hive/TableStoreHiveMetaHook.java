@@ -20,7 +20,7 @@ package org.apache.flink.table.store.hive;
 
 import org.apache.flink.table.store.mapred.TableStoreInputFormat;
 import org.apache.flink.table.store.mapred.TableStoreOutputFormat;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
 import org.apache.hadoop.hive.metastore.api.MetaException;

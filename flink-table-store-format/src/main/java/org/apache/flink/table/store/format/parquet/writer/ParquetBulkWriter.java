@@ -27,7 +27,7 @@ import org.apache.parquet.hadoop.ParquetWriter;
 
 import java.io.IOException;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 
 /** A simple {@link BulkWriter} implementation that wraps a {@link ParquetWriter}. */
 @PublicEvolving

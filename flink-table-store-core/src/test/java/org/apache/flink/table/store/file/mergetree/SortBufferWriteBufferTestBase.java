@@ -42,7 +42,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
 
-import static org.apache.flink.util.Preconditions.checkState;
+import static org.apache.flink.table.store.utils.Preconditions.checkState;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link SortBufferWriteBuffer}. */

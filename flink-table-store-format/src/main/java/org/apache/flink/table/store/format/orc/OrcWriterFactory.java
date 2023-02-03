@@ -40,7 +40,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 
 /**
  * A factory that creates an ORC {@link BulkWriter}. The factory takes a user supplied {@link
