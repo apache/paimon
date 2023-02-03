@@ -75,13 +75,17 @@ public class FileStoreSourceSplitReader
             nextBatch = currentFirstBatch;
             currentFirstBatch = null;
         } else {
-            nextBatch = currentReader.readBatch();
+            nextBatch = reachLimit() ? null : currentReader.readBatch();
         }
         if (nextBatch == null) {
             pool.recycler().recycle(iterator);
             return finishSplit();
         }
         return FileRecords.forRecords(currentSplitId, iterator.replace(nextBatch));
+    }
+
+    private boolean reachLimit() {
+        return limit != null && currentNumRead >= limit;
     }
 
     private FileStoreRecordIterator pool() throws IOException {
@@ -179,7 +183,7 @@ public class FileStoreSourceSplitReader
         @Nullable
         @Override
         public RecordAndPosition<RowData> next() {
-            if (limit != null && currentNumRead >= limit) {
+            if (reachLimit()) {
                 return null;
             }
             RowData row;
