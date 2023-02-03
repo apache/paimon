@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.fs;
 
-import org.apache.flink.core.fs.local.LocalFileSystem;
 import org.apache.flink.table.store.fs.hadoop.HadoopFileIO;
 
 import org.apache.hadoop.conf.Configuration;
@@ -26,17 +25,19 @@ import org.apache.hadoop.fs.RawLocalFileSystem;
 import org.apache.hadoop.util.VersionInfo;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.net.URI;
+
 import static org.assertj.core.api.Assumptions.assumeThat;
 
 /** Behavior tests for Hadoop Local. */
-class HadoopLocalFileSystemBehaviorTest extends FileIOBehaviorTestBase {
+class HadoopLocalFileIOBehaviorTest extends FileIOBehaviorTestBase {
 
     @TempDir private java.nio.file.Path tmp;
 
     @Override
     protected FileIO getFileSystem() throws Exception {
         org.apache.hadoop.fs.FileSystem fs = new RawLocalFileSystem();
-        fs.initialize(LocalFileSystem.getLocalFsURI(), new Configuration());
+        fs.initialize(URI.create("file:///"), new Configuration());
         HadoopFileIO fileIO = new HadoopFileIO();
         fileIO.setFileSystem(fs);
         return fileIO;
