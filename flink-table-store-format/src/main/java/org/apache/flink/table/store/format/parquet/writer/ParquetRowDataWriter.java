@@ -31,7 +31,7 @@ import org.apache.flink.table.store.types.LocalZonedTimestampType;
 import org.apache.flink.table.store.types.MapType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.TimestampType;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.io.api.RecordConsumer;

@@ -85,7 +85,7 @@ import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
 import static org.apache.flink.table.store.file.utils.FileStorePathFactory.PARTITION_DEFAULT_NAME;
-import static org.apache.flink.util.Preconditions.checkState;
+import static org.apache.flink.table.store.utils.Preconditions.checkState;
 
 /** Base class for merge tree benchmark. */
 @SuppressWarnings("MethodMayBeStatic")

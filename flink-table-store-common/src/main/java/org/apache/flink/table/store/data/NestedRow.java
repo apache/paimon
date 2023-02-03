@@ -22,7 +22,7 @@ import org.apache.flink.table.store.memory.MemorySegmentUtils;
 import org.apache.flink.table.store.types.RowKind;
 
 import static org.apache.flink.table.store.data.BinaryRow.calculateBitSetWidthInBytes;
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /**
  * Its memory storage structure is exactly the same with {@link BinaryRow}. The only different is

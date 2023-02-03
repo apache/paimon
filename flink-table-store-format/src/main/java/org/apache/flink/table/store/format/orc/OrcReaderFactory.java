@@ -50,7 +50,7 @@ import java.util.List;
 
 import static org.apache.flink.table.store.format.orc.reader.AbstractOrcColumnVector.createFlinkVector;
 import static org.apache.flink.table.store.format.orc.reader.OrcSplitReaderUtil.toOrcType;
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 
 /** An ORC reader that produces a stream of {@link ColumnarRow} records. */
 public class OrcReaderFactory implements FormatReaderFactory {

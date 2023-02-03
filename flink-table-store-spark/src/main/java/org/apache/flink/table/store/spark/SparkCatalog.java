@@ -26,7 +26,7 @@ import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;

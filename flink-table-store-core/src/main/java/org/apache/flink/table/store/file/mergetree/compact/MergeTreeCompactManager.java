@@ -26,7 +26,7 @@ import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.LevelSortedRun;
 import org.apache.flink.table.store.file.mergetree.Levels;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

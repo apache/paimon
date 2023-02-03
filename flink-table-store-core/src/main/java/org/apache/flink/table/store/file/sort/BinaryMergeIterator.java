@@ -24,7 +24,7 @@ import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
 
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /** Binary version of {@code MergeIterator}. Use {@code RecordComparator} to compare record. */
 public class BinaryMergeIterator<Entry> implements MutableObjectIterator<Entry> {

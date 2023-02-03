@@ -29,7 +29,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /** Rocksdb state for key -> a single value. */
 public class RocksDBValueState extends RocksDBState<RocksDBState.Reference> {

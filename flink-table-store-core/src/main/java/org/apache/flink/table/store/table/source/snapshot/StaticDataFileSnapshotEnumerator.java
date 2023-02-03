@@ -24,7 +24,7 @@ import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import javax.annotation.Nullable;
 

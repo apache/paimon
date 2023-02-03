@@ -19,7 +19,7 @@ package org.apache.flink.table.store.data;
 
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentUtils;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 /** Describe a section of memory. */
 public abstract class BinarySection {

@@ -42,8 +42,8 @@ import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
+import org.apache.flink.table.store.utils.Preconditions;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.util.Preconditions;
 
 import java.util.Collections;
 import java.util.HashSet;

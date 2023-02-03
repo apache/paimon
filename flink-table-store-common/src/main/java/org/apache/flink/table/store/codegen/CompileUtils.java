@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.codegen;
 
 import org.apache.flink.api.common.InvalidProgramException;
-import org.apache.flink.util.FlinkRuntimeException;
 
 import org.apache.flink.shaded.guava30.com.google.common.cache.Cache;
 import org.apache.flink.shaded.guava30.com.google.common.cache.CacheBuilder;
@@ -31,7 +30,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.util.Objects;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 
 /** Utilities to compile a generated code to a Class. Copied from Flink. */
 public final class CompileUtils {
@@ -73,7 +72,7 @@ public final class CompileUtils {
             final ClassKey classKey = new ClassKey(cl.hashCode(), code);
             return (Class<T>) COMPILED_CLASS_CACHE.get(classKey, () -> doCompile(cl, name, code));
         } catch (Exception e) {
-            throw new FlinkRuntimeException(e.getMessage(), e);
+            throw new RuntimeException(e.getMessage(), e);
         }
     }
 

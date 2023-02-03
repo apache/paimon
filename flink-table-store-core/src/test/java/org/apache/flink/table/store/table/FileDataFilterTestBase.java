@@ -19,15 +19,12 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.predicate.Equal;
 import org.apache.flink.table.store.file.predicate.IsNull;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.types.DataTypes;
@@ -36,7 +33,6 @@ import org.apache.flink.table.store.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -430,26 +426,5 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                 getPrimaryKeyNames(),
                 tableConfig,
                 this::createFileStoreTable);
-    }
-
-    protected List<String> getResult(
-            TableRead read, List<Split> splits, Function<InternalRow, String> rowDataToString) {
-        try {
-            List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
-            for (Split split : splits) {
-                readers.add(() -> read.createReader(split));
-            }
-            RecordReader<InternalRow> recordReader = ConcatRecordReader.create(readers);
-            RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(recordReader);
-            List<String> result = new ArrayList<>();
-            while (iterator.hasNext()) {
-                InternalRow rowData = iterator.next();
-                result.add(rowDataToString.apply(rowData));
-            }
-            iterator.close();
-            return result;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
     }
 }

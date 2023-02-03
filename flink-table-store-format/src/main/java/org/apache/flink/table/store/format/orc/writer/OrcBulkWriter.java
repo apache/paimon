@@ -28,7 +28,7 @@ import org.apache.orc.Writer;
 
 import java.io.IOException;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 
 /** A {@link BulkWriter} implementation that writes data in ORC format. */
 @Internal

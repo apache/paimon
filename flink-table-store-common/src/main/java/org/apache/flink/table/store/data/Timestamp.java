@@ -20,7 +20,7 @@ package org.apache.flink.table.store.data;
 
 import org.apache.flink.table.store.types.LocalZonedTimestampType;
 import org.apache.flink.table.store.types.TimestampType;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import java.time.Instant;
 import java.time.LocalDate;

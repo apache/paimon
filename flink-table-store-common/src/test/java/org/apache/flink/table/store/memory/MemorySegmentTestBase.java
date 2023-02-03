@@ -35,13 +35,10 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Random;
 
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.greaterThan;
-import static org.hamcrest.Matchers.lessThan;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -973,13 +970,13 @@ public abstract class MemorySegmentTestBase {
         seg1.put(0, bytes1);
         seg2.put(0, bytes2);
 
-        assertThat(seg1.compare(seg2, 0, 0, 3, 4), lessThan(0));
-        assertThat(seg1.compare(seg2, 0, 0, 3, 3), equalTo(0));
-        assertThat(seg1.compare(seg2, 0, 0, 3, 2), greaterThan(0));
+        assertThat(seg1.compare(seg2, 0, 0, 3, 4)).isLessThan(0);
+        assertThat(seg1.compare(seg2, 0, 0, 3, 3)).isEqualTo(0);
+        assertThat(seg1.compare(seg2, 0, 0, 3, 2)).isGreaterThan(0);
         // test non-zero offset
-        assertThat(seg1.compare(seg2, 1, 1, 2, 3), lessThan(0));
-        assertThat(seg1.compare(seg2, 1, 1, 2, 2), equalTo(0));
-        assertThat(seg1.compare(seg2, 1, 1, 2, 1), greaterThan(0));
+        assertThat(seg1.compare(seg2, 1, 1, 2, 3)).isLessThan(0);
+        assertThat(seg1.compare(seg2, 1, 1, 2, 2)).isEqualTo(0);
+        assertThat(seg1.compare(seg2, 1, 1, 2, 1)).isGreaterThan(0);
     }
 
     @Test

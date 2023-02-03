@@ -25,8 +25,8 @@ import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DecimalType;
 import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.Preconditions;
 import org.apache.flink.table.store.utils.TypeUtils;
-import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 

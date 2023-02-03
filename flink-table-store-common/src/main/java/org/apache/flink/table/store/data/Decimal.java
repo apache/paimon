@@ -27,7 +27,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.math.RoundingMode;
 
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /**
  * An internal data structure representing data of {@link DecimalType}.

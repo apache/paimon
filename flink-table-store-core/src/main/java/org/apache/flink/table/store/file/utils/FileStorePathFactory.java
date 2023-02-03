@@ -25,7 +25,7 @@ import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import javax.annotation.concurrent.ThreadSafe;
 

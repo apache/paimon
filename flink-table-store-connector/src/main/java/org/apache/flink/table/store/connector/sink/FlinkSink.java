@@ -34,7 +34,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.utils.StreamExecutionEnvironmentUtils;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 import org.apache.flink.util.function.SerializableFunction;
 
 import java.io.Serializable;

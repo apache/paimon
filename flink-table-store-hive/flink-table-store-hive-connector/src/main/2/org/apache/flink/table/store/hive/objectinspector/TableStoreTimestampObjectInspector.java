@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.hive.objectinspector;
 
+import org.apache.flink.table.store.data.Timestamp;
+
 import org.apache.hadoop.hive.serde2.io.TimestampWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.TimestampObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
-
-import org.apache.flink.table.store.data.Timestamp;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for TIMESTAMP type. */
 public class TableStoreTimestampObjectInspector extends AbstractPrimitiveJavaObjectInspector

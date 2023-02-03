@@ -24,6 +24,7 @@ import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.io.RowDataFileRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.IndexCastMapping;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -110,8 +111,8 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                                 dataSchema.fields(),
                                                 projection);
                                 RowType rowType = dataSchema.logicalRowType();
-                                int[] indexMapping =
-                                        SchemaEvolutionUtil.createIndexMapping(
+                                IndexCastMapping indexCastMapping =
+                                        SchemaEvolutionUtil.createIndexCastMapping(
                                                 Projection.of(projection).toTopLevelIndexes(),
                                                 tableSchema.fields(),
                                                 Projection.of(dataProjection).toTopLevelIndexes(),
@@ -124,7 +125,8 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                                         dataSchema.fields(),
                                                         filters);
                                 return new BulkFormatMapping(
-                                        indexMapping,
+                                        indexCastMapping.getIndexMapping(),
+                                        indexCastMapping.getCastMapping(),
                                         formatDiscover
                                                 .discover(formatIdentifier)
                                                 .createReaderFactory(
@@ -136,7 +138,8 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                     fileIO,
                                     dataFilePathFactory.toPath(file.fileName()),
                                     bulkFormatMapping.getReaderFactory(),
-                                    bulkFormatMapping.getIndexMapping()));
+                                    bulkFormatMapping.getIndexMapping(),
+                                    bulkFormatMapping.getCastMapping()));
         }
 
         return ConcatRecordReader.create(suppliers);

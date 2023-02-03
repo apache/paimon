@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -31,7 +31,7 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /** A class which stores all level files of merge tree. */
 public class Levels {

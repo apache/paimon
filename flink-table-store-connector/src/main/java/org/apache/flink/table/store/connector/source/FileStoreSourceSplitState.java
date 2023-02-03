@@ -22,8 +22,8 @@ import org.apache.flink.connector.file.src.util.CheckpointedPosition;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
 
-import static org.apache.flink.util.Preconditions.checkArgument;
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 
 /**
  * State of the reader, essentially a mutable version of the {@link FileStoreSourceSplit}. Has a
