@@ -106,6 +106,8 @@ CREATE TABLE MyTable (
 
 {{< /tabs >}}
 
+Configure [partition.expiration-time]({{< ref "docs/maintenance/manage-partition" >}}), expired partitions can be automatically deleted.
+
 {{< hint info >}}
 
 Partition keys must be a subset of primary keys if primary keys are defined.
