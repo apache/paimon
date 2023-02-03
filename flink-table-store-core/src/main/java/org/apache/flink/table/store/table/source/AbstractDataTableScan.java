@@ -120,11 +120,11 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public DataFilePlan plan() {
         FileStoreScan.Plan plan = scan.plan();
-        long snapshotId = plan.snapshotId();
+        Long snapshotId = plan.snapshotId();
 
         List<DataSplit> splits =
                 generateSplits(
-                        snapshotId,
+                        snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
                         scanKind != ScanKind.ALL,
                         false,
                         splitGenerator(pathFactory),
