@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.io;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
+import org.apache.flink.table.store.file.casting.CastFieldGetter;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FormatReaderFactory;
@@ -39,6 +40,7 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
     private final KeyValueSerializer serializer;
     private final int level;
     @Nullable private final int[] indexMapping;
+    @Nullable private final CastFieldGetter[] castMapping;
 
     public KeyValueDataFileRecordReader(
             FileIO fileIO,
@@ -47,19 +49,23 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
             RowType keyType,
             RowType valueType,
             int level,
-            @Nullable int[] indexMapping)
+            @Nullable int[] indexMapping,
+            @Nullable CastFieldGetter[] castMapping)
             throws IOException {
         this.reader = FileUtils.createFormatReader(fileIO, readerFactory, path);
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;
         this.indexMapping = indexMapping;
+        this.castMapping = castMapping;
     }
 
     @Nullable
     @Override
     public RecordIterator<KeyValue> readBatch() throws IOException {
         RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
-        return iterator == null ? null : new KeyValueDataFileRecordIterator(iterator, indexMapping);
+        return iterator == null
+                ? null
+                : new KeyValueDataFileRecordIterator(iterator, indexMapping, castMapping);
     }
 
     @Override
@@ -72,8 +78,10 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
         private final RecordReader.RecordIterator<InternalRow> iterator;
 
         private KeyValueDataFileRecordIterator(
-                RecordReader.RecordIterator<InternalRow> iterator, @Nullable int[] indexMapping) {
-            super(indexMapping);
+                RecordReader.RecordIterator<InternalRow> iterator,
+                @Nullable int[] indexMapping,
+                @Nullable CastFieldGetter[] castMapping) {
+            super(indexMapping, castMapping);
             this.iterator = iterator;
         }
 

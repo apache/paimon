@@ -26,10 +26,13 @@ import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
+import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.TraceableFileIO;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileIOFinder;
@@ -37,6 +40,8 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.BinaryType;
 import org.apache.flink.table.store.types.CharType;
@@ -51,6 +56,7 @@ import org.apache.flink.table.store.types.TimestampType;
 import org.apache.flink.table.store.types.VarBinaryType;
 import org.apache.flink.table.store.types.VarCharType;
 
+import org.apache.commons.lang3.StringUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
@@ -306,9 +312,9 @@ public abstract class SchemaEvolutionTableTestBase {
          * Fields before and after column type evolution:
          *
          * <ul>
-         *   <li>Before: a->string, b->char[10], c->varchar[10], d->decimal, e->smallint, f->int,
+         *   <li>Before: a->int, b->char[10], c->varchar[10], d->decimal, e->smallint, f->int,
          *       g->bigint, h->float, i->double, j->date, k->timestamp, l->binary
-         *   <li>After: a->string, b->varchar[10], c->varchar[10], d->double, e->int, f->decimal,
+         *   <li>After: a->int, b->varchar[10], c->varchar[10], d->double, e->int, f->decimal,
          *       g->float, h->double, i->decimal, j->date, k->date, l->varbinary
          * </ul>
          */
@@ -433,6 +439,47 @@ public abstract class SchemaEvolutionTableTestBase {
             List<DataFileMeta> fileMetaList, long expectedRowCount) {
         assertThat(fileMetaList.stream().mapToLong(DataFileMeta::rowCount).sum())
                 .isEqualTo(expectedRowCount);
+    }
+
+    protected List<String> getResult(
+            TableRead read, List<Split> splits, Function<InternalRow, String> rowDataToString) {
+        try {
+            List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
+            for (Split split : splits) {
+                readers.add(() -> read.createReader(split));
+            }
+            RecordReader<InternalRow> recordReader = ConcatRecordReader.create(readers);
+            RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(recordReader);
+            List<String> result = new ArrayList<>();
+            while (iterator.hasNext()) {
+                InternalRow rowData = iterator.next();
+                result.add(rowDataToString.apply(rowData));
+            }
+            iterator.close();
+            return result;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    protected List<String> getResult(
+            TableRead read, List<Split> splits, List<InternalRow.FieldGetter> fieldGetterList) {
+        return getResult(
+                read,
+                splits,
+                row -> {
+                    List<String> stringResultList = new ArrayList<>(fieldGetterList.size());
+                    for (InternalRow.FieldGetter getter : fieldGetterList) {
+                        Object result = getter.getFieldOrNull(row);
+                        stringResultList.add(
+                                result == null
+                                        ? "null"
+                                        : (result instanceof byte[]
+                                                ? new String((byte[]) result)
+                                                : result.toString()));
+                    }
+                    return StringUtils.join(stringResultList, "|");
+                });
     }
 
     /** {@link SchemaManager} subclass for testing. */

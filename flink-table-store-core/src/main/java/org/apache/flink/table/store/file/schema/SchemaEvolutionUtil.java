@@ -22,12 +22,19 @@ import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.casting.CastExecutor;
 import org.apache.flink.table.store.file.casting.CastExecutors;
+import org.apache.flink.table.store.file.casting.CastFieldGetter;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateReplaceVisitor;
+import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypeFamily;
+import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.MultisetType;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.ProjectedRow;
+import org.apache.flink.table.store.utils.RowDataUtils;
 
 import javax.annotation.Nullable;
 
@@ -116,7 +123,8 @@ public class SchemaEvolutionUtil {
      *   <li>data projection field list: [1->a, 3->c]
      * </ul>
      *
-     * <p>Then create index mapping based on the fields list.
+     * <p>Then create index mapping based on the fields list and create cast mapping based on index
+     * mapping.
      *
      * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
      *
@@ -126,23 +134,39 @@ public class SchemaEvolutionUtil {
      * @param dataFields the fields in underlying data
      * @return the index mapping
      */
-    @Nullable
-    public static int[] createIndexMapping(
+    public static IndexCastMapping createIndexCastMapping(
             int[] tableProjection,
             List<DataField> tableFields,
             int[] dataProjection,
             List<DataField> dataFields) {
-        List<DataField> tableProjectFields = new ArrayList<>(tableProjection.length);
-        for (int index : tableProjection) {
-            tableProjectFields.add(tableFields.get(index));
+        List<DataField> tableProjectFields = projectDataFields(tableProjection, tableFields);
+        List<DataField> dataProjectFields = projectDataFields(dataProjection, dataFields);
+
+        int[] indexMapping = createIndexMapping(tableProjectFields, dataProjectFields);
+        CastFieldGetter[] castMapping =
+                createCastFieldGetterMapping(tableProjectFields, dataProjectFields, indexMapping);
+        return new IndexCastMapping() {
+            @Nullable
+            @Override
+            public int[] getIndexMapping() {
+                return indexMapping;
+            }
+
+            @Nullable
+            @Override
+            public CastFieldGetter[] getCastMapping() {
+                return castMapping;
+            }
+        };
+    }
+
+    private static List<DataField> projectDataFields(int[] projection, List<DataField> dataFields) {
+        List<DataField> projectFields = new ArrayList<>(projection.length);
+        for (int index : projection) {
+            projectFields.add(dataFields.get(index));
         }
 
-        List<DataField> dataProjectFields = new ArrayList<>(dataProjection.length);
-        for (int index : dataProjection) {
-            dataProjectFields.add(dataFields.get(index));
-        }
-
-        return createIndexMapping(tableProjectFields, dataProjectFields);
+        return projectFields;
     }
 
     /**
@@ -167,7 +191,8 @@ public class SchemaEvolutionUtil {
      *   <li>Data fields: 1->kb, 5->ka, 7->seq, 8->kind, 11->aa, 13->f
      * </ul>
      *
-     * <p>Finally we can create index mapping with table/data projections and fields.
+     * <p>Finally we can create index mapping with table/data projections and fields, and create
+     * cast mapping based on index mapping.
      *
      * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
      *
@@ -177,10 +202,9 @@ public class SchemaEvolutionUtil {
      * @param dataProjection the data projection
      * @param dataKeyFields the data key fields
      * @param dataValueFields the data value fields
-     * @return the result index mapping
+     * @return the result index and cast mapping
      */
-    @Nullable
-    public static int[] createIndexMapping(
+    public static IndexCastMapping createIndexCastMapping(
             int[] tableProjection,
             List<DataField> tableKeyFields,
             List<DataField> tableValueFields,
@@ -195,7 +219,7 @@ public class SchemaEvolutionUtil {
                 KeyValue.createKeyValueFields(tableKeyFields, tableValueFields, maxKeyId);
         List<DataField> dataFields =
                 KeyValue.createKeyValueFields(dataKeyFields, dataValueFields, maxKeyId);
-        return createIndexMapping(tableProjection, tableFields, dataProjection, dataFields);
+        return createIndexCastMapping(tableProjection, tableFields, dataProjection, dataFields);
     }
 
     /**
@@ -281,14 +305,29 @@ public class SchemaEvolutionUtil {
                         return Optional.empty();
                     }
 
-                    /// TODO Should deal with column type schema evolution here
+                    DataType dataValueType = dataField.type().copy(true);
+                    DataType predicateType = predicate.type().copy(true);
+                    CastExecutor<Object, Object> castExecutor =
+                            dataValueType.equals(predicateType)
+                                    ? null
+                                    : (CastExecutor<Object, Object>)
+                                            CastExecutors.resolve(
+                                                    predicate.type(), dataField.type());
+                    // Convert value from predicate type to underlying data type which may lose
+                    // information, for example, convert double value to int. But it doesn't matter
+                    // because it just for predicate push down and the data will be filtered
+                    // correctly after reading.
+                    List<Object> literals =
+                            predicate.literals().stream()
+                                    .map(v -> castExecutor == null ? v : castExecutor.cast(v))
+                                    .collect(Collectors.toList());
                     return Optional.of(
                             new LeafPredicate(
                                     predicate.function(),
-                                    predicate.type(),
+                                    dataField.type(),
                                     indexOf(dataField, idToDataFields),
                                     dataField.name(),
-                                    predicate.literals()));
+                                    literals));
                 };
 
         for (Predicate predicate : filters) {
@@ -352,6 +391,69 @@ public class SchemaEvolutionUtil {
                     converterMapping[i] =
                             checkNotNull(
                                     CastExecutors.resolve(dataField.type(), tableField.type()));
+                    castExist = true;
+                }
+            }
+        }
+
+        return castExist ? converterMapping : null;
+    }
+
+    /**
+     * Create getter and casting mapping from table fields to underlying data fields with given
+     * index mapping. For example, the table and data fields are as follows
+     *
+     * <ul>
+     *   <li>table fields: 1->c INT, 6->b STRING, 3->a BIGINT
+     *   <li>data fields: 1->a BIGINT, 3->c DOUBLE
+     * </ul>
+     *
+     * <p>We can get the column types (1->a BIGINT), (3->c DOUBLE) from data fields for (1->c INT)
+     * and (3->a BIGINT) in table fields through index mapping [0, -1, 1], then compare the data
+     * type and create getter and casting mapping.
+     *
+     * <p>/// TODO should support nest index mapping when nest schema evolution is supported.
+     *
+     * @param tableFields the fields of table
+     * @param dataFields the fields of underlying data
+     * @param indexMapping the index mapping from table fields to data fields
+     * @return the getter and casting mapping
+     */
+    private static CastFieldGetter[] createCastFieldGetterMapping(
+            List<DataField> tableFields, List<DataField> dataFields, int[] indexMapping) {
+        CastFieldGetter[] converterMapping = new CastFieldGetter[tableFields.size()];
+        boolean castExist = false;
+        for (int i = 0; i < tableFields.size(); i++) {
+            int dataIndex = indexMapping == null ? i : indexMapping[i];
+            if (dataIndex < 0) {
+                converterMapping[i] =
+                        new CastFieldGetter(row -> null, CastExecutors.identityCastExecutor());
+            } else {
+                DataField tableField = tableFields.get(i);
+                DataField dataField = dataFields.get(dataIndex);
+                if (dataField.type().equalsIgnoreNullable(tableField.type())) {
+                    // Create getter with index i and projected row data will convert to underlying
+                    // data
+                    converterMapping[i] =
+                            new CastFieldGetter(
+                                    RowDataUtils.createNullCheckingFieldGetter(dataField.type(), i),
+                                    CastExecutors.identityCastExecutor());
+                } else {
+                    // TODO support column type evolution in nested type
+                    checkState(
+                            !(tableField.type() instanceof MapType
+                                    || dataField.type() instanceof ArrayType
+                                    || dataField.type() instanceof MultisetType
+                                    || dataField.type() instanceof RowType),
+                            "Only support column type evolution in atomic data type.");
+                    // Create getter with index i and projected row data will convert to underlying
+                    // data
+                    converterMapping[i] =
+                            new CastFieldGetter(
+                                    RowDataUtils.createNullCheckingFieldGetter(dataField.type(), i),
+                                    checkNotNull(
+                                            CastExecutors.resolve(
+                                                    dataField.type(), tableField.type())));
                     castExist = true;
                 }
             }
