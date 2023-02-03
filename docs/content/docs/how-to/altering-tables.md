@@ -78,6 +78,12 @@ ALTER TABLE my_table RENAME TO my_table_new;
 
 {{< /tabs >}}
 
+{{< hint info >}}
+
+If you use object storage, such as S3 or OSS, please use this syntax carefully, because the renaming of object storage is not atomic, and only partial files may be moved in case of failure.
+
+{{< /hint >}}
+
 ## Removing Table Properties
 
 The following SQL removes `write-buffer-size` table property.

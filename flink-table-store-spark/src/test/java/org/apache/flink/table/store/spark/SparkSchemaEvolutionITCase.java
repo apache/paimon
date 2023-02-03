@@ -112,17 +112,31 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     @Test
     public void testRenameTable() {
         // TODO: add test case for hive catalog table
-        spark.sql("USE tablestore");
-        spark.sql(
-                "CREATE TABLE testRenameTable (\n"
-                        + "a BIGINT,\n"
-                        + "b STRING) USING tablestore\n"
-                        + "COMMENT 'table comment'\n"
-                        + "PARTITIONED BY (a)\n");
-        assertThatThrownBy(
-                        () -> spark.sql("ALTER TABLE testRenameTable RENAME TO testRenameTable1"))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Cannot rename FileSystem catalog tables");
+        assertThatThrownBy(() -> spark.sql("ALTER TABLE t3 RENAME TO t4"))
+                .isInstanceOf(AnalysisException.class)
+                .hasMessageContaining("Table or view not found: t3");
+
+        assertThatThrownBy(() -> spark.sql("ALTER TABLE t1 RENAME TO t2"))
+                .isInstanceOf(AnalysisException.class)
+                .hasMessageContaining("Table default.t2 already exists");
+
+        spark.sql("ALTER TABLE t1 RENAME TO t3");
+        List<Row> tables = spark.sql("SHOW TABLES").collectAsList();
+        assertThat(tables.toString()).isEqualTo("[[default,t2,false], [default,t3,false]]");
+
+        List<Row> afterRename =
+                spark.sql("SHOW CREATE TABLE tablestore.default.t3").collectAsList();
+        assertThat(afterRename.toString())
+                .isEqualTo(
+                        "[[CREATE TABLE t3 (\n"
+                                + "  `a` INT NOT NULL,\n"
+                                + "  `b` BIGINT,\n"
+                                + "  `c` STRING)\n"
+                                + buildTableProperties("default.db/t3")
+                                + "]]");
+
+        List<Row> data = spark.sql("SELECT * FROM t3").collectAsList();
+        assertThat(data.toString()).isEqualTo("[[1,2,1], [5,6,3]]");
     }
 
     @Test
