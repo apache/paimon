@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.catalog;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.CatalogOptions;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -32,7 +32,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.options.CatalogOptions.METASTORE;
 import static org.apache.flink.table.store.options.CatalogOptions.WAREHOUSE;
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /** Factory to create {@link Catalog}. Each factory should have a unique identifier. */
 public interface CatalogFactory {

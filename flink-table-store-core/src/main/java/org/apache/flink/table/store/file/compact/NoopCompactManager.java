@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.compact;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;

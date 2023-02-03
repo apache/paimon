@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.mergetree;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import java.util.Collections;
 import java.util.Comparator;

@@ -36,7 +36,7 @@ import java.util.Objects;
 import static org.apache.flink.table.store.data.BinaryRow.EMPTY_ROW;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.newBytesType;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.newStringType;
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /** Metadata of a data file. */
 public class DataFileMeta {

@@ -46,7 +46,7 @@ import org.apache.flink.table.store.types.TimestampType;
 import org.apache.flink.table.store.types.TinyIntType;
 import org.apache.flink.table.store.types.VarBinaryType;
 import org.apache.flink.table.store.types.VarCharType;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import java.math.BigDecimal;
 import java.math.MathContext;

@@ -33,7 +33,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.util.ArrayList;
 
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /**
  * In memory sort buffer for binary row. The main code is copied from Flink {@code

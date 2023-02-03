@@ -30,7 +30,7 @@ import java.util.Arrays;
 
 import static org.apache.flink.table.store.memory.MemorySegmentUtils.allocateReuseBytes;
 import static org.apache.flink.table.store.memory.MemorySegmentUtils.allocateReuseChars;
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /** A string which is backed by {@link MemorySegment}s. */
 public final class BinaryString extends BinarySection implements Comparable<BinaryString> {

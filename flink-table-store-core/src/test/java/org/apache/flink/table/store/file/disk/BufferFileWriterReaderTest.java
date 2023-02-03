@@ -31,7 +31,7 @@ import java.nio.file.Path;
 import java.util.LinkedList;
 import java.util.Random;
 
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.fail;
 

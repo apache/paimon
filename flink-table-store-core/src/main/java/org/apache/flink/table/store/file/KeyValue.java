@@ -35,7 +35,7 @@ import java.util.stream.IntStream;
 
 import static org.apache.flink.table.store.file.schema.TableSchema.SEQUENCE_NUMBER;
 import static org.apache.flink.table.store.file.schema.TableSchema.VALUE_KIND;
-import static org.apache.flink.util.Preconditions.checkState;
+import static org.apache.flink.table.store.utils.Preconditions.checkState;
 
 /**
  * A key value, including user key, sequence number, value kind and value. This object can be

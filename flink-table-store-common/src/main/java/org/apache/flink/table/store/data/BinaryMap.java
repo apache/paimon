@@ -25,7 +25,7 @@ import org.apache.flink.table.store.types.DataType;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /**
  * [4 byte(keyArray size in bytes)] + [Key BinaryArray] + [Value BinaryArray].

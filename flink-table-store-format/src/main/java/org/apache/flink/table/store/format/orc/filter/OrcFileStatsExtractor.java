@@ -30,7 +30,7 @@ import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DecimalType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.DateTimeUtils;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.orc.BooleanColumnStatistics;

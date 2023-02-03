@@ -25,7 +25,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.Serializable;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 
 /**
  * A wrapper for generated class, defines a {@link #newInstance(ClassLoader)} method to get an

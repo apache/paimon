@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.utils;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
