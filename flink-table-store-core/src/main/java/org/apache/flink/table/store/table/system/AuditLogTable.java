@@ -180,6 +180,16 @@ public class AuditLogTable implements DataTable {
         public DataTableScan.DataFilePlan plan() {
             return dataScan.plan();
         }
+
+        @Override
+        public DataFilePlan planOverwriteChanges() {
+            return dataScan.planOverwriteChanges();
+        }
+
+        @Override
+        public boolean supportStreamingReadOverwrite() {
+            return dataScan.supportStreamingReadOverwrite();
+        }
     }
 
     private class AuditLogRead implements TableRead {

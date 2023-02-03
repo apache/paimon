@@ -27,6 +27,7 @@ import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
+import org.apache.flink.table.store.file.operation.ReverseReader;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -96,6 +97,18 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
         KeyValueFileStoreScan scan = store().newScan();
         return new AbstractDataTableScan(
                 fileIO, scan, tableSchema, store().pathFactory(), options()) {
+            /**
+             * Currently, the streaming read of overwrite is implemented by reversing the {@link
+             * RowKind} of overwrote records to {@link RowKind#DELETE}, so only tables that have
+             * primary key support it.
+             *
+             * @see ReverseReader
+             */
+            @Override
+            public boolean supportStreamingReadOverwrite() {
+                return false;
+            }
+
             @Override
             protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
                 return new MergeTreeSplitGenerator(
