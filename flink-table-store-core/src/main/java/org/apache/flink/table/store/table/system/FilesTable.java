@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.system;
 
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
@@ -43,6 +42,7 @@ import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
+import org.apache.flink.table.store.table.source.snapshot.StaticDataFileSnapshotEnumerator;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.IntType;
@@ -51,8 +51,6 @@ import org.apache.flink.table.store.utils.ProjectedRow;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -123,7 +121,7 @@ public class FilesTable implements Table {
 
     @Override
     public TableScan newScan() {
-        return new FilesScan(storeTable, options.scanSnapshotId());
+        return new FilesScan(storeTable);
     }
 
     @Override
@@ -133,7 +131,7 @@ public class FilesTable implements Table {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new FilesTable(storeTable, new CoreOptions(dynamicOptions));
+        return new FilesTable(storeTable.copy(dynamicOptions));
     }
 
     @Override
@@ -142,13 +140,11 @@ public class FilesTable implements Table {
     }
 
     private static class FilesScan implements TableScan {
+
         private final FileStoreTable storeTable;
 
-        @Nullable private final Long snapshotId;
-
-        private FilesScan(FileStoreTable storeTable, Long snapshotId) {
+        private FilesScan(FileStoreTable storeTable) {
             this.storeTable = storeTable;
-            this.snapshotId = snapshotId;
         }
 
         @Override
@@ -159,7 +155,7 @@ public class FilesTable implements Table {
 
         @Override
         public Plan plan() {
-            return () -> Collections.singletonList(new FilesSplit(snapshotId, storeTable));
+            return () -> Collections.singletonList(new FilesSplit(storeTable));
         }
     }
 
@@ -167,12 +163,9 @@ public class FilesTable implements Table {
 
         private static final long serialVersionUID = 1L;
 
-        @Nullable private final Long snapshotId;
-
         private final FileStoreTable storeTable;
 
-        private FilesSplit(@Nullable Long snapshotId, FileStoreTable storeTable) {
-            this.snapshotId = snapshotId;
+        private FilesSplit(FileStoreTable storeTable) {
             this.storeTable = storeTable;
         }
 
@@ -182,11 +175,8 @@ public class FilesTable implements Table {
         }
 
         private DataTableScan.DataFilePlan dataFilePlan() {
-            DataTableScan scan = storeTable.newScan();
-            if (snapshotId != null) {
-                scan.withSnapshot(snapshotId);
-            }
-            return scan.plan();
+            return StaticDataFileSnapshotEnumerator.create(storeTable, storeTable.newScan())
+                    .enumerate();
         }
 
         @Override
@@ -198,13 +188,12 @@ public class FilesTable implements Table {
                 return false;
             }
             FilesSplit that = (FilesSplit) o;
-            return Objects.equals(storeTable, that.storeTable)
-                    && Objects.equals(snapshotId, that.snapshotId);
+            return Objects.equals(storeTable, that.storeTable);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(snapshotId, storeTable);
+            return Objects.hash(storeTable);
         }
     }
 
