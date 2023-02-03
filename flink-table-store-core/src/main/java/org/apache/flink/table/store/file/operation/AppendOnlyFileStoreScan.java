@@ -18,22 +18,16 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.table.store.file.casting.CastExecutor;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
+import org.apache.flink.table.store.file.stats.FieldStatsConverters;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowType;
 
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.pickTransformFieldMapping;
@@ -42,8 +36,8 @@ import static org.apache.flink.table.store.file.predicate.PredicateBuilder.split
 /** {@link FileStoreScan} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
-    private final ConcurrentMap<Long, FieldStatsArraySerializer> schemaRowStatsConverters;
     private final RowType rowType;
+    private final FieldStatsConverters fieldStatsConverters;
 
     private Predicate filter;
 
@@ -68,8 +62,9 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 manifestListFactory,
                 numOfBuckets,
                 checkNumOfBuckets);
-        this.schemaRowStatsConverters = new ConcurrentHashMap<>();
         this.rowType = rowType;
+        this.fieldStatsConverters =
+                new FieldStatsConverters(sid -> scanTableSchema(sid).fields(), schemaId);
     }
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {
@@ -95,32 +90,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                         entry.file()
                                 .valueStats()
                                 .fields(
-                                        getFieldStatsArraySerializer(entry.file().schemaId()),
+                                        fieldStatsConverters.getOrCreate(entry.file().schemaId()),
                                         entry.file().rowCount()));
-    }
-
-    /** Note: Keep this thread-safe. */
-    private FieldStatsArraySerializer getFieldStatsArraySerializer(long schemaId) {
-        return schemaRowStatsConverters.computeIfAbsent(
-                schemaId,
-                id -> {
-                    TableSchema tableSchema = scanTableSchema();
-                    List<DataField> tableFields = tableSchema.fields();
-                    TableSchema schema = scanTableSchema(id);
-                    List<DataField> dataFields = schema.fields();
-                    int[] indexMapping =
-                            tableSchema.id() == id
-                                    ? null
-                                    : SchemaEvolutionUtil.createIndexMapping(
-                                            tableFields, dataFields);
-                    CastExecutor<Object, Object>[] converterMapping =
-                            tableSchema.id() == id
-                                    ? null
-                                    : (CastExecutor<Object, Object>[])
-                                            SchemaEvolutionUtil.createConvertMapping(
-                                                    tableFields, dataFields, indexMapping);
-                    return new FieldStatsArraySerializer(
-                            schema.logicalRowType(), indexMapping, converterMapping);
-                });
     }
 }
