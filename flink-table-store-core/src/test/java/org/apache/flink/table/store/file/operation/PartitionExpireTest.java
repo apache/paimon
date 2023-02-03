@@ -46,19 +46,44 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.flink.table.store.CoreOptions.PARTITION_EXPIRATION_TIME;
 import static org.apache.flink.table.store.CoreOptions.WRITE_ONLY;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link PartitionExpire}. */
 public class PartitionExpireTest {
 
     @TempDir java.nio.file.Path tempDir;
 
+    private Path path;
     private FileStoreTable table;
 
     @BeforeEach
-    public void beforeEach() throws Exception {
-        Path path = new Path(tempDir.toUri());
+    public void beforeEach() {
+        path = new Path(tempDir.toUri());
+    }
+
+    @Test
+    public void testNonPartitionedTable() {
+        SchemaManager schemaManager = new SchemaManager(path);
+        assertThatThrownBy(
+                        () ->
+                                schemaManager.commitNewVersion(
+                                        new UpdateSchema(
+                                                RowType.of(VarCharType.STRING_TYPE),
+                                                Collections.emptyList(),
+                                                Collections.emptyList(),
+                                                Collections.singletonMap(
+                                                        PARTITION_EXPIRATION_TIME.key(), "1 d"),
+                                                "")))
+                .hasMessageContaining(
+                        "Can not set 'partition.expiration-time' for non-partitioned table");
+    }
+
+    @Test
+    public void test() throws Exception {
+        path = new Path(tempDir.toUri());
         SchemaManager schemaManager = new SchemaManager(path);
         schemaManager.commitNewVersion(
                 new UpdateSchema(
@@ -68,10 +93,7 @@ public class PartitionExpireTest {
                         Collections.emptyMap(),
                         ""));
         table = FileStoreTableFactory.create(path);
-    }
 
-    @Test
-    public void test() throws Exception {
         write("20230101", "11");
         write("20230101", "12");
         write("20230103", "31");
@@ -119,7 +141,7 @@ public class PartitionExpireTest {
 
     private PartitionExpire newExpire() {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), "2 d");
+        options.put(PARTITION_EXPIRATION_TIME.key(), "2 d");
         options.put(CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "1 d");
         options.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd");
         return ((AbstractFileStoreTable) table.copy(options)).store().newPartitionExpire("");

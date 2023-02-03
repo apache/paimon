@@ -128,7 +128,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public PartitionExpire newPartitionExpire(String commitUser) {
         Duration partitionExpireTime = options.partitionExpireTime();
-        if (partitionExpireTime == null) {
+        if (partitionExpireTime == null || partitionType().getFieldCount() == 0) {
             return null;
         }
 

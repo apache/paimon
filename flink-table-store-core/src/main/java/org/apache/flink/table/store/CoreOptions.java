@@ -913,6 +913,13 @@ public class CoreOptions implements Serializable {
                     "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if "
                             + "still want to keep the primary key definition.");
         }
+
+        if (schema.options().containsKey(CoreOptions.PARTITION_EXPIRATION_TIME.key())) {
+            if (schema.partitionKeys().isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Can not set 'partition.expiration-time' for non-partitioned table.");
+            }
+        }
     }
 
     private static void checkOptionExistInMode(
