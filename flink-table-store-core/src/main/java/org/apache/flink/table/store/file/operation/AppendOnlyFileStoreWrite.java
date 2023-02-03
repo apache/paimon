@@ -162,7 +162,6 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                                             partition,
                                             bucket,
                                             toCompact,
-                                            false,
                                             false))));
             rewriter.close();
             return rewriter.result();

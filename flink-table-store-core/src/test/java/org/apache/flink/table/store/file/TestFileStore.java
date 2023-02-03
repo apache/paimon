@@ -324,8 +324,7 @@ public class TestFileStore extends KeyValueFileStore {
                                                 entryWithPartition.getKey(),
                                                 entryWithBucket.getKey(),
                                                 entryWithBucket.getValue(),
-                                                isIncremental,
-                                                false)));
+                                                isIncremental)));
                 while (iterator.hasNext()) {
                     kvs.add(iterator.next().copy(keySerializer, valueSerializer));
                 }

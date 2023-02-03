@@ -54,6 +54,15 @@ public class DataSplit implements Split {
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> files,
+            boolean isIncremental) {
+        init(snapshotId, partition, bucket, files, isIncremental, false);
+    }
+
+    public DataSplit(
+            long snapshotId,
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> files,
             boolean isIncremental,
             boolean reverseRowKind) {
         init(snapshotId, partition, bucket, files, isIncremental, reverseRowKind);
@@ -166,7 +175,6 @@ public class DataSplit implements Split {
         for (int i = 0; i < fileNumber; i++) {
             files.add(dataFileSer.deserialize(in));
         }
-        return new DataSplit(
-                snapshotId, partition, bucket, files, in.readBoolean(), in.readBoolean());
+        return new DataSplit(snapshotId, partition, bucket, files, in.readBoolean());
     }
 }

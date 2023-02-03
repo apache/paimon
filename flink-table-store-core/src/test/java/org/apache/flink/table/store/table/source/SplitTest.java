@@ -50,7 +50,6 @@ public class SplitTest {
                         data.partition,
                         data.bucket,
                         files,
-                        false,
                         false);
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();

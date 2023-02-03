@@ -118,9 +118,7 @@ public class FileStoreSourceSplitSerializerTest {
             boolean isIncremental,
             long recordsToSkip) {
         return new FileStoreSourceSplit(
-                id,
-                new DataSplit(1L, partition, bucket, files, isIncremental, false),
-                recordsToSkip);
+                id, new DataSplit(1L, partition, bucket, files, isIncremental), recordsToSkip);
     }
 
     private static FileStoreSourceSplit serializeAndDeserialize(FileStoreSourceSplit split)

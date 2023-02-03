@@ -120,11 +120,11 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public DataFilePlan plan() {
         FileStoreScan.Plan plan = scan.plan();
-        Long snapshotId = plan.snapshotId();
+        long snapshotId = plan.snapshotId();
 
         List<DataSplit> splits =
                 generateSplits(
-                        snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
+                        snapshotId,
                         scanKind != ScanKind.ALL,
                         false,
                         splitGenerator(pathFactory),
@@ -136,13 +136,20 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     public DataFilePlan planOverwriteChanges() {
         withKind(ScanKind.DELTA);
         FileStoreScan.Plan plan = scan.plan();
-        Long snapshotId = plan.snapshotId();
+        long snapshotId = plan.snapshotId();
+
+        SnapshotManager snapshotManager = new SnapshotManager(fileIO, pathFactory.root());
+        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
+        if (snapshot.commitKind() != Snapshot.CommitKind.OVERWRITE) {
+            throw new IllegalStateException(
+                    "Cannot plan overwrite changes from a non-overwrite snapshot.");
+        }
 
         List<DataSplit> splits = new ArrayList<>();
 
         splits.addAll(
                 generateSplits(
-                        snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
+                        snapshotId,
                         true,
                         true,
                         splitGenerator(pathFactory),
@@ -150,7 +157,7 @@ public abstract class AbstractDataTableScan implements DataTableScan {
 
         splits.addAll(
                 generateSplits(
-                        snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
+                        snapshotId,
                         true,
                         false,
                         splitGenerator(pathFactory),
