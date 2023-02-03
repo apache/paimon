@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.schema;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 import org.apache.flink.util.StringUtils;
 
 import java.io.Serializable;

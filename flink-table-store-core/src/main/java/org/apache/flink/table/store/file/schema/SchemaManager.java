@@ -42,7 +42,7 @@ import org.apache.flink.table.store.types.MapType;
 import org.apache.flink.table.store.types.MultisetType;
 import org.apache.flink.table.store.types.ReassignFieldId;
 import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -61,7 +61,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.utils.FileUtils.listVersionedFiles;
-import static org.apache.flink.util.Preconditions.checkState;
+import static org.apache.flink.table.store.utils.Preconditions.checkState;
 
 /** Schema Manager to manage schema versions. */
 public class SchemaManager implements Serializable {

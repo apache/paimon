@@ -58,7 +58,7 @@ import java.util.stream.IntStream;
 
 import static org.apache.flink.table.store.connector.RocksDBOptions.LOOKUP_CACHE_ROWS;
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.transformFieldMapping;
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /** A lookup {@link TableFunction} for file store. */
 public class FileStoreLookupFunction extends TableFunction<org.apache.flink.table.data.RowData> {

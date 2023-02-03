@@ -32,7 +32,7 @@ import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import java.util.ArrayList;
 import java.util.Collections;

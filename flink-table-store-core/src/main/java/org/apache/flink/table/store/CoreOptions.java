@@ -33,7 +33,7 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.Options;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import java.io.Serializable;
 import java.lang.annotation.ElementType;
@@ -55,7 +55,7 @@ import static org.apache.flink.configuration.description.TextElement.text;
 import static org.apache.flink.table.store.file.WriteMode.APPEND_ONLY;
 import static org.apache.flink.table.store.file.schema.TableSchema.KEY_FIELD_PREFIX;
 import static org.apache.flink.table.store.file.schema.TableSchema.SYSTEM_FIELD_NAMES;
-import static org.apache.flink.util.Preconditions.checkState;
+import static org.apache.flink.table.store.utils.Preconditions.checkState;
 
 /** Core options for table store. */
 public class CoreOptions implements Serializable {

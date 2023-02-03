@@ -28,7 +28,7 @@ import org.apache.flink.table.store.types.TimestampType;
 
 import java.nio.ByteOrder;
 
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /**
  * An implementation of {@link InternalRow} which is backed by {@link MemorySegment} instead of

@@ -20,7 +20,7 @@ package org.apache.flink.table.store.connector.sink;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import javax.annotation.Nullable;
 

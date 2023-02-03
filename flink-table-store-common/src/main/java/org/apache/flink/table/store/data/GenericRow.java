@@ -24,7 +24,7 @@ import org.apache.flink.table.store.types.RowType;
 import java.util.Arrays;
 import java.util.Objects;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 
 /**
  * An internal data structure representing data of {@link RowType}.

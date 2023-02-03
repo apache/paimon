@@ -34,8 +34,8 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.Preconditions;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
-import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 

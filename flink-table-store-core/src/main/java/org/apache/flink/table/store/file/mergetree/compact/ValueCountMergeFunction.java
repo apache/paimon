@@ -25,7 +25,7 @@ import org.apache.flink.table.store.types.RowKind;
 
 import javax.annotation.Nullable;
 
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /**
  * A {@link MergeFunction} where key is the full record and value is a count which represents number

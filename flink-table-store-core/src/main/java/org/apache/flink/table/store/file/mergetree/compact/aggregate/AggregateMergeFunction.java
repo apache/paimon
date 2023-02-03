@@ -34,9 +34,9 @@ import java.io.Serializable;
 import java.util.List;
 
 import static org.apache.flink.configuration.ConfigOptions.key;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 import static org.apache.flink.table.store.utils.RowDataUtils.createFieldGetters;
-import static org.apache.flink.util.Preconditions.checkArgument;
-import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record,

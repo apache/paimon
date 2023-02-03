@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.memory;
 
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.table.store.utils.Preconditions;
 
 import java.lang.reflect.Field;
 import java.nio.Buffer;

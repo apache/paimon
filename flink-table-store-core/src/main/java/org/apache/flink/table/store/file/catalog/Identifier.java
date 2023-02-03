@@ -23,7 +23,7 @@ import org.apache.flink.util.StringUtils;
 import java.io.Serializable;
 import java.util.Objects;
 
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /** Identifies an object in a catalog. */
 public class Identifier implements Serializable {
