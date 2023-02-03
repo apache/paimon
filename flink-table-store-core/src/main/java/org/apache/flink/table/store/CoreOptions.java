@@ -401,6 +401,61 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to create underlying storage when reading and writing the table.");
 
+    public static final ConfigOption<Duration> PARTITION_EXPIRATION_TIME =
+            key("partition.expiration-time")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The expiration interval of a partition. A partition will be expired if"
+                                    + " it‘s lifetime is over this value. Partition time is extracted from"
+                                    + " the partition value.");
+
+    public static final ConfigOption<Duration> PARTITION_EXPIRATION_CHECK_INTERVAL =
+            key("partition.expiration-check-interval")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
+                    .withDescription("The check interval of partition expiration.");
+
+    public static final ConfigOption<String> PARTITION_TIMESTAMP_FORMATTER =
+            key("partition.timestamp-formatter")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "The formatter to format timestamp from string. It can be used"
+                                                    + " with 'partition.timestamp-pattern' to create a formatter"
+                                                    + " using the specified value.")
+                                    .list(
+                                            text(
+                                                    "Default formatter is 'yyyy-MM-dd HH:mm:ss' and 'yyyy-MM-dd'."),
+                                            text(
+                                                    "Supports multiple partition fields like '$year-$month-$day $hour:00:00'."),
+                                            text(
+                                                    "The timestamp-formatter is compatible with Java's DateTimeFormatter."))
+                                    .build());
+
+    public static final ConfigOption<String> PARTITION_TIMESTAMP_PATTERN =
+            key("partition.timestamp-pattern")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "You can specify a pattern to get a timestamp from partitions. "
+                                                    + "The formatter pattern is defined by 'partition.timestamp-formatter'.")
+                                    .list(
+                                            text("By default, read from the first field."),
+                                            text(
+                                                    "If the timestamp in the partition is a single field called 'dt', you can use '$dt'."),
+                                            text(
+                                                    "If it is spread across multiple fields for year, month, day, and hour,"
+                                                            + " you can use '$year-$month-$day $hour:00:00'."),
+                                            text(
+                                                    "If the timestamp is in fields dt and hour, you can use '$dt "
+                                                            + "$hour:00:00'."))
+                                    .build());
+
     private final Configuration options;
 
     public CoreOptions(Map<String, String> options) {
@@ -594,6 +649,22 @@ public class CoreOptions implements Serializable {
 
     public boolean writeOnly() {
         return options.get(WRITE_ONLY);
+    }
+
+    public Duration partitionExpireTime() {
+        return options.get(PARTITION_EXPIRATION_TIME);
+    }
+
+    public Duration partitionExpireCheckInterval() {
+        return options.get(PARTITION_EXPIRATION_CHECK_INTERVAL);
+    }
+
+    public String partitionTimestampFormatter() {
+        return options.get(PARTITION_TIMESTAMP_FORMATTER);
+    }
+
+    public String partitionTimestampPattern() {
+        return options.get(PARTITION_TIMESTAMP_PATTERN);
     }
 
     /** Specifies the merge engine for table with primary key. */
@@ -846,6 +917,13 @@ public class CoreOptions implements Serializable {
             throw new TableException(
                     "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if "
                             + "still want to keep the primary key definition.");
+        }
+
+        if (schema.options().containsKey(CoreOptions.PARTITION_EXPIRATION_TIME.key())) {
+            if (schema.partitionKeys().isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Can not set 'partition.expiration-time' for non-partitioned table.");
+            }
         }
     }
 

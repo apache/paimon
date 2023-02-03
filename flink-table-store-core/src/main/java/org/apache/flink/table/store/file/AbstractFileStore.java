@@ -25,11 +25,13 @@ import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.operation.FileStoreCommitImpl;
 import org.apache.flink.table.store.file.operation.FileStoreExpireImpl;
+import org.apache.flink.table.store.file.operation.PartitionExpire;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.time.Duration;
 import java.util.Comparator;
 
 /**
@@ -121,6 +123,23 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 snapshotManager(),
                 manifestFileFactory(),
                 manifestListFactory());
+    }
+
+    @Override
+    public PartitionExpire newPartitionExpire(String commitUser) {
+        Duration partitionExpireTime = options.partitionExpireTime();
+        if (partitionExpireTime == null || partitionType().getFieldCount() == 0) {
+            return null;
+        }
+
+        return new PartitionExpire(
+                partitionType(),
+                partitionExpireTime,
+                options.partitionExpireCheckInterval(),
+                options.partitionTimestampPattern(),
+                options.partitionTimestampFormatter(),
+                newScan(),
+                newCommit(commitUser));
     }
 
     public abstract Comparator<RowData> newKeyComparator();
