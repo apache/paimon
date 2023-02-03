@@ -83,7 +83,6 @@ public class PartitionExpireTest {
 
     @Test
     public void test() throws Exception {
-        path = new Path(tempDir.toUri());
         SchemaManager schemaManager = new SchemaManager(path);
         schemaManager.commitNewVersion(
                 new UpdateSchema(

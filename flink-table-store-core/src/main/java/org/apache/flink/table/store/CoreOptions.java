@@ -406,7 +406,9 @@ public class CoreOptions implements Serializable {
                     .durationType()
                     .noDefaultValue()
                     .withDescription(
-                            "Judge whether the partition is expired according to the time extracted from the partition value.");
+                            "The expiration interval of a partition. A partition will be expired if"
+                                    + " it‘s lifetime is over this value. Partition time is extracted from"
+                                    + " the partition value.");
 
     public static final ConfigOption<Duration> PARTITION_EXPIRATION_CHECK_INTERVAL =
             key("partition.expiration-check-interval")
@@ -421,13 +423,16 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             Description.builder()
                                     .text(
-                                            "The formatter to format timestamp from string, it can be used with 'partition.timestamp-pattern', "
-                                                    + "creates a formatter using the specified value. "
-                                                    + "Supports multiple partition fields like '$year-$month-$day $hour:00:00'.")
+                                            "The formatter to format timestamp from string. It can be used"
+                                                    + " with 'partition.timestamp-pattern' to create a formatter"
+                                                    + " using the specified value.")
                                     .list(
                                             text(
-                                                    "The timestamp-formatter is compatible with "
-                                                            + "Java's DateTimeFormatter."))
+                                                    "Default formatter is 'yyyy-MM-dd HH:mm:ss' and 'yyyy-MM-dd'."),
+                                            text(
+                                                    "Supports multiple partition fields like '$year-$month-$day $hour:00:00'."),
+                                            text(
+                                                    "The timestamp-formatter is compatible with Java's DateTimeFormatter."))
                                     .build());
 
     public static final ConfigOption<String> PARTITION_TIMESTAMP_PATTERN =
@@ -438,14 +443,14 @@ public class CoreOptions implements Serializable {
                             Description.builder()
                                     .text(
                                             "You can specify a pattern to get a timestamp from partitions. "
-                                                    + "the formatter pattern is defined by 'partition.timestamp-formatter'.")
+                                                    + "The formatter pattern is defined by 'partition.timestamp-formatter'.")
                                     .list(
-                                            text(
-                                                    "By default, a format of 'yyyy-MM-dd hh:mm:ss' is read from the first field."),
+                                            text("By default, read from the first field."),
                                             text(
                                                     "If the timestamp in the partition is a single field called 'dt', you can use '$dt'."),
                                             text(
-                                                    "If it is spread across multiple fields for year, month, day, and hour, you can use '$year-$month-$day $hour:00:00'."),
+                                                    "If it is spread across multiple fields for year, month, day, and hour,"
+                                                            + " you can use '$year-$month-$day $hour:00:00'."),
                                             text(
                                                     "If the timestamp is in fields dt and hour, you can use '$dt "
                                                             + "$hour:00:00'."))

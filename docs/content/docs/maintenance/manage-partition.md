@@ -54,28 +54,28 @@ More options:
     </thead>
     <tbody>
         <tr>
-            <td><h5>partition.expiration-time</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Duration</td>
-            <td>Judge whether the partition is expired according to the time extracted from the partition value.</td>
-        </tr>
-        <tr>
             <td><h5>partition.expiration-check-interval</h5></td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
             <td>The check interval of partition expiration.</td>
         </tr>
         <tr>
+            <td><h5>partition.expiration-time</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</td>
+        </tr>
+        <tr>
             <td><h5>partition.timestamp-formatter</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>The formatter to format timestamp from string, it can be used with 'partition.timestamp-pattern', creates a formatter using the specified value. Supports multiple partition fields like '$year-$month-$day $hour:00:00'.<ul><li>The timestamp-formatter is compatible with Java's DateTimeFormatter.</li></ul></td>
+            <td>The formatter to format timestamp from string. It can be used with 'partition.timestamp-pattern' to create a formatter using the specified value.<ul><li>Default formatter is 'yyyy-MM-dd HH:mm:ss' and 'yyyy-MM-dd'.</li><li>Supports multiple partition fields like '$year-$month-$day $hour:00:00'.</li><li>The timestamp-formatter is compatible with Java's DateTimeFormatter.</li></ul></td>
         </tr>
         <tr>
             <td><h5>partition.timestamp-pattern</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>You can specify a pattern to get a timestamp from partitions. the formatter pattern is defined by 'partition.timestamp-formatter'.<ul><li>By default, a format of 'yyyy-MM-dd hh:mm:ss' is read from the first field.</li><li>If the timestamp in the partition is a single field called 'dt', you can use '$dt'.</li><li>If it is spread across multiple fields for year, month, day, and hour, you can use '$year-$month-$day $hour:00:00'.</li><li>If the timestamp is in fields dt and hour, you can use '$dt $hour:00:00'.</li></ul></td>
+            <td>You can specify a pattern to get a timestamp from partitions. The formatter pattern is defined by 'partition.timestamp-formatter'.<ul><li>By default, read from the first field.</li><li>If the timestamp in the partition is a single field called 'dt', you can use '$dt'.</li><li>If it is spread across multiple fields for year, month, day, and hour, you can use '$year-$month-$day $hour:00:00'.</li><li>If the timestamp is in fields dt and hour, you can use '$dt $hour:00:00'.</li></ul></td>
         </tr>
     </tbody>
 </table>

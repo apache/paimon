@@ -40,7 +40,7 @@ import java.util.stream.Collectors;
 public class PartitionExpire {
 
     private final List<String> partitionKeys;
-    private final RowDataToObjectArrayConverter objectArrayConverter;
+    private final RowDataToObjectArrayConverter toObjectArrayConverter;
     private final Duration expirationTime;
     private final Duration checkInterval;
     private final PartitionTimeExtractor timeExtractor;
@@ -58,7 +58,7 @@ public class PartitionExpire {
             FileStoreScan scan,
             FileStoreCommit commit) {
         this.partitionKeys = partitionType.getFieldNames();
-        this.objectArrayConverter = new RowDataToObjectArrayConverter(partitionType);
+        this.toObjectArrayConverter = new RowDataToObjectArrayConverter(partitionType);
         this.expirationTime = expirationTime;
         this.checkInterval = checkInterval;
         this.timeExtractor = new PartitionTimeExtractor(timePattern, timeFormatter);
@@ -93,7 +93,7 @@ public class PartitionExpire {
         List<BinaryRowData> partitions = readPartitions();
         List<Map<String, String>> expired = new ArrayList<>();
         for (BinaryRowData partition : partitions) {
-            Object[] array = objectArrayConverter.convert(partition);
+            Object[] array = toObjectArrayConverter.convert(partition);
             LocalDateTime partTime = timeExtractor.extract(partitionKeys, Arrays.asList(array));
             if (expireDateTime.isAfter(partTime)) {
                 expired.add(toPartitionString(array));
