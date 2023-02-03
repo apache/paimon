@@ -26,6 +26,8 @@ import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.types.RowKind;
 
+import static org.apache.flink.util.Preconditions.checkNotNull;
+
 /**
  * An implementation of {@link InternalRow} which provides a casted view of the underlying {@link
  * InternalRow}.
@@ -42,7 +44,7 @@ public class CastedRow implements InternalRow {
     private InternalRow row;
 
     protected CastedRow(CastFieldGetter[] castMapping) {
-        this.castMapping = castMapping;
+        this.castMapping = checkNotNull(castMapping);
     }
 
     /**
@@ -78,78 +80,72 @@ public class CastedRow implements InternalRow {
 
     @Override
     public boolean getBoolean(int pos) {
-        return castMapping == null ? row.getBoolean(pos) : castMapping[pos].getFieldOrNull(row);
+        return castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
     public byte getByte(int pos) {
-        return castMapping == null ? row.getByte(pos) : castMapping[pos].getFieldOrNull(row);
+        return castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
     public short getShort(int pos) {
-        return castMapping == null ? row.getShort(pos) : castMapping[pos].getFieldOrNull(row);
+        return castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
     public int getInt(int pos) {
-        return castMapping == null ? row.getInt(pos) : castMapping[pos].getFieldOrNull(row);
+        return castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
     public long getLong(int pos) {
-        return castMapping == null ? row.getLong(pos) : castMapping[pos].getFieldOrNull(row);
+        return castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
     public float getFloat(int pos) {
-        return castMapping == null ? row.getFloat(pos) : castMapping[pos].getFieldOrNull(row);
+        return castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
     public double getDouble(int pos) {
-        return castMapping == null ? row.getDouble(pos) : castMapping[pos].getFieldOrNull(row);
+        return castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
     public BinaryString getString(int pos) {
-        return castMapping == null ? row.getString(pos) : castMapping[pos].getFieldOrNull(row);
+        return castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
     public Decimal getDecimal(int pos, int precision, int scale) {
-        return castMapping == null
-                ? row.getDecimal(pos, precision, scale)
-                : castMapping[pos].getFieldOrNull(row);
+        return castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
     public Timestamp getTimestamp(int pos, int precision) {
-        return castMapping == null
-                ? row.getTimestamp(pos, precision)
-                : castMapping[pos].getFieldOrNull(row);
+        return castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
     public byte[] getBinary(int pos) {
-        return castMapping == null ? row.getBinary(pos) : castMapping[pos].getFieldOrNull(row);
+        return castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
     public InternalArray getArray(int pos) {
-        return castMapping == null ? row.getArray(pos) : castMapping[pos].getFieldOrNull(row);
+        return castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
     public InternalMap getMap(int pos) {
-        return castMapping == null ? row.getMap(pos) : castMapping[pos].getFieldOrNull(row);
+        return castMapping[pos].getFieldOrNull(row);
     }
 
     @Override
     public InternalRow getRow(int pos, int numFields) {
-        return castMapping == null
-                ? row.getRow(pos, numFields)
-                : castMapping[pos].getFieldOrNull(row);
+        return castMapping[pos].getFieldOrNull(row);
     }
 
     /**
