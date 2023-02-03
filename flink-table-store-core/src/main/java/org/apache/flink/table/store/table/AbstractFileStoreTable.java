@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.FileStore;
@@ -48,7 +49,8 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         this.tableSchema = tableSchema;
     }
 
-    protected abstract FileStore<?> store();
+    @VisibleForTesting
+    public abstract FileStore<?> store();
 
     protected abstract FileStoreTable copy(TableSchema newTableSchema);
 
@@ -115,6 +117,8 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public TableCommit newCommit(String commitUser) {
         return new TableCommit(
-                store().newCommit(commitUser), options().writeOnly() ? null : store().newExpire());
+                store().newCommit(commitUser),
+                options().writeOnly() ? null : store().newExpire(),
+                options().writeOnly() ? null : store().newPartitionExpire(commitUser));
     }
 }
