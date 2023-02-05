@@ -1,6 +1,6 @@
 ---
 title: "Configurations"
-weight: 4
+weight: 10
 type: docs
 aliases:
 - /development/configurations.html
