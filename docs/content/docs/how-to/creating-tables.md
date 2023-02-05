@@ -107,9 +107,11 @@ CREATE TABLE MyTable (
 {{< /tabs >}}
 
 {{< hint info >}}
-
 Partition keys must be a subset of primary keys if primary keys are defined.
+{{< /hint >}}
 
+{{< hint info >}}
+By configuring [partition.expiration-time]({{< ref "docs/maintenance/manage-partition" >}}), expired partitions can be automatically deleted.
 {{< /hint >}}
 
 ### Create Table Like

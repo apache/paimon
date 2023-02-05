@@ -24,8 +24,11 @@ import org.apache.flink.table.store.file.operation.FileStoreExpire;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
+import org.apache.flink.table.store.file.operation.PartitionExpire;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.types.RowType;
+
+import javax.annotation.Nullable;
 
 import java.io.Serializable;
 
@@ -51,4 +54,7 @@ public interface FileStore<T> extends Serializable {
     FileStoreCommit newCommit(String commitUser);
 
     FileStoreExpire newExpire();
+
+    @Nullable
+    PartitionExpire newPartitionExpire(String commitUser);
 }
