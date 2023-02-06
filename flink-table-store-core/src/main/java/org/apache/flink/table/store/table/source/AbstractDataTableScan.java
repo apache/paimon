@@ -126,8 +126,43 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                 generateSplits(
                         snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
                         scanKind != ScanKind.ALL,
+                        false,
                         splitGenerator(pathFactory),
-                        plan.groupByPartFiles(plan.files(FileKind.ADD)));
+                        FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.ADD)));
+        return new DataFilePlan(snapshotId, splits);
+    }
+
+    @Override
+    public DataFilePlan planOverwriteChanges() {
+        withKind(ScanKind.DELTA);
+        FileStoreScan.Plan plan = scan.plan();
+        long snapshotId = plan.snapshotId();
+
+        SnapshotManager snapshotManager = new SnapshotManager(fileIO, pathFactory.root());
+        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
+        if (snapshot.commitKind() != Snapshot.CommitKind.OVERWRITE) {
+            throw new IllegalStateException(
+                    "Cannot plan overwrite changes from a non-overwrite snapshot.");
+        }
+
+        List<DataSplit> splits = new ArrayList<>();
+
+        splits.addAll(
+                generateSplits(
+                        snapshotId,
+                        true,
+                        true,
+                        splitGenerator(pathFactory),
+                        FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.DELETE))));
+
+        splits.addAll(
+                generateSplits(
+                        snapshotId,
+                        true,
+                        false,
+                        splitGenerator(pathFactory),
+                        FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.ADD))));
+
         return new DataFilePlan(snapshotId, splits);
     }
 
@@ -135,6 +170,7 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     public static List<DataSplit> generateSplits(
             long snapshotId,
             boolean isIncremental,
+            boolean reverseRowKind,
             SplitGenerator splitGenerator,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
         List<DataSplit> splits = new ArrayList<>();
@@ -148,13 +184,23 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                     // Don't split when incremental
                     splits.add(
                             new DataSplit(
-                                    snapshotId, partition, bucket, bucketEntry.getValue(), true));
+                                    snapshotId,
+                                    partition,
+                                    bucket,
+                                    bucketEntry.getValue(),
+                                    true,
+                                    reverseRowKind));
                 } else {
                     splitGenerator.split(bucketEntry.getValue()).stream()
                             .map(
                                     files ->
                                             new DataSplit(
-                                                    snapshotId, partition, bucket, files, false))
+                                                    snapshotId,
+                                                    partition,
+                                                    bucket,
+                                                    files,
+                                                    false,
+                                                    reverseRowKind))
                             .forEach(splits::add);
                 }
             }

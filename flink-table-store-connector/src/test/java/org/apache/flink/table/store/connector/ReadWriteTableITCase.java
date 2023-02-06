@@ -20,6 +20,7 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.testutils.FlinkAssertions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
@@ -59,7 +60,6 @@ import static org.apache.flink.table.planner.factories.TestValuesTableFactory.ch
 import static org.apache.flink.table.store.connector.AbstractTableStoreFactory.buildFileStoreTable;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.SCAN_PARALLELISM;
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.SINK_PARALLELISM;
-import static org.apache.flink.table.store.connector.ReadWriteTableTestBase.assertNoMoreRecords;
 import static org.apache.flink.table.store.connector.TableStoreTestBase.createResolvedTable;
 import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.bExeEnv;
@@ -77,11 +77,19 @@ import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil
 import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.sEnv;
 import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.testBatchRead;
 import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.testStreamingRead;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.validateStreamingReadResult;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Table Store reading and writing IT cases. */
 public class ReadWriteTableITCase extends AbstractTestBase {
+
+    private final Map<String, String> streamingReadOverwrite =
+            new HashMap<String, String>() {
+                {
+                    put(CoreOptions.STREAMING_READ_OVERWRITE.key(), "true");
+                }
+            };
 
     @BeforeEach
     public void setUp() {
@@ -120,16 +128,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         testBatchRead(buildSimpleQuery(table), initialRecords);
 
-        BlockingIterator<Row, Row> streamItr =
-                testStreamingRead(buildSimpleQuery(table), initialRecords);
-
-        // test refresh after overwriting
         insertOverwritePartition(
                 table, "PARTITION (dt = '2022-01-02')", "('Euro', 100)", "('Yen', 1)");
-
-        // streaming iterator will not receive any changelog
-        assertNoMoreRecords(streamItr);
-        streamItr.close();
 
         // batch read to check partition refresh
         testBatchRead(
@@ -222,27 +222,6 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         checkFileStorePath(table, Arrays.asList("dt=2022-01-01", "dt=2022-01-02"));
 
         testBatchRead(buildSimpleQuery(table), initialRecords);
-
-        // overwrite
-        insertOverwrite(table, "('Euro', 90, '2022-01-01')", "('Yen', 2, '2022-01-02')");
-
-        // test streaming read
-        testStreamingRead(
-                        buildSimpleQuery(table),
-                        Arrays.asList(
-                                changelogRow("+I", "Euro", 90L, "2022-01-01"),
-                                changelogRow("+I", "Yen", 2L, "2022-01-02")))
-                .close();
-
-        // overwrite with initial data
-        insertOverwrite(
-                table,
-                "('US Dollar', 102, '2022-01-01')",
-                "('Euro', 114, '2022-01-01')",
-                "('Yen', 1, '2022-01-01')",
-                "('Euro', 114, '2022-01-01')",
-                "('US Dollar', 114, '2022-01-01')",
-                "('Euro', 119, '2022-01-02')");
 
         // test partition filter
         testBatchRead(buildQuery(table, "*", "WHERE dt >= '2022-01-01'"), initialRecords);
@@ -425,9 +404,6 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         Collections.singletonList("dt"));
 
         insertIntoFromTable(temporaryTable, table);
-
-        sEnv.executeSql(String.format("INSERT INTO `%s` SELECT * FROM `%s`", table, temporaryTable))
-                .await();
 
         checkFileStorePath(table, Arrays.asList("dt=2022-01-01", "dt=2022-01-02"));
 
@@ -742,6 +718,107 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     // ----------------------------------------------------------------------------------------------------------------
+    // Streaming Read of Overwrite
+    // ----------------------------------------------------------------------------------------------------------------
+
+    @Test
+    public void testStreamingReadOverwriteWithPartitionedRecords() throws Exception {
+        String table =
+                createTable(
+                        Arrays.asList("currency STRING", "rate BIGINT", "dt String"),
+                        Arrays.asList("currency", "dt"),
+                        Collections.singletonList("dt"),
+                        streamingReadOverwrite);
+
+        insertInto(
+                table,
+                "('US Dollar', 114, '2022-01-01')",
+                "('Yen', 1, '2022-01-01')",
+                "('Euro', 114, '2022-01-01')",
+                "('Euro', 119, '2022-01-02')");
+
+        checkFileStorePath(table, Arrays.asList("dt=2022-01-01", "dt=2022-01-02"));
+
+        // test reading after overwriting
+        insertOverwritePartition(table, "PARTITION (dt = '2022-01-01')", "('US Dollar', 120)");
+
+        BlockingIterator<Row, Row> streamingItr =
+                testStreamingRead(
+                        buildSimpleQuery(table),
+                        Arrays.asList(
+                                // part = 2022-01-01
+                                changelogRow("+I", "US Dollar", 120L, "2022-01-01"),
+                                // part = 2022-01-02
+                                changelogRow("+I", "Euro", 119L, "2022-01-02")));
+
+        // test refresh after overwriting
+        insertOverwritePartition(
+                table, "PARTITION (dt = '2022-01-02')", "('Euro', 100)", "('Yen', 1)");
+
+        validateStreamingReadResult(
+                streamingItr,
+                Arrays.asList(
+                        // part = 2022-01-02
+                        changelogRow("-D", "Euro", 119L, "2022-01-02"),
+                        changelogRow("+I", "Euro", 100L, "2022-01-02"),
+                        changelogRow("+I", "Yen", 1L, "2022-01-02")));
+
+        streamingItr.close();
+    }
+
+    @Test
+    public void testStreamingReadOverwriteWithoutPartitionedRecords() throws Exception {
+        String table =
+                createTable(
+                        Arrays.asList("currency STRING", "rate BIGINT", "dt STRING"),
+                        Collections.singletonList("currency"),
+                        Collections.emptyList(),
+                        streamingReadOverwrite);
+
+        insertInto(
+                table,
+                "('US Dollar', 102, '2022-01-01')",
+                "('Yen', 1, '2022-01-02')",
+                "('Euro', 119, '2022-01-02')");
+
+        checkFileStorePath(table, Collections.emptyList());
+
+        // test projection and filter
+        BlockingIterator<Row, Row> streamingItr =
+                testStreamingRead(
+                        buildQuery(table, "currency, rate", "WHERE dt = '2022-01-02'"),
+                        Arrays.asList(
+                                changelogRow("+I", "Yen", 1L), changelogRow("+I", "Euro", 119L)));
+
+        insertOverwrite(table, "('US Dollar', 100, '2022-01-02')", "('Yen', 10, '2022-01-01')");
+
+        validateStreamingReadResult(
+                streamingItr,
+                Arrays.asList(
+                        changelogRow("-D", "Yen", 1L),
+                        changelogRow("-D", "Euro", 119L),
+                        changelogRow("+I", "US Dollar", 100L)));
+
+        streamingItr.close();
+    }
+
+    @Test
+    public void testUnsupportStreamingReadOverwriteWithoutPk() {
+        assertThatThrownBy(
+                        () ->
+                                createTable(
+                                        Arrays.asList(
+                                                "currency STRING", "rate BIGINT", "dt String"),
+                                        Collections.emptyList(),
+                                        Collections.singletonList("dt"),
+                                        streamingReadOverwrite))
+                .satisfies(
+                        FlinkAssertions.anyCauseMatches(
+                                RuntimeException.class,
+                                "Doesn't support streaming read the changes from overwrite when the primary keys are not defined."));
+    }
+
+    // ----------------------------------------------------------------------------------------------------------------
     // Keyword
     // ----------------------------------------------------------------------------------------------------------------
 
@@ -782,7 +859,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         changelogRow("+I", 2, "test%2"),
                         changelogRow("+I", 8, "tests"),
                         changelogRow("+I", 10, "tested"),
-                        changelogRow("+I", 20, "test_123")));
+                        changelogRow("+I", 20, "test_123"),
+                        changelogRow("+I", 100, "test%fff")));
 
         testBatchRead(
                 buildQuery(table, "*", "WHERE f1 LIKE 'v%'"),

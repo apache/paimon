@@ -18,13 +18,10 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.store.data.InternalRow;
-
 import org.apache.commons.lang3.StringUtils;
 import org.apache.spark.sql.AnalysisException;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
@@ -192,7 +189,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testDropSingleColumn() throws Exception {
+    public void testDropSingleColumn() {
         createTable("testDropSingleColumn");
         writeTable("testDropSingleColumn", "(1, 2L, '1')", "(5, 6L, '3')");
 
@@ -227,7 +224,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testDropColumns() throws Exception {
+    public void testDropColumns() {
         createTable("testDropColumns");
 
         List<Row> beforeRename =
@@ -332,22 +329,26 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                 "b"));
     }
 
-    /**
-     * In fact, the table store does not currently support alter column type. In this case, changing
-     * "a" type from int to bigint can run successfully because the underlying orc supports directly
-     * reading int to bigint. At present, we read int value from orc into {@link InternalRow}
-     * according to the underlying data schema, and then read long from {@link InternalRow} will
-     * cause failure. TODO: This case needs to be ignored first and will be completely fixed in
-     * https://issues.apache.org/jira/browse/FLINK-27845
-     */
-    @Disabled
     @Test
-    public void testAlterColumnType() throws Exception {
+    public void testAlterColumnType() {
         createTable("testAlterColumnType");
         writeTable("testAlterColumnType", "(1, 2L, '1')", "(5, 6L, '3')");
 
-        spark.sql("ALTER TABLE tablestore.default.testAlterColumnType ALTER COLUMN a TYPE BIGINT");
-        innerTestSimpleType(spark.table("tablestore.default.testAlterColumnType"));
+        spark.sql("ALTER TABLE tablestore.default.testAlterColumnType ALTER COLUMN b TYPE DOUBLE");
+        assertThat(
+                        spark.table("tablestore.default.testAlterColumnType").collectAsList()
+                                .stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[1,2.0,1]", "[5,6.0,3]");
+
+        spark.sql("ALTER TABLE tablestore.default.testAlterColumnType DROP COLUMNS a");
+        assertThat(
+                        spark.table("tablestore.default.testAlterColumnType").collectAsList()
+                                .stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[2.0,1]", "[6.0,3]");
     }
 
     @Test
@@ -447,112 +448,169 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
      * Test for schema evolution as followed:
      *
      * <ul>
-     *   <li>1. Create table with fields ["a", "b", "c"], insert 2 records
-     *   <li>2. Rename "a->aa", "c"->"a", "b"->"c", insert 2 records
-     *   <li>3. Drop fields "aa", "c", insert 2 records
-     *   <li>4. Add new fields "d", "c", "b", insert 2 records
+     *   <li>1. Create table with fields [(1, a, int), (2, b, bigint), (3, c, string), (4, d, int),
+     *       (5, e, int), (6, f, int)], insert 2 records
+     *   <li>2. Rename (a, int)->(aa, bigint), c->a, b->c, (d, int)->(b, bigint), (f, int)->(ff,
+     *       float), the fields are [(1, aa, bigint), (2, c, bigint), (3, a, string), (4, b,
+     *       bigint), (5, e, int), (6, ff, float)] and insert 2 records
+     *   <li>3. Drop fields aa, c, e, the fields are [(3, a, string), (4, b, bigint), (6, ff,
+     *       float)] and insert 2 records
+     *   <li>4. Add new fields d, c, e, the fields are [(3, a, string), (4, b, bigint), (6, ff,
+     *       float), (7, d, int), (8, c, int), (9, e, int)] insert 2 records
      * </ul>
      *
      * <p>Verify records in table above.
      */
     @Test
-    public void testSchemaEvolution() throws Exception {
+    public void testSchemaEvolution() {
         // Create table with fields [a, b, c] and insert 2 records
-        createTable("testSchemaEvolution");
-        writeTable("testSchemaEvolution", "(1, 2L, '3')", "(4, 5L, '6')");
-        assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
-                .isEqualTo("[[1,2,3], [4,5,6]]");
+        spark.sql(
+                "CREATE TABLE tablestore.default.testSchemaEvolution(\n"
+                        + "a INT NOT NULL, \n"
+                        + "b BIGINT NOT NULL, \n"
+                        + "c VARCHAR(10), \n"
+                        + "d INT NOT NULL, \n"
+                        + "e INT NOT NULL, \n"
+                        + "f INT NOT NULL) \n"
+                        + "TBLPROPERTIES ('file.format'='avro')");
+        writeTable("testSchemaEvolution", "(1, 2L, '3', 4, 5, 6)", "(7, 8L, '9', 10, 11, 12)");
         assertThat(
-                        spark.table("tablestore.default.testSchemaEvolution")
-                                .select("a", "b", "c")
-                                .collectAsList()
-                                .toString())
-                .isEqualTo("[[1,2,3], [4,5,6]]");
+                        spark.table("tablestore.default.testSchemaEvolution").collectAsList()
+                                .stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[1,2,3,4,5,6]", "[7,8,9,10,11,12]");
         assertThat(
-                        spark.table("tablestore.default.testSchemaEvolution")
-                                .filter("a>1")
-                                .collectAsList()
-                                .toString())
-                .isEqualTo("[[4,5,6]]");
+                        spark.table("tablestore.default.testSchemaEvolution").select("a", "c", "e")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[1,3,5]", "[7,9,11]");
+        assertThat(
+                        spark.table("tablestore.default.testSchemaEvolution").filter("a>1")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[7,8,9,10,11,12]");
 
-        // Rename "a->aa", "c"->"a", "b"->"c" and the fields are [aa, c, a], insert 2 records
+        // Rename (a, int)->(aa, bigint), c->a, b->c, (d, int)->(b, bigint), (f, int)->(ff, float),
+        // the fields are [(1, aa, bigint), (2, c, bigint), (3, a, string), (4, b, bigint), (5, e,
+        // int), (6, ff, float)] and insert 2 records
         spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution RENAME COLUMN a to aa");
+        spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution ALTER COLUMN aa TYPE bigint");
         spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution RENAME COLUMN c to a");
         spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution RENAME COLUMN b to c");
-        writeTable("testSchemaEvolution", "(7, 8L, '9')", "(10, 11L, '12')");
-        assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
-                .isEqualTo("[[1,2,3], [4,5,6], [7,8,9], [10,11,12]]");
+        spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution RENAME COLUMN d to b");
+        spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution ALTER COLUMN b TYPE bigint");
+        spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution RENAME COLUMN f to ff");
+        spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution ALTER COLUMN ff TYPE float");
+        writeTable(
+                "testSchemaEvolution",
+                "(13L, 14L, '15', 16L, 17, 18.0F)",
+                "(19L, 20L, '21', 22L, 23, 24.0F)");
+        assertThat(
+                        spark.table("tablestore.default.testSchemaEvolution").collectAsList()
+                                .stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[1,2,3,4,5,6.0]",
+                        "[7,8,9,10,11,12.0]",
+                        "[13,14,15,16,17,18.0]",
+                        "[19,20,21,22,23,24.0]");
         assertThat(
                         spark.table("tablestore.default.testSchemaEvolution")
-                                .select("aa", "a", "c")
-                                .collectAsList()
-                                .toString())
-                .isEqualTo("[[1,3,2], [4,6,5], [7,9,8], [10,12,11]]");
+                                .select("aa", "b", "ff").collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[1,4,6.0]", "[7,10,12.0]", "[13,16,18.0]", "[19,22,24.0]");
         assertThat(
                         spark.table("tablestore.default.testSchemaEvolution")
-                                .select("aa", "a", "c")
-                                .filter("aa>4")
-                                .collectAsList()
-                                .toString())
-                .isEqualTo("[[7,9,8], [10,12,11]]");
+                                .select("aa", "a", "ff").filter("b>10L").collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[13,15,18.0]", "[19,21,24.0]");
 
-        // Drop fields "aa", "c" and the fields are [a], insert 2 records
-        spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution DROP COLUMNS aa, c");
-        writeTable("testSchemaEvolution", "('13')", "('14')");
-        assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
-                .isEqualTo("[[3], [6], [9], [12], [13], [14]]");
-        assertThat(
-                        spark.table("tablestore.default.testSchemaEvolution")
-                                .select("a")
-                                .filter("a>10")
-                                .collectAsList()
-                                .toString())
-                .isEqualTo("[[12], [13], [14]]");
+        // Drop fields aa, c, e, the fields are [(3, a, string), (4, b, bigint), (6, ff, float)] and
+        // insert 2 records
+        spark.sql("ALTER TABLE tablestore.default.testSchemaEvolution DROP COLUMNS aa, c, e");
+        writeTable("testSchemaEvolution", "('25', 26L, 27.0F)", "('28', 29L, 30.0)");
 
-        // Add new fields "d", "c", "b" and the fields are [a, d, c, b], insert 2 records
+        assertThat(
+                        spark.table("tablestore.default.testSchemaEvolution").collectAsList()
+                                .stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[3,4,6.0]",
+                        "[9,10,12.0]",
+                        "[15,16,18.0]",
+                        "[21,22,24.0]",
+                        "[25,26,27.0]",
+                        "[28,29,30.0]");
+        assertThat(
+                        spark.table("tablestore.default.testSchemaEvolution").select("a", "ff")
+                                .filter("b>10L").collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[15,18.0]", "[21,24.0]", "[25,27.0]", "[28,30.0]");
+
+        // Add new fields d, c, e, the fields are [(3, a, string), (4, b, bigint), (6, ff, float),
+        // (7, d, int), (8, c, int), (9, e, int)] insert 2 records
         spark.sql(
-                "ALTER TABLE tablestore.default.testSchemaEvolution ADD COLUMNS (d INT, c INT, b INT)");
-        writeTable("testSchemaEvolution", "('15', 16, 17, 18)", "('19', 20, 21, 22)");
-        assertThat(spark.table("tablestore.default.testSchemaEvolution").collectAsList().toString())
-                .isEqualTo(
-                        "[[3,null,null,null], "
-                                + "[6,null,null,null], "
-                                + "[9,null,null,null], "
-                                + "[12,null,null,null], "
-                                + "[13,null,null,null], "
-                                + "[14,null,null,null], "
-                                + "[15,16,17,18], "
-                                + "[19,20,21,22]]");
+                "ALTER TABLE tablestore.default.testSchemaEvolution ADD COLUMNS (d INT, c INT, e INT)");
+        writeTable(
+                "testSchemaEvolution",
+                "('31', 32L, 33.0F, 34, 35, 36)",
+                "('37', 38L, 39.0F, 40, 41, 42)");
+
+        assertThat(
+                        spark.table("tablestore.default.testSchemaEvolution").collectAsList()
+                                .stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[3,4,6.0,null,null,null]",
+                        "[9,10,12.0,null,null,null]",
+                        "[15,16,18.0,null,null,null]",
+                        "[21,22,24.0,null,null,null]",
+                        "[25,26,27.0,null,null,null]",
+                        "[28,29,30.0,null,null,null]",
+                        "[31,32,33.0,34,35,36]",
+                        "[37,38,39.0,40,41,42]");
+        assertThat(
+                        spark.table("tablestore.default.testSchemaEvolution").filter("b>10")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[15,16,18.0,null,null,null]",
+                        "[21,22,24.0,null,null,null]",
+                        "[25,26,27.0,null,null,null]",
+                        "[28,29,30.0,null,null,null]",
+                        "[31,32,33.0,34,35,36]",
+                        "[37,38,39.0,40,41,42]");
         assertThat(
                         spark.table("tablestore.default.testSchemaEvolution")
-                                .filter("a>10")
-                                .collectAsList()
-                                .toString())
-                .isEqualTo(
-                        "[[12,null,null,null], "
-                                + "[13,null,null,null], "
-                                + "[14,null,null,null], "
-                                + "[15,16,17,18], "
-                                + "[19,20,21,22]]");
+                                .select("e", "a", "ff", "d", "b").filter("b>10L").collectAsList()
+                                .stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[null,15,18.0,null,16]",
+                        "[null,21,24.0,null,22]",
+                        "[null,25,27.0,null,26]",
+                        "[null,28,30.0,null,29]",
+                        "[36,31,33.0,34,32]",
+                        "[42,37,39.0,40,38]");
         assertThat(
                         spark.table("tablestore.default.testSchemaEvolution")
-                                .select("a", "b", "c", "d")
-                                .filter("a>10")
-                                .collectAsList()
-                                .toString())
-                .isEqualTo(
-                        "[[12,null,null,null], "
-                                + "[13,null,null,null], "
-                                + "[14,null,null,null], "
-                                + "[15,18,17,16], "
-                                + "[19,22,21,20]]");
-        assertThat(
-                        spark.table("tablestore.default.testSchemaEvolution")
-                                .select("a", "b", "c", "d")
-                                .filter("a>10 and b is not null")
-                                .collectAsList()
-                                .toString())
-                .isEqualTo("[[15,18,17,16], [19,22,21,20]]");
+                                .select("e", "a", "ff", "d", "b").filter("b>10 and e is not null")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[36,31,33.0,34,32]", "[42,37,39.0,40,38]");
     }
 
     @Test

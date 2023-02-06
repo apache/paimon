@@ -33,10 +33,6 @@ public class MemoryUtils {
 
     private static final long BUFFER_ADDRESS_FIELD_OFFSET =
             getClassFieldOffset(Buffer.class, "address");
-    private static final long BUFFER_CAPACITY_FIELD_OFFSET =
-            getClassFieldOffset(Buffer.class, "capacity");
-    private static final Class<?> DIRECT_BYTE_BUFFER_CLASS =
-            getClassByName("java.nio.DirectByteBuffer");
 
     @SuppressWarnings("restriction")
     private static sun.misc.Unsafe getUnsafe() {
@@ -91,54 +87,6 @@ public class MemoryUtils {
             return Class.forName(className);
         } catch (ClassNotFoundException e) {
             throw new Error("Could not find class '" + className + "' for unsafe operations.", e);
-        }
-    }
-
-    /**
-     * Allocates unsafe native memory.
-     *
-     * @param size size of the unsafe memory to allocate.
-     * @return address of the allocated unsafe memory
-     */
-    static long allocateUnsafe(long size) {
-        return UNSAFE.allocateMemory(Math.max(1L, size));
-    }
-
-    /**
-     * Creates a cleaner to release the unsafe memory.
-     *
-     * @param address address of the unsafe memory to release
-     * @param customCleanup A custom action to clean up GC
-     * @return action to run to release the unsafe memory manually
-     */
-    static Runnable createMemoryCleaner(long address, Runnable customCleanup) {
-        return () -> {
-            releaseUnsafe(address);
-            customCleanup.run();
-        };
-    }
-
-    private static void releaseUnsafe(long address) {
-        UNSAFE.freeMemory(address);
-    }
-
-    /**
-     * Wraps the unsafe native memory with a {@link ByteBuffer}.
-     *
-     * @param address address of the unsafe memory to wrap
-     * @param size size of the unsafe memory to wrap
-     * @return a {@link ByteBuffer} which is a view of the given unsafe memory
-     */
-    static ByteBuffer wrapUnsafeMemoryWithByteBuffer(long address, int size) {
-        //noinspection OverlyBroadCatchBlock
-        try {
-            ByteBuffer buffer = (ByteBuffer) UNSAFE.allocateInstance(DIRECT_BYTE_BUFFER_CLASS);
-            UNSAFE.putLong(buffer, BUFFER_ADDRESS_FIELD_OFFSET, address);
-            UNSAFE.putInt(buffer, BUFFER_CAPACITY_FIELD_OFFSET, size);
-            buffer.clear();
-            return buffer;
-        } catch (Throwable t) {
-            throw new Error("Failed to wrap unsafe off-heap memory with ByteBuffer", t);
         }
     }
 

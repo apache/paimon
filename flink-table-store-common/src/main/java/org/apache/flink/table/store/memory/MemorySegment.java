@@ -102,14 +102,6 @@ public final class MemorySegment {
         }
     }
 
-    public long getAddress() {
-        if (heapMemory == null) {
-            return address;
-        } else {
-            throw new IllegalStateException("Memory segment does not represent off heap memory");
-        }
-    }
-
     public ByteBuffer wrap(int offset, int length) {
         return wrapInternal(offset, length);
     }

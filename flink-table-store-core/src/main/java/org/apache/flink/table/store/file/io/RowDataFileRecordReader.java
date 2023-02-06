@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.file.casting.CastFieldGetter;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FormatReaderFactory;
@@ -34,22 +35,27 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
 
     private final RecordReader<InternalRow> reader;
     @Nullable private final int[] indexMapping;
+    @Nullable private final CastFieldGetter[] castMapping;
 
     public RowDataFileRecordReader(
             FileIO fileIO,
             Path path,
             FormatReaderFactory readerFactory,
-            @Nullable int[] indexMapping)
+            @Nullable int[] indexMapping,
+            @Nullable CastFieldGetter[] castMapping)
             throws IOException {
         this.reader = FileUtils.createFormatReader(fileIO, readerFactory, path);
         this.indexMapping = indexMapping;
+        this.castMapping = castMapping;
     }
 
     @Nullable
     @Override
     public RecordReader.RecordIterator<InternalRow> readBatch() throws IOException {
         RecordIterator<InternalRow> iterator = reader.readBatch();
-        return iterator == null ? null : new RowDataFileRecordIterator(iterator, indexMapping);
+        return iterator == null
+                ? null
+                : new RowDataFileRecordIterator(iterator, indexMapping, castMapping);
     }
 
     @Override
@@ -62,8 +68,10 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
         private final RecordIterator<InternalRow> iterator;
 
         private RowDataFileRecordIterator(
-                RecordIterator<InternalRow> iterator, @Nullable int[] indexMapping) {
-            super(indexMapping);
+                RecordIterator<InternalRow> iterator,
+                @Nullable int[] indexMapping,
+                @Nullable CastFieldGetter[] castMapping) {
+            super(indexMapping, castMapping);
             this.iterator = iterator;
         }
 

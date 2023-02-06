@@ -19,7 +19,9 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.store.file.KeyValue;
+import org.apache.flink.table.store.file.casting.CastFieldGetter;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.schema.IndexCastMapping;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -36,16 +38,26 @@ import java.util.List;
 /** Class with index mapping and bulk format. */
 public class BulkFormatMapping {
     @Nullable private final int[] indexMapping;
+    @Nullable private final CastFieldGetter[] castMapping;
     private final FormatReaderFactory bulkFormat;
 
-    public BulkFormatMapping(int[] indexMapping, FormatReaderFactory bulkFormat) {
+    public BulkFormatMapping(
+            int[] indexMapping,
+            @Nullable CastFieldGetter[] castMapping,
+            FormatReaderFactory bulkFormat) {
         this.indexMapping = indexMapping;
+        this.castMapping = castMapping;
         this.bulkFormat = bulkFormat;
     }
 
     @Nullable
     public int[] getIndexMapping() {
         return indexMapping;
+    }
+
+    @Nullable
+    public CastFieldGetter[] getCastMapping() {
+        return castMapping;
     }
 
     public FormatReaderFactory getReaderFactory() {
@@ -115,8 +127,8 @@ public class BulkFormatMapping {
              *   <li>the data key fields: 1->a, 2->b, 3->c
              * </ul>
              *
-             * The value fields of table and data are 0->value_count, the key and value projections
-             * are as follows
+             * <p>The value fields of table and data are 0->value_count, the key and value
+             * projections are as follows
              *
              * <ul>
              *   <li>table key projection: [0, 1, 2, 3], value projection: [0], data projection: [0,
@@ -125,11 +137,11 @@ public class BulkFormatMapping {
              *       2, 3, 4, 5] where 3/4 is seq/kind and 5 is value
              * </ul>
              *
-             * We will get value index mapping null fro above and we can't create projection index
-             * mapping based on key and value index mapping any more.
+             * <p>We will get value index mapping null from above and we can't create projection
+             * index mapping based on key and value index mapping any more.
              */
-            int[] indexMapping =
-                    SchemaEvolutionUtil.createIndexMapping(
+            IndexCastMapping indexCastMapping =
+                    SchemaEvolutionUtil.createIndexCastMapping(
                             Projection.of(tableProjection).toTopLevelIndexes(),
                             tableKeyFields,
                             tableValueFields,
@@ -143,7 +155,8 @@ public class BulkFormatMapping {
                             : SchemaEvolutionUtil.createDataFilters(
                                     tableSchema.fields(), dataSchema.fields(), filters);
             return new BulkFormatMapping(
-                    indexMapping,
+                    indexCastMapping.getIndexMapping(),
+                    indexCastMapping.getCastMapping(),
                     formatDiscover
                             .discover(formatIdentifier)
                             .createReaderFactory(dataRecordType, dataProjection, dataFilters));

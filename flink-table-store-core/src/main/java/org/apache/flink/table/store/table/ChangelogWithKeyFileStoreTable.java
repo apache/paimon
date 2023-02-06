@@ -153,6 +153,11 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         return new AbstractDataTableScan(
                 fileIO(), scan, tableSchema, store().pathFactory(), options()) {
             @Override
+            public boolean supportStreamingReadOverwrite() {
+                return new CoreOptions(tableSchema.options()).streamingReadOverwrite();
+            }
+
+            @Override
             protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
                 return new MergeTreeSplitGenerator(
                         store().newKeyComparator(),

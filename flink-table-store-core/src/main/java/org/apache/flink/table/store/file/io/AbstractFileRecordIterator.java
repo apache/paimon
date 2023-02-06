@@ -19,6 +19,8 @@
 package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.file.casting.CastFieldGetter;
+import org.apache.flink.table.store.file.casting.CastedRow;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.utils.ProjectedRow;
 
@@ -31,14 +33,25 @@ import javax.annotation.Nullable;
  */
 public abstract class AbstractFileRecordIterator<V> implements RecordReader.RecordIterator<V> {
     @Nullable private final ProjectedRow projectedRow;
+    @Nullable private final CastedRow castedRow;
 
-    protected AbstractFileRecordIterator(@Nullable int[] indexMapping) {
+    protected AbstractFileRecordIterator(
+            @Nullable int[] indexMapping, @Nullable CastFieldGetter[] castMapping) {
         this.projectedRow = indexMapping == null ? null : ProjectedRow.from(indexMapping);
+        this.castedRow = castMapping == null ? null : CastedRow.from(castMapping);
     }
 
     protected InternalRow mappingRowData(InternalRow rowData) {
-        return projectedRow == null
-                ? rowData
-                : (rowData == null ? null : projectedRow.replaceRow(rowData));
+        if (rowData == null) {
+            return null;
+        }
+        if (projectedRow != null) {
+            rowData = projectedRow.replaceRow(rowData);
+        }
+        if (castedRow != null) {
+            rowData = castedRow.replaceRow(rowData);
+        }
+
+        return rowData;
     }
 }
