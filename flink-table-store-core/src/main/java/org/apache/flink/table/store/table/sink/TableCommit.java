@@ -22,6 +22,7 @@ import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.operation.FileStoreCommit;
 import org.apache.flink.table.store.file.operation.FileStoreExpire;
 import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.flink.table.store.file.operation.PartitionExpire;
 
 import javax.annotation.Nullable;
 
@@ -38,13 +39,18 @@ public class TableCommit implements AutoCloseable {
 
     private final FileStoreCommit commit;
     @Nullable private final FileStoreExpire expire;
+    @Nullable private final PartitionExpire partitionExpire;
 
     @Nullable private List<Map<String, String>> overwritePartitions = null;
     @Nullable private Lock lock;
 
-    public TableCommit(FileStoreCommit commit, @Nullable FileStoreExpire expire) {
+    public TableCommit(
+            FileStoreCommit commit,
+            @Nullable FileStoreExpire expire,
+            @Nullable PartitionExpire partitionExpire) {
         this.commit = commit;
         this.expire = expire;
+        this.partitionExpire = partitionExpire;
     }
 
     public TableCommit withOverwritePartition(@Nullable Map<String, String> overwritePartition) {
@@ -65,6 +71,10 @@ public class TableCommit implements AutoCloseable {
 
         if (expire != null) {
             expire.withLock(lock);
+        }
+
+        if (partitionExpire != null) {
+            partitionExpire.withLock(lock);
         }
 
         this.lock = lock;
@@ -112,6 +122,10 @@ public class TableCommit implements AutoCloseable {
 
         if (expire != null) {
             expire.expire();
+        }
+
+        if (partitionExpire != null) {
+            partitionExpire.expire();
         }
     }
 
