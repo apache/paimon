@@ -22,9 +22,8 @@ import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputSerializer;
 import org.apache.flink.core.memory.DataOutputView;
+import org.apache.flink.table.store.utils.InstantiationUtil;
 
-import org.apache.commons.lang3.SerializationException;
-import org.apache.commons.lang3.SerializationUtils;
 import org.junit.Assert;
 import org.junit.jupiter.api.Test;
 
@@ -136,8 +135,8 @@ public abstract class SerializerTestBase<T> {
             Serializer<T> ser1 = getSerializer();
             Serializer<T> ser2;
             try {
-                ser2 = SerializationUtils.clone(ser1);
-            } catch (SerializationException e) {
+                ser2 = InstantiationUtil.clone(ser1);
+            } catch (Throwable e) {
                 fail("The serializer is not serializable: " + e);
                 return;
             }
