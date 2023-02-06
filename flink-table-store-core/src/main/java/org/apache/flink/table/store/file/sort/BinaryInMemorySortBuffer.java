@@ -26,8 +26,8 @@ import org.apache.flink.table.store.data.BinaryRowSerializer;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.SimpleCollectingOutputView;
 import org.apache.flink.table.store.file.memory.MemorySegmentPool;
+import org.apache.flink.table.store.file.utils.MutableObjectIterator;
 import org.apache.flink.table.store.memory.MemorySegment;
-import org.apache.flink.util.MutableObjectIterator;
 
 import java.io.EOFException;
 import java.io.IOException;

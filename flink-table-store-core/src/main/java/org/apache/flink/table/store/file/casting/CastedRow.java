@@ -26,7 +26,7 @@ import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.types.RowKind;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 
 /**
  * An implementation of {@link InternalRow} which provides a casted view of the underlying {@link

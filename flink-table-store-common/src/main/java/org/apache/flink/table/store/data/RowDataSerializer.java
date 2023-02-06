@@ -30,7 +30,7 @@ import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.util.InstantiationUtil;
+import org.apache.flink.table.store.utils.InstantiationUtil;
 
 import java.io.IOException;
 import java.util.Arrays;

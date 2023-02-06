@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.utils;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.RowDataUtils;
-import org.apache.flink.util.StringUtils;
+import org.apache.flink.table.store.utils.StringUtils;
 
 import java.util.Arrays;
 import java.util.LinkedHashMap;

@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.format.orc.filter;
 
+import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.predicate.FieldRef;
 import org.apache.flink.table.store.file.predicate.FunctionVisitor;
 import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.util.function.TriFunction;
 
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
 
@@ -210,5 +210,28 @@ public class OrcPredicateFunctionVisitor
             default:
                 return null;
         }
+    }
+
+    /**
+     * Function which takes three arguments.
+     *
+     * @param <S> type of the first argument
+     * @param <T> type of the second argument
+     * @param <U> type of the third argument
+     * @param <R> type of the return value
+     */
+    @PublicEvolving
+    @FunctionalInterface
+    private interface TriFunction<S, T, U, R> {
+
+        /**
+         * Applies this function to the given arguments.
+         *
+         * @param s the first function argument
+         * @param t the second function argument
+         * @param u the third function argument
+         * @return the function result
+         */
+        R apply(S s, T t, U u);
     }
 }

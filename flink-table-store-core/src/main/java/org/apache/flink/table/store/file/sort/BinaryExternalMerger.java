@@ -26,7 +26,7 @@ import org.apache.flink.table.store.file.compression.BlockCompressionFactory;
 import org.apache.flink.table.store.file.disk.ChannelReaderInputView;
 import org.apache.flink.table.store.file.disk.ChannelReaderInputViewIterator;
 import org.apache.flink.table.store.file.disk.IOManager;
-import org.apache.flink.util.MutableObjectIterator;
+import org.apache.flink.table.store.file.utils.MutableObjectIterator;
 
 import java.io.IOException;
 import java.util.ArrayList;

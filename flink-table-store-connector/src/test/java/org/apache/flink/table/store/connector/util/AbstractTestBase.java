@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.connector.util;
 
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
+import org.apache.flink.table.store.utils.FileIOUtils;
 import org.apache.flink.test.junit5.MiniClusterExtension;
-import org.apache.flink.util.FileUtils;
 import org.apache.flink.util.TestLogger;
 
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -72,7 +72,7 @@ public class AbstractTestBase extends TestLogger {
             f.getParentFile().mkdirs();
         }
         f.createNewFile();
-        FileUtils.writeFileUtf8(f, contents);
+        FileIOUtils.writeFileUtf8(f, contents);
         return f.toString();
     }
 

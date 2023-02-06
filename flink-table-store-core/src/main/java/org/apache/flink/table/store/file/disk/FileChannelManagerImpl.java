@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.disk;
 
 import org.apache.flink.table.store.file.disk.FileIOChannel.Enumerator;
 import org.apache.flink.table.store.file.disk.FileIOChannel.ID;
-import org.apache.flink.util.FileUtils;
-import org.apache.flink.util.IOUtils;
+import org.apache.flink.table.store.utils.FileIOUtils;
+import org.apache.flink.table.store.utils.IOUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -112,7 +112,7 @@ public class FileChannelManagerImpl implements FileChannelManager {
     private AutoCloseable getFileCloser(File path) {
         return () -> {
             try {
-                FileUtils.deleteDirectory(path);
+                FileIOUtils.deleteDirectory(path);
                 LOG.info(
                         "FileChannelManager removed spill file directory {}",
                         path.getAbsolutePath());

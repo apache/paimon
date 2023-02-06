@@ -20,7 +20,7 @@ package org.apache.flink.table.store.data;
 
 import org.apache.flink.core.memory.SeekableDataInputView;
 import org.apache.flink.table.store.memory.MemorySegment;
-import org.apache.flink.util.MathUtils;
+import org.apache.flink.table.store.utils.MathUtils;
 
 import java.io.EOFException;
 import java.util.ArrayList;
