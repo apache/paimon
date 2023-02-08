@@ -32,9 +32,6 @@ import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 
-import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.NewTopic;
-
 import javax.annotation.Nullable;
 
 import java.nio.file.Paths;
@@ -43,8 +40,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -136,8 +131,7 @@ public class ReadWriteTableTestUtil {
             List<String> fieldsSpec,
             List<String> primaryKeys,
             List<String> partitionKeys,
-            boolean manuallyCreateLogTable)
-            throws Exception {
+            boolean manuallyCreateLogTable) {
         String topic = "topic_" + UUID.randomUUID();
         String table =
                 createTable(
@@ -153,22 +147,10 @@ public class ReadWriteTableTestUtil {
                         });
 
         if (manuallyCreateLogTable) {
-            createKafkaLogTable(topic);
             createTopicIfNotExists(topic, 1);
         }
 
         return table;
-    }
-
-    private static void createKafkaLogTable(String topic) throws Exception {
-        Properties properties = new Properties();
-        properties.put("bootstrap.servers", getBootstrapServers());
-
-        try (AdminClient adminClient = AdminClient.create(properties)) {
-            NewTopic topicObj =
-                    new NewTopic(topic, Optional.of(1), Optional.empty()).configs(new HashMap<>());
-            adminClient.createTopics(Collections.singleton(topicObj)).all().get();
-        }
     }
 
     public static String createTemporaryTable(

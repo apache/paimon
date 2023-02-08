@@ -52,7 +52,7 @@ import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil
 import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.testBatchRead;
 import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.testStreamingRead;
 import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.testStreamingReadWithReadFirst;
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.validateStreamingReadResult;
 
 /** Streaming reading and writing with Kafka log IT cases. */
 public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBase {
@@ -119,11 +119,11 @@ public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBas
 
         insertIntoPartition(table, "PARTITION (dt = '2022-01-04')", "('Yen', 20)");
 
-        assertThat(streamItr.collect(2))
-                .containsExactlyInAnyOrderElementsOf(
-                        Arrays.asList(
-                                changelogRow("+I", "HK Dollar", 100L, "2022-01-03"),
-                                changelogRow("+I", "Yen", 20L, "2022-01-03")));
+        validateStreamingReadResult(
+                streamItr,
+                Arrays.asList(
+                        changelogRow("+I", "HK Dollar", 100L, "2022-01-03"),
+                        changelogRow("+I", "Yen", 20L, "2022-01-03")));
 
         // overwrite partition 2022-01-02
         insertOverwritePartition(
@@ -446,13 +446,13 @@ public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBas
 
         // test only read the latest log
         insertInto(table, "('US Dollar', 104, '2022-01-01')", "('Euro', 100, '2022-01-02')");
-        assertThat(streamItr.collect(4))
-                .containsExactlyInAnyOrderElementsOf(
-                        Arrays.asList(
-                                changelogRow("-U", "US Dollar", 102L, "2022-01-01"),
-                                changelogRow("+U", "US Dollar", 104L, "2022-01-01"),
-                                changelogRow("-U", "Euro", 119L, "2022-01-02"),
-                                changelogRow("+U", "Euro", 100L, "2022-01-02")));
+        validateStreamingReadResult(
+                streamItr,
+                Arrays.asList(
+                        changelogRow("-U", "US Dollar", 102L, "2022-01-01"),
+                        changelogRow("+U", "US Dollar", 104L, "2022-01-01"),
+                        changelogRow("-U", "Euro", 119L, "2022-01-02"),
+                        changelogRow("+U", "Euro", 100L, "2022-01-02")));
 
         assertNoMoreRecords(streamItr);
         streamItr.close();
