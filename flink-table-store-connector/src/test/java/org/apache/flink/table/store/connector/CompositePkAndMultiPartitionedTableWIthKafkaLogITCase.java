@@ -29,7 +29,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.SCAN_LATEST;
@@ -48,7 +47,7 @@ import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil
 import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.testBatchRead;
 import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.testStreamingRead;
 import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.testStreamingReadWithReadFirst;
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.validateStreamingReadResult;
 
 /**
  * IT cases of streaming reading and writing tables which have composite primary keys and multiple
@@ -156,16 +155,11 @@ public class CompositePkAndMultiPartitionedTableWIthKafkaLogITCase extends Kafka
         // test streaming consume changelog
         insertInto(table, "('Chinese Yuan', 'HK Dollar', 1.231, '2022-01-03', '15')");
 
-        assertThat(streamingItr.collect(1, 5, TimeUnit.SECONDS))
-                .containsExactlyInAnyOrderElementsOf(
-                        Collections.singletonList(
-                                changelogRow(
-                                        "+I",
-                                        "Chinese Yuan",
-                                        "HK Dollar",
-                                        1.231d,
-                                        "2022-01-03",
-                                        "15")));
+        validateStreamingReadResult(
+                streamingItr,
+                Collections.singletonList(
+                        changelogRow(
+                                "+I", "Chinese Yuan", "HK Dollar", 1.231d, "2022-01-03", "15")));
 
         // dynamic overwrite the whole table
         bEnv.executeSql(
@@ -298,11 +292,10 @@ public class CompositePkAndMultiPartitionedTableWIthKafkaLogITCase extends Kafka
         insertIntoPartition(
                 table, "PARTITION (dt = '2022-01-03')", "('Chinese Yuan', 'HK Dollar', 1.231)");
 
-        assertThat(streamingItr.collect(1, 5, TimeUnit.SECONDS))
-                .containsExactlyInAnyOrderElementsOf(
-                        Collections.singletonList(
-                                changelogRow(
-                                        "+I", "Chinese Yuan", "HK Dollar", 1.231d, "2022-01-03")));
+        validateStreamingReadResult(
+                streamingItr,
+                Collections.singletonList(
+                        changelogRow("+I", "Chinese Yuan", "HK Dollar", 1.231d, "2022-01-03")));
         streamingItr.close();
 
         // filter on partition and field filter
@@ -378,10 +371,9 @@ public class CompositePkAndMultiPartitionedTableWIthKafkaLogITCase extends Kafka
         // test streaming consume changelog
         insertIntoPartition(table, "PARTITION (dt = '2022-04-02')", "('Euro', 116, '10')");
 
-        assertThat(streamingItr.collect(1, 5, TimeUnit.SECONDS))
-                .containsExactlyInAnyOrderElementsOf(
-                        Collections.singletonList(
-                                changelogRow("+I", "Euro", 116L, "2022-04-02", "10")));
+        validateStreamingReadResult(
+                streamingItr,
+                Collections.singletonList(changelogRow("+I", "Euro", 116L, "2022-04-02", "10")));
         streamingItr.close();
 
         // filter on partition and field filter
