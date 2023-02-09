@@ -58,7 +58,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
     @Test
     public void testReadExternalTable() throws Exception {
         final String table = "table_store_pk";
-        String tableStorePkPath = HDFS_ROOT + "/" + UUID.randomUUID().toString() + ".store";
+        String tableStorePkPath = HDFS_ROOT + "/" + UUID.randomUUID() + ".store";
         String tableStorePkDdl =
                 String.format(
                         "CREATE TABLE IF NOT EXISTS %s (\n"
@@ -67,17 +67,19 @@ public class HiveE2eTest extends E2eReaderTestBase {
                                 + "  c string,\n"
                                 + "  PRIMARY KEY (a, b) NOT ENFORCED\n"
                                 + ") WITH (\n"
-                                + "  'bucket' = '2',\n"
-                                + "  'root-path' = '%s'\n"
+                                + "  'bucket' = '2'\n"
                                 + ");",
-                        table, tableStorePkPath);
-        runSql(createInsertSql(table), tableStorePkDdl);
+                        table);
+        runSql(
+                createInsertSql(table),
+                createCatalogSql("table_store", tableStorePkPath),
+                tableStorePkDdl);
 
         String externalTablePkDdl =
                 String.format(
                         "CREATE EXTERNAL TABLE IF NOT EXISTS %s\n"
                                 + "STORED BY 'org.apache.flink.table.store.hive.TableStoreHiveStorageHandler'\n"
-                                + "LOCATION '%s/default_catalog.catalog/default_database.db/%s';\n",
+                                + "LOCATION '%s/default.db/%s';\n",
                         table, tableStorePkPath, table);
 
         checkQueryResults(table, this::executeQuery, externalTablePkDdl);
@@ -85,7 +87,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
 
     @Test
     public void testFlinkWriteAndHiveRead() throws Exception {
-        final String warehouse = HDFS_ROOT + "/" + UUID.randomUUID().toString() + ".warehouse";
+        final String warehouse = HDFS_ROOT + "/" + UUID.randomUUID() + ".warehouse";
         final String table = "t";
         runSql(
                 String.join(
