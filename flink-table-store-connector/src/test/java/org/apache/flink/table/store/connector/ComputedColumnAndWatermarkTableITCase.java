@@ -18,40 +18,76 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.table.store.CoreOptions.StartupMode;
+import org.apache.flink.table.store.kafka.KafkaTableTestBase;
+import org.apache.flink.types.Row;
 
+import org.junit.Before;
 import org.junit.Test;
 
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
-import static org.apache.flink.table.store.CoreOptions.SCAN_MODE;
-import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.rates;
-import static org.apache.flink.table.store.connector.ReadWriteTableTestUtil.ratesWithTimestamp;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.SCAN_LATEST;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.buildQuery;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.buildQueryWithTableOptions;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.buildSimpleQuery;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.createTable;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.createTableWithKafkaLog;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.createTemporaryTable;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.init;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.insertIntoFromTable;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.testBatchRead;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.testStreamingRead;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.testStreamingReadWithReadFirst;
 
-/** Table store IT case when the managed table has computed column and watermark spec. */
-public class ComputedColumnAndWatermarkTableITCase extends ReadWriteTableTestBase {
+/** Table store IT case when the table has computed column and watermark spec. */
+public class ComputedColumnAndWatermarkTableITCase extends KafkaTableTestBase {
+
+    @Before
+    public void setUp() throws Exception {
+        init(createAndRegisterTempFile("").toString());
+    }
 
     @Test
     public void testBatchSelectComputedColumn() throws Exception {
-        // input is rates()
-        collectAndCheckUnderSameEnv(
-                false,
-                false,
-                true,
-                Collections.emptyList(), // partition
-                Collections.emptyList(), // pk
-                Collections.singletonList(Tuple2.of("capital_currency", "UPPER(currency)")),
-                null,
-                true,
-                Collections.emptyMap(),
-                null,
-                Collections.singletonList("capital_currency"),
-                rates().stream()
+        // test 1
+        List<Row> initialRecords =
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", 102L),
+                        changelogRow("+I", "Euro", 114L),
+                        changelogRow("+I", "Yen", 1L),
+                        changelogRow("+I", "Euro", 114L),
+                        changelogRow("+I", "Euro", 119L));
+
+        String temporaryTable =
+                createTemporaryTable(
+                        Arrays.asList("currency STRING", "rate BIGINT"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        initialRecords,
+                        null,
+                        true,
+                        "I");
+
+        // write computed column to fieldSpec
+        String table =
+                createTable(
+                        Arrays.asList(
+                                "currency STRING",
+                                "rate BIGINT",
+                                "capital_currency AS UPPER(currency)"),
+                        Collections.emptyList(),
+                        Collections.emptyList());
+
+        insertIntoFromTable(temporaryTable, table);
+
+        testBatchRead(
+                buildQuery(table, "capital_currency", ""),
+                initialRecords.stream()
                         .map(
                                 row ->
                                         changelogRow(
@@ -59,191 +95,344 @@ public class ComputedColumnAndWatermarkTableITCase extends ReadWriteTableTestBas
                                                 ((String) row.getField(0)).toUpperCase()))
                         .collect(Collectors.toList()));
 
-        // input is rates()
-        collectAndCheckUnderSameEnv(
-                false,
-                false,
-                true,
-                Collections.emptyList(), // partition
-                Collections.singletonList("currency"), // pk
-                Collections.singletonList(Tuple2.of("capital_currency", "LOWER(currency)")),
-                null,
-                true,
-                Collections.emptyMap(),
-                null,
-                Collections.singletonList("capital_currency"),
+        // test 2
+        table =
+                createTable(
+                        Arrays.asList(
+                                "currency STRING",
+                                "rate BIGINT",
+                                "capital_currency AS LOWER(currency)"),
+                        Collections.singletonList("currency"),
+                        Collections.emptyList());
+
+        insertIntoFromTable(temporaryTable, table);
+
+        testBatchRead(
+                buildQuery(table, "capital_currency", ""),
                 Arrays.asList(
                         changelogRow("+I", "us dollar"),
                         changelogRow("+I", "yen"),
                         changelogRow("+I", "euro")));
 
-        // input is hourlyRates()
-        collectAndCheckUnderSameEnv(
-                false,
-                false,
-                true,
-                Arrays.asList("dt", "hh"), // partition
-                Arrays.asList("currency", "dt", "hh"), // pk
-                Collections.singletonList(Tuple2.of("dth", "dt || ' ' || hh")),
-                null,
-                true,
-                Collections.emptyMap(),
-                "dth = '2022-01-02 12'",
-                Collections.singletonList("dth"),
+        // test 3
+        initialRecords =
+                Arrays.asList(
+                        // dt = 2022-01-01, hh = 00
+                        changelogRow("+I", "US Dollar", 102L, "2022-01-01", "00"),
+                        changelogRow("+I", "Euro", 114L, "2022-01-01", "00"),
+                        changelogRow("+I", "Yen", 1L, "2022-01-01", "00"),
+                        changelogRow("+I", "Euro", 114L, "2022-01-01", "00"),
+                        changelogRow("+I", "US Dollar", 114L, "2022-01-01", "00"),
+                        // dt = 2022-01-01, hh = 20
+                        changelogRow("+I", "US Dollar", 102L, "2022-01-01", "20"),
+                        changelogRow("+I", "Euro", 114L, "2022-01-01", "20"),
+                        changelogRow("+I", "Yen", 1L, "2022-01-01", "20"),
+                        changelogRow("+I", "Euro", 114L, "2022-01-01", "20"),
+                        changelogRow("+I", "US Dollar", 114L, "2022-01-01", "20"),
+                        // dt = 2022-01-02, hh = 12
+                        changelogRow("+I", "Euro", 119L, "2022-01-02", "12"));
+
+        temporaryTable =
+                createTemporaryTable(
+                        Arrays.asList("currency STRING", "rate BIGINT", "dt STRING", "hh STRING"),
+                        Arrays.asList("currency", "dt", "hh"),
+                        Arrays.asList("dt", "hh"),
+                        initialRecords,
+                        "dt:2022-01-01,hh:00;dt:2022-01-01,hh:20;dt:2022-01-02,hh:12",
+                        true,
+                        "I");
+
+        table =
+                createTable(
+                        Arrays.asList(
+                                "currency STRING",
+                                "rate BIGINT",
+                                "dt STRING",
+                                "hh STRING",
+                                "dth AS dt || ' ' || hh"),
+                        Arrays.asList("currency", "dt", "hh"),
+                        Arrays.asList("dt", "hh"));
+
+        insertIntoFromTable(temporaryTable, table);
+
+        testBatchRead(
+                buildQuery(table, "dth", "WHERE dth = '2022-01-02 12'"),
                 Collections.singletonList(changelogRow("+I", "2022-01-02 12")));
 
-        // test proctime
-        collectAndCheckUnderSameEnv(
-                false,
-                false,
-                true,
-                Collections.emptyList(), // partition
-                Collections.singletonList("currency"), // pk
-                Collections.singletonList(Tuple2.of("ptime", "PROCTIME()")),
-                null,
-                true,
-                Collections.emptyMap(),
-                "currency = 'US Dollar'",
-                Collections.singletonList("CHAR_LENGTH(DATE_FORMAT(ptime, 'yyyy-MM-dd HH:mm'))"),
+        // test 4 (proctime)
+        table =
+                createTable(
+                        Arrays.asList(
+                                "currency STRING",
+                                "rate BIGINT",
+                                "dt STRING",
+                                "hh STRING",
+                                "ptime AS PROCTIME()"),
+                        Collections.singletonList("currency"),
+                        Collections.emptyList());
+
+        insertIntoFromTable(temporaryTable, table);
+
+        testBatchRead(
+                buildQuery(
+                        table,
+                        "CHAR_LENGTH(DATE_FORMAT(ptime, 'yyyy-MM-dd HH:mm'))",
+                        "WHERE currency = 'US Dollar'"),
                 Collections.singletonList(changelogRow("+I", 16)));
     }
 
     @Test
     public void testStreamingSelectComputedColumn() throws Exception {
-        // input is ratesChangelogWithUB()
-        collectAndCheckUnderSameEnv(
-                        true,
-                        true,
-                        false,
-                        Collections.emptyList(), // partition
-                        Collections.emptyList(), // pk
-                        Arrays.asList(
-                                Tuple2.of("capital_currency", "UPPER(currency)"),
-                                Tuple2.of("ptime", "PROCTIME()")),
+        // test 1
+        List<Row> initialRecords =
+                Arrays.asList(
+                        changelogRow("+I", "US Dollar", 102L),
+                        changelogRow("+I", "Euro", 114L),
+                        changelogRow("+I", "Yen", 1L),
+                        changelogRow("-U", "Euro", 114L),
+                        changelogRow("+U", "Euro", 116L),
+                        changelogRow("-D", "Euro", 116L),
+                        changelogRow("+I", "Euro", 119L),
+                        changelogRow("-U", "Euro", 119L),
+                        changelogRow("+U", "Euro", 119L),
+                        changelogRow("-D", "Yen", 1L),
+                        changelogRow("+I", null, 100L),
+                        changelogRow("+I", "HK Dollar", null));
+
+        String temporaryTable =
+                createTemporaryTable(
+                        Arrays.asList("currency STRING", "rate BIGINT"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        initialRecords,
                         null,
-                        true,
-                        Collections.emptyMap(),
-                        "currency IS NULL",
+                        false,
+                        "I,UA,UB,D");
+
+        String table =
+                createTableWithKafkaLog(
                         Arrays.asList(
-                                "capital_currency",
-                                "CHAR_LENGTH(DATE_FORMAT(ptime, 'yyyy-MM-dd HH:mm'))"),
+                                "currency STRING",
+                                "rate BIGINT",
+                                "capital_currency AS UPPER(currency)",
+                                "ptime AS PROCTIME()"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        false);
+
+        insertIntoFromTable(temporaryTable, table);
+
+        testStreamingRead(
+                        buildQuery(
+                                table,
+                                "capital_currency, CHAR_LENGTH(DATE_FORMAT(ptime, 'yyyy-MM-dd HH:mm'))",
+                                "WHERE currency IS NULL"),
                         Collections.singletonList(changelogRow("+I", null, 16)))
-                .f1
                 .close();
 
-        // input is dailyExchangeRatesChangelogWithoutUB()
-        collectAndCheckUnderSameEnv(
-                        true,
-                        true,
-                        false,
-                        Collections.singletonList("dt"), // partition
-                        Arrays.asList("from_currency", "to_currency", "dt"), // pk
+        // test 2
+        initialRecords =
+                Arrays.asList(
+                        // to_currency is USD
+                        changelogRow("+I", "US Dollar", "US Dollar", null, "2022-01-01"),
+                        changelogRow("+I", "Euro", "US Dollar", null, "2022-01-01"),
+                        changelogRow("+I", "HK Dollar", "US Dollar", 0.13d, "2022-01-01"),
+                        changelogRow("+I", "Yen", "US Dollar", 0.0082d, "2022-01-01"),
+                        changelogRow("-D", "Yen", "US Dollar", 0.0082d, "2022-01-01"),
+                        changelogRow("+I", "Singapore Dollar", "US Dollar", 0.74d, "2022-01-01"),
+                        changelogRow("+I", "Yen", "US Dollar", 0.0081d, "2022-01-01"),
+                        changelogRow("+U", "Euro", "US Dollar", 1.11d, "2022-01-01"),
+                        changelogRow("+U", "US Dollar", "US Dollar", 1.0d, "2022-01-01"),
+                        // to_currency is Euro
+                        changelogRow("+I", "US Dollar", "Euro", 0.9d, "2022-01-02"),
+                        changelogRow("+I", "Singapore Dollar", "Euro", 0.67d, "2022-01-02"),
+                        changelogRow("-D", "Singapore Dollar", "Euro", 0.67d, "2022-01-02"),
+                        // to_currency is Yen
+                        changelogRow("+I", "Yen", "Yen", 1.0d, "2022-01-02"),
+                        changelogRow("+I", "Chinese Yuan", "Yen", 19.25d, "2022-01-02"),
+                        changelogRow("+I", "Singapore Dollar", "Yen", 90.32d, "2022-01-02"),
+                        changelogRow("+U", "Singapore Dollar", "Yen", 122.46d, "2022-01-02"));
+
+        temporaryTable =
+                createTemporaryTable(
                         Arrays.asList(
-                                Tuple2.of(
-                                        "corrected_rate_by_to_currency",
-                                        "COALESCE(rate_by_to_currency, 1)"),
-                                Tuple2.of("ptime", "PROCTIME()")),
-                        null,
+                                "from_currency STRING",
+                                "to_currency STRING",
+                                "rate_by_to_currency DOUBLE",
+                                "dt STRING"),
+                        Arrays.asList("from_currency", "to_currency", "dt"),
+                        Collections.singletonList("dt"),
+                        initialRecords,
+                        "dt:2022-01-01;dt:2022-01-02",
                         false,
-                        Collections.singletonMap(
-                                SCAN_MODE.key(), StartupMode.LATEST.name().toLowerCase()),
-                        "rate_by_to_currency IS NULL",
+                        "I,UA,D");
+
+        table =
+                createTableWithKafkaLog(
                         Arrays.asList(
-                                "corrected_rate_by_to_currency",
-                                "CHAR_LENGTH(DATE_FORMAT(ptime, 'yyyy-MM-dd HH:mm'))"),
+                                "from_currency STRING",
+                                "to_currency STRING",
+                                "rate_by_to_currency DOUBLE",
+                                "dt STRING",
+                                "corrected_rate_by_to_currency AS COALESCE(rate_by_to_currency, 1)",
+                                "ptime AS PROCTIME()"),
+                        Arrays.asList("from_currency", "to_currency", "dt"),
+                        Collections.singletonList("dt"),
+                        true);
+
+        testStreamingReadWithReadFirst(
+                        temporaryTable,
+                        table,
+                        buildQueryWithTableOptions(
+                                table,
+                                "corrected_rate_by_to_currency, CHAR_LENGTH(DATE_FORMAT(ptime, 'yyyy-MM-dd HH:mm'))",
+                                "WHERE rate_by_to_currency IS NULL",
+                                SCAN_LATEST),
                         Collections.singletonList(changelogRow("+I", 1d, 16)))
-                .f1
                 .close();
     }
 
     @Test
     public void testBatchSelectWithWatermark() throws Exception {
-        // input is ratesWithTimestamp(), test `ts` as an ordinary field under batch mode
-        collectAndCheckUnderSameEnv(
-                false,
-                false,
-                true,
-                Collections.emptyList(), // partition
-                Collections.emptyList(), // pk
-                Collections.emptyList(), // computed column
-                WatermarkSpec.of("ts", "ts - INTERVAL '3' YEAR"),
-                true,
-                Collections.emptyMap(), // read hints
-                null,
-                Collections.emptyList(), // projection
-                ratesWithTimestamp());
+        List<Row> initialRecords =
+                Arrays.asList(
+                        changelogRow(
+                                "+I",
+                                "US Dollar",
+                                102L,
+                                LocalDateTime.parse("1990-04-07T10:00:11.120")),
+                        changelogRow(
+                                "+I", "Euro", 119L, LocalDateTime.parse("2020-04-07T10:10:11.120")),
+                        changelogRow(
+                                "+I", "Yen", 1L, LocalDateTime.parse("2022-04-07T09:54:11.120")));
+
+        String temporaryTable =
+                createTemporaryTable(
+                        Arrays.asList("currency STRING", "rate BIGINT", "ts TIMESTAMP(3)"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        initialRecords,
+                        null,
+                        true,
+                        "I");
+
+        String table =
+                createTable(
+                        Arrays.asList(
+                                "currency STRING",
+                                "rate BIGINT",
+                                "ts TIMESTAMP(3)",
+                                "WATERMARK FOR ts AS ts - INTERVAL '3' YEAR"),
+                        Collections.emptyList(),
+                        Collections.emptyList());
+
+        insertIntoFromTable(temporaryTable, table);
+
+        testBatchRead(buildSimpleQuery(table), initialRecords);
     }
 
     @Test
     public void testStreamingSelectWithWatermark() throws Exception {
-        String lateEventFilter = "CURRENT_WATERMARK(ts) IS NULL OR ts > CURRENT_WATERMARK(ts)";
-        // input is ratesWithTimestamp()
-
         // physical column as watermark
-        collectAndCheckUnderSameEnv(
+        List<Row> initialRecords =
+                Arrays.asList(
+                        changelogRow(
+                                "+I",
+                                "US Dollar",
+                                102L,
+                                LocalDateTime.parse("1990-04-07T10:00:11.120")),
+                        changelogRow(
+                                "+I", "Euro", 119L, LocalDateTime.parse("2020-04-07T10:10:11.120")),
+                        changelogRow(
+                                "+I", "Yen", 1L, LocalDateTime.parse("2022-04-07T09:54:11.120")));
+
+        String temporaryTable =
+                createTemporaryTable(
+                        Arrays.asList("currency STRING", "rate BIGINT", "ts TIMESTAMP(3)"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        initialRecords,
+                        null,
                         true,
-                        true,
-                        true,
-                        Collections.emptyList(), // partition
-                        Collections.emptyList(), // pk
-                        Collections.emptyList(), // computed column
-                        WatermarkSpec.of("ts", "ts - INTERVAL '3' YEAR"),
-                        false,
-                        Collections.singletonMap(
-                                SCAN_MODE.key(), StartupMode.LATEST.name().toLowerCase()),
-                        lateEventFilter,
-                        Collections.emptyList(), // projection
+                        "I");
+
+        String table =
+                createTableWithKafkaLog(
+                        Arrays.asList(
+                                "currency STRING",
+                                "rate BIGINT",
+                                "ts TIMESTAMP(3)",
+                                "WATERMARK FOR ts AS ts - INTERVAL '3' YEAR"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        true);
+
+        testStreamingReadWithReadFirst(
+                        temporaryTable,
+                        table,
+                        buildQueryWithTableOptions(
+                                table,
+                                "*",
+                                "WHERE CURRENT_WATERMARK(ts) IS NULL OR ts > CURRENT_WATERMARK(ts)",
+                                SCAN_LATEST),
                         Collections.singletonList(
                                 changelogRow(
                                         "+I",
                                         "US Dollar",
                                         102L,
                                         LocalDateTime.parse("1990-04-07T10:00:11.120"))))
-                .f1
                 .close();
 
         // computed column as watermark
-        collectAndCheckUnderSameEnv(
-                        true,
-                        true,
-                        true,
-                        Collections.emptyList(), // partition
-                        Collections.emptyList(), // pk
-                        Collections.singletonList(Tuple2.of("ts1", "ts")), // computed column
-                        WatermarkSpec.of("ts1", "ts1 - INTERVAL '3' YEAR"),
-                        false,
-                        Collections.singletonMap(
-                                SCAN_MODE.key(), StartupMode.LATEST.name().toLowerCase()),
-                        lateEventFilter.replaceAll("ts", "ts1"),
-                        Arrays.asList("currency", "rate", "ts1"),
+        table =
+                createTableWithKafkaLog(
+                        Arrays.asList(
+                                "currency STRING",
+                                "rate BIGINT",
+                                "ts TIMESTAMP(3)",
+                                "ts1 AS ts",
+                                "WATERMARK FOR ts1 AS ts1 - INTERVAL '3' YEAR"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        true);
+
+        testStreamingReadWithReadFirst(
+                        temporaryTable,
+                        table,
+                        buildQueryWithTableOptions(
+                                table,
+                                "currency, rate, ts1",
+                                "WHERE CURRENT_WATERMARK(ts1) IS NULL OR ts1 > CURRENT_WATERMARK(ts1)",
+                                SCAN_LATEST),
                         Collections.singletonList(
                                 changelogRow(
                                         "+I",
                                         "US Dollar",
                                         102L,
                                         LocalDateTime.parse("1990-04-07T10:00:11.120"))))
-                .f1
                 .close();
 
         // query both event time and processing time
-        collectAndCheckUnderSameEnv(
-                        true,
-                        true,
-                        true,
-                        Collections.emptyList(), // partition
-                        Collections.emptyList(), // pk
-                        Collections.singletonList(
-                                Tuple2.of("ptime", "PROCTIME()")), // computed column
-                        WatermarkSpec.of("ts", "ts - INTERVAL '3' YEAR"),
-                        false,
-                        Collections.singletonMap(
-                                SCAN_MODE.key(), StartupMode.LATEST.name().toLowerCase()),
-                        lateEventFilter,
+        table =
+                createTableWithKafkaLog(
                         Arrays.asList(
-                                "currency",
-                                "rate",
-                                "ts",
-                                "CHAR_LENGTH(DATE_FORMAT(ptime, 'yyyy-MM-dd HH:mm'))"), // projection
+                                "currency STRING",
+                                "rate BIGINT",
+                                "ts TIMESTAMP(3)",
+                                "ptime AS PROCTIME()",
+                                "WATERMARK FOR ts AS ts - INTERVAL '3' YEAR"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        true);
+
+        testStreamingReadWithReadFirst(
+                        temporaryTable,
+                        table,
+                        buildQueryWithTableOptions(
+                                table,
+                                "currency, rate, ts, CHAR_LENGTH(DATE_FORMAT(ptime, 'yyyy-MM-dd HH:mm'))",
+                                "WHERE CURRENT_WATERMARK(ts) IS NULL OR ts > CURRENT_WATERMARK(ts)",
+                                SCAN_LATEST),
                         Collections.singletonList(
                                 changelogRow(
                                         "+I",
@@ -251,7 +440,6 @@ public class ComputedColumnAndWatermarkTableITCase extends ReadWriteTableTestBas
                                         102L,
                                         LocalDateTime.parse("1990-04-07T10:00:11.120"),
                                         16)))
-                .f1
                 .close();
     }
 }

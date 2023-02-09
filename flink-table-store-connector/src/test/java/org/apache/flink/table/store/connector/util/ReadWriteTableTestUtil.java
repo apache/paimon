@@ -77,11 +77,15 @@ public class ReadWriteTableTestUtil {
     public static String warehouse;
 
     public static void init(String warehouse) {
-        StreamExecutionEnvironment sExeEnv = buildStreamEnv(DEFAULT_PARALLELISM);
+        init(warehouse, DEFAULT_PARALLELISM);
+    }
+
+    public static void init(String warehouse, int parallelism) {
+        StreamExecutionEnvironment sExeEnv = buildStreamEnv(parallelism);
         sExeEnv.getConfig().setRestartStrategy(RestartStrategies.noRestart());
         sEnv = StreamTableEnvironment.create(sExeEnv);
 
-        bExeEnv = buildBatchEnv(DEFAULT_PARALLELISM);
+        bExeEnv = buildBatchEnv(parallelism);
         bExeEnv.getConfig().setRestartStrategy(RestartStrategies.noRestart());
         bEnv = StreamTableEnvironment.create(bExeEnv, EnvironmentSettings.inBatchMode());
 
@@ -97,7 +101,7 @@ public class ReadWriteTableTestUtil {
         bEnv.useCatalog(catalog);
     }
 
-    private static StreamExecutionEnvironment buildStreamEnv(int parallelism) {
+    public static StreamExecutionEnvironment buildStreamEnv(int parallelism) {
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
         env.enableCheckpointing(100);
@@ -105,7 +109,7 @@ public class ReadWriteTableTestUtil {
         return env;
     }
 
-    private static StreamExecutionEnvironment buildBatchEnv(int parallelism) {
+    public static StreamExecutionEnvironment buildBatchEnv(int parallelism) {
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         env.setParallelism(parallelism);
