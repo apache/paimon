@@ -37,7 +37,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 /**
  * SHOW CREATE statement Util.
@@ -65,41 +64,6 @@ public class ShowCreateUtil {
         ddl.append(optionsToSql(tableOptions))
                 .append(String.format(" LIKE `%s` (EXCLUDING OPTIONS)\n", sourceTableName));
         return ddl.toString();
-    }
-
-    public static String buildInsertOverwriteQuery(
-            String managedTableName,
-            Map<String, String> staticPartitions,
-            List<String[]> overwriteRecords) {
-        StringBuilder insertDmlBuilder =
-                new StringBuilder(String.format("INSERT OVERWRITE `%s`", managedTableName));
-        if (staticPartitions.size() > 0) {
-            String partitionString =
-                    staticPartitions.entrySet().stream()
-                            .map(
-                                    entry ->
-                                            String.format(
-                                                    "%s = %s", entry.getKey(), entry.getValue()))
-                            .collect(Collectors.joining(", "));
-            insertDmlBuilder.append(String.format("PARTITION (%s)", partitionString));
-        }
-        insertDmlBuilder.append("\n VALUES ");
-        overwriteRecords.forEach(
-                record -> {
-                    int arity = record.length;
-                    insertDmlBuilder.append("(");
-                    IntStream.range(0, arity)
-                            .forEach(i -> insertDmlBuilder.append(record[i]).append(", "));
-
-                    if (arity > 0) {
-                        int len = insertDmlBuilder.length();
-                        insertDmlBuilder.delete(len - 2, len);
-                    }
-                    insertDmlBuilder.append("), ");
-                });
-        int len = insertDmlBuilder.length();
-        insertDmlBuilder.delete(len - 2, len);
-        return insertDmlBuilder.toString();
     }
 
     public static String buildInsertIntoQuery(String sourceTableName, String managedTableName) {
@@ -130,10 +94,6 @@ public class ShowCreateUtil {
         insertDmlBuilder.append(buildHints(hints));
 
         return insertDmlBuilder.toString();
-    }
-
-    public static String buildSimpleSelectQuery(String tableName, Map<String, String> hints) {
-        return buildSelectQuery(tableName, hints, null, Collections.emptyList());
     }
 
     public static String buildSelectQuery(

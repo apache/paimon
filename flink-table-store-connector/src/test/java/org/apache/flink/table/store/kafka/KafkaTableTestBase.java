@@ -122,7 +122,7 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
         deleteTopics();
     }
 
-    public Properties getStandardProps() {
+    public static Properties getStandardProps() {
         Properties standardProps = new Properties();
         standardProps.put("bootstrap.servers", KAFKA_CONTAINER.getBootstrapServers());
         standardProps.put("group.id", "flink-tests");
@@ -134,7 +134,7 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
         return standardProps;
     }
 
-    public String getBootstrapServers() {
+    public static String getBootstrapServers() {
         return KAFKA_CONTAINER.getBootstrapServers();
     }
 
@@ -142,7 +142,7 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
         return describeExternalTopics().containsKey(topicName);
     }
 
-    protected void createTopicIfNotExists(String topicName, int numBucket) {
+    public static void createTopicIfNotExists(String topicName, int numBucket) {
         try (final AdminClient adminClient = AdminClient.create(getStandardProps())) {
             if (!adminClient.listTopics().names().get().contains(topicName)) {
                 adminClient

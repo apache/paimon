@@ -25,6 +25,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.ReadWriteTableITCase;
 import org.apache.flink.table.store.connector.StreamingReadWriteTableWithKafkaLogITCase;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
@@ -44,6 +45,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.registerData;
+import static org.apache.flink.table.store.CoreOptions.SCAN_MODE;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.LOG_SYSTEM;
+import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
+import static org.apache.flink.table.store.kafka.KafkaLogOptions.TOPIC;
+import static org.apache.flink.table.store.kafka.KafkaTableTestBase.createTopicIfNotExists;
+import static org.apache.flink.table.store.kafka.KafkaTableTestBase.getBootstrapServers;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -54,6 +61,13 @@ public class ReadWriteTableTestUtil {
     private static final Time TIME_OUT = Time.seconds(10);
 
     public static final int DEFAULT_PARALLELISM = 2;
+
+    public static final Map<String, String> SCAN_LATEST =
+            new HashMap<String, String>() {
+                {
+                    put(SCAN_MODE.key(), CoreOptions.StartupMode.LATEST.toString());
+                }
+            };
 
     public static TableEnvironment sEnv;
 
@@ -110,6 +124,32 @@ public class ReadWriteTableTestUtil {
             Map<String, String> options) {
         String table = "MyTable_" + UUID.randomUUID();
         sEnv.executeSql(buildDdl(table, fieldsSpec, primaryKeys, partitionKeys, options));
+        return table;
+    }
+
+    public static String createTableWithKafkaLog(
+            List<String> fieldsSpec,
+            List<String> primaryKeys,
+            List<String> partitionKeys,
+            boolean manuallyCreateLogTable) {
+        String topic = "topic_" + UUID.randomUUID();
+        String table =
+                createTable(
+                        fieldsSpec,
+                        primaryKeys,
+                        partitionKeys,
+                        new HashMap<String, String>() {
+                            {
+                                put(LOG_SYSTEM.key(), "kafka");
+                                put(BOOTSTRAP_SERVERS.key(), getBootstrapServers());
+                                put(TOPIC.key(), topic);
+                            }
+                        });
+
+        if (manuallyCreateLogTable) {
+            createTopicIfNotExists(topic, 1);
+        }
+
         return table;
     }
 
@@ -208,6 +248,7 @@ public class ReadWriteTableTestUtil {
         }
         partitionSpec.stream()
                 .map(str -> str.replaceAll(",", "/"))
+                .map(str -> str.replaceAll("null", "__DEFAULT_PARTITION__"))
                 .forEach(
                         partition -> {
                             assertThat(Paths.get(warehouse, relativeFilePath, partition)).exists();
