@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.fs;
 
 import org.apache.flink.table.store.fs.hadoop.HadoopFileIO;
-import org.apache.flink.util.OperatingSystem;
+import org.apache.flink.table.store.utils.OperatingSystem;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.MiniDFSCluster;

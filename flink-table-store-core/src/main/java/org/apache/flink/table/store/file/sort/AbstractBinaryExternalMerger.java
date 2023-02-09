@@ -26,7 +26,7 @@ import org.apache.flink.table.store.file.disk.ChannelWriterOutputView;
 import org.apache.flink.table.store.file.disk.FileChannelUtil;
 import org.apache.flink.table.store.file.disk.FileIOChannel;
 import org.apache.flink.table.store.file.disk.IOManager;
-import org.apache.flink.util.MutableObjectIterator;
+import org.apache.flink.table.store.file.utils.MutableObjectIterator;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

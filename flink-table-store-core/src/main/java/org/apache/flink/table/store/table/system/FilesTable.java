@@ -65,7 +65,7 @@ import java.util.Objects;
 import java.util.TreeMap;
 
 import static org.apache.flink.table.store.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
-import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /** A {@link Table} for showing files of a snapshot in specific table. */
 public class FilesTable implements Table {

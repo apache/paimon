@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,29 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.sort;
+package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.utils.MutableObjectIterator;
+import org.apache.flink.annotation.Public;
 
-import java.io.IOException;
+/**
+ * This interface is basically Java's {@link java.util.function.Consumer} interface enhanced with
+ * the ability to throw an exception.
+ *
+ * @param <T> type of the consumed elements.
+ * @param <E> type of the exception thrown.
+ */
+@Public
+@FunctionalInterface
+public interface ThrowingConsumer<T, E extends Throwable> {
 
-/** Sort buffer to sort records. */
-public interface SortBuffer {
-
-    int size();
-
-    void clear();
-
-    long getOccupancy();
-
-    /** Flush memory, return false if not supported. */
-    boolean flushMemory() throws IOException;
-
-    /** @return false if the buffer is full. */
-    boolean write(InternalRow record) throws IOException;
-
-    /** @return iterator with sorting. */
-    MutableObjectIterator<BinaryRow> sortedIterator() throws IOException;
+    /**
+     * Performs this operation on the given argument.
+     *
+     * @param t the input argument
+     * @throws E on errors during consumption
+     */
+    void accept(T t) throws E;
 }

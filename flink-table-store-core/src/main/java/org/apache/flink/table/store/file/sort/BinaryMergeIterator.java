@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.sort;
 
-import org.apache.flink.util.MutableObjectIterator;
+import org.apache.flink.table.store.file.utils.MutableObjectIterator;
 
 import java.io.IOException;
 import java.util.Comparator;

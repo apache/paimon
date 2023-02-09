@@ -30,8 +30,8 @@ import org.apache.flink.configuration.description.Formatter;
 import org.apache.flink.configuration.description.HtmlFormatter;
 import org.apache.flink.configuration.description.InlineElement;
 import org.apache.flink.configuration.description.TextElement;
-import org.apache.flink.util.TimeUtils;
-import org.apache.flink.util.function.ThrowingConsumer;
+import org.apache.flink.table.store.utils.ThrowingConsumer;
+import org.apache.flink.table.store.utils.TimeUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

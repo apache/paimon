@@ -16,29 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.sort;
+package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.utils.MutableObjectIterator;
+import org.slf4j.Logger;
 
-import java.io.IOException;
+import java.lang.management.ManagementFactory;
+import java.lang.management.ThreadInfo;
+import java.util.Arrays;
+import java.util.stream.Collectors;
 
-/** Sort buffer to sort records. */
-public interface SortBuffer {
+/** {@code ThreadUtils} collects helper methods in the context of threading. */
+public class ThreadUtils {
 
-    int size();
-
-    void clear();
-
-    long getOccupancy();
-
-    /** Flush memory, return false if not supported. */
-    boolean flushMemory() throws IOException;
-
-    /** @return false if the buffer is full. */
-    boolean write(InternalRow record) throws IOException;
-
-    /** @return iterator with sorting. */
-    MutableObjectIterator<BinaryRow> sortedIterator() throws IOException;
+    public static void errorLogThreadDump(Logger logger) {
+        final ThreadInfo[] perThreadInfo =
+                ManagementFactory.getThreadMXBean().dumpAllThreads(true, true);
+        logger.error(
+                "Thread dump: \n{}",
+                Arrays.stream(perThreadInfo).map(Object::toString).collect(Collectors.joining()));
+    }
 }

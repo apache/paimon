@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,29 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.sort;
+package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.utils.MutableObjectIterator;
+import org.apache.flink.annotation.PublicEvolving;
 
-import java.io.IOException;
+import java.io.Serializable;
+import java.util.function.Supplier;
 
-/** Sort buffer to sort records. */
-public interface SortBuffer {
-
-    int size();
-
-    void clear();
-
-    long getOccupancy();
-
-    /** Flush memory, return false if not supported. */
-    boolean flushMemory() throws IOException;
-
-    /** @return false if the buffer is full. */
-    boolean write(InternalRow record) throws IOException;
-
-    /** @return iterator with sorting. */
-    MutableObjectIterator<BinaryRow> sortedIterator() throws IOException;
-}
+/**
+ * A serializable {@link Supplier}.
+ *
+ * @param <T> the type of results supplied by this supplier
+ */
+@PublicEvolving
+@FunctionalInterface
+public interface SerializableSupplier<T> extends Supplier<T>, Serializable {}

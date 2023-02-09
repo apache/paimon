@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.util.StringUtils;
+import org.apache.flink.table.store.utils.StringUtils;
 
 import java.io.Serializable;
 import java.util.Objects;

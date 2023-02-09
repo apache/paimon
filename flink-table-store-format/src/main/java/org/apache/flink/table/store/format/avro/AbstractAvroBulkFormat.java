@@ -25,8 +25,8 @@ import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.utils.IOUtils;
 import org.apache.flink.table.store.utils.Pool;
-import org.apache.flink.util.IOUtils;
 
 import org.apache.avro.Schema;
 import org.apache.avro.file.DataFileReader;
