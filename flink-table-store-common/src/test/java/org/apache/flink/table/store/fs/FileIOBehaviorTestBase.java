@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.fs;
 
-import org.apache.flink.util.StringUtils;
+import org.apache.flink.table.store.utils.StringUtils;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;

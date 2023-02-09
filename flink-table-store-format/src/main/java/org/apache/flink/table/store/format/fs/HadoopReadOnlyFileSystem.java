@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.format.fs;
 
 import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.util.IOUtils;
+import org.apache.flink.table.store.utils.IOUtils;
 
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;

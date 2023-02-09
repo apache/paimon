@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.hive;
 
 import org.apache.flink.table.store.file.catalog.CatalogLock;
-import org.apache.flink.util.TimeUtils;
+import org.apache.flink.table.store.utils.TimeUtils;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;

@@ -45,7 +45,7 @@ import org.apache.flink.table.store.types.SmallIntType;
 import org.apache.flink.table.store.types.TimestampType;
 import org.apache.flink.table.store.types.TinyIntType;
 import org.apache.flink.table.store.types.VarCharType;
-import org.apache.flink.util.InstantiationUtil;
+import org.apache.flink.table.store.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;

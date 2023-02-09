@@ -22,7 +22,7 @@ import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.store.table.source.Split;
-import org.apache.flink.util.InstantiationUtil;
+import org.apache.flink.table.store.utils.InstantiationUtil;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;

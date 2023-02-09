@@ -30,7 +30,7 @@ import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.TableType;
 import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.util.StringUtils;
+import org.apache.flink.table.store.utils.StringUtils;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;

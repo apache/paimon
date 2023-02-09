@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.disk;
 
 import org.apache.flink.table.store.file.memory.Buffer;
-import org.apache.flink.util.FileUtils;
+import org.apache.flink.table.store.utils.FileIOUtils;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -38,7 +38,7 @@ public class BufferFileWriterImpl extends AbstractFileIOChannel implements Buffe
         header.putInt(nioBufferReadable.remaining());
         header.flip();
 
-        FileUtils.writeCompletely(fileChannel, header);
-        FileUtils.writeCompletely(fileChannel, nioBufferReadable);
+        FileIOUtils.writeCompletely(fileChannel, header);
+        FileIOUtils.writeCompletely(fileChannel, nioBufferReadable);
     }
 }

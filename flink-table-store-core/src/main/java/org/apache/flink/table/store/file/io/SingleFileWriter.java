@@ -25,7 +25,7 @@ import org.apache.flink.table.store.format.FormatWriterFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.PositionOutputStream;
-import org.apache.flink.util.IOUtils;
+import org.apache.flink.table.store.utils.IOUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
