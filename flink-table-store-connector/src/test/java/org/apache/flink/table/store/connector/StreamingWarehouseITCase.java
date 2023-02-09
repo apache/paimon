@@ -20,9 +20,8 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.table.api.EnvironmentSettings;
-import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
+import org.apache.flink.table.store.kafka.KafkaTableTestBase;
 import org.apache.flink.types.Row;
 
 import org.junit.Test;
@@ -30,22 +29,20 @@ import org.junit.Test;
 import java.time.LocalDateTime;
 import java.util.function.Function;
 
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.bEnv;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.init;
+import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil.sEnv;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Table store IT case to test concurrent batch overwrite and streaming insert into. */
-public class StreamingWarehouseITCase extends ReadWriteTableTestBase {
-
-    private final StreamTableEnvironment streamTableEnv =
-            StreamTableEnvironment.create(buildStreamEnv(1));
-    private final StreamTableEnvironment batchTableEnv =
-            StreamTableEnvironment.create(buildBatchEnv(1), EnvironmentSettings.inBatchMode());
+public class StreamingWarehouseITCase extends KafkaTableTestBase {
 
     @Test
     public void testUserStory() throws Exception {
+        init(createAndRegisterTempFile("").toString(), 1);
         // Step1: define trade order table schema
-        rootPath = TEMPORARY_FOLDER.newFolder().getPath();
         String orderSource =
-                "CREATE TABLE IF NOT EXISTS trade_orders (\n"
+                "CREATE TEMPORARY TABLE IF NOT EXISTS trade_orders (\n"
                         + "    order_id BIGINT NOT NULL,\n"
                         + "    order_timestamp AS LOCALTIMESTAMP,\n"
                         + "    buyer_id STRING,\n"
@@ -86,14 +83,13 @@ public class StreamingWarehouseITCase extends ReadWriteTableTestBase {
                                 + "  )\n"
                                 + "PARTITIONED BY (dt)\n"
                                 + "WITH (\n"
-                                + "    'root-path' = '%s',\n"
-                                + "    'log.system' = 'kafka', "
-                                + "    'kafka.bootstrap.servers' = '%s');",
-                        rootPath, getBootstrapServers());
-        streamTableEnv.executeSql(orderSource);
-        streamTableEnv.executeSql(cleanedOrders);
-        batchTableEnv.executeSql(orderSource);
-        batchTableEnv.executeSql(cleanedOrders);
+                                + "    'log.system' = 'kafka',\n"
+                                + "    'kafka.bootstrap.servers' = '%s',\n"
+                                + "    'kafka.topic' = 'cleaned_trade_order');",
+                        getBootstrapServers());
+        sEnv.executeSql(orderSource);
+        bEnv.executeSql(orderSource);
+        sEnv.executeSql(cleanedOrders);
 
         // Step2: batch write some corrupted historical data
         String corruptedHistoricalData =
@@ -124,13 +120,12 @@ public class StreamingWarehouseITCase extends ReadWriteTableTestBase {
                         + "FROM\n"
                         + "  trade_orders\n"
                         + "  /*+ OPTIONS ('number-of-rows' = '50')  */";
-        batchTableEnv.executeSql(corruptedHistoricalData).await();
+        bEnv.executeSql(corruptedHistoricalData).await();
 
         // Step3: start downstream streaming task to read
         String streamingRead = "SELECT * FROM cleaned_trade_order";
         BlockingIterator<Row, CleanedTradeOrder> streamIter =
-                BlockingIterator.of(
-                        streamTableEnv.executeSql(streamingRead).collect(), ORDER_CONVERTER);
+                BlockingIterator.of(sEnv.executeSql(streamingRead).collect(), ORDER_CONVERTER);
         // verify historical data is corrupted
         streamIter.collect(50).stream()
                 .filter(order -> order.orderVerified && order.orderId % 2 == 1)
@@ -155,7 +150,7 @@ public class StreamingWarehouseITCase extends ReadWriteTableTestBase {
                         + "  DATE_FORMAT (order_timestamp, 'yyyy-MM-dd') AS dt\n"
                         + "FROM\n"
                         + "  trade_orders";
-        JobClient dailyTaskHandler = streamTableEnv.executeSql(streamingWrite).getJobClient().get();
+        JobClient dailyTaskHandler = sEnv.executeSql(streamingWrite).getJobClient().get();
         while (true) {
             if (dailyTaskHandler.getJobStatus().get() == JobStatus.RUNNING) {
                 break;
@@ -184,7 +179,7 @@ public class StreamingWarehouseITCase extends ReadWriteTableTestBase {
                         + "  dt = '2022-04-14';";
 
         // wait for back-fill task to finish
-        batchTableEnv.executeSql(backFillOverwrite).await();
+        bEnv.executeSql(backFillOverwrite).await();
 
         // Step6: check streaming read does not achieve any changelog
         int checkSize = 200;
@@ -199,9 +194,7 @@ public class StreamingWarehouseITCase extends ReadWriteTableTestBase {
         // verify corrupted historical data is corrected
         BlockingIterator<Row, CleanedTradeOrder> batchIter =
                 BlockingIterator.of(
-                        batchTableEnv
-                                .executeSql(
-                                        "SELECT * FROM cleaned_trade_order WHERE dt ='2022-04-14'")
+                        bEnv.executeSql("SELECT * FROM cleaned_trade_order WHERE dt ='2022-04-14'")
                                 .collect(),
                         ORDER_CONVERTER);
         batchIter.collect(50).stream()
