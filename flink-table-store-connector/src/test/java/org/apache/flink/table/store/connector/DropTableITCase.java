@@ -19,102 +19,34 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.catalog.ObjectIdentifier;
-import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
-import org.apache.flink.table.types.logical.IntType;
-import org.apache.flink.table.types.logical.RowType;
-import org.apache.flink.table.types.logical.VarCharType;
 
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.junit.jupiter.params.provider.Arguments;
 
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
-import static org.apache.flink.table.store.connector.FlinkConnectorOptions.relativeTablePath;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 /** IT cases for testing drop managed table ddl. */
-@RunWith(Parameterized.class)
 public class DropTableITCase extends TableStoreTestBase {
 
-    protected final boolean ignoreException;
-
-    protected ResolvedCatalogTable resolvedTable =
-            createResolvedTable(
-                    Collections.emptyMap(),
-                    RowType.of(new IntType(), new VarCharType()),
-                    Collections.emptyList(),
-                    Collections.emptyList());
-
-    public DropTableITCase(
+    @Override
+    public void prepareEnv(
             RuntimeExecutionMode executionMode,
             String tableName,
-            boolean enableLogStore,
             boolean ignoreException,
+            String manualCause,
             ExpectedResult expectedResult) {
-        super(executionMode, tableName, enableLogStore, expectedResult);
-        this.ignoreException = ignoreException;
-    }
+        super.prepareEnv(executionMode, tableName, ignoreException, manualCause, expectedResult);
 
-    @Test
-    public void testDropTable() {
-        String ddl =
-                String.format(
-                        "DROP TABLE%s%s\n",
-                        ignoreException ? " IF EXISTS " : " ",
-                        tableIdentifier.asSerializableString());
-
-        if (expectedResult.success) {
-            tEnv.executeSql(ddl);
-            // check catalog
-            assertThat(((TableEnvironmentImpl) tEnv).getCatalogManager().getTable(tableIdentifier))
-                    .isNotPresent();
-            // check table store
-            assertThat(Paths.get(rootPath, relativeTablePath(tableIdentifier)).toFile())
-                    .doesNotExist();
-            // check log store
-            assertThat(topicExists(tableIdentifier.asSummaryString())).isFalse();
-        } else {
-            // check inconsistency between catalog/file store/log store
-            assertThat(ignoreException).isFalse();
-            if (ValidationException.class.isAssignableFrom(expectedResult.expectedType)) {
-                // successfully delete path/topic, but schema doesn't exist in catalog
-                assertThatThrownBy(() -> tEnv.executeSql(ddl))
-                        .isInstanceOf(expectedResult.expectedType)
-                        .hasMessageContaining(expectedResult.expectedMessage);
-                assertThat(
-                                ((TableEnvironmentImpl) tEnv)
-                                        .getCatalogManager()
-                                        .getTable(tableIdentifier))
-                        .isNotPresent();
-            } else {
-                assertThatThrownBy(() -> tEnv.executeSql(ddl))
-                        .getCause()
-                        .isInstanceOf(expectedResult.expectedType)
-                        .hasMessageContaining(expectedResult.expectedMessage);
-                // throw exception when deleting file path/topic, so schema still exists in
-                // catalog
-                assertThat(
-                                ((TableEnvironmentImpl) tEnv)
-                                        .getCatalogManager()
-                                        .getTable(tableIdentifier))
-                        .isPresent();
-            }
-        }
-    }
-
-    @Override
-    public void prepareEnv() {
         ((TableEnvironmentImpl) tEnv)
                 .getCatalogManager()
                 .createTable(resolvedTable, tableIdentifier, false);
@@ -132,17 +64,10 @@ public class DropTableITCase extends TableStoreTestBase {
                                 });
                 // delete file store path does not affect dropping the table
                 deleteTablePath();
-                // delete log store topic does not affect dropping the table
-                if (enableLogStore) {
-                    deleteTopicIfExists(tableIdentifier.asSummaryString());
-                }
             }
-        } else if (expectedResult.expectedMessage.startsWith("Failed to delete file store path.")) {
+        } else if (manualCause.contains("delete file store path")) {
             // failed when deleting file path
             deleteTablePath();
-        } else if (expectedResult.expectedMessage.startsWith("Failed to delete kafka topic.")) {
-            // failed when deleting topic
-            deleteTopicIfExists(tableIdentifier.asSummaryString());
         } else {
             // failed when dropping catalog schema
             tEnv.getCatalog(tEnv.getCurrentCatalog())
@@ -157,87 +82,92 @@ public class DropTableITCase extends TableStoreTestBase {
         }
     }
 
-    @Parameterized.Parameters(
-            name =
-                    "executionMode-{0}, tableName-{1}, enableLogStore-{2}, ignoreException-{3}, expectedResult-{4}")
-    public static List<Object[]> data() {
-        List<Object[]> specs = new ArrayList<>();
+    @Override
+    protected void testCore() {
+        String ddl =
+                String.format(
+                        "DROP TABLE%s%s\n",
+                        ignoreException ? " IF EXISTS " : " ",
+                        tableIdentifier.asSerializableString());
+
+        if (expectedResult.success) {
+            tEnv.executeSql(ddl);
+            // check catalog
+            assertThat(((TableEnvironmentImpl) tEnv).getCatalogManager().getTable(tableIdentifier))
+                    .isNotPresent();
+            // check table store
+            assertThat(Paths.get(rootPath, relativeTablePath(tableIdentifier)).toFile())
+                    .doesNotExist();
+        } else {
+            // check inconsistency
+            assertThat(ignoreException).isFalse();
+
+            assertThatThrownBy(() -> tEnv.executeSql(ddl))
+                    .isInstanceOf(expectedResult.expectedType)
+                    .hasMessageContaining(expectedResult.expectedMessage);
+
+            // check that table is not exist after deleting table path or dropping table
+            assertThat(((TableEnvironmentImpl) tEnv).getCatalogManager().getTable(tableIdentifier))
+                    .isNotPresent();
+        }
+    }
+
+    private static List<Arguments> data() {
+        List<Arguments> args = new ArrayList<>();
         // successful case specs
-        specs.add(
-                new Object[] {
-                    RuntimeExecutionMode.STREAMING,
-                    "table_" + UUID.randomUUID(),
-                    true,
-                    true,
-                    new ExpectedResult().success(true)
-                });
-        specs.add(
-                new Object[] {
-                    RuntimeExecutionMode.STREAMING,
-                    "table_" + UUID.randomUUID(),
-                    false,
-                    true,
-                    new ExpectedResult().success(true)
-                });
-        specs.add(
-                new Object[] {
-                    RuntimeExecutionMode.STREAMING,
-                    "table_" + UUID.randomUUID(),
-                    true,
-                    false,
-                    new ExpectedResult().success(true)
-                });
-        specs.add(
-                new Object[] {
-                    RuntimeExecutionMode.STREAMING,
-                    "table_" + UUID.randomUUID(),
-                    false,
-                    false,
-                    new ExpectedResult().success(true)
-                });
+        args.add(
+                arguments(
+                        RuntimeExecutionMode.STREAMING,
+                        "table_" + UUID.randomUUID(),
+                        true,
+                        "",
+                        new ExpectedResult().success(true)));
+        args.add(
+                arguments(
+                        RuntimeExecutionMode.STREAMING,
+                        "table_" + UUID.randomUUID(),
+                        false,
+                        "",
+                        new ExpectedResult().success(true)));
 
         // failed case specs
-        specs.add(
-                new Object[] {
-                    RuntimeExecutionMode.STREAMING,
-                    "table_" + UUID.randomUUID(),
-                    false,
-                    false,
-                    new ExpectedResult()
-                            .success(false)
-                            .expectedType(TableException.class)
-                            .expectedMessage("Failed to delete file store path.")
-                });
-        specs.add(
-                new Object[] {
-                    RuntimeExecutionMode.STREAMING,
-                    "table_" + UUID.randomUUID(),
-                    true,
-                    false,
-                    new ExpectedResult()
-                            .success(false)
-                            .expectedType(TableException.class)
-                            .expectedMessage("Failed to delete kafka topic.")
-                });
-        final String tableName = "table_" + UUID.randomUUID();
-        specs.add(
-                new Object[] {
-                    RuntimeExecutionMode.STREAMING,
-                    tableName,
-                    true,
-                    false,
-                    new ExpectedResult()
-                            .success(false)
-                            .expectedType(ValidationException.class)
-                            .expectedMessage(
-                                    String.format(
-                                            "Table with identifier '%s' does not exist.",
-                                            ObjectIdentifier.of(
-                                                            CURRENT_CATALOG,
-                                                            CURRENT_DATABASE,
-                                                            tableName)
-                                                    .asSummaryString()))
-                });
-        return specs;
+        String tableName = "table_" + UUID.randomUUID();
+        args.add(
+                arguments(
+                        RuntimeExecutionMode.STREAMING,
+                        tableName,
+                        false,
+                        "delete file store path",
+                        new ExpectedResult()
+                                .success(false)
+                                .expectedType(ValidationException.class)
+                                .expectedMessage(
+                                        String.format(
+                                                "Table with identifier '%s' does not exist.",
+                                                ObjectIdentifier.of(
+                                                                CURRENT_CATALOG,
+                                                                CURRENT_DATABASE,
+                                                                tableName)
+                                                        .asSummaryString()))));
+        tableName = "table_" + UUID.randomUUID();
+        args.add(
+                arguments(
+                        RuntimeExecutionMode.STREAMING,
+                        tableName,
+                        false,
+                        "drop table",
+                        new ExpectedResult()
+                                .success(false)
+                                .expectedType(ValidationException.class)
+                                .expectedMessage(
+                                        String.format(
+                                                "Table with identifier '%s' does not exist.",
+                                                ObjectIdentifier.of(
+                                                                CURRENT_CATALOG,
+                                                                CURRENT_DATABASE,
+                                                                tableName)
+                                                        .asSummaryString()))));
+
+        return args;
     }
 }
