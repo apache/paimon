@@ -164,6 +164,26 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
+    public void renameTable(ObjectPath fromTable, ObjectPath toTable, boolean ignoreIfNotExists)
+            throws TableNotExistException, TableAlreadyExistException {
+        Path fromPath = getTableLocation(fromTable);
+        if (!tableExists(fromPath)) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+
+            throw new TableNotExistException(fromTable);
+        }
+
+        Path toPath = getTableLocation(toTable);
+        if (tableExists(toPath)) {
+            throw new TableAlreadyExistException(toTable);
+        }
+
+        uncheck(() -> fs.rename(fromPath, toPath));
+    }
+
+    @Override
     public void alterTable(
             ObjectPath tablePath, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException {

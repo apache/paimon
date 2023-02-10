@@ -357,7 +357,14 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
     }
 
     @Override
-    public void renameTable(Identifier oldIdent, Identifier newIdent) {
-        throw new UnsupportedOperationException();
+    public void renameTable(Identifier oldIdent, Identifier newIdent)
+            throws NoSuchTableException, TableAlreadyExistsException {
+        try {
+            catalog.renameTable(objectPath(oldIdent), objectPath(newIdent), false);
+        } catch (Catalog.TableNotExistException e) {
+            throw new NoSuchTableException(oldIdent);
+        } catch (Catalog.TableAlreadyExistException e) {
+            throw new TableAlreadyExistsException(newIdent);
+        }
     }
 }

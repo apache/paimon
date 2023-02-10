@@ -106,6 +106,37 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testRenameTable() {
+        // TODO: add test case for hive catalog table
+        assertThatThrownBy(() -> spark.sql("ALTER TABLE t3 RENAME TO t4"))
+                .isInstanceOf(AnalysisException.class)
+                .hasMessageContaining("Table or view not found: t3");
+
+        assertThatThrownBy(() -> spark.sql("ALTER TABLE t1 RENAME TO t2"))
+                .isInstanceOf(AnalysisException.class)
+                .hasMessageContaining("Table default.t2 already exists");
+
+        spark.sql("ALTER TABLE t1 RENAME TO t3");
+        List<Row> tables = spark.sql("SHOW TABLES").collectAsList();
+        assertThat(tables.stream().map(Row::toString))
+                .containsExactlyInAnyOrder("[default,t2,false]", "[default,t3,false]");
+
+        List<Row> afterRename =
+                spark.sql("SHOW CREATE TABLE tablestore.default.t3").collectAsList();
+        assertThat(afterRename.toString())
+                .isEqualTo(
+                        "[[CREATE TABLE t3 (\n"
+                                + "  `a` INT NOT NULL,\n"
+                                + "  `b` BIGINT,\n"
+                                + "  `c` STRING)\n"
+                                + buildTableProperties("default.db/t3")
+                                + "]]");
+
+        List<Row> data = spark.sql("SELECT * FROM t3").collectAsList();
+        assertThat(data.toString()).isEqualTo("[[1,2,1], [5,6,3]]");
+    }
+
+    @Test
     public void testRenameColumn() throws Exception {
         Path tablePath = new Path(warehousePath, "default.db/testRenameColumn");
         SimpleTableTestHelper testHelper1 = createTestHelper(tablePath);
