@@ -30,5 +30,11 @@ import java.lang.annotation.Target;
 @Target(ElementType.FIELD)
 @Retention(RetentionPolicy.RUNTIME)
 public @interface Parameter {
+    /**
+     * Method that returns the index of the parameter in the array returned by the method annotated
+     * by <code>Parameters</code>. Index range must start at 0. Default value is 0.
+     *
+     * @return the index of the parameter.
+     */
     int value() default 0;
 }

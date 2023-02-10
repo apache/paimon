@@ -57,7 +57,7 @@ public class TestLoggerExtension implements TestWatcher, BeforeEachCallback {
     public void testFailed(ExtensionContext context, Throwable cause) {
         LOG.error(
                 "\n--------------------------------------------------------------------------------"
-                        + "\nTest {}.{}[{}] failed with:\n{}"
+                        + "\nTest {}.{}[{}] failed with:\n{}."
                         + "\n================================================================================",
                 context.getRequiredTestClass().getCanonicalName(),
                 context.getRequiredTestMethod().getName(),

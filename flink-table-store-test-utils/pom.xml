@@ -29,7 +29,7 @@ under the License.
     </parent>
 
     <artifactId>flink-table-store-test-utils</artifactId>
-    <name>Flink Table Store: Test utils : </name>
+    <name>Flink Table Store : Test utils</name>
 
     <dependencies>
         <dependency>

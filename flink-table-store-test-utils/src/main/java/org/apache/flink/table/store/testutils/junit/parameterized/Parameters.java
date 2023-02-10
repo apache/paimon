@@ -22,6 +22,7 @@ import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+import java.text.MessageFormat;
 
 /**
  * The annotation is used to replace {@code Parameterized.Parameters} (Junit4) for Junit 5
@@ -30,5 +31,21 @@ import java.lang.annotation.Target;
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.METHOD)
 public @interface Parameters {
+    /**
+     * Optional pattern to derive the test's name from the parameters. Use numbers in braces to
+     * refer to the parameters or the additional data as follows:
+     *
+     * <pre>
+     * {index} - the current parameter index
+     * {0} - the first parameter value
+     * {1} - the second parameter value
+     * etc...
+     * </pre>
+     *
+     * <p>Default value is "{index}" for compatibility with previous JUnit versions.
+     *
+     * @return {@link MessageFormat} pattern string, except the index placeholder.
+     * @see MessageFormat
+     */
     String name() default "{index}";
 }
