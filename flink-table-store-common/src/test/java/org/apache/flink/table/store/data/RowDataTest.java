@@ -22,8 +22,8 @@ import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -43,7 +43,7 @@ public class RowDataTest {
     private Timestamp timestamp1;
     private Timestamp timestamp2;
 
-    @Before
+    @BeforeEach
     public void before() {
         str = BinaryString.fromString("haha");
         decimal1 = Decimal.fromUnscaledLong(10, 5, 0);

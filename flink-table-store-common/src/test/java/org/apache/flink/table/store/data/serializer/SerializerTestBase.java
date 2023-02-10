@@ -24,7 +24,6 @@ import org.apache.flink.core.memory.DataOutputSerializer;
 import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.table.store.utils.InstantiationUtil;
 
-import org.junit.Assert;
 import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nonnull;
@@ -39,9 +38,9 @@ import java.util.List;
 import java.util.concurrent.CyclicBarrier;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /** Abstract test base for serializers. */
 public abstract class SerializerTestBase<T> {
@@ -83,14 +82,14 @@ public abstract class SerializerTestBase<T> {
                 serializer.serialize(value, out);
                 TestInputView in = out.getInputView();
 
-                assertTrue("No data available during deserialization.", in.available() > 0);
+                assertTrue(in.available() > 0, "No data available during deserialization.");
 
                 T deserialized = serializer.deserialize(in);
                 checkToString(deserialized);
 
                 deepEquals("Deserialized value if wrong.", value, deserialized);
 
-                assertTrue("Trailing data available after deserialization.", in.available() == 0);
+                assertEquals(0, in.available(), "Trailing data available after deserialization.");
             }
         } catch (Exception e) {
             System.err.println(e.getMessage());
@@ -121,7 +120,7 @@ public abstract class SerializerTestBase<T> {
                 num++;
             }
 
-            assertEquals("Wrong number of elements deserialized.", testData.length, num);
+            assertEquals(testData.length, num, "Wrong number of elements deserialized.");
         } catch (Exception e) {
             System.err.println(e.getMessage());
             e.printStackTrace();
@@ -142,7 +141,7 @@ public abstract class SerializerTestBase<T> {
             }
 
             assertEquals(
-                    "The copy of the serializer is not equal to the original one.", ser1, ser2);
+                    ser1, ser2, "The copy of the serializer is not equal to the original one.");
         } catch (Exception e) {
             System.err.println(e.getMessage());
             e.printStackTrace();
@@ -168,7 +167,7 @@ public abstract class SerializerTestBase<T> {
         final Serializer<T> serializer = getSerializer();
         final CyclicBarrier startLatch = new CyclicBarrier(numThreads);
         final List<SerializerRunner> concurrentRunners = new ArrayList<>(numThreads);
-        Assert.assertEquals(serializer, serializer.duplicate());
+        assertEquals(serializer, serializer.duplicate());
 
         T[] testData = getData();
 
@@ -189,7 +188,7 @@ public abstract class SerializerTestBase<T> {
     // --------------------------------------------------------------------------------------------
 
     private void deepEquals(String message, T should, T is) {
-        assertTrue(message, deepEquals(should, is));
+        assertTrue(deepEquals(should, is), message);
     }
 
     // --------------------------------------------------------------------------------------------
@@ -278,8 +277,8 @@ public abstract class SerializerTestBase<T> {
                         dataOutputSerializer.clear();
 
                         assertTrue(
-                                "Serialization/Deserialization cycle resulted in an object that are not equal to the original.",
-                                deepEquals(copySerdeTestItem, testItem));
+                                deepEquals(copySerdeTestItem, testItem),
+                                "Serialization/Deserialization cycle resulted in an object that are not equal to the original.");
 
                         // try to enforce some upper bound to the test time
                         if (System.nanoTime() >= endTimeNanos) {

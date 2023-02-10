@@ -18,19 +18,20 @@
 
 package org.apache.flink.table.store.memory;
 
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.apache.flink.table.store.testutils.junit.parameterized.ParameterizedTestExtension;
+
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.nio.ByteBuffer;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotSame;
-import static org.junit.Assert.assertSame;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 /** Tests for the {@link MemorySegment} in on-heap mode. */
-@RunWith(Parameterized.class)
+@ExtendWith(ParameterizedTestExtension.class)
 public class OnHeapMemorySegmentTest extends MemorySegmentTestBase {
 
     public OnHeapMemorySegmentTest(int pageSize) {
@@ -42,7 +43,7 @@ public class OnHeapMemorySegmentTest extends MemorySegmentTestBase {
         return MemorySegment.allocateHeapMemory(size);
     }
 
-    @Test
+    @TestTemplate
     public void testHeapSegmentSpecifics() {
         final byte[] buffer = new byte[411];
         MemorySegment seg = MemorySegment.wrap(buffer);
@@ -61,7 +62,7 @@ public class OnHeapMemorySegmentTest extends MemorySegmentTestBase {
         assertEquals(7, buf2.limit());
     }
 
-    @Test
+    @TestTemplate
     public void testReadOnlyByteBufferPut() {
         final byte[] buffer = new byte[100];
         MemorySegment seg = MemorySegment.wrap(buffer);

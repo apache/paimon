@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.junit.Assert;
-
 import java.io.BufferedWriter;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -38,6 +36,7 @@ import java.util.function.Supplier;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.instanceOf;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /** This class contains reusable utility methods for unit tests. */
 public class CommonTestUtils {
@@ -178,7 +177,7 @@ public class CommonTestUtils {
             String msg, Class<? extends Exception> expected, Callable<?> code) {
         try {
             Object result = code.call();
-            Assert.fail("Previous method call should have failed but it returned: " + result);
+            fail("Previous method call should have failed but it returned: " + result);
         } catch (Exception e) {
             assertThat(e, instanceOf(expected));
             assertThat(e.getMessage(), containsString(msg));
