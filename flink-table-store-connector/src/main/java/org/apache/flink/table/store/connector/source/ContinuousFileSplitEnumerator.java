@@ -33,6 +33,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -91,6 +92,19 @@ public class ContinuousFileSplitEnumerator
                 .add(split);
     }
 
+    private void addSplitsBack(Collection<FileStoreSourceSplit> splits) {
+        List<FileStoreSourceSplit> backSplits = new ArrayList<>(splits);
+        Collections.reverse(backSplits);
+        backSplits.forEach(this::addSplitToHead);
+    }
+
+    private void addSplitToHead(FileStoreSourceSplit split) {
+        ((LinkedList<FileStoreSourceSplit>)
+                        bucketSplits.computeIfAbsent(
+                                ((DataSplit) split.split()).bucket(), i -> new LinkedList<>()))
+                .addFirst(split);
+    }
+
     @Override
     public void start() {
         context.callAsync(
@@ -121,7 +135,7 @@ public class ContinuousFileSplitEnumerator
     @Override
     public void addSplitsBack(List<FileStoreSourceSplit> splits, int subtaskId) {
         LOG.debug("File Source Enumerator adds splits back: {}", splits);
-        addSplits(splits);
+        addSplitsBack(splits);
     }
 
     @Override
