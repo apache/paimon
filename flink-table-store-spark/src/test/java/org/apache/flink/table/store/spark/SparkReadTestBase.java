@@ -36,7 +36,9 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 
 import java.io.File;
 import java.io.IOException;
@@ -71,6 +73,21 @@ public abstract class SparkReadTestBase {
         spark.conf().set("spark.sql.catalog.tablestore.warehouse", warehousePath.toString());
         spark.sql("USE tablestore");
         spark.sql("CREATE NAMESPACE default");
+    }
+
+    @AfterAll
+    public static void stopMetastoreAndSpark() throws IOException {
+        if (warehouse != null && warehouse.exists()) {
+            FileUtils.deleteDirectory(warehouse);
+        }
+        if (spark != null) {
+            spark.stop();
+            spark = null;
+        }
+    }
+
+    @BeforeEach
+    public void beforeEach() throws Exception {
 
         // flink sink
         tablePath1 = new Path(warehousePath, "default.db/t1");
@@ -87,8 +104,12 @@ public abstract class SparkReadTestBase {
         // c row<row<double, array<boolean> not null> not null, bigint> not null
         tablePath2 = new Path(warehousePath, "default.db/t2");
         spark.sql(
-                "CREATE TABLE tablestore.default.t2 (a INT NOT NULL COMMENT 'comment about a', b ARRAY<STRING> NOT NULL, c STRUCT<c1: STRUCT<c11: DOUBLE, c12: ARRAY<BOOLEAN> NOT NULL> NOT NULL, c2: BIGINT COMMENT 'comment about c2'> NOT NULL COMMENT 'comment about c') TBLPROPERTIES ('file.format'='avro')");
-        //        createTable1("t2");
+                "CREATE TABLE tablestore.default.t2 ("
+                        + "a INT NOT NULL COMMENT 'comment about a', "
+                        + "b ARRAY<STRING> NOT NULL, "
+                        + "c STRUCT<c1: STRUCT<c11: DOUBLE, c12: ARRAY<BOOLEAN> NOT NULL> NOT NULL, "
+                        + "c2: BIGINT COMMENT 'comment about c2'> NOT NULL COMMENT 'comment about c')"
+                        + " TBLPROPERTIES ('file.format'='avro')");
         writeTable(
                 "t2",
                 "(1, array('AAA', 'BBB'), struct(struct(1.0d, array(null)), 1L))",
@@ -99,15 +120,13 @@ public abstract class SparkReadTestBase {
                 "(4, array(null, 'EEE'), struct(struct(3.0d, array(true, false, true)), 3L))");
     }
 
-    @AfterAll
-    public static void stopMetastoreAndSpark() throws IOException {
-        if (warehouse != null && warehouse.exists()) {
-            FileUtils.deleteDirectory(warehouse);
-        }
-        if (spark != null) {
-            spark.stop();
-            spark = null;
-        }
+    @AfterEach
+    public void afterEach() {
+        List<Row> tables = spark.sql("show tables").collectAsList();
+        tables.forEach(
+                table -> {
+                    spark.sql("DROP TABLE " + table.getString(0) + "." + table.getString(1));
+                });
     }
 
     protected void innerTestSimpleType(Dataset<Row> dataset) {
