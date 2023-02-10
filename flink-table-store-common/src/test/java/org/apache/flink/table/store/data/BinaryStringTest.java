@@ -18,11 +18,12 @@
 package org.apache.flink.table.store.data;
 
 import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.flink.table.store.testutils.junit.parameterized.ParameterizedTestExtension;
+import org.apache.flink.table.store.testutils.junit.parameterized.Parameters;
 import org.apache.flink.table.store.utils.SortUtil;
 
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
@@ -42,7 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Caution that you must construct a string by {@link #fromString} to cover all the test cases.
  */
-@RunWith(Parameterized.class)
+@ExtendWith(ParameterizedTestExtension.class)
 public class BinaryStringTest {
 
     private BinaryString empty = fromString("");
@@ -53,7 +54,7 @@ public class BinaryStringTest {
         this.mode = mode;
     }
 
-    @Parameterized.Parameters(name = "{0}")
+    @Parameters(name = "{0}")
     public static List<Mode> getVarSeg() {
         return Arrays.asList(Mode.ONE_SEG, Mode.MULTI_SEGS, Mode.STRING, Mode.RANDOM);
     }
@@ -124,7 +125,7 @@ public class BinaryStringTest {
         assertThat(s1.endsWith(s1)).isTrue();
     }
 
-    @Test
+    @TestTemplate
     public void basicTest() {
         checkBasic("", 0);
         checkBasic(",", 1);
@@ -139,7 +140,7 @@ public class BinaryStringTest {
         checkBasic("\uD83E\uDD19", 1); // 4 bytes char
     }
 
-    @Test
+    @TestTemplate
     public void emptyStringTest() {
         assertThat(fromString("")).isEqualTo(empty);
         assertThat(fromBytes(new byte[0])).isEqualTo(empty);
@@ -147,7 +148,7 @@ public class BinaryStringTest {
         assertThat(empty.getSizeInBytes()).isEqualTo(0);
     }
 
-    @Test
+    @TestTemplate
     public void compareTo() {
         assertThat(fromString("   ").compareTo(blankString(3))).isEqualTo(0);
         assertThat(fromString("").compareTo(fromString("a"))).isLessThan(0);
@@ -171,7 +172,7 @@ public class BinaryStringTest {
         assertThat(segment1.compare(segment2, 0, 0, 9)).isLessThan(0);
     }
 
-    @Test
+    @TestTemplate
     public void testMultiSegments() {
 
         // prepare
@@ -220,7 +221,7 @@ public class BinaryStringTest {
         assertThat(binaryString2.compareTo(binaryString1)).isEqualTo(1);
     }
 
-    @Test
+    @TestTemplate
     public void contains() {
         assertThat(empty.contains(empty)).isTrue();
         assertThat(fromString("hello").contains(fromString("ello"))).isTrue();
@@ -231,7 +232,7 @@ public class BinaryStringTest {
         assertThat(fromString("大千世界").contains(fromString("大千世界好"))).isFalse();
     }
 
-    @Test
+    @TestTemplate
     public void startsWith() {
         assertThat(empty.startsWith(empty)).isTrue();
         assertThat(fromString("hello").startsWith(fromString("hell"))).isTrue();
@@ -242,7 +243,7 @@ public class BinaryStringTest {
         assertThat(fromString("大千世界").startsWith(fromString("大千世界好"))).isFalse();
     }
 
-    @Test
+    @TestTemplate
     public void endsWith() {
         assertThat(empty.endsWith(empty)).isTrue();
         assertThat(fromString("hello").endsWith(fromString("ello"))).isTrue();
@@ -253,7 +254,7 @@ public class BinaryStringTest {
         assertThat(fromString("数据砖头").endsWith(fromString("我的数据砖头"))).isFalse();
     }
 
-    @Test
+    @TestTemplate
     public void substring() {
         assertThat(fromString("hello").substring(0, 0)).isEqualTo(empty);
         assertThat(fromString("hello").substring(1, 3)).isEqualTo(fromString("el"));
@@ -263,7 +264,7 @@ public class BinaryStringTest {
         assertThat(fromString("ߵ梷").substring(0, 2)).isEqualTo(fromString("ߵ梷"));
     }
 
-    @Test
+    @TestTemplate
     public void indexOf() {
         assertThat(empty.indexOf(empty, 0)).isEqualTo(0);
         assertThat(empty.indexOf(fromString("l"), 0)).isEqualTo(-1);
@@ -279,7 +280,7 @@ public class BinaryStringTest {
         assertThat(fromString("数据砖头").indexOf(fromString("头"), 0)).isEqualTo(3);
     }
 
-    @Test
+    @TestTemplate
     public void testToUpperLowerCase() {
         assertThat(fromString("我是中国人").toLowerCase()).isEqualTo(fromString("我是中国人"));
         assertThat(fromString("我是中国人").toUpperCase()).isEqualTo(fromString("我是中国人"));
@@ -311,7 +312,7 @@ public class BinaryStringTest {
                 .isEqualTo(fromString("!@#$%^*"));
     }
 
-    @Test
+    @TestTemplate
     public void testcastFrom() {
         class DecimalTestData {
             private String str;
@@ -394,7 +395,7 @@ public class BinaryStringTest {
         }
     }
 
-    @Test
+    @TestTemplate
     public void testEmptyString() {
         BinaryString str2 = fromString("hahahahah");
         BinaryString str3;
@@ -418,7 +419,7 @@ public class BinaryStringTest {
         assertThat(BinaryString.EMPTY_UTF8).isEqualTo(str3);
     }
 
-    @Test
+    @TestTemplate
     public void testEncodeWithIllegalCharacter() throws UnsupportedEncodingException {
 
         // Tis char array has some illegal character, such as 55357
@@ -435,7 +436,7 @@ public class BinaryStringTest {
         assertThat(BinaryString.encodeUTF8(str)).isEqualTo(str.getBytes("UTF-8"));
     }
 
-    @Test
+    @TestTemplate
     public void testDecodeWithIllegalUtf8Bytes() throws UnsupportedEncodingException {
 
         // illegal utf-8 bytes
@@ -467,7 +468,7 @@ public class BinaryStringTest {
                 .isEqualTo(str);
     }
 
-    @Test
+    @TestTemplate
     public void skipWrongFirstByte() {
         int[] wrongFirstBytes = {
             0x80,
@@ -496,7 +497,7 @@ public class BinaryStringTest {
         }
     }
 
-    @Test
+    @TestTemplate
     public void testFromBytes() {
         String s = "hahahe";
         byte[] bytes = Arrays.copyOf(s.getBytes(UTF_8), 10);

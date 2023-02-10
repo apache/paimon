@@ -20,7 +20,7 @@ package org.apache.flink.table.store.data;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.types.DataTypes;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import static org.apache.flink.table.store.data.DataFormatTestUtil.splitBytes;
 import static org.assertj.core.api.Assertions.assertThat;

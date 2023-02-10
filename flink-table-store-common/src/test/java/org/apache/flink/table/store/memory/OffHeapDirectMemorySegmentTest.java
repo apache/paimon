@@ -18,19 +18,20 @@
 
 package org.apache.flink.table.store.memory;
 
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.apache.flink.table.store.testutils.junit.parameterized.ParameterizedTestExtension;
+
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.nio.ByteBuffer;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotSame;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /** Tests for the {@link MemorySegment} in off-heap mode using direct memory. */
-@RunWith(Parameterized.class)
+@ExtendWith(ParameterizedTestExtension.class)
 public class OffHeapDirectMemorySegmentTest extends MemorySegmentTestBase {
 
     public OffHeapDirectMemorySegmentTest(int pageSize) {
@@ -42,7 +43,7 @@ public class OffHeapDirectMemorySegmentTest extends MemorySegmentTestBase {
         return MemorySegment.allocateOffHeapMemory(size);
     }
 
-    @Test
+    @TestTemplate
     public void testHeapSegmentSpecifics() {
         final int bufSize = 411;
         MemorySegment seg = createSegment(bufSize);
