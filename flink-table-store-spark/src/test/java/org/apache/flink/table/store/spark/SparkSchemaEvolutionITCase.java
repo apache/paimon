@@ -122,7 +122,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
         spark.sql("ALTER TABLE t1 RENAME TO t3");
         List<Row> tables = spark.sql("SHOW TABLES").collectAsList();
-        assertThat(tables.toString()).isEqualTo("[[default,t2,false], [default,t3,false]]");
+        assertThat(tables.stream().map(Row::toString))
+                .containsExactlyInAnyOrder("[default,t2,false]", "[default,t3,false]");
 
         List<Row> afterRename =
                 spark.sql("SHOW CREATE TABLE tablestore.default.t3").collectAsList();
