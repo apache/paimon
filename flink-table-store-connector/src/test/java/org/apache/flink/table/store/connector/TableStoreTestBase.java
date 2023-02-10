@@ -19,29 +19,29 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
-import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.Column;
-import org.apache.flink.table.catalog.GenericInMemoryCatalog;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.catalog.UniqueConstraint;
-import org.apache.flink.table.store.kafka.KafkaTableTestBase;
+import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.table.types.utils.TypeConversions;
 import org.apache.flink.types.Row;
 
 import org.apache.commons.io.FileUtils;
-import org.junit.Before;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.List;
@@ -49,75 +49,67 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.apache.flink.table.store.connector.FlinkConnectorOptions.LOG_SYSTEM;
-import static org.apache.flink.table.store.connector.FlinkConnectorOptions.NONE;
-import static org.apache.flink.table.store.connector.FlinkConnectorOptions.ROOT_PATH;
-import static org.apache.flink.table.store.connector.FlinkConnectorOptions.TABLE_STORE_PREFIX;
-import static org.apache.flink.table.store.connector.FlinkConnectorOptions.relativeTablePath;
-import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
-
 /** End-to-end test base for table store. */
-public abstract class TableStoreTestBase extends KafkaTableTestBase {
+public abstract class TableStoreTestBase extends AbstractTestBase {
 
     public static final String CURRENT_CATALOG = "catalog";
-    public static final String CURRENT_DATABASE = "database";
+    public static final String CURRENT_DATABASE = "default";
 
-    protected final RuntimeExecutionMode executionMode;
-    protected final ObjectIdentifier tableIdentifier;
-    protected final boolean enableLogStore;
-    protected final ExpectedResult expectedResult;
+    protected ObjectIdentifier tableIdentifier;
+    protected ExpectedResult expectedResult;
+    protected boolean ignoreException;
 
+    protected StreamTableEnvironment tEnv;
     protected String rootPath;
 
-    public TableStoreTestBase(
+    protected ResolvedCatalogTable resolvedTable =
+            createResolvedTable(
+                    Collections.emptyMap(),
+                    RowType.of(new IntType(), new VarCharType()),
+                    Collections.emptyList(),
+                    Collections.emptyList());
+
+    protected void prepareEnv(
             RuntimeExecutionMode executionMode,
             String tableName,
-            boolean enableLogStore,
+            boolean ignoreException,
+            String manualCause,
             ExpectedResult expectedResult) {
-        this.executionMode = executionMode;
         this.tableIdentifier = ObjectIdentifier.of(CURRENT_CATALOG, CURRENT_DATABASE, tableName);
-        this.enableLogStore = enableLogStore;
+        this.ignoreException = ignoreException;
         this.expectedResult = expectedResult;
-    }
 
-    protected abstract void prepareEnv();
-
-    @Override
-    @Before
-    public void setup() {
-        super.setup();
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
         EnvironmentSettings.Builder builder = EnvironmentSettings.newInstance().inBatchMode();
         if (executionMode == RuntimeExecutionMode.STREAMING) {
             env.enableCheckpointing(100);
             builder.inStreamingMode();
         }
         tEnv = StreamTableEnvironment.create(env, builder.build());
-        ((TableEnvironmentImpl) tEnv)
-                .getCatalogManager()
-                .registerCatalog(
-                        CURRENT_CATALOG,
-                        new GenericInMemoryCatalog(CURRENT_CATALOG, CURRENT_DATABASE));
+        rootPath = getTempDirPath();
+
+        tEnv.executeSql(
+                String.format(
+                        "CREATE CATALOG %s WITH ('type' = 'table-store', 'warehouse' = '%s')",
+                        CURRENT_CATALOG, rootPath));
         tEnv.useCatalog(CURRENT_CATALOG);
-        try {
-            rootPath = TEMPORARY_FOLDER.newFolder().getPath();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        prepareSessionContext();
-        prepareEnv();
     }
 
-    protected void prepareSessionContext() {
-        Configuration configuration = tEnv.getConfig().getConfiguration();
-        configuration.setString(TABLE_STORE_PREFIX + ROOT_PATH.key(), rootPath);
-        configuration.setString(
-                TABLE_STORE_PREFIX + BOOTSTRAP_SERVERS.key(), getBootstrapServers());
-        if (enableLogStore) {
-            configuration.setString(TABLE_STORE_PREFIX + LOG_SYSTEM.key(), "kafka");
-        } else {
-            configuration.setString(TABLE_STORE_PREFIX + LOG_SYSTEM.key(), NONE);
-        }
+    /** Test class implements "private static List'<'Arguments> data()" to supply test data. */
+    @ParameterizedTest
+    @MethodSource("data")
+    public void test(
+            RuntimeExecutionMode executionMode,
+            String tableName,
+            boolean ignoreException,
+            String manualCause,
+            ExpectedResult expectedResult) {
+        prepareEnv(executionMode, tableName, ignoreException, manualCause, expectedResult);
+        testCore();
     }
+
+    protected abstract void testCore();
 
     protected static ResolvedCatalogTable createResolvedTable(
             Map<String, String> options,
@@ -156,6 +148,11 @@ public abstract class TableStoreTestBase extends KafkaTableTestBase {
 
     protected void deleteTablePath() {
         FileUtils.deleteQuietly(Paths.get(rootPath, relativeTablePath(tableIdentifier)).toFile());
+    }
+
+    protected String relativeTablePath(ObjectIdentifier tableIdentifier) {
+        return String.format(
+                "%s.db/%s", tableIdentifier.getDatabaseName(), tableIdentifier.getObjectName());
     }
 
     /** Expected result wrapper. */
