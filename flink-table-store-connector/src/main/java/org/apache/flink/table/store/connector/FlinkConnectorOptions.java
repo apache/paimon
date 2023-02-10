@@ -19,12 +19,10 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.annotation.docs.Documentation;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.description.Description;
 import org.apache.flink.configuration.description.TextElement;
-import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.factories.FactoryUtil;
 
 import java.lang.reflect.Field;
@@ -34,17 +32,7 @@ import java.util.List;
 /** Options for flink connector. */
 public class FlinkConnectorOptions {
 
-    public static final String TABLE_STORE_PREFIX = "table-store.";
-
     public static final String NONE = "none";
-
-    @Internal
-    @Documentation.ExcludeFromDocumentation("Internal use only")
-    public static final ConfigOption<String> ROOT_PATH =
-            ConfigOptions.key("root-path")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("The root file path of the table store in the filesystem.");
 
     public static final ConfigOption<String> LOG_SYSTEM =
             ConfigOptions.key("log.system")
@@ -77,14 +65,6 @@ public class FlinkConnectorOptions {
                             "Define a custom parallelism for the scan source. "
                                     + "By default, if this option is not defined, the planner will derive the parallelism "
                                     + "for each statement individually by also considering the global configuration.");
-
-    public static String relativeTablePath(ObjectIdentifier tableIdentifier) {
-        return String.format(
-                "%s.catalog/%s.db/%s",
-                tableIdentifier.getCatalogName(),
-                tableIdentifier.getDatabaseName(),
-                tableIdentifier.getObjectName());
-    }
 
     @Internal
     public static List<ConfigOption<?>> getOptions() {
