@@ -24,7 +24,9 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.store.connector.FlinkCatalog;
+import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
+import org.apache.flink.table.store.file.catalog.Identifier;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.ExceptionUtils;
@@ -42,6 +44,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -274,6 +277,38 @@ public class HiveCatalogITCase {
             ExceptionUtils.assertThrowableWithMessage(
                     t, "Table test_db.hive_table is not a table store table");
         }
+    }
+
+    @Test
+    public void testRenameTable() throws Exception {
+        tEnv.executeSql("CREATE TABLE t1 (a INT)").await();
+        tEnv.executeSql("CREATE TABLE t2 (a INT)").await();
+        tEnv.executeSql("INSERT INTO t1 SELECT 1");
+        // the source table do not exist.
+        assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t3 RENAME TO t4"))
+                .hasMessage(
+                        "Table `my_hive`.`test_db`.`t3` doesn't exist or is a temporary table.");
+
+        // the target table has existed.
+        assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t1 RENAME TO t2"))
+                .hasMessage(
+                        "Could not execute ALTER TABLE my_hive.test_db.t1 RENAME TO my_hive.test_db.t2");
+
+        tEnv.executeSql("ALTER TABLE t1 RENAME TO t3").await();
+        List<String> tables = hiveShell.executeQuery("SHOW TABLES");
+        Assert.assertTrue(tables.contains("t3"));
+        Assert.assertFalse(tables.contains("t1"));
+
+        Identifier identifier = new Identifier("test_db", "t3");
+        Catalog catalog =
+                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
+        org.apache.flink.table.store.fs.Path tablePath = catalog.getTableLocation(identifier);
+        Assert.assertEquals(tablePath.toString(), path + "test_db.db" + File.separator + "t3");
+
+        // TODO: the hiverunner (4.0) has a bug ,it can not rename the table path correctly ,
+        // we should upgrade it to the 6.0 later ,and  update the test case for query.
+        assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM t3"))
+                .hasMessageContaining("SQL validation failed. There is no table stored in");
     }
 
     @Test

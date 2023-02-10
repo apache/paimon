@@ -243,6 +243,33 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
+            throws TableNotExistException, TableAlreadyExistException {
+        if (!tableStoreTableExists(fromTable)) {
+            if (ignoreIfNotExists) {
+                return;
+            } else {
+                throw new TableNotExistException(fromTable);
+            }
+        }
+
+        if (tableExists(toTable)) {
+            throw new TableAlreadyExistException(toTable);
+        }
+
+        try {
+            String fromDB = fromTable.getDatabaseName();
+            String fromTableName = fromTable.getObjectName();
+            Table table = client.getTable(fromDB, fromTableName);
+            table.setDbName(toTable.getDatabaseName());
+            table.setTableName(toTable.getObjectName());
+            client.alter_table(fromDB, fromTableName, table);
+        } catch (TException e) {
+            throw new RuntimeException("Failed to rename table " + fromTable.getFullName(), e);
+        }
+    }
+
+    @Override
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException {
