@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.memory;
 
-import org.junit.Test;
-import org.junit.runners.Parameterized;
+import org.apache.flink.table.store.testutils.junit.parameterized.Parameters;
+
+import org.junit.jupiter.api.TestTemplate;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -36,11 +37,12 @@ import java.util.Collection;
 import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /** Tests for the access and transfer methods of the {@link MemorySegment}. */
 public abstract class MemorySegmentTestBase {
@@ -63,7 +65,7 @@ public abstract class MemorySegmentTestBase {
     //  Access to primitives
     // ------------------------------------------------------------------------
 
-    @Test
+    @TestTemplate
     public void testByteAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
@@ -112,7 +114,7 @@ public abstract class MemorySegmentTestBase {
         }
     }
 
-    @Test
+    @TestTemplate
     public void testBooleanAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
@@ -149,7 +151,7 @@ public abstract class MemorySegmentTestBase {
         }
     }
 
-    @Test
+    @TestTemplate
     public void testEqualTo() {
         MemorySegment seg1 = createSegment(pageSize);
         MemorySegment seg2 = createSegment(pageSize);
@@ -170,7 +172,7 @@ public abstract class MemorySegmentTestBase {
         assertFalse(seg1.equalTo(seg2, i, i, 9));
     }
 
-    @Test
+    @TestTemplate
     public void testCharAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
@@ -221,7 +223,7 @@ public abstract class MemorySegmentTestBase {
         }
     }
 
-    @Test
+    @TestTemplate
     public void testShortAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
@@ -272,7 +274,7 @@ public abstract class MemorySegmentTestBase {
         }
     }
 
-    @Test
+    @TestTemplate
     public void testIntAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
@@ -325,7 +327,7 @@ public abstract class MemorySegmentTestBase {
         }
     }
 
-    @Test
+    @TestTemplate
     public void testLongAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
@@ -402,7 +404,7 @@ public abstract class MemorySegmentTestBase {
         }
     }
 
-    @Test
+    @TestTemplate
     public void testFloatAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
@@ -457,7 +459,7 @@ public abstract class MemorySegmentTestBase {
         }
     }
 
-    @Test
+    @TestTemplate
     public void testDoubleAccess() {
         final MemorySegment segment = createSegment(pageSize);
 
@@ -538,7 +540,7 @@ public abstract class MemorySegmentTestBase {
     //  Bulk Byte Movements
     // ------------------------------------------------------------------------
 
-    @Test
+    @TestTemplate
     public void testBulkByteAccess() {
         // test expected correct behavior with default offset / length
         {
@@ -636,7 +638,7 @@ public abstract class MemorySegmentTestBase {
     //  Writing / Reading to/from DataInput / DataOutput
     // ------------------------------------------------------------------------
 
-    @Test
+    @TestTemplate
     public void testDataInputOutput() throws IOException {
         MemorySegment seg = createSegment(pageSize);
         byte[] contents = new byte[pageSize];
@@ -677,7 +679,7 @@ public abstract class MemorySegmentTestBase {
         assertArrayEquals(contents, targetBuffer);
     }
 
-    @Test
+    @TestTemplate
     public void testDataInputOutputStreamUnderflowOverflow() throws IOException {
         final int segmentSize = 1337;
 
@@ -738,7 +740,7 @@ public abstract class MemorySegmentTestBase {
     //  ByteBuffer Ops
     // ------------------------------------------------------------------------
 
-    @Test
+    @TestTemplate
     public void testByteBufferGet() {
         testByteBufferGet(false);
         testByteBufferGet(true);
@@ -773,14 +775,14 @@ public abstract class MemorySegmentTestBase {
         assertArrayEquals(bytes, result);
     }
 
-    @Test(expected = ReadOnlyBufferException.class)
+    @TestTemplate
     public void testHeapByteBufferGetReadOnly() {
-        testByteBufferGetReadOnly(false);
+        assertThrows(ReadOnlyBufferException.class, () -> testByteBufferGetReadOnly(false));
     }
 
-    @Test(expected = ReadOnlyBufferException.class)
+    @TestTemplate
     public void testOffHeapByteBufferGetReadOnly() {
-        testByteBufferGetReadOnly(true);
+        assertThrows(ReadOnlyBufferException.class, () -> testByteBufferGetReadOnly(true));
     }
 
     /**
@@ -801,7 +803,7 @@ public abstract class MemorySegmentTestBase {
         seg.get(0, target, pageSize);
     }
 
-    @Test
+    @TestTemplate
     public void testByteBufferPut() {
         testByteBufferPut(false);
         testByteBufferPut(true);
@@ -841,7 +843,7 @@ public abstract class MemorySegmentTestBase {
     //  ByteBuffer Ops on sliced byte buffers
     // ------------------------------------------------------------------------
 
-    @Test
+    @TestTemplate
     public void testSlicedByteBufferGet() {
         testSlicedByteBufferGet(false);
         testSlicedByteBufferGet(true);
@@ -879,7 +881,7 @@ public abstract class MemorySegmentTestBase {
         assertArrayEquals(bytes, result);
     }
 
-    @Test
+    @TestTemplate
     public void testSlicedByteBufferPut() {
         testSlicedByteBufferPut(false);
         testSlicedByteBufferPut(true);
@@ -919,7 +921,7 @@ public abstract class MemorySegmentTestBase {
         assertArrayEquals(expected, result);
     }
 
-    @Test
+    @TestTemplate
     public void testCompareBytes() {
         final byte[] bytes1 = new byte[pageSize];
         final byte[] bytes2 = new byte[pageSize];
@@ -960,7 +962,7 @@ public abstract class MemorySegmentTestBase {
         }
     }
 
-    @Test
+    @TestTemplate
     public void testCompareBytesWithDifferentLength() {
         final byte[] bytes1 = new byte[] {'a', 'b', 'c'};
         final byte[] bytes2 = new byte[] {'a', 'b', 'c', 'd'};
@@ -979,7 +981,7 @@ public abstract class MemorySegmentTestBase {
         assertThat(seg1.compare(seg2, 1, 1, 2, 1)).isGreaterThan(0);
     }
 
-    @Test
+    @TestTemplate
     public void testSwapBytes() {
         final int halfPageSize = pageSize / 2;
 
@@ -1017,7 +1019,7 @@ public abstract class MemorySegmentTestBase {
     //  Miscellaneous
     // ------------------------------------------------------------------------
 
-    @Test
+    @TestTemplate
     public void testByteBufferWrapping() {
         MemorySegment seg = createSegment(1024);
 
@@ -1059,7 +1061,7 @@ public abstract class MemorySegmentTestBase {
     //  Parametrization to run with different segment sizes
     // ------------------------------------------------------------------------
 
-    @Parameterized.Parameters(name = "segment-size = {0}")
+    @Parameters(name = "segment-size = {0}")
     public static Collection<Object[]> executionModes() {
         return Arrays.asList(
                 new Object[] {32 * 1024}, new Object[] {4 * 1024}, new Object[] {512 * 1024});
