@@ -34,8 +34,8 @@ import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.TableStreamingReader;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
 import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.FileIOUtils;
 import org.apache.flink.table.store.utils.TypeUtils;
-import org.apache.flink.util.FileUtils;
 
 import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
 
@@ -202,7 +202,7 @@ public class FileStoreLookupFunction extends TableFunction<org.apache.flink.tabl
         }
 
         if (path != null) {
-            FileUtils.deleteDirectoryQuietly(path);
+            FileIOUtils.deleteDirectoryQuietly(path);
         }
     }
 

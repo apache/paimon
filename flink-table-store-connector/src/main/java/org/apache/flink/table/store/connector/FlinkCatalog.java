@@ -473,7 +473,9 @@ public class FlinkCatalog extends AbstractCatalog {
     public final void createFunction(
             ObjectPath functionPath, CatalogFunction function, boolean ignoreIfExists)
             throws CatalogException {
-        throw new UnsupportedOperationException();
+        throw new UnsupportedOperationException(
+                "Create function is not supported,"
+                        + " maybe you can use 'CREATE TEMPORARY FUNCTION' instead.");
     }
 
     @Override

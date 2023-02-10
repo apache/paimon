@@ -25,6 +25,7 @@ import java.io.InputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.ObjectStreamClass;
+import java.io.OutputStream;
 import java.io.Serializable;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
@@ -61,6 +62,14 @@ public final class InstantiationUtil {
             oos.flush();
             return baos.toByteArray();
         }
+    }
+
+    public static void serializeObject(OutputStream out, Object o) throws IOException {
+        ObjectOutputStream oos =
+                out instanceof ObjectOutputStream
+                        ? (ObjectOutputStream) out
+                        : new ObjectOutputStream(out);
+        oos.writeObject(o);
     }
 
     /**

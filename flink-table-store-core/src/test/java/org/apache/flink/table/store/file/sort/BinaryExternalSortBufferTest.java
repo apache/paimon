@@ -26,7 +26,7 @@ import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.memory.MemorySegmentPool;
-import org.apache.flink.util.MutableObjectIterator;
+import org.apache.flink.table.store.file.utils.MutableObjectIterator;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;

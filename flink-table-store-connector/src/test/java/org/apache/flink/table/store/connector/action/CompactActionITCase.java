@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.connector.action;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.store.CoreOptions;
@@ -32,11 +33,13 @@ import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.CommonTestUtils;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -151,7 +154,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         env.getCheckpointConfig().setCheckpointInterval(500);
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
         new CompactAction(tablePath).withPartitions(getSpecifiedPartitions()).build(env);
-        env.executeAsync();
+        JobClient client = env.executeAsync();
 
         // first full compaction
         validateResult(
@@ -178,9 +181,15 @@ public class CompactActionITCase extends ActionITCaseBase {
                 60_000);
 
         // assert dedicated compact job will expire snapshots
-        Assertions.assertEquals(
-                snapshotManager.latestSnapshotId() - 2,
-                (long) snapshotManager.earliestSnapshotId());
+        CommonTestUtils.waitUtil(
+                () ->
+                        snapshotManager.latestSnapshotId() - 2
+                                == snapshotManager.earliestSnapshotId(),
+                Duration.ofSeconds(60_000),
+                Duration.ofSeconds(100),
+                String.format("Cannot validate snapshot expiration in %s milliseconds.", 60_000));
+
+        client.cancel();
     }
 
     private List<Map<String, String>> getSpecifiedPartitions() {

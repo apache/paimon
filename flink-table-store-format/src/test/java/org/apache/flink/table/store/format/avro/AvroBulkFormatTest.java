@@ -25,7 +25,7 @@ import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.util.FileUtils;
+import org.apache.flink.table.store.utils.FileIOUtils;
 
 import org.apache.avro.Schema;
 import org.apache.avro.file.DataFileWriter;
@@ -116,7 +116,7 @@ class AvroBulkFormatTest {
 
     @AfterEach
     public void after() throws IOException {
-        FileUtils.deleteFileOrDirectory(tmpFile);
+        FileIOUtils.deleteFileOrDirectory(tmpFile);
     }
 
     @Test

@@ -20,8 +20,8 @@ package org.apache.flink.table.store.plugin;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ConfigurationUtils;
+import org.apache.flink.table.store.utils.IOUtils;
 import org.apache.flink.table.store.utils.LocalFileUtils;
-import org.apache.flink.util.IOUtils;
 
 import java.io.IOException;
 import java.io.InputStream;

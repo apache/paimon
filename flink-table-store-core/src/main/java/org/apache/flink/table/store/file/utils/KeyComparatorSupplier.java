@@ -23,7 +23,6 @@ import org.apache.flink.table.store.codegen.GeneratedClass;
 import org.apache.flink.table.store.codegen.RecordComparator;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.util.function.SerializableSupplier;
 
 import java.util.Comparator;
 import java.util.function.Supplier;

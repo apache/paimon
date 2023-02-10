@@ -25,7 +25,7 @@ import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.util.function.SerializableSupplier;
+import org.apache.flink.table.store.file.utils.SerializableSupplier;
 
 import java.util.ArrayList;
 import java.util.List;

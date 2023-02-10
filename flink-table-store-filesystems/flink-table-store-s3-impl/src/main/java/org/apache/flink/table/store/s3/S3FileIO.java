@@ -49,7 +49,8 @@ public class S3FileIO extends HadoopCompliantFileIO {
     private static final String[][] MIRRORED_CONFIG_KEYS = {
         {"fs.s3a.access-key", "fs.s3a.access.key"},
         {"fs.s3a.secret-key", "fs.s3a.secret.key"},
-        {"fs.s3a.path-style-access", "fs.s3a.path.style.access"}
+        {"fs.s3a.path-style-access", "fs.s3a.path.style.access"},
+        {"fs.s3a.signer-type", "fs.s3a.signing-algorithm"}
     };
 
     /**

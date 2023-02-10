@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.types;
 
 import org.apache.flink.annotation.Experimental;
-import org.apache.flink.util.InstantiationUtil;
+import org.apache.flink.table.store.utils.InstantiationUtil;
 
 import org.assertj.core.api.AbstractAssert;
 import org.assertj.core.api.Condition;

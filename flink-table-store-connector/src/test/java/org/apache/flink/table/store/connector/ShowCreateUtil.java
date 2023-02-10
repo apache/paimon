@@ -29,15 +29,9 @@ import org.apache.flink.table.utils.EncodingUtils;
 
 import org.apache.commons.lang3.StringUtils;
 
-import javax.annotation.Nullable;
-
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 /**
  * SHOW CREATE statement Util.
@@ -47,112 +41,6 @@ import java.util.stream.IntStream;
 public class ShowCreateUtil {
 
     private ShowCreateUtil() {}
-
-    public static String createTableLikeDDL(
-            String sourceTableName,
-            String managedTableName,
-            Map<String, String> tableOptions,
-            @Nullable ReadWriteTableTestBase.WatermarkSpec watermarkSpec) {
-        StringBuilder ddl =
-                new StringBuilder("CREATE TABLE IF NOT EXISTS ")
-                        .append(String.format("`%s`", managedTableName));
-        if (watermarkSpec != null) {
-            ddl.append(
-                    String.format(
-                            "(\n WATERMARK FOR %s AS %s)\n",
-                            watermarkSpec.columnName, watermarkSpec.expressionAsString));
-        }
-        ddl.append(optionsToSql(tableOptions))
-                .append(String.format(" LIKE `%s` (EXCLUDING OPTIONS)\n", sourceTableName));
-        return ddl.toString();
-    }
-
-    public static String buildInsertOverwriteQuery(
-            String managedTableName,
-            Map<String, String> staticPartitions,
-            List<String[]> overwriteRecords) {
-        StringBuilder insertDmlBuilder =
-                new StringBuilder(String.format("INSERT OVERWRITE `%s`", managedTableName));
-        if (staticPartitions.size() > 0) {
-            String partitionString =
-                    staticPartitions.entrySet().stream()
-                            .map(
-                                    entry ->
-                                            String.format(
-                                                    "%s = %s", entry.getKey(), entry.getValue()))
-                            .collect(Collectors.joining(", "));
-            insertDmlBuilder.append(String.format("PARTITION (%s)", partitionString));
-        }
-        insertDmlBuilder.append("\n VALUES ");
-        overwriteRecords.forEach(
-                record -> {
-                    int arity = record.length;
-                    insertDmlBuilder.append("(");
-                    IntStream.range(0, arity)
-                            .forEach(i -> insertDmlBuilder.append(record[i]).append(", "));
-
-                    if (arity > 0) {
-                        int len = insertDmlBuilder.length();
-                        insertDmlBuilder.delete(len - 2, len);
-                    }
-                    insertDmlBuilder.append("), ");
-                });
-        int len = insertDmlBuilder.length();
-        insertDmlBuilder.delete(len - 2, len);
-        return insertDmlBuilder.toString();
-    }
-
-    public static String buildInsertIntoQuery(String sourceTableName, String managedTableName) {
-        return buildInsertIntoQuery(
-                sourceTableName, managedTableName, Collections.emptyMap(), Collections.emptyMap());
-    }
-
-    public static String buildInsertIntoQuery(
-            String sourceTableName,
-            String managedTableName,
-            Map<String, String> partitions,
-            Map<String, String> hints) {
-        StringBuilder insertDmlBuilder =
-                new StringBuilder(String.format("INSERT INTO `%s`", managedTableName));
-        if (partitions.size() > 0) {
-            insertDmlBuilder.append(" PARTITION (");
-            partitions.forEach(
-                    (k, v) -> {
-                        insertDmlBuilder.append(String.format("'%s'", k));
-                        insertDmlBuilder.append(" = ");
-                        insertDmlBuilder.append(String.format("'%s', ", v));
-                    });
-            int len = insertDmlBuilder.length();
-            insertDmlBuilder.deleteCharAt(len - 1);
-            insertDmlBuilder.append(")");
-        }
-        insertDmlBuilder.append(String.format("\n SELECT * FROM `%s`", sourceTableName));
-        insertDmlBuilder.append(buildHints(hints));
-
-        return insertDmlBuilder.toString();
-    }
-
-    public static String buildSimpleSelectQuery(String tableName, Map<String, String> hints) {
-        return buildSelectQuery(tableName, hints, null, Collections.emptyList());
-    }
-
-    public static String buildSelectQuery(
-            String tableName,
-            Map<String, String> hints,
-            @Nullable String filter,
-            List<String> projections) {
-        StringBuilder queryBuilder =
-                new StringBuilder(
-                        String.format(
-                                "SELECT %s FROM `%s` %s",
-                                projections.isEmpty() ? "*" : String.join(", ", projections),
-                                tableName,
-                                buildHints(hints)));
-        if (filter != null) {
-            queryBuilder.append("\nWHERE ").append(filter);
-        }
-        return queryBuilder.toString();
-    }
 
     public static String buildShowCreateTable(
             ResolvedCatalogBaseTable<?> table,
@@ -291,34 +179,5 @@ public class ShowCreateUtil {
         }
         // TODO: Print the column comment until FLINK-18958 is fixed
         return sb.toString();
-    }
-
-    private static String optionsToSql(Map<String, String> tableOptions) {
-        String optionsStr =
-                tableOptions.entrySet().stream()
-                        .map(
-                                entry ->
-                                        String.format(
-                                                "'%s' = '%s'", entry.getKey(), entry.getValue()))
-                        .collect(Collectors.joining(",\n"));
-        if (StringUtils.isNotEmpty(optionsStr)) {
-            return "WITH (\n  " + optionsStr + ")";
-        }
-        return optionsStr;
-    }
-
-    private static String buildHints(Map<String, String> hints) {
-        if (hints.size() > 0) {
-            String hintString =
-                    hints.entrySet().stream()
-                            .map(
-                                    entry ->
-                                            String.format(
-                                                    "'%s' = '%s'",
-                                                    entry.getKey(), entry.getValue()))
-                            .collect(Collectors.joining(", "));
-            return "/*+ OPTIONS (" + hintString + ") */";
-        }
-        return "";
     }
 }
