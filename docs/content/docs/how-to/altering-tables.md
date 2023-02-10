@@ -54,6 +54,36 @@ ALTER TABLE my_table SET TBLPROPERTIES (
 
 {{< /tabs >}}
 
+## Rename Table Name
+
+The following SQL rename the table name to new name.
+
+{{< tabs "rename-table-name" >}}
+
+{{< tab "Flink" >}}
+
+```sql
+ALTER TABLE my_table RENAME TO my_table_new;
+```
+
+{{< /tab >}}
+
+{{< tab "Spark3" >}}
+
+```sql
+ALTER TABLE my_table RENAME TO my_table_new;
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+{{< hint info >}}
+
+If you use object storage, such as S3 or OSS, please use this syntax carefully, because the renaming of object storage is not atomic, and only partial files may be moved in case of failure.
+
+{{< /hint >}}
+
 ## Removing Table Properties
 
 The following SQL removes `write-buffer-size` table property.

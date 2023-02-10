@@ -150,6 +150,19 @@ public interface Catalog extends AutoCloseable {
             throws TableAlreadyExistException, DatabaseNotExistException;
 
     /**
+     * Rename a table.
+     *
+     * @param fromTable the name of the table which need to rename
+     * @param toTable the new table
+     * @param ignoreIfNotExists Flag to specify behavior when the table does not exist: if set to
+     *     false, throw an exception, if set to true, do nothing.
+     * @throws TableNotExistException if the from table does not exist
+     * @throws TableAlreadyExistException if the to table already exists
+     */
+    void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
+            throws TableNotExistException, TableAlreadyExistException;
+
+    /**
      * Modify an existing table from {@link SchemaChange}s.
      *
      * @param identifier path of the table to be modified
