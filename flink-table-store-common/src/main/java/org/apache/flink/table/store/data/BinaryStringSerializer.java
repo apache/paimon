@@ -67,7 +67,10 @@ public final class BinaryStringSerializer extends TypeSerializerSingleton<Binary
     public void serialize(BinaryString string, DataOutputView target) throws IOException {
         target.writeInt(string.getSizeInBytes());
         MemorySegmentUtils.copyToView(
-                string.getSegments(), string.getOffset(), string.getSizeInBytes(), target);
+                string.getSegments(),
+                string.getOffset(),
+                string.getSizeInBytes(),
+                org.apache.flink.table.store.io.DataOutputView.convertFlinkToStore(target));
     }
 
     @Override

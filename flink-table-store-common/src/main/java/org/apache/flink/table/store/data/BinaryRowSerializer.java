@@ -82,7 +82,10 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
             serializeWithoutLength(record, (MemorySegmentWritable) target);
         } else {
             MemorySegmentUtils.copyToView(
-                    record.getSegments(), record.getOffset(), record.getSizeInBytes(), target);
+                    record.getSegments(),
+                    record.getOffset(),
+                    record.getSizeInBytes(),
+                    org.apache.flink.table.store.io.DataOutputView.convertFlinkToStore(target));
         }
     }
 

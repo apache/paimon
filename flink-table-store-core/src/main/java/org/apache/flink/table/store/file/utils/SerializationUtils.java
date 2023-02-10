@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.core.memory.DataInputView;
-import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.io.DataInputView;
+import org.apache.flink.table.store.io.DataOutputView;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.types.VarBinaryType;
 import org.apache.flink.table.store.types.VarCharType;

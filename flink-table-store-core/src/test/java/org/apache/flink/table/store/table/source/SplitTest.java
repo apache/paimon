@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.core.memory.DataInputDeserializer;
-import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFileTestDataGenerator;
+import org.apache.flink.table.store.io.DataInputDeserializer;
+import org.apache.flink.table.store.io.DataOutputViewStreamWrapper;
 
 import org.junit.jupiter.api.Test;
 
