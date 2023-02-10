@@ -402,11 +402,6 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     @Test
     public void testAlterTableColumnComment() {
         createTable("testAlterTableColumnComment");
-        Row row =
-                spark.sql("SHOW CREATE TABLE tablestore.default.`testAlterTableColumnComment`")
-                        .collectAsList()
-                        .get(0);
-        System.out.println(row);
         assertThat(getField(schema1(), 0).description()).isNull();
 
         spark.sql("ALTER TABLE tablestore.default.t1 ALTER COLUMN a COMMENT 'a new comment'");
