@@ -38,8 +38,6 @@ import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
 
-import java.util.Map;
-
 import static org.apache.flink.table.store.CoreOptions.LOG_FORMAT;
 import static org.apache.flink.table.store.CoreOptions.LOG_KEY_FORMAT;
 
@@ -51,15 +49,6 @@ import static org.apache.flink.table.store.CoreOptions.LOG_KEY_FORMAT;
  * writing.
  */
 public interface LogStoreTableFactory extends DynamicTableFactory {
-
-    /** Enrich options from catalog and session information. */
-    Map<String, String> enrichOptions(Context context);
-
-    /** Notifies the listener that a table creation occurred. */
-    void onCreateTable(Context context, int numBucket, boolean ignoreIfExists);
-
-    /** Notifies the listener that a table drop occurred. */
-    void onDropTable(Context context, boolean ignoreIfNotExists);
 
     /**
      * Creates a {@link LogSourceProvider} instance from a {@link CatalogTable} and additional
