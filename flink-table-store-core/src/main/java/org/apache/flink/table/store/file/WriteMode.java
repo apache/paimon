@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.file;
 
-import org.apache.flink.configuration.DescribedEnum;
-import org.apache.flink.configuration.description.InlineElement;
+import org.apache.flink.table.store.options.description.DescribedEnum;
+import org.apache.flink.table.store.options.description.InlineElement;
 
-import static org.apache.flink.configuration.description.TextElement.text;
+import static org.apache.flink.table.store.options.description.TextElement.text;
 
 /** Defines the write mode for flink table store. */
 public enum WriteMode implements DescribedEnum {

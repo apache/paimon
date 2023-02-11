@@ -20,8 +20,6 @@ package org.apache.flink.table.store.format.orc;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
@@ -34,6 +32,7 @@ import org.apache.flink.table.store.format.orc.filter.OrcPredicateFunctionVisito
 import org.apache.flink.table.store.format.orc.reader.OrcSplitReaderUtil;
 import org.apache.flink.table.store.format.orc.writer.RowDataVectorizer;
 import org.apache.flink.table.store.format.orc.writer.Vectorizer;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataType;
@@ -65,7 +64,7 @@ public class OrcFileFormat extends FileFormat {
     private final org.apache.hadoop.conf.Configuration readerConf;
     private final org.apache.hadoop.conf.Configuration writerConf;
 
-    public OrcFileFormat(Configuration formatOptions) {
+    public OrcFileFormat(Options formatOptions) {
         super(IDENTIFIER);
         this.orcProperties = getOrcProperties(formatOptions);
         this.readerConf = new org.apache.hadoop.conf.Configuration();
@@ -126,10 +125,10 @@ public class OrcFileFormat extends FileFormat {
         return new OrcWriterFactory(vectorizer, orcProperties, writerConf);
     }
 
-    private static Properties getOrcProperties(ReadableConfig options) {
+    private static Properties getOrcProperties(Options options) {
         Properties orcProperties = new Properties();
         Properties properties = new Properties();
-        ((org.apache.flink.configuration.Configuration) options).addAllToProperties(properties);
+        options.addAllToProperties(properties);
         properties.forEach((k, v) -> orcProperties.put(IDENTIFIER + "." + k, v));
         return orcProperties;
     }

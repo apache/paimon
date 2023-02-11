@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
@@ -29,6 +28,7 @@ import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileIOFinder;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.io.TempDir;
@@ -47,7 +47,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ManifestFileTest {
 
     private final ManifestTestDataGenerator gen = ManifestTestDataGenerator.builder().build();
-    private final FileFormat avro = FileFormat.fromIdentifier("avro", new Configuration());
+    private final FileFormat avro = FileFormat.fromIdentifier("avro", new Options());
 
     @TempDir java.nio.file.Path tempDir;
 

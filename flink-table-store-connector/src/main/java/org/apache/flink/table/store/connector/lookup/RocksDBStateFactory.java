@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector.lookup;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.connector.RocksDBOptions;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.serializer.Serializer;
@@ -42,7 +41,8 @@ public class RocksDBStateFactory implements Closeable {
 
     private final ColumnFamilyOptions columnFamilyOptions;
 
-    public RocksDBStateFactory(String path, Configuration conf) throws IOException {
+    public RocksDBStateFactory(String path, org.apache.flink.table.store.options.Options conf)
+            throws IOException {
         DBOptions dbOptions =
                 RocksDBOptions.createDBOptions(
                         new DBOptions()

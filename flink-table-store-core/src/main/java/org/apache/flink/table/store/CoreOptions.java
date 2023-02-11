@@ -18,28 +18,21 @@
 
 package org.apache.flink.table.store;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.annotation.docs.Documentation;
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.DescribedEnum;
-import org.apache.flink.configuration.MemorySize;
-import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.configuration.description.Description;
-import org.apache.flink.configuration.description.InlineElement;
+import org.apache.flink.table.store.annotation.Documentation.ExcludeFromDocumentation;
+import org.apache.flink.table.store.annotation.Documentation.Immutable;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.flink.table.store.options.MemorySize;
 import org.apache.flink.table.store.options.Options;
+import org.apache.flink.table.store.options.description.DescribedEnum;
+import org.apache.flink.table.store.options.description.Description;
+import org.apache.flink.table.store.options.description.InlineElement;
 import org.apache.flink.table.store.utils.Preconditions;
 
 import java.io.Serializable;
-import java.lang.annotation.ElementType;
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
-import java.lang.annotation.Target;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -50,25 +43,25 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-import static org.apache.flink.configuration.ConfigOptions.key;
-import static org.apache.flink.configuration.description.TextElement.text;
 import static org.apache.flink.table.store.file.WriteMode.APPEND_ONLY;
 import static org.apache.flink.table.store.file.schema.TableSchema.KEY_FIELD_PREFIX;
 import static org.apache.flink.table.store.file.schema.TableSchema.SYSTEM_FIELD_NAMES;
+import static org.apache.flink.table.store.options.ConfigOptions.key;
+import static org.apache.flink.table.store.options.description.TextElement.text;
 import static org.apache.flink.table.store.utils.Preconditions.checkState;
 
 /** Core options for table store. */
 public class CoreOptions implements Serializable {
 
     public static final ConfigOption<Integer> BUCKET =
-            ConfigOptions.key("bucket")
+            key("bucket")
                     .intType()
                     .defaultValue(1)
                     .withDescription("Bucket number for file store.");
 
     @Immutable
     public static final ConfigOption<String> BUCKET_KEY =
-            ConfigOptions.key("bucket-key")
+            key("bucket-key")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
@@ -84,48 +77,47 @@ public class CoreOptions implements Serializable {
                                                     + "if there is no primary key, the full row will be used.")
                                     .build());
 
-    @Internal
-    @Documentation.ExcludeFromDocumentation("Internal use only")
+    @ExcludeFromDocumentation("Internal use only")
     public static final ConfigOption<String> PATH =
-            ConfigOptions.key("path")
+            key("path")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("The file path of this table in the filesystem.");
 
     public static final ConfigOption<String> FILE_FORMAT =
-            ConfigOptions.key("file.format")
+            key("file.format")
                     .stringType()
                     .defaultValue("orc")
                     .withDescription("Specify the message format of data files.");
 
     public static final ConfigOption<String> ORC_BLOOM_FILTER_COLUMNS =
-            ConfigOptions.key("orc.bloom.filter.columns")
+            key("orc.bloom.filter.columns")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
                             "A comma-separated list of columns for which to create a bloon filter when writing.");
 
     public static final ConfigOption<Double> ORC_BLOOM_FILTER_FPP =
-            ConfigOptions.key("orc.bloom.filter.fpp")
+            key("orc.bloom.filter.fpp")
                     .doubleType()
                     .defaultValue(0.05)
                     .withDescription(
                             "Define the default false positive probability for bloom filters.");
 
     public static final ConfigOption<String> MANIFEST_FORMAT =
-            ConfigOptions.key("manifest.format")
+            key("manifest.format")
                     .stringType()
                     .defaultValue("avro")
                     .withDescription("Specify the message format of manifest files.");
 
     public static final ConfigOption<MemorySize> MANIFEST_TARGET_FILE_SIZE =
-            ConfigOptions.key("manifest.target-file-size")
+            key("manifest.target-file-size")
                     .memoryType()
                     .defaultValue(MemorySize.ofMebiBytes(8))
                     .withDescription("Suggested file size of a manifest file.");
 
     public static final ConfigOption<Integer> MANIFEST_MERGE_MIN_COUNT =
-            ConfigOptions.key("manifest.merge-min-count")
+            key("manifest.merge-min-count")
                     .intType()
                     .defaultValue(30)
                     .withDescription(
@@ -141,51 +133,51 @@ public class CoreOptions implements Serializable {
                                     + " column value is null/empty string.");
 
     public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED_MIN =
-            ConfigOptions.key("snapshot.num-retained.min")
+            key("snapshot.num-retained.min")
                     .intType()
                     .defaultValue(10)
                     .withDescription("The minimum number of completed snapshots to retain.");
 
     public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED_MAX =
-            ConfigOptions.key("snapshot.num-retained.max")
+            key("snapshot.num-retained.max")
                     .intType()
                     .defaultValue(Integer.MAX_VALUE)
                     .withDescription("The maximum number of completed snapshots to retain.");
 
     public static final ConfigOption<Duration> SNAPSHOT_TIME_RETAINED =
-            ConfigOptions.key("snapshot.time-retained")
+            key("snapshot.time-retained")
                     .durationType()
                     .defaultValue(Duration.ofHours(1))
                     .withDescription("The maximum time of completed snapshots to retain.");
 
     public static final ConfigOption<Duration> CONTINUOUS_DISCOVERY_INTERVAL =
-            ConfigOptions.key("continuous.discovery-interval")
+            key("continuous.discovery-interval")
                     .durationType()
                     .defaultValue(Duration.ofSeconds(1))
                     .withDescription("The discovery interval of continuous reading.");
 
     @Immutable
     public static final ConfigOption<MergeEngine> MERGE_ENGINE =
-            ConfigOptions.key("merge-engine")
+            key("merge-engine")
                     .enumType(MergeEngine.class)
                     .defaultValue(MergeEngine.DEDUPLICATE)
                     .withDescription("Specify the merge engine for table with primary key.");
 
     public static final ConfigOption<Boolean> PARTIAL_UPDATE_IGNORE_DELETE =
-            ConfigOptions.key("partial-update.ignore-delete")
+            key("partial-update.ignore-delete")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether to ignore delete records in partial-update mode.");
 
     @Immutable
     public static final ConfigOption<WriteMode> WRITE_MODE =
-            ConfigOptions.key("write-mode")
+            key("write-mode")
                     .enumType(WriteMode.class)
                     .defaultValue(WriteMode.CHANGE_LOG)
                     .withDescription("Specify the write mode for table.");
 
     public static final ConfigOption<Boolean> WRITE_ONLY =
-            ConfigOptions.key("write-only")
+            key("write-only")
                     .booleanType()
                     .defaultValue(false)
                     .withDeprecatedKeys("write.compaction-skip")
@@ -194,13 +186,13 @@ public class CoreOptions implements Serializable {
                                     + "This option is used along with dedicated compact jobs.");
 
     public static final ConfigOption<MemorySize> SOURCE_SPLIT_TARGET_SIZE =
-            ConfigOptions.key("source.split.target-size")
+            key("source.split.target-size")
                     .memoryType()
                     .defaultValue(MemorySize.ofMebiBytes(128))
                     .withDescription("Target size of a source split when scanning a bucket.");
 
     public static final ConfigOption<MemorySize> SOURCE_SPLIT_OPEN_FILE_COST =
-            ConfigOptions.key("source.split.open-file-cost")
+            key("source.split.open-file-cost")
                     .memoryType()
                     .defaultValue(MemorySize.ofMebiBytes(4))
                     .withDescription(
@@ -208,21 +200,21 @@ public class CoreOptions implements Serializable {
                                     + " too many files with a source split, which can be very slow.");
 
     public static final ConfigOption<MemorySize> WRITE_BUFFER_SIZE =
-            ConfigOptions.key("write-buffer-size")
+            key("write-buffer-size")
                     .memoryType()
                     .defaultValue(MemorySize.parse("256 mb"))
                     .withDescription(
                             "Amount of data to build up in memory before converting to a sorted on-disk file.");
 
     public static final ConfigOption<Boolean> WRITE_BUFFER_SPILLABLE =
-            ConfigOptions.key("write-buffer-spillable")
+            key("write-buffer-spillable")
                     .booleanType()
                     .noDefaultValue()
                     .withDescription(
                             "Whether the write buffer can be spillable. Enabled by default when using object storage.");
 
     public static final ConfigOption<Integer> LOCAL_SORT_MAX_NUM_FILE_HANDLES =
-            ConfigOptions.key("local-sort.max-num-file-handles")
+            key("local-sort.max-num-file-handles")
                     .intType()
                     .defaultValue(128)
                     .withDescription(
@@ -231,19 +223,19 @@ public class CoreOptions implements Serializable {
                                     + "it will cause too many files opened at the same time, consume memory and lead to random reading.");
 
     public static final ConfigOption<MemorySize> PAGE_SIZE =
-            ConfigOptions.key("page-size")
+            key("page-size")
                     .memoryType()
                     .defaultValue(MemorySize.parse("64 kb"))
                     .withDescription("Memory page size.");
 
     public static final ConfigOption<MemorySize> TARGET_FILE_SIZE =
-            ConfigOptions.key("target-file-size")
+            key("target-file-size")
                     .memoryType()
                     .defaultValue(MemorySize.ofMebiBytes(128))
                     .withDescription("Target size of a file.");
 
     public static final ConfigOption<Integer> NUM_SORTED_RUNS_COMPACTION_TRIGGER =
-            ConfigOptions.key("num-sorted-run.compaction-trigger")
+            key("num-sorted-run.compaction-trigger")
                     .intType()
                     .defaultValue(5)
                     .withDescription(
@@ -251,7 +243,7 @@ public class CoreOptions implements Serializable {
                                     + "high-level runs (one level one sorted run).");
 
     public static final ConfigOption<Integer> NUM_SORTED_RUNS_STOP_TRIGGER =
-            ConfigOptions.key("num-sorted-run.stop-trigger")
+            key("num-sorted-run.stop-trigger")
                     .intType()
                     .noDefaultValue()
                     .withDescription(
@@ -259,20 +251,20 @@ public class CoreOptions implements Serializable {
                                     + " the default value is 'num-sorted-run.compaction-trigger' + 1.");
 
     public static final ConfigOption<Integer> NUM_LEVELS =
-            ConfigOptions.key("num-levels")
+            key("num-levels")
                     .intType()
                     .noDefaultValue()
                     .withDescription(
                             "Total level number, for example, there are 3 levels, including 0,1,2 levels.");
 
     public static final ConfigOption<Boolean> COMMIT_FORCE_COMPACT =
-            ConfigOptions.key("commit.force-compact")
+            key("commit.force-compact")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether to force a compaction before commit.");
 
     public static final ConfigOption<Integer> COMPACTION_MAX_SIZE_AMPLIFICATION_PERCENT =
-            ConfigOptions.key("compaction.max-size-amplification-percent")
+            key("compaction.max-size-amplification-percent")
                     .intType()
                     .defaultValue(200)
                     .withDescription(
@@ -280,7 +272,7 @@ public class CoreOptions implements Serializable {
                                     + "needed to store a single byte of data in the merge tree for changelog mode table.");
 
     public static final ConfigOption<Integer> COMPACTION_SIZE_RATIO =
-            ConfigOptions.key("compaction.size-ratio")
+            key("compaction.size-ratio")
                     .intType()
                     .defaultValue(1)
                     .withDescription(
@@ -289,7 +281,7 @@ public class CoreOptions implements Serializable {
                                     + "into this candidate set.");
 
     public static final ConfigOption<Integer> COMPACTION_MIN_FILE_NUM =
-            ConfigOptions.key("compaction.min.file-num")
+            key("compaction.min.file-num")
                     .intType()
                     .defaultValue(5)
                     .withDescription(
@@ -299,7 +291,7 @@ public class CoreOptions implements Serializable {
                                     + "which is not cost-effective.");
 
     public static final ConfigOption<Integer> COMPACTION_MAX_FILE_NUM =
-            ConfigOptions.key("compaction.early-max.file-num")
+            key("compaction.early-max.file-num")
                     .intType()
                     .defaultValue(50)
                     .withDescription(
@@ -308,7 +300,7 @@ public class CoreOptions implements Serializable {
                                     + "avoids pending too much small files, which slows down the performance.");
 
     public static final ConfigOption<Integer> COMPACTION_MAX_SORTED_RUN_NUM =
-            ConfigOptions.key("compaction.max-sorted-run-num")
+            key("compaction.max-sorted-run-num")
                     .intType()
                     .defaultValue(Integer.MAX_VALUE)
                     .withDescription(
@@ -317,7 +309,7 @@ public class CoreOptions implements Serializable {
                                     + "which may lead to OutOfMemoryError.");
 
     public static final ConfigOption<ChangelogProducer> CHANGELOG_PRODUCER =
-            ConfigOptions.key("changelog-producer")
+            key("changelog-producer")
                     .enumType(ChangelogProducer.class)
                     .defaultValue(ChangelogProducer.NONE)
                     .withDescription(
@@ -326,7 +318,7 @@ public class CoreOptions implements Serializable {
                                     + "it can be read directly during stream reads.");
 
     public static final ConfigOption<Duration> CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL =
-            ConfigOptions.key("changelog-producer.compaction-interval")
+            key("changelog-producer.compaction-interval")
                     .durationType()
                     .defaultValue(Duration.ofMinutes(30))
                     .withDescription(
@@ -338,7 +330,7 @@ public class CoreOptions implements Serializable {
 
     @Immutable
     public static final ConfigOption<String> SEQUENCE_FIELD =
-            ConfigOptions.key("sequence.field")
+            key("sequence.field")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
@@ -346,14 +338,14 @@ public class CoreOptions implements Serializable {
                                     + " the sequence number determines which data is the most recent.");
 
     public static final ConfigOption<StartupMode> SCAN_MODE =
-            ConfigOptions.key("scan.mode")
+            key("scan.mode")
                     .enumType(StartupMode.class)
                     .defaultValue(StartupMode.DEFAULT)
                     .withDeprecatedKeys("log.scan")
                     .withDescription("Specify the scanning behavior of the source.");
 
     public static final ConfigOption<Long> SCAN_TIMESTAMP_MILLIS =
-            ConfigOptions.key("scan.timestamp-millis")
+            key("scan.timestamp-millis")
                     .longType()
                     .noDefaultValue()
                     .withDeprecatedKeys("log.scan.timestamp-millis")
@@ -361,33 +353,33 @@ public class CoreOptions implements Serializable {
                             "Optional timestamp used in case of \"from-timestamp\" scan mode.");
 
     public static final ConfigOption<Long> SCAN_SNAPSHOT_ID =
-            ConfigOptions.key("scan.snapshot-id")
+            key("scan.snapshot-id")
                     .longType()
                     .noDefaultValue()
                     .withDescription(
                             "Optional snapshot id used in case of \"from-snapshot\" scan mode");
 
     public static final ConfigOption<Duration> LOG_RETENTION =
-            ConfigOptions.key("log.retention")
+            key("log.retention")
                     .durationType()
                     .noDefaultValue()
                     .withDescription(
                             "It means how long changes log will be kept. The default value is from the log system cluster.");
 
     public static final ConfigOption<LogConsistency> LOG_CONSISTENCY =
-            ConfigOptions.key("log.consistency")
+            key("log.consistency")
                     .enumType(LogConsistency.class)
                     .defaultValue(LogConsistency.TRANSACTIONAL)
                     .withDescription("Specify the log consistency mode for table.");
 
     public static final ConfigOption<LogChangelogMode> LOG_CHANGELOG_MODE =
-            ConfigOptions.key("log.changelog-mode")
+            key("log.changelog-mode")
                     .enumType(LogChangelogMode.class)
                     .defaultValue(LogChangelogMode.AUTO)
                     .withDescription("Specify the log changelog mode for table.");
 
     public static final ConfigOption<Boolean> LOG_SCAN_REMOVE_NORMALIZE =
-            ConfigOptions.key("log.scan.remove-normalize")
+            key("log.scan.remove-normalize")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
@@ -396,27 +388,27 @@ public class CoreOptions implements Serializable {
                                     + " is used to calculate aggregation and the input is not complete changelog.");
 
     public static final ConfigOption<String> LOG_KEY_FORMAT =
-            ConfigOptions.key("log.key.format")
+            key("log.key.format")
                     .stringType()
                     .defaultValue("json")
                     .withDescription(
                             "Specify the key message format of log system with primary key.");
 
     public static final ConfigOption<String> LOG_FORMAT =
-            ConfigOptions.key("log.format")
+            key("log.format")
                     .stringType()
                     .defaultValue("debezium-json")
                     .withDescription("Specify the message format of log system.");
 
     public static final ConfigOption<Boolean> AUTO_CREATE =
-            ConfigOptions.key("auto-create")
+            key("auto-create")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
                             "Whether to create underlying storage when reading and writing the table.");
 
     public static final ConfigOption<Boolean> STREAMING_READ_OVERWRITE =
-            ConfigOptions.key("streaming-read-overwrite")
+            key("streaming-read-overwrite")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
@@ -477,17 +469,17 @@ public class CoreOptions implements Serializable {
                                                             + "$hour:00:00'."))
                                     .build());
 
-    private final Configuration options;
+    private final Options options;
 
     public CoreOptions(Map<String, String> options) {
-        this(Configuration.fromMap(options));
+        this(Options.fromMap(options));
     }
 
-    public CoreOptions(Configuration options) {
+    public CoreOptions(Options options) {
         this.options = options;
     }
 
-    public Configuration toConfiguration() {
+    public Options toConfiguration() {
         return options;
     }
 
@@ -505,10 +497,6 @@ public class CoreOptions implements Serializable {
 
     public static Path path(Map<String, String> options) {
         return new Path(options.get(PATH.key()));
-    }
-
-    public static Path path(Configuration options) {
-        return new Path(options.get(PATH));
     }
 
     public static Path path(Options options) {
@@ -647,7 +635,7 @@ public class CoreOptions implements Serializable {
         return startupMode(options);
     }
 
-    public static StartupMode startupMode(ReadableConfig options) {
+    public static StartupMode startupMode(Options options) {
         StartupMode mode = options.get(SCAN_MODE);
         if (mode == StartupMode.DEFAULT) {
             if (options.getOptional(SCAN_TIMESTAMP_MILLIS).isPresent()) {
@@ -890,11 +878,11 @@ public class CoreOptions implements Serializable {
     }
 
     /**
-     * Set the default values of the {@link CoreOptions} via the given {@link Configuration}.
+     * Set the default values of the {@link CoreOptions} via the given {@link Options}.
      *
      * @param options the options to set default values
      */
-    public static void setDefaultValues(Configuration options) {
+    public static void setDefaultValues(Options options) {
         if (options.contains(SCAN_TIMESTAMP_MILLIS) && !options.contains(SCAN_MODE)) {
             options.set(SCAN_MODE, StartupMode.FROM_TIMESTAMP);
         }
@@ -999,7 +987,6 @@ public class CoreOptions implements Serializable {
                         "%s must be null when you set %s", illegalOption.key(), legalOption.key()));
     }
 
-    @Internal
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = CoreOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
@@ -1015,7 +1002,6 @@ public class CoreOptions implements Serializable {
         return list;
     }
 
-    @Internal
     public static Set<String> getImmutableOptionKeys() {
         final Field[] fields = CoreOptions.class.getFields();
         final Set<String> immutableKeys = new HashSet<>(fields.length);
@@ -1031,10 +1017,4 @@ public class CoreOptions implements Serializable {
         }
         return immutableKeys;
     }
-
-    /** Annotation used on {@link ConfigOption} fields to exclude it from schema change. */
-    @Internal
-    @Target(ElementType.FIELD)
-    @Retention(RetentionPolicy.RUNTIME)
-    public @interface Immutable {}
 }

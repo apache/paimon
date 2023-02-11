@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.datagen;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.table.store.options.ConfigOption;
 
 import java.util.Arrays;
 import java.util.HashSet;

@@ -19,17 +19,17 @@
 package org.apache.flink.table.store.docs.configuration;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.annotation.docs.ConfigGroup;
-import org.apache.flink.annotation.docs.ConfigGroups;
-import org.apache.flink.annotation.docs.Documentation;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.DescribedEnum;
-import org.apache.flink.configuration.description.Description;
-import org.apache.flink.configuration.description.Formatter;
-import org.apache.flink.configuration.description.HtmlFormatter;
-import org.apache.flink.configuration.description.InlineElement;
-import org.apache.flink.configuration.description.TextElement;
+import org.apache.flink.table.store.annotation.ConfigGroup;
+import org.apache.flink.table.store.annotation.ConfigGroups;
+import org.apache.flink.table.store.annotation.Documentation;
+import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.flink.table.store.options.description.DescribedEnum;
+import org.apache.flink.table.store.options.description.Description;
+import org.apache.flink.table.store.options.description.Formatter;
+import org.apache.flink.table.store.options.description.HtmlFormatter;
+import org.apache.flink.table.store.options.description.InlineElement;
+import org.apache.flink.table.store.options.description.TextElement;
 import org.apache.flink.table.store.utils.ThrowingConsumer;
 import org.apache.flink.table.store.utils.TimeUtils;
 
@@ -61,8 +61,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.configuration.description.TextElement.text;
 import static org.apache.flink.table.store.docs.util.Utils.escapeCharacters;
+import static org.apache.flink.table.store.options.description.TextElement.text;
 
 /** Class used for generating code based documentation of configuration parameters. */
 public class ConfigOptionsDocGenerator {

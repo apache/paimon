@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store;
 
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.table.store.options.Options;
 
 import org.junit.jupiter.api.Test;
 
@@ -29,12 +29,12 @@ public class CoreOptionsTest {
 
     @Test
     public void testDefaultStartupMode() {
-        Configuration conf = new Configuration();
+        Options conf = new Options();
         assertThat(conf.get(CoreOptions.SCAN_MODE)).isEqualTo(CoreOptions.StartupMode.DEFAULT);
         assertThat(new CoreOptions(conf).startupMode())
                 .isEqualTo(CoreOptions.StartupMode.LATEST_FULL);
 
-        conf = new Configuration();
+        conf = new Options();
         conf.set(CoreOptions.SCAN_TIMESTAMP_MILLIS, System.currentTimeMillis());
         assertThat(new CoreOptions(conf).startupMode())
                 .isEqualTo(CoreOptions.StartupMode.FROM_TIMESTAMP);
@@ -42,11 +42,11 @@ public class CoreOptionsTest {
 
     @Test
     public void testStartupModeCompatibility() {
-        Configuration conf = new Configuration();
+        Options conf = new Options();
         conf.setString("log.scan", "latest");
         assertThat(new CoreOptions(conf).startupMode()).isEqualTo(CoreOptions.StartupMode.LATEST);
 
-        conf = new Configuration();
+        conf = new Options();
         conf.setString("log.scan.timestamp-millis", String.valueOf(System.currentTimeMillis()));
         assertThat(new CoreOptions(conf).startupMode())
                 .isEqualTo(CoreOptions.StartupMode.FROM_TIMESTAMP);
@@ -54,7 +54,7 @@ public class CoreOptionsTest {
 
     @Test
     public void testDeprecatedStartupMode() {
-        Configuration conf = new Configuration();
+        Options conf = new Options();
         conf.set(CoreOptions.SCAN_MODE, CoreOptions.StartupMode.FULL);
         assertThat(new CoreOptions(conf).startupMode())
                 .isEqualTo(CoreOptions.StartupMode.LATEST_FULL);

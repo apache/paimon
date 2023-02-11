@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.plugin;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.ConfigurationUtils;
 import org.apache.flink.table.store.utils.IOUtils;
 import org.apache.flink.table.store.utils.LocalFileUtils;
 
@@ -67,8 +65,7 @@ public class PluginLoader {
     public PluginLoader(String jarName) {
         try {
             ClassLoader ownerClassLoader = PluginLoader.class.getClassLoader();
-            Path tmpDirectory =
-                    Paths.get(ConfigurationUtils.parseTempDirectories(new Configuration())[0]);
+            Path tmpDirectory = Paths.get(System.getProperty("java.io.tmpdir"));
             Files.createDirectories(
                     LocalFileUtils.getTargetPathIfContainsSymbolicPath(tmpDirectory));
             Path delegateJar =

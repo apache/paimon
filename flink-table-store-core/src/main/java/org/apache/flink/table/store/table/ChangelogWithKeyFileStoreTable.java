@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
@@ -36,6 +35,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.sink.SequenceGenerator;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -77,7 +77,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     public KeyValueFileStore store() {
         if (lazyStore == null) {
             RowType rowType = tableSchema.logicalRowType();
-            Configuration conf = Configuration.fromMap(tableSchema.options());
+            Options conf = Options.fromMap(tableSchema.options());
             CoreOptions.MergeEngine mergeEngine = conf.get(CoreOptions.MERGE_ENGINE);
             MergeFunctionFactory<KeyValue> mfFactory;
             switch (mergeEngine) {

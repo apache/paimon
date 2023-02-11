@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
@@ -27,6 +26,7 @@ import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.VarCharType;
@@ -41,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** ITCase for auto-enabling commit.force-compact under batch mode. */
 public class ForceCompactionITCase extends CatalogITCaseBase {
 
-    private final FileFormat avro = FileFormat.fromIdentifier("avro", new Configuration());
+    private final FileFormat avro = FileFormat.fromIdentifier("avro", new Options());
 
     @Override
     protected List<String> ddl() {

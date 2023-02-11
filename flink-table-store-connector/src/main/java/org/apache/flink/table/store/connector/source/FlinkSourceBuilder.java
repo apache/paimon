@@ -21,7 +21,6 @@ package org.apache.flink.table.store.connector.source;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.source.hybrid.HybridSource;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -33,6 +32,7 @@ import org.apache.flink.table.store.CoreOptions.StartupMode;
 import org.apache.flink.table.store.connector.Projection;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.log.LogSourceProvider;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -52,7 +52,7 @@ public class FlinkSourceBuilder {
 
     private final ObjectIdentifier tableIdentifier;
     private final FileStoreTable table;
-    private final Configuration conf;
+    private final Options conf;
 
     private boolean isContinuous = false;
     private StreamExecutionEnvironment env;
@@ -66,7 +66,7 @@ public class FlinkSourceBuilder {
     public FlinkSourceBuilder(ObjectIdentifier tableIdentifier, FileStoreTable table) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
-        this.conf = Configuration.fromMap(table.schema().options());
+        this.conf = Options.fromMap(table.schema().options());
     }
 
     public FlinkSourceBuilder withContinuousMode(boolean isContinuous) {

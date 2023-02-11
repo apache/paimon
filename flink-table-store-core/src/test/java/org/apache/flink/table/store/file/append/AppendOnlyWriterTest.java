@@ -20,7 +20,6 @@
 package org.apache.flink.table.store.file.append;
 
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.BinaryString;
@@ -35,6 +34,7 @@ import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
@@ -303,7 +303,7 @@ public class AppendOnlyWriterTest {
 
     private Tuple2<AppendOnlyWriter, LinkedList<DataFileMeta>> createWriter(
             long targetFileSize, boolean forceCompact, List<DataFileMeta> scannedFiles) {
-        FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Configuration());
+        FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>(scannedFiles);
         return new Tuple2<>(
                 new AppendOnlyWriter(

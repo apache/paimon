@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.store.CoreOptions;
@@ -30,6 +29,7 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.kafka.KafkaLogStoreFactory;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.types.IntType;
@@ -59,13 +59,13 @@ public class ChangelogModeTest {
         path = new Path(temp.toUri().toString());
     }
 
-    private void test(Configuration options, ChangelogMode expectSource, ChangelogMode expectSink)
+    private void test(Options options, ChangelogMode expectSource, ChangelogMode expectSink)
             throws Exception {
         test(options, expectSource, expectSink, null);
     }
 
     private void test(
-            Configuration options,
+            Options options,
             ChangelogMode expectSource,
             ChangelogMode expectSink,
             @Nullable LogStoreTableFactory logStoreTableFactory)
@@ -90,26 +90,26 @@ public class ChangelogModeTest {
 
     @Test
     public void testDefault() throws Exception {
-        test(new Configuration(), ChangelogMode.upsert(), ChangelogMode.upsert());
+        test(new Options(), ChangelogMode.upsert(), ChangelogMode.upsert());
     }
 
     @Test
     public void testInputChangelogProducer() throws Exception {
-        Configuration options = new Configuration();
+        Options options = new Options();
         options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.INPUT);
         test(options, ChangelogMode.all(), ChangelogMode.all());
     }
 
     @Test
     public void testChangelogModeAll() throws Exception {
-        Configuration options = new Configuration();
+        Options options = new Options();
         options.set(CoreOptions.LOG_CHANGELOG_MODE, CoreOptions.LogChangelogMode.ALL);
         test(options, ChangelogMode.all(), ChangelogMode.all());
     }
 
     @Test
     public void testInputChangelogProducerWithLog() throws Exception {
-        Configuration options = new Configuration();
+        Options options = new Options();
         options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.INPUT);
         test(options, ChangelogMode.upsert(), ChangelogMode.all(), new KafkaLogStoreFactory());
     }

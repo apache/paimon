@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.kafka;
 
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
+import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.flink.table.store.options.ConfigOptions;
 
 /** Options for kafka log. */
 public class KafkaLogOptions {

@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.docs.configuration.data;
 
-import org.apache.flink.annotation.docs.Documentation;
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
+import org.apache.flink.table.store.annotation.Documentation;
+import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.flink.table.store.options.ConfigOptions;
 
 /** Collection of test {@link ConfigOptions ConfigOptions}. */
 @SuppressWarnings("unused") // this class is only accessed reflectively

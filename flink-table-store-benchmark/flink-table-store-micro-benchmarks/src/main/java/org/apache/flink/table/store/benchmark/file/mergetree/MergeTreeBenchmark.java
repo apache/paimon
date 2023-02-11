@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.benchmark.file.mergetree;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.benchmark.config.ConfigUtil;
 import org.apache.flink.table.store.benchmark.config.FileBenchmarkOptions;
@@ -50,6 +49,7 @@ import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowKind;
@@ -117,7 +117,7 @@ public class MergeTreeBenchmark {
     protected long sequenceNumber = 0;
 
     protected void createRecordWriter() {
-        Configuration configuration = ConfigUtil.loadBenchMarkConf();
+        Options configuration = ConfigUtil.loadBenchMarkConf();
         batchCount = configuration.get(FileBenchmarkOptions.WRITER_BATCH_COUNT);
         countPerBatch = configuration.get(FileBenchmarkOptions.WRITER_RECORD_COUNT_PER_BATCH);
         service = Executors.newSingleThreadExecutor();
@@ -133,11 +133,11 @@ public class MergeTreeBenchmark {
     }
 
     private RecordWriter<KeyValue> recreateMergeTree(
-            Configuration configuration, Path path, FileStorePathFactory pathFactory) {
+            Options configuration, Path path, FileStorePathFactory pathFactory) {
         options = new CoreOptions(configuration);
         RowType keyType = new RowType(singletonList(new DataField(0, "k", new IntType())));
         RowType valueType = new RowType(singletonList(new DataField(1, "v", new IntType())));
-        FileFormat flushingFormat = FileFormat.fromIdentifier(format, new Configuration());
+        FileFormat flushingFormat = FileFormat.fromIdentifier(format, new Options());
         KeyValueFileReaderFactory.Builder readerBuilder =
                 KeyValueFileReaderFactory.builder(
                         LocalFileIO.create(),

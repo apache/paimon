@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.format.orc;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractorTestBase;
 import org.apache.flink.table.store.format.orc.filter.OrcFileStatsExtractor;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.BinaryType;
@@ -46,7 +46,7 @@ public class OrcFileStatsExtractorTest extends FileStatsExtractorTestBase {
 
     @Override
     protected FileFormat createFormat() {
-        return FileFormat.fromIdentifier("orc", new Configuration());
+        return FileFormat.fromIdentifier("orc", new Options());
     }
 
     @Override
