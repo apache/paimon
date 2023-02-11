@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.DynamicTableSource;
@@ -37,6 +36,7 @@ import org.apache.flink.table.store.connector.lookup.FileStoreLookupFunction;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.AppendOnlyFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogValueCountFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogWithKeyFileStoreTable;
@@ -122,7 +122,7 @@ public class TableStoreSource extends FlinkTableSource
         } else if (table instanceof ChangelogValueCountFileStoreTable) {
             return ChangelogMode.all();
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
-            Configuration options = Configuration.fromMap(table.schema().options());
+            Options options = Options.fromMap(table.schema().options());
 
             if (options.get(LOG_SCAN_REMOVE_NORMALIZE)) {
                 return ChangelogMode.all();
@@ -163,7 +163,7 @@ public class TableStoreSource extends FlinkTableSource
                         .withPredicate(predicate)
                         .withLimit(limit)
                         .withParallelism(
-                                Configuration.fromMap(table.schema().options())
+                                Options.fromMap(table.schema().options())
                                         .get(FlinkConnectorOptions.SCAN_PARALLELISM))
                         .withWatermarkStrategy(watermarkStrategy);
 

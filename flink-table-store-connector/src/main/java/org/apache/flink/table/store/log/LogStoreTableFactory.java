@@ -20,6 +20,8 @@ package org.apache.flink.table.store.log;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.serialization.SerializationSchema;
+import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.connector.ChangelogMode;
@@ -67,6 +69,18 @@ public interface LogStoreTableFactory extends DynamicTableFactory {
 
     // --------------------------------------------------------------------------------------------
 
+    static ConfigOption<String> logKeyFormat() {
+        return ConfigOptions.key(LOG_KEY_FORMAT.key())
+                .stringType()
+                .defaultValue(LOG_KEY_FORMAT.defaultValue());
+    }
+
+    static ConfigOption<String> logFormat() {
+        return ConfigOptions.key(LOG_FORMAT.key())
+                .stringType()
+                .defaultValue(LOG_FORMAT.defaultValue());
+    }
+
     static LogStoreTableFactory discoverLogStoreFactory(ClassLoader cl, String identifier) {
         return FactoryUtil.discoverFactory(cl, LogStoreTableFactory.class, identifier);
     }
@@ -74,32 +88,32 @@ public interface LogStoreTableFactory extends DynamicTableFactory {
     static DecodingFormat<DeserializationSchema<RowData>> getKeyDecodingFormat(
             TableFactoryHelper helper) {
         DecodingFormat<DeserializationSchema<RowData>> format =
-                helper.discoverDecodingFormat(DeserializationFormatFactory.class, LOG_KEY_FORMAT);
-        validateKeyFormat(format, helper.getOptions().get(LOG_KEY_FORMAT));
+                helper.discoverDecodingFormat(DeserializationFormatFactory.class, logKeyFormat());
+        validateKeyFormat(format, helper.getOptions().get(logKeyFormat()));
         return format;
     }
 
     static EncodingFormat<SerializationSchema<RowData>> getKeyEncodingFormat(
             TableFactoryHelper helper) {
         EncodingFormat<SerializationSchema<RowData>> format =
-                helper.discoverEncodingFormat(SerializationFormatFactory.class, LOG_KEY_FORMAT);
-        validateKeyFormat(format, helper.getOptions().get(LOG_KEY_FORMAT));
+                helper.discoverEncodingFormat(SerializationFormatFactory.class, logKeyFormat());
+        validateKeyFormat(format, helper.getOptions().get(logKeyFormat()));
         return format;
     }
 
     static DecodingFormat<DeserializationSchema<RowData>> getValueDecodingFormat(
             TableFactoryHelper helper) {
         DecodingFormat<DeserializationSchema<RowData>> format =
-                helper.discoverDecodingFormat(DeserializationFormatFactory.class, LOG_FORMAT);
-        validateValueFormat(format, helper.getOptions().get(LOG_FORMAT));
+                helper.discoverDecodingFormat(DeserializationFormatFactory.class, logFormat());
+        validateValueFormat(format, helper.getOptions().get(logFormat()));
         return format;
     }
 
     static EncodingFormat<SerializationSchema<RowData>> getValueEncodingFormat(
             TableFactoryHelper helper) {
         EncodingFormat<SerializationSchema<RowData>> format =
-                helper.discoverEncodingFormat(SerializationFormatFactory.class, LOG_FORMAT);
-        validateValueFormat(format, helper.getOptions().get(LOG_FORMAT));
+                helper.discoverEncodingFormat(SerializationFormatFactory.class, logFormat());
+        validateValueFormat(format, helper.getOptions().get(logFormat()));
         return format;
     }
 

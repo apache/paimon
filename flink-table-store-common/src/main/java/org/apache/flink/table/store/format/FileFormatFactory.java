@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.format;
 
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.table.store.options.Options;
 
 /** Factory to create {@link FileFormat}. */
 public interface FileFormatFactory {
 
     String identifier();
 
-    FileFormat create(Configuration formatOptions);
+    FileFormat create(Options formatOptions);
 }

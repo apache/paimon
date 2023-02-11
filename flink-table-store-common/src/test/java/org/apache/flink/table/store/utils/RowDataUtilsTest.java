@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.InternalRow;
@@ -27,6 +26,7 @@ import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.datagen.DataGenerator;
 import org.apache.flink.table.store.datagen.RandomGeneratorVisitor;
 import org.apache.flink.table.store.datagen.RowDataGenerator;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.DataTypeRoot;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowType;
@@ -76,7 +76,7 @@ public class RowDataUtilsTest {
                                         field.type()
                                                 .accept(
                                                         new RandomGeneratorVisitor(
-                                                                field.name(), new Configuration()))
+                                                                field.name(), new Options()))
                                                 .getGenerator())
                         .toArray(DataGenerator[]::new);
         this.rowDataGenerator = new RowDataGenerator(generators);

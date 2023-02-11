@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.BinaryRowWriter;
@@ -32,6 +31,7 @@ import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileIOFinder;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
 
@@ -64,7 +64,7 @@ public class ManifestFileMetaTest {
     private ManifestFile manifestFile;
 
     public ManifestFileMetaTest() {
-        this.avro = FileFormat.fromIdentifier("avro", new Configuration());
+        this.avro = FileFormat.fromIdentifier("avro", new Options());
     }
 
     @BeforeEach

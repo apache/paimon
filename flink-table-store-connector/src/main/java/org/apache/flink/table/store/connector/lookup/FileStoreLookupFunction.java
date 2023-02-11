@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector.lookup;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.functions.FunctionContext;
@@ -30,6 +29,7 @@ import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.TableStreamingReader;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
@@ -119,7 +119,7 @@ public class FileStoreLookupFunction extends TableFunction<org.apache.flink.tabl
         String tmpDirectory = getTmpDirectory(context);
         this.path = new File(tmpDirectory, "lookup-" + UUID.randomUUID());
 
-        Configuration options = Configuration.fromMap(table.schema().options());
+        Options options = Options.fromMap(table.schema().options());
         this.refreshInterval = options.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL);
         this.stateFactory = new RocksDBStateFactory(path.toString(), options);
 
@@ -135,7 +135,7 @@ public class FileStoreLookupFunction extends TableFunction<org.apache.flink.tabl
                         table.schema().primaryKeys(),
                         joinKeys,
                         recordFilter,
-                        options.getLong(LOOKUP_CACHE_ROWS));
+                        options.get(LOOKUP_CACHE_ROWS));
         this.nextLoadTime = -1;
         this.streamingReader = new TableStreamingReader(table, projection, this.predicate);
 

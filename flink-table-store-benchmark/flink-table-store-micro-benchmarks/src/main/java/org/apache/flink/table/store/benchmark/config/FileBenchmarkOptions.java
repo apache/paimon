@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.benchmark.config;
 
-import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.table.store.options.ConfigOption;
 
-import static org.apache.flink.configuration.ConfigOptions.key;
+import static org.apache.flink.table.store.options.ConfigOptions.key;
 
 /** Benchmark options for file. */
 public class FileBenchmarkOptions {

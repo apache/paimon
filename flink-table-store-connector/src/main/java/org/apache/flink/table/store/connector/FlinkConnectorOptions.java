@@ -18,12 +18,10 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
-import org.apache.flink.configuration.description.Description;
-import org.apache.flink.configuration.description.TextElement;
-import org.apache.flink.table.factories.FactoryUtil;
+import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.flink.table.store.options.ConfigOptions;
+import org.apache.flink.table.store.options.description.Description;
+import org.apache.flink.table.store.options.description.TextElement;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -55,7 +53,14 @@ public class FlinkConnectorOptions {
                                                             + " store and kafka, and the streaming read will be read from kafka."))
                                     .build());
 
-    public static final ConfigOption<Integer> SINK_PARALLELISM = FactoryUtil.SINK_PARALLELISM;
+    public static final ConfigOption<Integer> SINK_PARALLELISM =
+            ConfigOptions.key("sink.parallelism")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Defines a custom parallelism for the sink. "
+                                    + "By default, if this option is not defined, the planner will derive the parallelism "
+                                    + "for each statement individually by also considering the global configuration.");
 
     public static final ConfigOption<Integer> SCAN_PARALLELISM =
             ConfigOptions.key("scan.parallelism")
@@ -66,7 +71,6 @@ public class FlinkConnectorOptions {
                                     + "By default, if this option is not defined, the planner will derive the parallelism "
                                     + "for each statement individually by also considering the global configuration.");
 
-    @Internal
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);

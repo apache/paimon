@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.options;
 
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileIOLoader;
 import org.apache.flink.table.store.fs.hadoop.HadoopFileIOLoader;
@@ -33,7 +31,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
 
-import static org.apache.flink.configuration.ConfigOptions.key;
+import static org.apache.flink.table.store.options.ConfigOptions.key;
 
 /** Configuration for {@link FileIO}. */
 public class CatalogOptions {

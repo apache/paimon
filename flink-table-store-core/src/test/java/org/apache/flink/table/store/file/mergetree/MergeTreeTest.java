@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.mergetree;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.data.BinaryRow;
@@ -50,6 +48,8 @@ import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.fs.FileStatus;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.MemorySize;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.SchemaEvolutionTableTestBase;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.IntType;
@@ -126,7 +126,7 @@ public class MergeTreeTest {
     }
 
     private void recreateMergeTree(long targetFileSize) {
-        Configuration configuration = new Configuration();
+        Options configuration = new Options();
         configuration.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
         configuration.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
         configuration.set(CoreOptions.TARGET_FILE_SIZE, new MemorySize(targetFileSize));

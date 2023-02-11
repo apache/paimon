@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.format.parquet;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.GenericArray;
@@ -31,6 +30,7 @@ import org.apache.flink.table.store.format.FormatWriter;
 import org.apache.flink.table.store.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.BooleanType;
@@ -223,7 +223,7 @@ public class ParquetReadWriteTest {
         DataType[] fieldTypes = new DataType[] {new DoubleType(), new TinyIntType(), new IntType()};
         ParquetReaderFactory format =
                 new ParquetReaderFactory(
-                        new Configuration(),
+                        new Options(),
                         RowType.builder()
                                 .fields(fieldTypes, new String[] {"f7", "f2", "f4"})
                                 .build(),
@@ -260,7 +260,7 @@ public class ParquetReadWriteTest {
                 };
         ParquetReaderFactory format =
                 new ParquetReaderFactory(
-                        new Configuration(),
+                        new Options(),
                         // f99 not exist in parquet file.
                         RowType.builder()
                                 .fields(fieldTypes, new String[] {"f7", "f2", "f4", "f99"})
@@ -292,7 +292,7 @@ public class ParquetReadWriteTest {
             throws IOException {
         // write data
         Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
-        Configuration conf = new Configuration();
+        Options conf = new Options();
         conf.setInteger("parquet.block.size", rowGroupSize);
         ParquetWriterFactory factory =
                 new ParquetWriterFactory(new RowDataParquetBuilder(ROW_TYPE, conf));
@@ -307,7 +307,7 @@ public class ParquetReadWriteTest {
     }
 
     private int testReadingFile(List<Integer> expected, Path path) throws IOException {
-        ParquetReaderFactory format = new ParquetReaderFactory(new Configuration(), ROW_TYPE, 500);
+        ParquetReaderFactory format = new ParquetReaderFactory(new Options(), ROW_TYPE, 500);
 
         // validate java serialization
         try {

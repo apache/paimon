@@ -19,13 +19,13 @@
 package org.apache.flink.table.store.format.parquet;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.format.FormatWriterFactory;
 import org.apache.flink.table.store.format.parquet.writer.RowDataParquetBuilder;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Projection;
 
@@ -37,15 +37,15 @@ import static org.apache.flink.table.store.format.parquet.ParquetFileFormatFacto
 /** Parquet {@link FileFormat}. */
 public class ParquetFileFormat extends FileFormat {
 
-    private final Configuration formatOptions;
+    private final Options formatOptions;
 
-    public ParquetFileFormat(Configuration formatOptions) {
+    public ParquetFileFormat(Options formatOptions) {
         super(IDENTIFIER);
         this.formatOptions = formatOptions;
     }
 
     @VisibleForTesting
-    Configuration formatOptions() {
+    Options formatOptions() {
         return formatOptions;
     }
 
@@ -68,8 +68,8 @@ public class ParquetFileFormat extends FileFormat {
         return Optional.of(new ParquetFileStatsExtractor(type));
     }
 
-    public static Configuration getParquetConfiguration(Configuration options) {
-        Configuration conf = new Configuration();
+    public static Options getParquetConfiguration(Options options) {
+        Options conf = new Options();
         options.toMap().forEach((key, value) -> conf.setString(IDENTIFIER + "." + key, value));
         return conf;
     }

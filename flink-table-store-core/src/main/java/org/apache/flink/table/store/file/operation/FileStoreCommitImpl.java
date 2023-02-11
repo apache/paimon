@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.Snapshot;
@@ -35,6 +34,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.MemorySize;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;

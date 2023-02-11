@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.docs.configuration;
 
-import org.apache.flink.annotation.docs.Documentation;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.table.store.annotation.Documentation;
+import org.apache.flink.table.store.options.ConfigOption;
 
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;

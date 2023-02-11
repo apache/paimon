@@ -18,10 +18,6 @@
 
 package org.apache.flink.table.store.format.avro;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
-import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -30,6 +26,9 @@ import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.format.FormatWriter;
 import org.apache.flink.table.store.format.FormatWriterFactory;
 import org.apache.flink.table.store.fs.PositionOutputStream;
+import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.flink.table.store.options.ConfigOptions;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Projection;
@@ -61,9 +60,9 @@ public class AvroFileFormat extends FileFormat {
                     .defaultValue(SNAPPY_CODEC)
                     .withDescription("The compression codec for avro");
 
-    private final ReadableConfig formatOptions;
+    private final Options formatOptions;
 
-    public AvroFileFormat(ReadableConfig formatOptions) {
+    public AvroFileFormat(Options formatOptions) {
         super(IDENTIFIER);
         this.formatOptions = formatOptions;
     }
@@ -111,8 +110,8 @@ public class AvroFileFormat extends FileFormat {
     }
 
     /**
-     * A {@link BulkWriter.Factory} to convert {@link InternalRow} to {@link GenericRecord} and wrap
-     * {@link AvroWriterFactory}.
+     * A {@link FormatWriterFactory} to convert {@link InternalRow} to {@link GenericRecord} and
+     * wrap {@link AvroWriterFactory}.
      */
     private static class RowDataAvroWriterFactory implements FormatWriterFactory {
 

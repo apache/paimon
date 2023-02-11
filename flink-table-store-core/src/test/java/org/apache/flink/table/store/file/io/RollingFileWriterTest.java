@@ -19,13 +19,13 @@
 package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.api.common.accumulators.LongCounter;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
@@ -57,7 +57,7 @@ public class RollingFileWriterTest {
 
     @BeforeEach
     public void beforeEach() {
-        FileFormat fileFormat = FileFormat.fromIdentifier("avro", new Configuration());
+        FileFormat fileFormat = FileFormat.fromIdentifier("avro", new Options());
         rollingFileWriter =
                 new RollingFileWriter<>(
                         () ->

@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.format.parquet;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.columnar.ColumnVector;
 import org.apache.flink.table.store.data.columnar.ColumnarRow;
@@ -32,6 +31,7 @@ import org.apache.flink.table.store.format.parquet.reader.ColumnReader;
 import org.apache.flink.table.store.format.parquet.reader.ParquetDecimalVector;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypeRoot;
 import org.apache.flink.table.store.types.RowType;
@@ -75,17 +75,17 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     private static final int BATCH_SIZE = 2048;
 
-    private final Configuration conf;
+    private final Options conf;
     private final String[] projectedFields;
     private final DataType[] projectedTypes;
     private final int batchSize;
     private final Set<Integer> unknownFieldsIndices = new HashSet<>();
 
-    public ParquetReaderFactory(Configuration formatConfig, RowType projectedType) {
+    public ParquetReaderFactory(Options formatConfig, RowType projectedType) {
         this(formatConfig, projectedType, BATCH_SIZE);
     }
 
-    public ParquetReaderFactory(Configuration conf, RowType projectedType, int batchSize) {
+    public ParquetReaderFactory(Options conf, RowType projectedType, int batchSize) {
         this.conf = conf;
         this.projectedFields = projectedType.getFieldNames().toArray(new String[0]);
         this.projectedTypes = projectedType.getFieldTypes().toArray(new DataType[0]);

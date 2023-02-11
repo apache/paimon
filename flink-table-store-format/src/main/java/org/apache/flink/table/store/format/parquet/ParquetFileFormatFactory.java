@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.format.parquet;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.format.FileFormatFactory;
+import org.apache.flink.table.store.options.Options;
 
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
@@ -36,18 +36,18 @@ public class ParquetFileFormatFactory implements FileFormatFactory {
     }
 
     @Override
-    public ParquetFileFormat create(Configuration formatOptions) {
+    public ParquetFileFormat create(Options formatOptions) {
         return new ParquetFileFormat(supplyDefaultOptions(formatOptions));
     }
 
-    private Configuration supplyDefaultOptions(Configuration options) {
+    private Options supplyDefaultOptions(Options options) {
         String compression =
                 ParquetOutputFormat.COMPRESSION.replaceFirst(String.format("^%s.", IDENTIFIER), "");
         if (!options.containsKey(compression)) {
             Properties properties = new Properties();
             options.addAllToProperties(properties);
             properties.setProperty(compression, CompressionCodecName.SNAPPY.name());
-            Configuration newOptions = new Configuration();
+            Options newOptions = new Options();
             properties.forEach((k, v) -> newOptions.setString(k.toString(), v.toString()));
             return newOptions;
         }

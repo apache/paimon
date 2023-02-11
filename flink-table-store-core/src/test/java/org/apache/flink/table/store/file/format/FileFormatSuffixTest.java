@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.format;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.append.AppendOnlyCompactManager;
@@ -31,6 +30,7 @@ import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
@@ -59,7 +59,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
 
         DataFilePathFactory dataFilePathFactory =
                 new DataFilePathFactory(new Path(tempDir.toString()), "dt=1", 1, format);
-        FileFormat fileFormat = FileFormat.fromIdentifier(format, new Configuration());
+        FileFormat fileFormat = FileFormat.fromIdentifier(format, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>();
         AppendOnlyWriter appendOnlyWriter =
                 new AppendOnlyWriter(

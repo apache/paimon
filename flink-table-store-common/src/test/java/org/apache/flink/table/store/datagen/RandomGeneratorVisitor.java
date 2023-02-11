@@ -19,14 +19,14 @@
 package org.apache.flink.table.store.datagen;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
-import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.GenericArray;
 import org.apache.flink.table.store.data.GenericMap;
 import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.flink.table.store.options.ConfigOptions;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.BinaryType;
@@ -59,7 +59,7 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.configuration.ConfigOptions.key;
+import static org.apache.flink.table.store.options.ConfigOptions.key;
 
 /** Creates a random {@link DataGeneratorContainer} for a particular logical type. */
 @Internal
@@ -85,7 +85,7 @@ public class RandomGeneratorVisitor extends DataGenVisitorBase {
 
     private final ConfigOptions.OptionBuilder maxPastKey;
 
-    public RandomGeneratorVisitor(String name, ReadableConfig config) {
+    public RandomGeneratorVisitor(String name, Options config) {
         super(name, config);
 
         this.minKey = key(FIELDS + "." + name + "." + MIN);

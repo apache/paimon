@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.Decimal;
@@ -37,6 +36,7 @@ import org.apache.flink.table.store.file.utils.TraceableFileIO;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileIOFinder;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -120,7 +120,7 @@ public abstract class SchemaEvolutionTableTestBase {
     protected Path tablePath;
     protected FileIO fileIO;
     protected String commitUser;
-    protected final Configuration tableConfig = new Configuration();
+    protected final Options tableConfig = new Options();
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -152,7 +152,7 @@ public abstract class SchemaEvolutionTableTestBase {
             Function<Map<Long, TableSchema>, R> firstChecker,
             BiConsumer<R, Map<Long, TableSchema>> secondChecker,
             List<String> primaryKeyNames,
-            Configuration tableConfig,
+            Options tableConfig,
             Function<Map<Long, TableSchema>, FileStoreTable> createFileStoreTable)
             throws Exception {
         Map<Long, TableSchema> tableSchemas = new HashMap<>();
@@ -227,7 +227,7 @@ public abstract class SchemaEvolutionTableTestBase {
             Function<Map<Long, TableSchema>, R> firstChecker,
             BiConsumer<R, Map<Long, TableSchema>> secondChecker,
             List<String> primaryKeyNames,
-            Configuration tableConfig,
+            Options tableConfig,
             Function<Map<Long, TableSchema>, FileStoreTable> createFileStoreTable)
             throws Exception {
         Map<Long, TableSchema> tableSchemas = new HashMap<>();

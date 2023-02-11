@@ -18,10 +18,9 @@
 
 package org.apache.flink.table.store.format.parquet;
 
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.DelegatingConfiguration;
+import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.flink.table.store.options.ConfigOptions;
+import org.apache.flink.table.store.options.Options;
 
 import org.apache.parquet.format.CompressionCodec;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
@@ -38,14 +37,14 @@ public class ParquetFileFormatTest {
 
     @Test
     public void testAbsent() {
-        Configuration options = new Configuration();
+        Options options = new Options();
         ParquetFileFormat parquet = new ParquetFileFormatFactory().create(options);
         assertThat(parquet.formatOptions().getString(KEY1)).isEqualTo("absent");
     }
 
     @Test
     public void testPresent() {
-        Configuration options = new Configuration();
+        Options options = new Options();
         options.setString(KEY1.key(), "v1");
         ParquetFileFormat parquet = new ParquetFileFormatFactory().create(options);
         assertThat(parquet.formatOptions().getString(KEY1)).isEqualTo("v1");
@@ -53,20 +52,20 @@ public class ParquetFileFormatTest {
 
     @Test
     public void testDefaultCompressionCodecName() {
-        Configuration conf = new Configuration();
+        Options conf = new Options();
         assertThat(getCompressionCodec(conf)).isEqualTo(CompressionCodec.SNAPPY.name());
     }
 
     @Test
     public void testSpecifiedCompressionCodecName() {
         String lz4 = CompressionCodec.LZ4.name();
-        Configuration conf = new Configuration();
+        Options conf = new Options();
         conf.setString(ParquetOutputFormat.COMPRESSION, lz4);
         assertThat(getCompressionCodec(conf)).isEqualTo(lz4);
     }
 
-    private String getCompressionCodec(Configuration conf) {
-        DelegatingConfiguration formatOptions = new DelegatingConfiguration(conf, IDENTIFIER + ".");
+    private String getCompressionCodec(Options conf) {
+        Options formatOptions = conf.removePrefix(IDENTIFIER + ".");
         ParquetFileFormat parquet = new ParquetFileFormatFactory().create(formatOptions);
         return getParquetConfiguration(parquet.formatOptions())
                 .getString(ParquetOutputFormat.COMPRESSION, null);

@@ -18,18 +18,18 @@
 
 package org.apache.flink.table.store.docs.configuration;
 
-import org.apache.flink.annotation.docs.ConfigGroup;
-import org.apache.flink.annotation.docs.ConfigGroups;
-import org.apache.flink.annotation.docs.Documentation;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
-import org.apache.flink.configuration.DescribedEnum;
-import org.apache.flink.configuration.MemorySize;
-import org.apache.flink.configuration.description.Formatter;
-import org.apache.flink.configuration.description.HtmlFormatter;
-import org.apache.flink.configuration.description.InlineElement;
+import org.apache.flink.table.store.annotation.ConfigGroup;
+import org.apache.flink.table.store.annotation.ConfigGroups;
+import org.apache.flink.table.store.annotation.Documentation;
 import org.apache.flink.table.store.docs.configuration.data.TestCommonOptions;
+import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.flink.table.store.options.ConfigOptions;
+import org.apache.flink.table.store.options.MemorySize;
+import org.apache.flink.table.store.options.description.DescribedEnum;
+import org.apache.flink.table.store.options.description.Formatter;
+import org.apache.flink.table.store.options.description.HtmlFormatter;
+import org.apache.flink.table.store.options.description.InlineElement;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -43,7 +43,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.flink.configuration.description.TextElement.text;
+import static org.apache.flink.table.store.options.description.TextElement.text;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for the {@link ConfigOptionsDocGenerator}. */

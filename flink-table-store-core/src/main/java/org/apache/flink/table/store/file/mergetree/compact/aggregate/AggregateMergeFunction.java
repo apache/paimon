@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.utils.Projection;
@@ -33,7 +33,7 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.List;
 
-import static org.apache.flink.configuration.ConfigOptions.key;
+import static org.apache.flink.table.store.options.ConfigOptions.key;
 import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 import static org.apache.flink.table.store.utils.RowDataUtils.createFieldGetters;
@@ -99,7 +99,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         private final FieldAggregator[] fieldAggregators;
 
         public RowAggregator(
-                Configuration sqlConf,
+                Options sqlConf,
                 List<String> fieldNames,
                 List<DataType> fieldTypes,
                 List<String> primaryKeys) {
@@ -127,7 +127,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     }
 
     public static MergeFunctionFactory<KeyValue> factory(
-            Configuration conf,
+            Options conf,
             List<String> tableNames,
             List<DataType> tableTypes,
             List<String> primaryKeys) {
@@ -138,13 +138,13 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
         private static final long serialVersionUID = 1L;
 
-        private final Configuration conf;
+        private final Options conf;
         private final List<String> tableNames;
         private final List<DataType> tableTypes;
         private final List<String> primaryKeys;
 
         private Factory(
-                Configuration conf,
+                Options conf,
                 List<String> tableNames,
                 List<DataType> tableTypes,
                 List<String> primaryKeys) {
