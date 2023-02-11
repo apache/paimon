@@ -24,7 +24,7 @@ import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericArray;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -118,9 +118,9 @@ public class TestKeyValueGenerator {
                     new DataType[] {new IntType(false), new BigIntType(false)},
                     new String[] {"key_shopId", "key_orderId"});
 
-    public static final RowDataSerializer DEFAULT_ROW_SERIALIZER =
-            new RowDataSerializer(DEFAULT_ROW_TYPE);
-    public static final RowDataSerializer KEY_SERIALIZER = new RowDataSerializer(KEY_TYPE);
+    public static final InternalRowSerializer DEFAULT_ROW_SERIALIZER =
+            new InternalRowSerializer(DEFAULT_ROW_TYPE);
+    public static final InternalRowSerializer KEY_SERIALIZER = new InternalRowSerializer(KEY_TYPE);
     public static final RecordComparator KEY_COMPARATOR =
             (a, b) -> {
                 int firstResult = a.getInt(0) - b.getInt(0);
@@ -138,8 +138,8 @@ public class TestKeyValueGenerator {
 
     private long sequenceNumber;
 
-    private final RowDataSerializer rowSerializer;
-    private final RowDataSerializer partitionSerializer;
+    private final InternalRowSerializer rowSerializer;
+    private final InternalRowSerializer partitionSerializer;
 
     public TestKeyValueGenerator() {
         this(MULTI_PARTITIONED);
@@ -172,8 +172,8 @@ public class TestKeyValueGenerator {
             default:
                 throw new UnsupportedOperationException("Unsupported generator mode: " + mode);
         }
-        rowSerializer = new RowDataSerializer(rowType);
-        partitionSerializer = new RowDataSerializer(partitionType);
+        rowSerializer = new InternalRowSerializer(rowType);
+        partitionSerializer = new InternalRowSerializer(partitionType);
     }
 
     public KeyValue next() {

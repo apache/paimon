@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.InternalSerializers;
-import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
+import org.apache.flink.table.store.data.serializer.InternalSerializers;
 import org.apache.flink.table.store.io.DataInputView;
 import org.apache.flink.table.store.io.DataInputViewStreamWrapper;
 import org.apache.flink.table.store.io.DataOutputView;
@@ -34,12 +34,12 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
-/** A serializer to serialize object by {@link RowDataSerializer}. */
+/** A serializer to serialize object by {@link InternalRowSerializer}. */
 public abstract class ObjectSerializer<T> implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    protected final RowDataSerializer rowSerializer;
+    protected final InternalRowSerializer rowSerializer;
 
     public ObjectSerializer(RowType rowType) {
         this.rowSerializer = InternalSerializers.create(rowType);
@@ -60,7 +60,7 @@ public abstract class ObjectSerializer<T> implements Serializable {
      *     delegates.
      */
     public final void serialize(T record, DataOutputView target) throws IOException {
-        rowSerializer.serialize(toRow(record), DataOutputView.convertStoreToFlink(target));
+        rowSerializer.serialize(toRow(record), target);
     }
 
     /**
@@ -73,7 +73,7 @@ public abstract class ObjectSerializer<T> implements Serializable {
      *     it reads.
      */
     public final T deserialize(DataInputView source) throws IOException {
-        return fromRow(rowSerializer.deserialize(DataInputView.convertStoreToFlink(source)));
+        return fromRow(rowSerializer.deserialize(source));
     }
 
     /** Serializes the given record list to the given target output view. */

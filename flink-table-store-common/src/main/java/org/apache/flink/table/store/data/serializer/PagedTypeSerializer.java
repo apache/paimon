@@ -16,18 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.data;
+package org.apache.flink.table.store.data.serializer;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.table.store.data.AbstractPagedInputView;
+import org.apache.flink.table.store.data.AbstractPagedOutputView;
+import org.apache.flink.table.store.data.BinaryRow;
 
 import java.io.IOException;
 
 /** A type serializer which provides paged serialize and deserialize methods. */
-@Internal
-public abstract class PagedTypeSerializer<T> extends TypeSerializer<T> {
-
-    private static final long serialVersionUID = 1L;
+public interface PagedTypeSerializer<T> extends Serializer<T> {
 
     /**
      * Serializes the given record to the given target paged output view. Some implementations may
@@ -40,8 +38,7 @@ public abstract class PagedTypeSerializer<T> extends TypeSerializer<T> {
      *     raised by the output view, which may have an underlying I/O channel to which it
      *     delegates.
      */
-    public abstract int serializeToPages(T record, AbstractPagedOutputView target)
-            throws IOException;
+    int serializeToPages(T record, AbstractPagedOutputView target) throws IOException;
 
     /**
      * De-serializes a record from the given source paged input view. For consistency with serialize
@@ -56,11 +53,10 @@ public abstract class PagedTypeSerializer<T> extends TypeSerializer<T> {
      *     Typically raised by the input view, which may have an underlying I/O channel from which
      *     it reads.
      */
-    public abstract T deserializeFromPages(AbstractPagedInputView source) throws IOException;
+    T deserializeFromPages(AbstractPagedInputView source) throws IOException;
 
     /** Reuse version of {@link #deserializeFromPages(AbstractPagedInputView)}. */
-    public abstract T deserializeFromPages(T reuse, AbstractPagedInputView source)
-            throws IOException;
+    T deserializeFromPages(T reuse, AbstractPagedInputView source) throws IOException;
 
     /**
      * Map a reused record from the given source paged input view. This method provides a
@@ -77,8 +73,8 @@ public abstract class PagedTypeSerializer<T> extends TypeSerializer<T> {
      *     Typically raised by the input view, which may have an underlying I/O channel from which
      *     it reads.
      */
-    public abstract T mapFromPages(T reuse, AbstractPagedInputView source) throws IOException;
+    T mapFromPages(T reuse, AbstractPagedInputView source) throws IOException;
 
     /** Skip over bytes of one record from the paged input view, discarding the skipped bytes. */
-    public abstract void skipRecordFromPages(AbstractPagedInputView source) throws IOException;
+    void skipRecordFromPages(AbstractPagedInputView source) throws IOException;
 }

@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.connector.lookup;
 
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.InternalSerializers;
+import org.apache.flink.table.store.data.serializer.InternalSerializers;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.KeyProjectedRow;

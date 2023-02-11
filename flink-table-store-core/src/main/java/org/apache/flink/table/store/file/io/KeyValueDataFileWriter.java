@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
@@ -59,7 +59,7 @@ public class KeyValueDataFileWriter
 
     private final FieldStatsArraySerializer keyStatsConverter;
     private final FieldStatsArraySerializer valueStatsConverter;
-    private final RowDataSerializer keySerializer;
+    private final InternalRowSerializer keySerializer;
 
     private BinaryRow minKey = null;
     private InternalRow maxKey = null;
@@ -91,7 +91,7 @@ public class KeyValueDataFileWriter
 
         this.keyStatsConverter = new FieldStatsArraySerializer(keyType);
         this.valueStatsConverter = new FieldStatsArraySerializer(valueType);
-        this.keySerializer = new RowDataSerializer(keyType);
+        this.keySerializer = new InternalRowSerializer(keyType);
     }
 
     @Override

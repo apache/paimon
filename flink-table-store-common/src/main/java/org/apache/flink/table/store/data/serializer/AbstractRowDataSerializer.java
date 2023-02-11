@@ -16,13 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.data;
+package org.apache.flink.table.store.data.serializer;
+
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.InternalRow;
 
 import java.io.IOException;
 
 /** Row serializer, provided paged serialize paged method. */
 public abstract class AbstractRowDataSerializer<T extends InternalRow>
-        extends PagedTypeSerializer<T> {
+        implements PagedTypeSerializer<T> {
 
     private static final long serialVersionUID = 1L;
 

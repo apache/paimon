@@ -18,7 +18,8 @@
 
 package org.apache.flink.table.store.file.disk;
 
-import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.serializer.BinaryRowSerializer;
 import org.apache.flink.table.store.file.utils.MutableObjectIterator;
 import org.apache.flink.table.store.memory.MemorySegment;
 
@@ -27,24 +28,24 @@ import java.io.IOException;
 import java.util.List;
 
 /** A simple iterator over the input read though an I/O channel. */
-public class ChannelReaderInputViewIterator<E> implements MutableObjectIterator<E> {
+public class ChannelReaderInputViewIterator implements MutableObjectIterator<BinaryRow> {
     private final ChannelReaderInputView inView;
 
-    private final TypeSerializer<E> accessors;
+    private final BinaryRowSerializer accessors;
 
     private final List<MemorySegment> freeMemTarget;
 
     public ChannelReaderInputViewIterator(
             ChannelReaderInputView inView,
             List<MemorySegment> freeMemTarget,
-            TypeSerializer<E> accessors) {
+            BinaryRowSerializer accessors) {
         this.inView = inView;
         this.freeMemTarget = freeMemTarget;
         this.accessors = accessors;
     }
 
     @Override
-    public E next(E reuse) throws IOException {
+    public BinaryRow next(BinaryRow reuse) throws IOException {
         try {
             return this.accessors.deserialize(reuse, this.inView);
         } catch (EOFException eofex) {
@@ -57,7 +58,7 @@ public class ChannelReaderInputViewIterator<E> implements MutableObjectIterator<
     }
 
     @Override
-    public E next() throws IOException {
+    public BinaryRow next() throws IOException {
         try {
             return this.accessors.deserialize(this.inView);
         } catch (EOFException eofex) {

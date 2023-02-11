@@ -23,10 +23,10 @@ import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.codegen.NormalizedKeyComputer;
 import org.apache.flink.table.store.codegen.RecordComparator;
 import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.BinaryRowSerializer;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.InternalSerializers;
-import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.data.serializer.BinaryRowSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
+import org.apache.flink.table.store.data.serializer.InternalSerializers;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.disk.IOManager;
@@ -83,7 +83,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
             throw new IllegalArgumentException(
                     "Write buffer requires a minimum of 3 page memory, please increase write buffer memory size.");
         }
-        RowDataSerializer serializer =
+        InternalRowSerializer serializer =
                 InternalSerializers.create(KeyValue.schema(keyType, valueType));
         BinaryInMemorySortBuffer inMemorySortBuffer =
                 BinaryInMemorySortBuffer.createBuffer(

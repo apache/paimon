@@ -35,7 +35,7 @@ public class ShortSerializerTest extends SerializerTestBase<Short> {
 
     @Override
     protected Short[] getTestData() {
-        Random rnd = new Random(874597969123412341L);
+        Random rnd = new Random();
         short rndShort = (short) rnd.nextInt();
 
         return new Short[] {

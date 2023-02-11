@@ -187,6 +187,12 @@ under the License.
                 </exclusion>
             </exclusions>
         </dependency>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-common</artifactId>
+            <version>1.16.0</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

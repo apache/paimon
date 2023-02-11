@@ -18,7 +18,12 @@
 
 package org.apache.flink.table.store.data;
 
-import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.table.store.data.serializer.BinaryRowSerializer;
+import org.apache.flink.table.store.data.serializer.InternalArraySerializer;
+import org.apache.flink.table.store.data.serializer.InternalMapSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
+import org.apache.flink.table.store.data.serializer.InternalSerializers;
+import org.apache.flink.table.store.data.serializer.Serializer;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
@@ -422,7 +427,7 @@ public class BinaryRowTest {
         writer.writeRow(
                 0,
                 GenericRow.of(fromString("1"), 1),
-                new RowDataSerializer(RowType.of(VarCharType.STRING_TYPE, new IntType())));
+                new InternalRowSerializer(RowType.of(VarCharType.STRING_TYPE, new IntType())));
         writer.setNullAt(1);
         writer.complete();
 
@@ -466,7 +471,7 @@ public class BinaryRowTest {
         // 2. test write array to binary row
         BinaryRow row = new BinaryRow(1);
         BinaryRowWriter rowWriter = new BinaryRowWriter(row);
-        ArrayDataSerializer serializer = new ArrayDataSerializer(DataTypes.INT());
+        InternalArraySerializer serializer = new InternalArraySerializer(DataTypes.INT());
         rowWriter.writeArray(0, array, serializer);
         rowWriter.complete();
 
@@ -490,7 +495,7 @@ public class BinaryRowTest {
         // 2. test write array to binary row
         BinaryRow row2 = new BinaryRow(1);
         BinaryRowWriter writer2 = new BinaryRowWriter(row2);
-        ArrayDataSerializer serializer = new ArrayDataSerializer(DataTypes.INT());
+        InternalArraySerializer serializer = new InternalArraySerializer(DataTypes.INT());
         writer2.writeArray(0, array, serializer);
         writer2.complete();
 
@@ -526,7 +531,8 @@ public class BinaryRowTest {
 
         BinaryRow row = new BinaryRow(1);
         BinaryRowWriter rowWriter = new BinaryRowWriter(row);
-        MapDataSerializer serializer = new MapDataSerializer(DataTypes.STRING(), DataTypes.INT());
+        InternalMapSerializer serializer =
+                new InternalMapSerializer(DataTypes.STRING(), DataTypes.INT());
         rowWriter.writeMap(0, binaryMap, serializer);
         rowWriter.complete();
 
@@ -556,7 +562,8 @@ public class BinaryRowTest {
 
         BinaryRow row = new BinaryRow(1);
         BinaryRowWriter rowWriter = new BinaryRowWriter(row);
-        MapDataSerializer serializer = new MapDataSerializer(DataTypes.INT(), DataTypes.STRING());
+        InternalMapSerializer serializer =
+                new InternalMapSerializer(DataTypes.INT(), DataTypes.STRING());
         rowWriter.writeMap(0, genericMap, serializer);
         rowWriter.complete();
 
@@ -880,8 +887,8 @@ public class BinaryRowTest {
                     DataTypes.ROW(
                             DataTypes.FIELD(0, "f0", DataTypes.STRING()),
                             DataTypes.FIELD(1, "f1", DataTypes.DOUBLE()));
-            RowDataSerializer innerSerializer =
-                    (RowDataSerializer) (TypeSerializer<?>) InternalSerializers.create(innerType);
+            InternalRowSerializer innerSerializer =
+                    (InternalRowSerializer) (Serializer<?>) InternalSerializers.create(innerType);
             writer.writeRow(
                     1, GenericRow.of(BinaryString.fromString("Test"), 12.345), innerSerializer);
             writer.complete();

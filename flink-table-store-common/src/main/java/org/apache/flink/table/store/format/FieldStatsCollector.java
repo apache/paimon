@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.format;
 
-import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.InternalSerializers;
+import org.apache.flink.table.store.data.serializer.InternalSerializers;
+import org.apache.flink.table.store.data.serializer.Serializer;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
 
@@ -31,7 +31,7 @@ public class FieldStatsCollector {
     private final Object[] maxValues;
     private final long[] nullCounts;
     private final RowDataToObjectArrayConverter converter;
-    private final TypeSerializer<Object>[] fieldSerializers;
+    private final Serializer<Object>[] fieldSerializers;
 
     public FieldStatsCollector(RowType rowType) {
         int numFields = rowType.getFieldCount();
@@ -39,7 +39,7 @@ public class FieldStatsCollector {
         this.maxValues = new Object[numFields];
         this.nullCounts = new long[numFields];
         this.converter = new RowDataToObjectArrayConverter(rowType);
-        this.fieldSerializers = new TypeSerializer[numFields];
+        this.fieldSerializers = new Serializer[numFields];
         for (int i = 0; i < numFields; i++) {
             fieldSerializers[i] = InternalSerializers.create(rowType.getTypeAt(i));
         }

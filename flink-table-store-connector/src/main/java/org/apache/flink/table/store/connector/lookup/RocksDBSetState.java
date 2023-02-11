@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.connector.lookup;
 
-import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.serializer.Serializer;
 
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDB;
@@ -41,8 +41,8 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
     public RocksDBSetState(
             RocksDB db,
             ColumnFamilyHandle columnFamily,
-            TypeSerializer<InternalRow> keySerializer,
-            TypeSerializer<InternalRow> valueSerializer,
+            Serializer<InternalRow> keySerializer,
+            Serializer<InternalRow> valueSerializer,
             long lruCacheSize) {
         super(db, columnFamily, keySerializer, valueSerializer, lruCacheSize);
     }

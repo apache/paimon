@@ -24,7 +24,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.FlinkRowWrapper;
 import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.OffsetRow;
@@ -48,7 +48,7 @@ public class StoreCompactOperator extends PrepareCommitOperator {
     private final boolean isStreaming;
 
     private transient StoreSinkWrite write;
-    private transient RowDataSerializer partitionSerializer;
+    private transient InternalRowSerializer partitionSerializer;
     private transient OffsetRow reusedPartition;
     private transient DataFileMetaSerializer dataFileMetaSerializer;
 
@@ -75,7 +75,7 @@ public class StoreCompactOperator extends PrepareCommitOperator {
     @Override
     public void open() throws Exception {
         super.open();
-        partitionSerializer = new RowDataSerializer(table.schema().logicalPartitionType());
+        partitionSerializer = new InternalRowSerializer(table.schema().logicalPartitionType());
         reusedPartition = new OffsetRow(partitionSerializer.getArity(), 1);
         dataFileMetaSerializer = new DataFileMetaSerializer();
     }
