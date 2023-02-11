@@ -18,11 +18,13 @@
 
 package org.apache.flink.table.store.connector.sink;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.connector.FlinkConnectorOptions;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.LogSinkFunction;
@@ -41,6 +43,8 @@ public class FlinkSinkBuilder {
     @Nullable private Map<String, String> overwritePartition;
     @Nullable private LogSinkFunction logSinkFunction;
     @Nullable private Integer parallelism;
+    @Nullable private String commitUser;
+    @Nullable private StoreSinkWrite.Provider sinkProvider;
 
     public FlinkSinkBuilder(FileStoreTable table) {
         this.table = table;
@@ -71,8 +75,21 @@ public class FlinkSinkBuilder {
         return this;
     }
 
+    @VisibleForTesting
+    public FlinkSinkBuilder withSinkProvider(
+            String commitUser, StoreSinkWrite.Provider sinkProvider) {
+        this.commitUser = commitUser;
+        this.sinkProvider = sinkProvider;
+        return this;
+    }
+
     public DataStreamSink<?> build() {
-        BucketStreamPartitioner partitioner = new BucketStreamPartitioner(table.schema());
+        BucketStreamPartitioner partitioner =
+                new BucketStreamPartitioner(
+                        table.schema(),
+                        table.options()
+                                .toConfiguration()
+                                .getBoolean(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION));
         PartitionTransformation<RowData> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
         if (parallelism != null) {
@@ -82,6 +99,8 @@ public class FlinkSinkBuilder {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         FileStoreSink sink =
                 new FileStoreSink(table, lockFactory, overwritePartition, logSinkFunction);
-        return sink.sinkFrom(new DataStream<>(env, partitioned));
+        return commitUser != null && sinkProvider != null
+                ? sink.sinkFrom(new DataStream<>(env, partitioned), commitUser, sinkProvider)
+                : sink.sinkFrom(new DataStream<>(env, partitioned));
     }
 }
