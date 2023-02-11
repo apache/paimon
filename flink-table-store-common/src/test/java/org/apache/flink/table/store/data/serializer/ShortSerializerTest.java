@@ -20,24 +20,26 @@ package org.apache.flink.table.store.data.serializer;
 
 import java.util.Random;
 
-/** Test for {@link IntSerializer}. */
-public class IntSerializerTest extends SerializerTestBase<Integer> {
+/** Test for {@link ShortSerializer}. */
+public class ShortSerializerTest extends SerializerTestBase<Short> {
 
     @Override
-    protected Serializer<Integer> createSerializer() {
-        return IntSerializer.INSTANCE;
+    protected Serializer<Short> createSerializer() {
+        return ShortSerializer.INSTANCE;
     }
 
     @Override
-    protected boolean deepEquals(Integer t1, Integer t2) {
+    protected boolean deepEquals(Short t1, Short t2) {
         return t1.equals(t2);
     }
 
     @Override
-    protected Integer[] getTestData() {
-        Random rnd = new Random();
-        int rndInt = rnd.nextInt();
+    protected Short[] getTestData() {
+        Random rnd = new Random(874597969123412341L);
+        short rndShort = (short) rnd.nextInt();
 
-        return new Integer[] {0, 1, -1, Integer.MAX_VALUE, Integer.MIN_VALUE, rndInt, -rndInt};
+        return new Short[] {
+            0, 1, -1, Short.MAX_VALUE, Short.MIN_VALUE, rndShort, (short) -rndShort
+        };
     }
 }

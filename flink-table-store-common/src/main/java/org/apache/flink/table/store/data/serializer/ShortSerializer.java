@@ -18,26 +18,31 @@
 
 package org.apache.flink.table.store.data.serializer;
 
-import java.util.Random;
+import org.apache.flink.core.memory.DataInputView;
+import org.apache.flink.core.memory.DataOutputView;
 
-/** Test for {@link IntSerializer}. */
-public class IntSerializerTest extends SerializerTestBase<Integer> {
+import java.io.IOException;
+
+/** Type serializer for {@code Short} (and {@code short}, via auto-boxing). */
+public final class ShortSerializer extends SerializerSingleton<Short> {
+
+    private static final long serialVersionUID = 1L;
+
+    /** Sharable instance of the IntSerializer. */
+    public static final ShortSerializer INSTANCE = new ShortSerializer();
 
     @Override
-    protected Serializer<Integer> createSerializer() {
-        return IntSerializer.INSTANCE;
+    public Short copy(Short from) {
+        return from;
     }
 
     @Override
-    protected boolean deepEquals(Integer t1, Integer t2) {
-        return t1.equals(t2);
+    public void serialize(Short record, DataOutputView target) throws IOException {
+        target.writeShort(record);
     }
 
     @Override
-    protected Integer[] getTestData() {
-        Random rnd = new Random();
-        int rndInt = rnd.nextInt();
-
-        return new Integer[] {0, 1, -1, Integer.MAX_VALUE, Integer.MIN_VALUE, rndInt, -rndInt};
+    public Short deserialize(DataInputView source) throws IOException {
+        return source.readShort();
     }
 }
