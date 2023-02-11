@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.memory;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.core.memory.DataOutputView;
 import org.apache.flink.table.store.data.BinaryArray;
 import org.apache.flink.table.store.data.BinaryMap;
 import org.apache.flink.table.store.data.BinaryString;
@@ -29,6 +28,7 @@ import org.apache.flink.table.store.data.InternalMap;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.NestedRow;
 import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.io.DataOutputView;
 import org.apache.flink.table.store.utils.MurmurHashUtils;
 
 import java.io.IOException;

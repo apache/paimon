@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.core.memory.DataInputViewStreamWrapper;
-import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
+import org.apache.flink.table.store.io.DataInputViewStreamWrapper;
+import org.apache.flink.table.store.io.DataOutputViewStreamWrapper;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;

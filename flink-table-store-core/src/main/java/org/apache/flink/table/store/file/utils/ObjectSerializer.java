@@ -18,13 +18,13 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.core.memory.DataInputView;
-import org.apache.flink.core.memory.DataInputViewStreamWrapper;
-import org.apache.flink.core.memory.DataOutputView;
-import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.InternalSerializers;
 import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.io.DataInputView;
+import org.apache.flink.table.store.io.DataInputViewStreamWrapper;
+import org.apache.flink.table.store.io.DataOutputView;
+import org.apache.flink.table.store.io.DataOutputViewStreamWrapper;
 import org.apache.flink.table.store.types.RowType;
 
 import java.io.ByteArrayInputStream;
@@ -60,7 +60,7 @@ public abstract class ObjectSerializer<T> implements Serializable {
      *     delegates.
      */
     public final void serialize(T record, DataOutputView target) throws IOException {
-        rowSerializer.serialize(toRow(record), target);
+        rowSerializer.serialize(toRow(record), DataOutputView.convertStoreToFlink(target));
     }
 
     /**
@@ -73,7 +73,7 @@ public abstract class ObjectSerializer<T> implements Serializable {
      *     it reads.
      */
     public final T deserialize(DataInputView source) throws IOException {
-        return fromRow(rowSerializer.deserialize(source));
+        return fromRow(rowSerializer.deserialize(DataInputView.convertStoreToFlink(source)));
     }
 
     /** Serializes the given record list to the given target output view. */

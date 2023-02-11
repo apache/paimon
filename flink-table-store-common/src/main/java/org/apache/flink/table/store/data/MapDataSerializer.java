@@ -23,10 +23,10 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
-import org.apache.flink.api.java.typeutils.runtime.DataInputViewStream;
-import org.apache.flink.api.java.typeutils.runtime.DataOutputViewStream;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
+import org.apache.flink.table.store.io.DataInputViewStream;
+import org.apache.flink.table.store.io.DataOutputViewStream;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentUtils;
 import org.apache.flink.table.store.types.DataType;
@@ -119,7 +119,10 @@ public class MapDataSerializer extends TypeSerializer<InternalMap> {
         BinaryMap binaryMap = toBinaryMap(record);
         target.writeInt(binaryMap.getSizeInBytes());
         MemorySegmentUtils.copyToView(
-                binaryMap.getSegments(), binaryMap.getOffset(), binaryMap.getSizeInBytes(), target);
+                binaryMap.getSegments(),
+                binaryMap.getOffset(),
+                binaryMap.getSizeInBytes(),
+                org.apache.flink.table.store.io.DataOutputView.convertFlinkToStore(target));
     }
 
     public BinaryMap toBinaryMap(InternalMap from) {
@@ -270,7 +273,10 @@ public class MapDataSerializer extends TypeSerializer<InternalMap> {
 
         @Override
         public void writeSnapshot(DataOutputView out) throws IOException {
-            DataOutputViewStream outStream = new DataOutputViewStream(out);
+            DataOutputViewStream outStream =
+                    new DataOutputViewStream(
+                            org.apache.flink.table.store.io.DataOutputView.convertFlinkToStore(
+                                    out));
             InstantiationUtil.serializeObject(outStream, previousKeyType);
             InstantiationUtil.serializeObject(outStream, previousValueType);
             InstantiationUtil.serializeObject(outStream, previousKeySerializer);
@@ -281,7 +287,10 @@ public class MapDataSerializer extends TypeSerializer<InternalMap> {
         public void readSnapshot(int readVersion, DataInputView in, ClassLoader userCodeClassLoader)
                 throws IOException {
             try {
-                DataInputViewStream inStream = new DataInputViewStream(in);
+                DataInputViewStream inStream =
+                        new DataInputViewStream(
+                                org.apache.flink.table.store.io.DataInputView.convertFlinkToStore(
+                                        in));
                 this.previousKeyType =
                         InstantiationUtil.deserializeObject(inStream, userCodeClassLoader);
                 this.previousValueType =
