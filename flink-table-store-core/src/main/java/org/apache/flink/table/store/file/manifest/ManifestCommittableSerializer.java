@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.core.io.SimpleVersionedSerializer;
-import org.apache.flink.core.memory.DataInputDeserializer;
-import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
+import org.apache.flink.table.store.io.DataInputDeserializer;
+import org.apache.flink.table.store.io.DataOutputViewStreamWrapper;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.FileCommittableSerializer;
 

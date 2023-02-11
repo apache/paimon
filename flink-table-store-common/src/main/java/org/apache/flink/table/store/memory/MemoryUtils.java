@@ -23,6 +23,7 @@ import org.apache.flink.table.store.utils.Preconditions;
 import java.lang.reflect.Field;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 /** Utility class for memory operations. */
 public class MemoryUtils {
@@ -30,6 +31,9 @@ public class MemoryUtils {
     /** The "unsafe", which can be used to perform native memory accesses. */
     @SuppressWarnings({"restriction", "UseOfSunClasses"})
     public static final sun.misc.Unsafe UNSAFE = getUnsafe();
+
+    /** The native byte order of the platform on which the system currently runs. */
+    public static final ByteOrder NATIVE_BYTE_ORDER = ByteOrder.nativeOrder();
 
     private static final long BUFFER_ADDRESS_FIELD_OFFSET =
             getClassFieldOffset(Buffer.class, "address");

@@ -23,10 +23,10 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
-import org.apache.flink.api.java.typeutils.runtime.DataInputViewStream;
-import org.apache.flink.api.java.typeutils.runtime.DataOutputViewStream;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
+import org.apache.flink.table.store.io.DataInputViewStream;
+import org.apache.flink.table.store.io.DataOutputViewStream;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentUtils;
 import org.apache.flink.table.store.types.DataType;
@@ -135,7 +135,7 @@ public class ArrayDataSerializer extends TypeSerializer<InternalArray> {
                 binaryArray.getSegments(),
                 binaryArray.getOffset(),
                 binaryArray.getSizeInBytes(),
-                target);
+                org.apache.flink.table.store.io.DataOutputView.convertFlinkToStore(target));
     }
 
     public BinaryArray toBinaryArray(InternalArray from) {
@@ -251,7 +251,10 @@ public class ArrayDataSerializer extends TypeSerializer<InternalArray> {
 
         @Override
         public void writeSnapshot(DataOutputView out) throws IOException {
-            DataOutputViewStream outStream = new DataOutputViewStream(out);
+            DataOutputViewStream outStream =
+                    new DataOutputViewStream(
+                            org.apache.flink.table.store.io.DataOutputView.convertFlinkToStore(
+                                    out));
             InstantiationUtil.serializeObject(outStream, previousType);
             InstantiationUtil.serializeObject(outStream, previousEleSer);
         }
@@ -260,7 +263,10 @@ public class ArrayDataSerializer extends TypeSerializer<InternalArray> {
         public void readSnapshot(int readVersion, DataInputView in, ClassLoader userCodeClassLoader)
                 throws IOException {
             try {
-                DataInputViewStream inStream = new DataInputViewStream(in);
+                DataInputViewStream inStream =
+                        new DataInputViewStream(
+                                org.apache.flink.table.store.io.DataInputView.convertFlinkToStore(
+                                        in));
                 this.previousType =
                         InstantiationUtil.deserializeObject(inStream, userCodeClassLoader);
                 this.previousEleSer =
