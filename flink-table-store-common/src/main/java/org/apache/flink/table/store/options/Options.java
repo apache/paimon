@@ -18,15 +18,19 @@
 
 package org.apache.flink.table.store.options;
 
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.Configuration;
-
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.Set;
+import java.util.function.BiFunction;
+
+import static org.apache.flink.table.store.options.OptionsUtils.canBePrefixMap;
+import static org.apache.flink.table.store.options.OptionsUtils.containsPrefixMap;
+import static org.apache.flink.table.store.options.OptionsUtils.convertToPropertiesPrefixed;
+import static org.apache.flink.table.store.options.OptionsUtils.removePrefixMap;
 
 /** Options which stores key/value pairs. */
 public class Options implements Serializable {
@@ -57,43 +61,163 @@ public class Options implements Serializable {
      * @param key the key of the key/value pair to be added
      * @param value the value of the key/value pair to be added
      */
-    public void setString(String key, String value) {
+    public synchronized void setString(String key, String value) {
         data.put(key, value);
     }
 
-    public void set(String key, String value) {
+    public synchronized void set(String key, String value) {
         data.put(key, value);
     }
 
-    public <T> void set(ConfigOption<T> key, T value) {
-        Configuration conf = Configuration.fromMap(data);
-        conf.set(key, value);
-        data.clear();
-        data.putAll(conf.toMap());
+    public synchronized <T> Options set(ConfigOption<T> option, T value) {
+        final boolean canBePrefixMap = OptionsUtils.canBePrefixMap(option);
+        setValueInternal(option.key(), value, canBePrefixMap);
+        return this;
     }
 
-    public <T> T get(ConfigOption<T> option) {
+    private <T> void setValueInternal(String key, T value, boolean canBePrefixMap) {
+        if (key == null) {
+            throw new NullPointerException("Key must not be null.");
+        }
+        if (value == null) {
+            throw new NullPointerException("Value must not be null.");
+        }
+
+        synchronized (this.data) {
+            if (canBePrefixMap) {
+                removePrefixMap(this.data, key);
+            }
+            this.data.put(key, OptionsUtils.convertToString(value));
+        }
+    }
+
+    public synchronized <T> T get(ConfigOption<T> option) {
         return getOptional(option).orElseGet(option::defaultValue);
     }
 
-    public String get(String key) {
+    public synchronized String get(String key) {
         return data.get(key);
     }
 
-    public <T> Optional<T> getOptional(ConfigOption<T> option) {
-        return Configuration.fromMap(data).getOptional(option);
+    public synchronized <T> Optional<T> getOptional(ConfigOption<T> option) {
+        Optional<Object> rawValue = getRawValueFromOption(option);
+        Class<?> clazz = option.getClazz();
+
+        try {
+            if (option.isList()) {
+                return rawValue.map(v -> OptionsUtils.convertToList(v, clazz));
+            } else {
+                return rawValue.map(v -> OptionsUtils.convertValue(v, clazz));
+            }
+        } catch (Exception e) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Could not parse value '%s' for key '%s'.",
+                            rawValue.map(Object::toString).orElse(""), option.key()),
+                    e);
+        }
     }
 
-    public Set<String> keySet() {
+    private Optional<Object> getRawValueFromOption(ConfigOption<?> configOption) {
+        return applyWithOption(configOption, this::getRawValue);
+    }
+
+    private Optional<Object> getRawValue(String key) {
+        return getRawValue(key, false);
+    }
+
+    private Optional<Object> getRawValue(String key, boolean canBePrefixMap) {
+        if (key == null) {
+            throw new NullPointerException("Key must not be null.");
+        }
+
+        synchronized (this.data) {
+            final Object valueFromExactKey = this.data.get(key);
+            if (!canBePrefixMap || valueFromExactKey != null) {
+                return Optional.ofNullable(valueFromExactKey);
+            }
+            final Map<String, String> valueFromPrefixMap = convertToPropertiesPrefixed(data, key);
+            if (valueFromPrefixMap.isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(valueFromPrefixMap);
+        }
+    }
+
+    /**
+     * Checks whether there is an entry for the given config option.
+     *
+     * @param configOption The configuration option
+     * @return <tt>true</tt> if a valid (current or deprecated) key of the config option is stored,
+     *     <tt>false</tt> otherwise
+     */
+    public synchronized boolean contains(ConfigOption<?> configOption) {
+        synchronized (this.data) {
+            final BiFunction<String, Boolean, Optional<Boolean>> applier =
+                    (key, canBePrefixMap) -> {
+                        if (canBePrefixMap && containsPrefixMap(this.data, key)
+                                || this.data.containsKey(key)) {
+                            return Optional.of(true);
+                        }
+                        return Optional.empty();
+                    };
+            return applyWithOption(configOption, applier).orElse(false);
+        }
+    }
+
+    private <T> Optional<T> applyWithOption(
+            ConfigOption<?> option, BiFunction<String, Boolean, Optional<T>> applier) {
+        final boolean canBePrefixMap = canBePrefixMap(option);
+        final Optional<T> valueFromExactKey = applier.apply(option.key(), canBePrefixMap);
+        if (valueFromExactKey.isPresent()) {
+            return valueFromExactKey;
+        } else if (option.hasFallbackKeys()) {
+            // try the fallback keys
+            for (FallbackKey fallbackKey : option.fallbackKeys()) {
+                final Optional<T> valueFromFallbackKey =
+                        applier.apply(fallbackKey.getKey(), canBePrefixMap);
+                if (valueFromFallbackKey.isPresent()) {
+                    return valueFromFallbackKey;
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    public synchronized Set<String> keySet() {
         return data.keySet();
     }
 
-    public Map<String, String> toMap() {
+    public synchronized Map<String, String> toMap() {
         return data;
     }
 
+    public synchronized Options removePrefix(String prefix) {
+        Map<String, String> newData = new HashMap<>();
+        data.forEach(
+                (k, v) -> {
+                    if (k.startsWith(prefix)) {
+                        newData.put(k.substring(prefix.length()), v);
+                    }
+                });
+        return new Options(newData);
+    }
+
+    public synchronized boolean containsKey(String key) {
+        return data.containsKey(key);
+    }
+
+    /** Adds all entries in this options to the given {@link Properties}. */
+    public synchronized void addAllToProperties(Properties props) {
+        props.putAll(this.data);
+    }
+
+    public synchronized String getString(ConfigOption<String> option) {
+        return get(option);
+    }
+
     @Override
-    public boolean equals(Object o) {
+    public synchronized boolean equals(Object o) {
         if (this == o) {
             return true;
         }
@@ -105,7 +229,31 @@ public class Options implements Serializable {
     }
 
     @Override
-    public int hashCode() {
+    public synchronized int hashCode() {
         return Objects.hash(data);
+    }
+
+    public synchronized boolean getBoolean(String key, boolean defaultValue) {
+        return getRawValue(key).map(OptionsUtils::convertToBoolean).orElse(defaultValue);
+    }
+
+    public synchronized int getInteger(String key, int defaultValue) {
+        return getRawValue(key).map(OptionsUtils::convertToInt).orElse(defaultValue);
+    }
+
+    public synchronized String getString(String key, String defaultValue) {
+        return getRawValue(key).map(OptionsUtils::convertToString).orElse(defaultValue);
+    }
+
+    public synchronized void setInteger(String key, int value) {
+        setValueInternal(key, value);
+    }
+
+    private <T> void setValueInternal(String key, T value) {
+        setValueInternal(key, value, false);
+    }
+
+    public synchronized long getLong(String key, long defaultValue) {
+        return getRawValue(key).map(OptionsUtils::convertToLong).orElse(defaultValue);
     }
 }

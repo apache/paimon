@@ -18,11 +18,11 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.flink.table.store.options.ConfigOptions;
 
 import java.util.Collections;
 import java.util.Set;
@@ -43,12 +43,12 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
     }
 
     @Override
-    public Set<ConfigOption<?>> requiredOptions() {
+    public Set<org.apache.flink.configuration.ConfigOption<?>> requiredOptions() {
         return Collections.emptySet();
     }
 
     @Override
-    public Set<ConfigOption<?>> optionalOptions() {
+    public Set<org.apache.flink.configuration.ConfigOption<?>> optionalOptions() {
         return Collections.emptySet();
     }
 

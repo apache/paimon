@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.WriteMode;
@@ -26,6 +25,7 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.options.MemorySize;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;

@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.connector.lookup;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
@@ -49,7 +49,7 @@ public class LookupTableTest {
 
     @BeforeEach
     public void before() throws IOException {
-        this.stateFactory = new RocksDBStateFactory(tempDir.toString(), new Configuration());
+        this.stateFactory = new RocksDBStateFactory(tempDir.toString(), new Options());
         this.rowType = RowType.of(new IntType(), new IntType(), new IntType());
     }
 

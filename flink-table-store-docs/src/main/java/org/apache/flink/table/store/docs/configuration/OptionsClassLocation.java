@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.docs.configuration;
 
-import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.table.store.options.ConfigOption;
 
 /** Simple descriptor for the location of a class containing {@link ConfigOption ConfigOptions}. */
 class OptionsClassLocation {

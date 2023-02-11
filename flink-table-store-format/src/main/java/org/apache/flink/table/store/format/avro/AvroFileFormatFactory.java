@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.format.avro;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileFormatFactory;
+import org.apache.flink.table.store.options.Options;
 
 /** Factory to create {@link AvroFileFormat}. */
 public class AvroFileFormatFactory implements FileFormatFactory {
@@ -31,7 +31,7 @@ public class AvroFileFormatFactory implements FileFormatFactory {
     }
 
     @Override
-    public FileFormat create(Configuration formatOptions) {
+    public FileFormat create(Options formatOptions) {
         return new AvroFileFormat(formatOptions);
     }
 }

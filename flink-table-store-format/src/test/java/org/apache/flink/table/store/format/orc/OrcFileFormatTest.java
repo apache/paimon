@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.format.orc;
 
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.table.store.options.Options;
 
 import org.junit.jupiter.api.Test;
 
@@ -30,7 +30,7 @@ public class OrcFileFormatTest {
 
     @Test
     public void testAbsent() {
-        Configuration options = new Configuration();
+        Options options = new Options();
         options.setString("haha", "1");
         OrcFileFormat orc = new OrcFileFormatFactory().create(options);
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");
@@ -39,7 +39,7 @@ public class OrcFileFormatTest {
 
     @Test
     public void testPresent() {
-        Configuration options = new Configuration();
+        Options options = new Options();
         options.setString("haha", "1");
         options.setString("compress", "zlib");
         OrcFileFormat orc = new OrcFileFormatFactory().create(options);

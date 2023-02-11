@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.benchmark.config;
 
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.table.store.options.Options;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,7 +40,7 @@ public class ConfigUtil {
     private static final String BENCHMARK_CONF = "benchmark-conf.yaml";
 
     /** Load benchmark conf from classpath. */
-    public static Configuration loadBenchMarkConf() {
+    public static Options loadBenchMarkConf() {
         InputStream inputStream =
                 ConfigUtil.class.getClassLoader().getResourceAsStream(BENCHMARK_CONF);
         return loadYAMLResource(inputStream);
@@ -50,8 +50,8 @@ public class ConfigUtil {
      * This is copied from {@code GlobalConfiguration#loadYAMLResource} to avoid depending
      * on @Internal api.
      */
-    private static Configuration loadYAMLResource(InputStream inputStream) {
-        final Configuration config = new Configuration();
+    private static Options loadYAMLResource(InputStream inputStream) {
+        final Options config = new Options();
 
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
 
@@ -111,7 +111,7 @@ public class ConfigUtil {
      * @param configuration the configuration
      * @return the file data dir
      */
-    public static String createFileDataDir(Configuration configuration) {
+    public static String createFileDataDir(Options configuration) {
         return configuration.get(FileBenchmarkOptions.FILE_DATA_BASE_DIR)
                 + "/"
                 + UUID.randomUUID().toString();

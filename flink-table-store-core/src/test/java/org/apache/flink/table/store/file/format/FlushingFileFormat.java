@@ -18,13 +18,13 @@
 
 package org.apache.flink.table.store.file.format;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.format.FormatWriter;
 import org.apache.flink.table.store.format.FormatWriterFactory;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.RowType;
 
 import javax.annotation.Nullable;
@@ -39,7 +39,7 @@ public class FlushingFileFormat extends FileFormat {
 
     public FlushingFileFormat(String identifier) {
         super(identifier);
-        this.format = FileFormat.fromIdentifier(identifier, new Configuration());
+        this.format = FileFormat.fromIdentifier(identifier, new Options());
     }
 
     @Override

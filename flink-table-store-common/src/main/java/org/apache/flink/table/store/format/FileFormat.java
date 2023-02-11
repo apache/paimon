@@ -18,10 +18,9 @@
 
 package org.apache.flink.table.store.format;
 
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.DelegatingConfiguration;
 import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.RowType;
 
 import javax.annotation.Nullable;
@@ -52,7 +51,6 @@ public abstract class FileFormat {
      * Create a {@link FormatReaderFactory} from the type, with projection pushed down.
      *
      * @param type Type without projection.
-     * @param projection See {@link org.apache.flink.table.connector.Projection#toNestedIndexes()}.
      * @param filters A list of filters in conjunctive form for filtering on a best-effort basis.
      */
     public abstract FormatReaderFactory createReaderFactory(
@@ -79,15 +77,13 @@ public abstract class FileFormat {
 
     /** Create a {@link FileFormat} from table options. */
     public static FileFormat fromTableOptions(
-            Configuration tableOptions, ConfigOption<String> formatOption) {
+            Options tableOptions, ConfigOption<String> formatOption) {
         String formatIdentifier = tableOptions.get(formatOption);
-        DelegatingConfiguration formatOptions =
-                new DelegatingConfiguration(tableOptions, formatIdentifier + ".");
-        return fromIdentifier(formatIdentifier, formatOptions);
+        return fromIdentifier(formatIdentifier, tableOptions.removePrefix(formatIdentifier + "."));
     }
 
     /** Create a {@link FileFormat} from format identifier and format options. */
-    public static FileFormat fromIdentifier(String identifier, Configuration options) {
+    public static FileFormat fromIdentifier(String identifier, Options options) {
         Optional<FileFormat> format =
                 fromIdentifier(identifier, options, Thread.currentThread().getContextClassLoader());
         return format.orElseGet(
@@ -103,7 +99,7 @@ public abstract class FileFormat {
     }
 
     private static Optional<FileFormat> fromIdentifier(
-            String formatIdentifier, Configuration formatOptions, ClassLoader classLoader) {
+            String formatIdentifier, Options formatOptions, ClassLoader classLoader) {
         ServiceLoader<FileFormatFactory> serviceLoader =
                 ServiceLoader.load(FileFormatFactory.class, classLoader);
         for (FileFormatFactory factory : serviceLoader) {

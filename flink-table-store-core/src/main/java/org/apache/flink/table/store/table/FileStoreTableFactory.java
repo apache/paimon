@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -73,7 +72,7 @@ public class FileStoreTableFactory {
     public static FileStoreTable create(
             FileIO fileIO, Path tablePath, TableSchema tableSchema, Options dynamicOptions) {
         FileStoreTable table;
-        if (Configuration.fromMap(tableSchema.options()).get(CoreOptions.WRITE_MODE)
+        if (Options.fromMap(tableSchema.options()).get(CoreOptions.WRITE_MODE)
                 == WriteMode.APPEND_ONLY) {
             table = new AppendOnlyFileStoreTable(fileIO, tablePath, tableSchema);
         } else {

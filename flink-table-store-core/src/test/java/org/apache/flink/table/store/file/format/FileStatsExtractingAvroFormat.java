@@ -18,13 +18,13 @@
 
 package org.apache.flink.table.store.file.format;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.stats.TestFileStatsExtractor;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.format.FormatWriterFactory;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.RowType;
 
 import javax.annotation.Nullable;
@@ -39,7 +39,7 @@ public class FileStatsExtractingAvroFormat extends FileFormat {
 
     public FileStatsExtractingAvroFormat() {
         super("avro");
-        avro = FileFormat.fromIdentifier("avro", new Configuration());
+        avro = FileFormat.fromIdentifier("avro", new Options());
     }
 
     @Override

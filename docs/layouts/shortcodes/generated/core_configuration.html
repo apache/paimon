@@ -87,18 +87,6 @@
             <td>Specify the message format of data files.</td>
         </tr>
         <tr>
-            <td><h5>orc.bloom.filter.columns</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>A comma-separated list of columns for which to create a bloon filter when writing.</td>
-        </tr>
-        <tr>
-            <td><h5>orc.bloom.filter.fpp</h5></td>
-            <td style="word-wrap: break-word;">0.05</td>
-            <td>Double</td>
-            <td>Define the default false positive probability for bloom filters.</td>
-        </tr>
-        <tr>
             <td><h5>local-sort.max-num-file-handles</h5></td>
             <td style="word-wrap: break-word;">128</td>
             <td>Integer</td>
@@ -181,6 +169,18 @@
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 1.</td>
+        </tr>
+        <tr>
+            <td><h5>orc.bloom.filter.columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>A comma-separated list of columns for which to create a bloon filter when writing.</td>
+        </tr>
+        <tr>
+            <td><h5>orc.bloom.filter.fpp</h5></td>
+            <td style="word-wrap: break-word;">0.05</td>
+            <td>Double</td>
+            <td>Define the default false positive probability for bloom filters.</td>
         </tr>
         <tr>
             <td><h5>page-size</h5></td>

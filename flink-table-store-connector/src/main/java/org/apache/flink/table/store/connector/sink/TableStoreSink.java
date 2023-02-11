@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
@@ -35,6 +34,7 @@ import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.log.LogSinkProvider;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.AppendOnlyFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogValueCountFileStoreTable;
 import org.apache.flink.table.store.table.ChangelogWithKeyFileStoreTable;
@@ -83,7 +83,7 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
             // no primary key, sink all changelogs
             return requestedMode;
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
-            Configuration options = Configuration.fromMap(table.schema().options());
+            Options options = Options.fromMap(table.schema().options());
             if (options.get(CHANGELOG_PRODUCER) == ChangelogProducer.INPUT) {
                 return requestedMode;
             }
@@ -118,7 +118,7 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
             logSinkProvider = logStoreTableFactory.createSinkProvider(this.context, context);
         }
 
-        Configuration conf = Configuration.fromMap(table.schema().options());
+        Options conf = Options.fromMap(table.schema().options());
         // Do not sink to log store when overwrite mode
         final LogSinkFunction logSinkFunction =
                 overwrite ? null : (logSinkProvider == null ? null : logSinkProvider.createSink());

@@ -21,7 +21,6 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.CatalogTable;
@@ -30,7 +29,6 @@ import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.DynamicTableSourceFactory;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import org.apache.flink.table.store.CoreOptions.LogConsistency;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
@@ -40,6 +38,7 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
 import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.utils.Preconditions;
@@ -97,10 +96,7 @@ public abstract class AbstractTableStoreFactory
 
     @Override
     public Set<ConfigOption<?>> optionalOptions() {
-        Set<ConfigOption<?>> options = new HashSet<>();
-        options.addAll(FlinkConnectorOptions.getOptions());
-        options.addAll(CoreOptions.getOptions());
-        return options;
+        return new HashSet<>();
     }
 
     // ~ Tools ------------------------------------------------------------------
@@ -113,7 +109,7 @@ public abstract class AbstractTableStoreFactory
 
     static Optional<LogStoreTableFactory> createOptionalLogStoreFactory(
             ClassLoader classLoader, Map<String, String> options) {
-        Configuration configOptions = new Configuration();
+        Options configOptions = new Options();
         options.forEach(configOptions::setString);
 
         if (configOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE)) {
@@ -125,7 +121,7 @@ public abstract class AbstractTableStoreFactory
         return Optional.of(discoverLogStoreFactory(classLoader, configOptions.get(LOG_SYSTEM)));
     }
 
-    private static void validateFileStoreContinuous(Configuration options) {
+    private static void validateFileStoreContinuous(Options options) {
         LogChangelogMode changelogMode = options.get(LOG_CHANGELOG_MODE);
         if (changelogMode == LogChangelogMode.UPSERT) {
             throw new ValidationException(

@@ -31,6 +31,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.utils.DataTypeUtils;
 
@@ -47,7 +48,6 @@ import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.flink.table.store.CoreOptions.LogConsistency;
 import static org.apache.flink.table.store.CoreOptions.SCAN_TIMESTAMP_MILLIS;
-import static org.apache.flink.table.store.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.flink.table.store.kafka.KafkaLogOptions.TOPIC;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
 
@@ -65,9 +65,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
 
     @Override
     public Set<ConfigOption<?>> requiredOptions() {
-        Set<ConfigOption<?>> options = new HashSet<>();
-        options.add(BOOTSTRAP_SERVERS);
-        return options;
+        return new HashSet<>();
     }
 
     @Override
@@ -98,18 +96,19 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
         DeserializationSchema<RowData> valueDeserializer =
                 LogStoreTableFactory.getValueDecodingFormat(helper)
                         .createRuntimeDecoder(sourceContext, physicalType);
+        Options options = toOptions(helper.getOptions());
         return new KafkaLogSourceProvider(
                 topic(context),
-                toKafkaProperties(helper.getOptions()),
+                toKafkaProperties(options),
                 physicalType,
                 primaryKey,
                 primaryKeyDeserializer,
                 valueDeserializer,
                 projectFields,
-                helper.getOptions().get(LOG_CONSISTENCY),
+                options.get(LOG_CONSISTENCY),
                 // TODO visit all options through CoreOptions
-                CoreOptions.startupMode(helper.getOptions()),
-                helper.getOptions().get(SCAN_TIMESTAMP_MILLIS));
+                CoreOptions.startupMode(options),
+                options.get(SCAN_TIMESTAMP_MILLIS));
     }
 
     @Override
@@ -129,13 +128,14 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
         SerializationSchema<RowData> valueSerializer =
                 LogStoreTableFactory.getValueEncodingFormat(helper)
                         .createRuntimeEncoder(sinkContext, physicalType);
+        Options options = toOptions(helper.getOptions());
         return new KafkaLogSinkProvider(
                 topic(context),
-                toKafkaProperties(helper.getOptions()),
+                toKafkaProperties(options),
                 primaryKeySerializer,
                 valueSerializer,
-                helper.getOptions().get(LOG_CONSISTENCY),
-                helper.getOptions().get(LOG_CHANGELOG_MODE));
+                options.get(LOG_CONSISTENCY),
+                options.get(LOG_CHANGELOG_MODE));
     }
 
     private int[] getPrimaryKeyIndexes(ResolvedSchema schema) {
@@ -146,9 +146,9 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 .orElseGet(() -> new int[] {});
     }
 
-    public static Properties toKafkaProperties(ReadableConfig options) {
+    public static Properties toKafkaProperties(Options options) {
         Properties properties = new Properties();
-        Map<String, String> optionMap = ((Configuration) options).toMap();
+        Map<String, String> optionMap = options.toMap();
         optionMap.keySet().stream()
                 .filter(key -> key.startsWith(KAFKA_PREFIX))
                 .forEach(
@@ -162,5 +162,11 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
             properties.setProperty(ISOLATION_LEVEL_CONFIG, "read_committed");
         }
         return properties;
+    }
+
+    private Options toOptions(ReadableConfig config) {
+        Options options = new Options();
+        ((Configuration) config).toMap().forEach(options::setString);
+        return options;
     }
 }

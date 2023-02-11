@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -27,6 +26,7 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.sink.TableCommit;
 
 import java.util.Map;
@@ -65,7 +65,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                     }
                 });
 
-        Configuration newOptions = Configuration.fromMap(options);
+        Options newOptions = Options.fromMap(options);
 
         // merge dynamic options into schema.options
         dynamicOptions.forEach(newOptions::setString);

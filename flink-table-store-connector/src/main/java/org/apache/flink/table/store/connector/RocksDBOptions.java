@@ -18,11 +18,11 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.annotation.docs.Documentation;
-import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.MemorySize;
-import org.apache.flink.configuration.description.Description;
+import org.apache.flink.table.store.annotation.Documentation;
+import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.flink.table.store.options.MemorySize;
+import org.apache.flink.table.store.options.Options;
+import org.apache.flink.table.store.options.description.Description;
 
 import org.rocksdb.BlockBasedTableConfig;
 import org.rocksdb.BloomFilter;
@@ -36,9 +36,9 @@ import org.rocksdb.TableFormatConfig;
 
 import java.io.File;
 
-import static org.apache.flink.configuration.ConfigOptions.key;
-import static org.apache.flink.configuration.description.LinkElement.link;
-import static org.apache.flink.configuration.description.TextElement.code;
+import static org.apache.flink.table.store.options.ConfigOptions.key;
+import static org.apache.flink.table.store.options.description.LinkElement.link;
+import static org.apache.flink.table.store.options.description.TextElement.code;
 import static org.rocksdb.CompactionStyle.FIFO;
 import static org.rocksdb.CompactionStyle.LEVEL;
 import static org.rocksdb.CompactionStyle.NONE;
@@ -262,7 +262,7 @@ public class RocksDBOptions {
                             "If true, RocksDB will use block-based filter instead of full filter, this only take effect when bloom filter is used. "
                                     + "The default value is 'false'.");
 
-    public static DBOptions createDBOptions(DBOptions currentOptions, Configuration options) {
+    public static DBOptions createDBOptions(DBOptions currentOptions, Options options) {
         currentOptions.setMaxBackgroundJobs(options.get(MAX_BACKGROUND_THREADS));
         currentOptions.setMaxOpenFiles(options.get(MAX_OPEN_FILES));
         currentOptions.setInfoLogLevel(options.get(LOG_LEVEL));
@@ -307,7 +307,7 @@ public class RocksDBOptions {
     }
 
     public static ColumnFamilyOptions createColumnOptions(
-            ColumnFamilyOptions currentOptions, Configuration options) {
+            ColumnFamilyOptions currentOptions, Options options) {
         currentOptions.setCompressionType(options.get(COMPRESSION_TYPE));
         currentOptions.setCompactionStyle(options.get(COMPACTION_STYLE));
         currentOptions.setLevelCompactionDynamicLevelBytes(options.get(USE_DYNAMIC_LEVEL_SIZE));

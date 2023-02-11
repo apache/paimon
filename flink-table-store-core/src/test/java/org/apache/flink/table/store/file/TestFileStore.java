@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
@@ -47,6 +45,8 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileIOFinder;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.MemorySize;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.types.RowType;
@@ -516,7 +516,7 @@ public class TestFileStore extends KeyValueFileStore {
         }
 
         public TestFileStore build() {
-            Configuration conf = new Configuration();
+            Options conf = new Options();
 
             conf.set(CoreOptions.WRITE_BUFFER_SIZE, WRITE_BUFFER_SIZE);
             conf.set(CoreOptions.PAGE_SIZE, PAGE_SIZE);

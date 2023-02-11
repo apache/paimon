@@ -18,8 +18,7 @@
 
 package org.apache.flink.table.store.datagen;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypeDefaultVisitor;
 import org.apache.flink.table.store.types.DateType;
@@ -33,14 +32,13 @@ import java.util.function.Supplier;
 import static java.time.temporal.ChronoField.MILLI_OF_DAY;
 
 /** Base class for translating {@link DataType} to {@link DataGeneratorContainer}'s. */
-@Internal
 public abstract class DataGenVisitorBase extends DataTypeDefaultVisitor<DataGeneratorContainer> {
 
     protected final String name;
 
-    protected final ReadableConfig config;
+    protected final Options config;
 
-    protected DataGenVisitorBase(String name, ReadableConfig config) {
+    protected DataGenVisitorBase(String name, Options config) {
         this.name = name;
         this.config = config;
     }

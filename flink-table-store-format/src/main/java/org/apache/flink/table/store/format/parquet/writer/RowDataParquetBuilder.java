@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.format.parquet.writer;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.RowType;
 
 import org.apache.parquet.column.ParquetProperties;
@@ -34,9 +34,9 @@ import java.io.IOException;
 public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
 
     private final RowType rowType;
-    private final Configuration conf;
+    private final Options conf;
 
-    public RowDataParquetBuilder(RowType rowType, Configuration conf) {
+    public RowDataParquetBuilder(RowType rowType, Options conf) {
         this.rowType = rowType;
         this.conf = conf;
     }
