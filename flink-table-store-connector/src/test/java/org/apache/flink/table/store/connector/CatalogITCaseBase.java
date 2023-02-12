@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
@@ -77,8 +76,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
         sEnv.registerCatalog(catalog, tEnv.getCatalog(catalog).get());
         sEnv.useCatalog(catalog);
 
-        prepareConfiguration(tEnv);
-        prepareConfiguration(sEnv);
+        setParallelism(defaultParallelism());
         prepareEnv();
     }
 
@@ -97,11 +95,11 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
         }
     }
 
-    private void prepareConfiguration(TableEnvironment env) {
-        Configuration config = env.getConfig().getConfiguration();
-        config.set(
-                ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM,
-                defaultParallelism());
+    protected void setParallelism(int parallelism) {
+        tEnv.getConfig()
+                .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, parallelism);
+        sEnv.getConfig()
+                .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, parallelism);
     }
 
     protected int defaultParallelism() {
