@@ -426,6 +426,8 @@ under the License.
                         <exclude>**/LICENSE*</exclude>
                         <!-- artifacts created during release process -->
                         <exclude>release/**</exclude>
+                        <!-- antlr grammar files -->
+                        <exclude>flink-table-store-common/src/main/antlr4/**</exclude>
                     </excludes>
                 </configuration>
             </plugin>
