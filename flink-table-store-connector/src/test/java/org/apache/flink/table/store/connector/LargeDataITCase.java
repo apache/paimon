@@ -31,12 +31,20 @@ public class LargeDataITCase extends CatalogITCaseBase {
 
     @Test
     public void testSpillableWriteBuffer() throws Exception {
+        // set Parallelism to 1, or multiple source tasks resulting in uncertain order.
+        setParallelism(1);
         sql(
                 "CREATE TABLE T1 (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ("
                         + "'write-buffer-size'='256 kb', 'write-buffer-spillable'='true')");
         sql("CREATE TABLE T2 (a INT PRIMARY KEY NOT ENFORCED, b INT)");
         sql(
-                "CREATE TEMPORARY TABLE datagen (a INT, B INT) WITH ('connector'='datagen', 'number-of-rows'='10000')");
+                "CREATE TEMPORARY TABLE datagen (a INT, b INT) WITH ("
+                        + "'connector'='datagen', "
+                        + "'fields.a.min'='0', "
+                        + "'fields.a.max'='50000', "
+                        + "'fields.b.min'='0', "
+                        + "'fields.b.max'='10', "
+                        + "'number-of-rows'='20000')");
 
         tEnv.createStatementSet()
                 .addInsertSql("INSERT INTO T1 SELECT * FROM datagen")
