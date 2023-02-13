@@ -157,9 +157,14 @@ public class HiveCatalog extends AbstractCatalog {
         try {
             return client.getAllTables(databaseName).stream()
                     .filter(
-                            tableName ->
-                                    tableStoreTableExists(
-                                            new Identifier(databaseName, tableName), false))
+                            tableName -> {
+                                Identifier identifier = new Identifier(databaseName, tableName);
+                                // the environment here may not be able to access non-TableStore
+                                // tables.
+                                // so we just check the schema file first
+                                return schemaFileExists(identifier)
+                                        && tableStoreTableExists(identifier, false);
+                            })
                     .collect(Collectors.toList());
         } catch (UnknownDBException e) {
             throw new DatabaseNotExistException(databaseName, e);
@@ -394,6 +399,10 @@ public class HiveCatalog extends AbstractCatalog {
 
     private boolean tableStoreTableExists(Identifier identifier) {
         return tableStoreTableExists(identifier, true);
+    }
+
+    private boolean schemaFileExists(Identifier identifier) {
+        return new SchemaManager(fileIO, getTableLocation(identifier)).latest().isPresent();
     }
 
     private boolean tableStoreTableExists(Identifier identifier, boolean throwException) {
