@@ -31,8 +31,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext.SplitAssignmentState;
 import static org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 
 /** Unit tests for the {@link ContinuousFileSplitEnumerator}. */
@@ -45,10 +47,10 @@ public class ContinuousFileSplitEnumeratorTest {
         context.registerReader(0, "test-host");
 
         List<FileStoreSourceSplit> initialSplits = new ArrayList<>();
-        FileStoreSourceSplit split1 = createSnapshotSplit(1, 0, Collections.emptyList());
-        FileStoreSourceSplit split2 = createSnapshotSplit(2, 0, Collections.emptyList());
-        initialSplits.add(split1);
-        initialSplits.add(split2);
+        for (int i = 1; i <= 4; i++) {
+            initialSplits.add(createSnapshotSplit(i, 0, Collections.emptyList()));
+        }
+        List<FileStoreSourceSplit> expectedSplits = new ArrayList<>(initialSplits);
         final ContinuousFileSplitEnumerator enumerator =
                 new Builder()
                         .setSplitEnumeratorContext(context)
@@ -56,36 +58,51 @@ public class ContinuousFileSplitEnumeratorTest {
                         .setDiscoveryInterval(3)
                         .build();
 
-        // The first time split is allocated, split1 should be allocated
+        // The first time split is allocated, split1 and split2 should be allocated
         enumerator.handleSplitRequest(0, "test-host");
-        Assert.assertEquals(1, context.getSplitAssignments().size());
-        Assert.assertTrue(context.getSplitAssignments().containsKey(0));
-        List<FileStoreSourceSplit> assignedSplits =
-                context.getSplitAssignments().get(0).getAssignedSplits();
-        Assert.assertEquals(1, assignedSplits.size());
-        Assert.assertEquals(split1, assignedSplits.get(0));
+        enumerator.handleSplitRequest(0, "test-host");
+        Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
+                context.getSplitAssignments();
+        // Only subtask-0 is allocated.
+        Assert.assertEquals(1, assignments.size());
+        Assert.assertTrue(assignments.containsKey(0));
+        List<FileStoreSourceSplit> assignedSplits = assignments.get(0).getAssignedSplits();
+        Assert.assertEquals(2, assignedSplits.size());
+        for (int i = 0; i < 2; i++) {
+            Assert.assertEquals(expectedSplits.get(i), assignedSplits.get(i));
+        }
 
-        // split1 is added back
-        enumerator.addSplitsBack(Collections.singletonList(split1), 0);
+        // split1 and split2 is added back
+        enumerator.addSplitsBack(assignedSplits, 0);
         context.getSplitAssignments().clear();
         Assert.assertEquals(0, context.getSplitAssignments().size());
 
         // The split is allocated for the second time, and split1 is allocated first
         enumerator.handleSplitRequest(0, "test-host");
-        Assert.assertEquals(1, context.getSplitAssignments().size());
-        Assert.assertTrue(context.getSplitAssignments().containsKey(0));
-        assignedSplits = context.getSplitAssignments().get(0).getAssignedSplits();
-        Assert.assertEquals(1, assignedSplits.size());
-        Assert.assertEquals(split1, assignedSplits.get(0));
+        enumerator.handleSplitRequest(0, "test-host");
+        assignments = context.getSplitAssignments();
+        // Only subtask-0 is allocated.
+        Assert.assertEquals(1, assignments.size());
+        Assert.assertTrue(assignments.containsKey(0));
+        assignedSplits = assignments.get(0).getAssignedSplits();
+        Assert.assertEquals(2, assignedSplits.size());
+        for (int i = 0; i < 2; i++) {
+            Assert.assertEquals(expectedSplits.get(i), assignedSplits.get(i));
+        }
 
-        // continuing to allocate split, split2 is allocated.
+        // continuing to allocate split
         context.getSplitAssignments().clear();
         enumerator.handleSplitRequest(0, "test-host");
-        Assert.assertEquals(1, context.getSplitAssignments().size());
-        Assert.assertTrue(context.getSplitAssignments().containsKey(0));
-        assignedSplits = context.getSplitAssignments().get(0).getAssignedSplits();
-        Assert.assertEquals(1, assignedSplits.size());
-        Assert.assertEquals(split2, assignedSplits.get(0));
+        enumerator.handleSplitRequest(0, "test-host");
+        assignments = context.getSplitAssignments();
+        // Only subtask-0 is allocated.
+        Assert.assertEquals(1, assignments.size());
+        Assert.assertTrue(assignments.containsKey(0));
+        assignedSplits = assignments.get(0).getAssignedSplits();
+        Assert.assertEquals(2, assignedSplits.size());
+        for (int i = 0; i < 2; i++) {
+            Assert.assertEquals(expectedSplits.get(i + 2), assignedSplits.get(i));
+        }
     }
 
     private static FileStoreSourceSplit createSnapshotSplit(

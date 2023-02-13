@@ -33,13 +33,11 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.Set;
 
 import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
@@ -53,7 +51,7 @@ public class ContinuousFileSplitEnumerator
 
     private final SplitEnumeratorContext<FileStoreSourceSplit> context;
 
-    private final Map<Integer, Queue<FileStoreSourceSplit>> bucketSplits;
+    private final Map<Integer, LinkedList<FileStoreSourceSplit>> bucketSplits;
 
     private Long nextSnapshotId;
 
@@ -93,15 +91,12 @@ public class ContinuousFileSplitEnumerator
     }
 
     private void addSplitsBack(Collection<FileStoreSourceSplit> splits) {
-        List<FileStoreSourceSplit> backSplits = new ArrayList<>(splits);
-        Collections.reverse(backSplits);
-        backSplits.forEach(this::addSplitToHead);
+        new LinkedList<>(splits).descendingIterator().forEachRemaining(this::addSplitToHead);
     }
 
     private void addSplitToHead(FileStoreSourceSplit split) {
-        ((LinkedList<FileStoreSourceSplit>)
-                        bucketSplits.computeIfAbsent(
-                                ((DataSplit) split.split()).bucket(), i -> new LinkedList<>()))
+        bucketSplits
+                .computeIfAbsent(((DataSplit) split.split()).bucket(), i -> new LinkedList<>())
                 .addFirst(split);
     }
 
