@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.data.serializer;
 
-import org.apache.flink.core.memory.DataInputDeserializer;
-import org.apache.flink.core.memory.DataInputView;
-import org.apache.flink.core.memory.DataOutputSerializer;
-import org.apache.flink.core.memory.DataOutputView;
+import org.apache.flink.table.store.io.DataInputDeserializer;
+import org.apache.flink.table.store.io.DataInputView;
+import org.apache.flink.table.store.io.DataOutputSerializer;
+import org.apache.flink.table.store.io.DataOutputView;
 import org.apache.flink.table.store.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;

@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.io;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializerTest;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
@@ -163,7 +163,7 @@ public class KeyValueFileReadWriteTest {
                                 new DataType[] {new BigIntType(false)},
                                 new String[] {"key_orderId"})
                         .build();
-        RowDataSerializer projectedKeySerializer = new RowDataSerializer(projectedKeyType);
+        InternalRowSerializer projectedKeySerializer = new InternalRowSerializer(projectedKeyType);
         assertData(
                 data,
                 actualMetas,
@@ -210,7 +210,8 @@ public class KeyValueFileReadWriteTest {
                             new IntType(false)
                         },
                         new String[] {"shopId", "itemId", "dt", "hr"});
-        RowDataSerializer projectedValueSerializer = new RowDataSerializer(projectedValueType);
+        InternalRowSerializer projectedValueSerializer =
+                new InternalRowSerializer(projectedValueType);
         assertData(
                 data,
                 actualMetas,
@@ -284,8 +285,8 @@ public class KeyValueFileReadWriteTest {
     private void assertData(
             DataFileTestDataGenerator.Data data,
             List<DataFileMeta> actualMetas,
-            RowDataSerializer keySerializer,
-            RowDataSerializer projectedValueSerializer,
+            InternalRowSerializer keySerializer,
+            InternalRowSerializer projectedValueSerializer,
             DataFileMetaSerializer dataFileMetaSerializer,
             KeyValueFileReaderFactory readerFactory,
             Function<KeyValue, KeyValue> toExpectedKv)

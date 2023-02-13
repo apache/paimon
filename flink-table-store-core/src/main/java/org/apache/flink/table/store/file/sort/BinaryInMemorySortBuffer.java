@@ -20,11 +20,11 @@ package org.apache.flink.table.store.file.sort;
 
 import org.apache.flink.table.store.codegen.NormalizedKeyComputer;
 import org.apache.flink.table.store.codegen.RecordComparator;
-import org.apache.flink.table.store.data.AbstractRowDataSerializer;
 import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.BinaryRowSerializer;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.SimpleCollectingOutputView;
+import org.apache.flink.table.store.data.serializer.AbstractRowDataSerializer;
+import org.apache.flink.table.store.data.serializer.BinaryRowSerializer;
 import org.apache.flink.table.store.file.memory.MemorySegmentPool;
 import org.apache.flink.table.store.file.utils.MutableObjectIterator;
 import org.apache.flink.table.store.memory.MemorySegment;

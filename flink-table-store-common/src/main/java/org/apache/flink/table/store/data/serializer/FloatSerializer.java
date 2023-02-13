@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.data.serializer;
 
-import org.apache.flink.core.memory.DataInputView;
-import org.apache.flink.core.memory.DataOutputView;
+import org.apache.flink.table.store.io.DataInputView;
+import org.apache.flink.table.store.io.DataOutputView;
 
 import java.io.IOException;
 

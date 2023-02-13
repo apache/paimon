@@ -17,8 +17,11 @@
 
 package org.apache.flink.table.store.data;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.table.store.data.serializer.InternalArraySerializer;
+import org.apache.flink.table.store.data.serializer.InternalMapSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
+import org.apache.flink.table.store.data.serializer.InternalSerializers;
+import org.apache.flink.table.store.data.serializer.Serializer;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DecimalType;
 import org.apache.flink.table.store.types.LocalZonedTimestampType;
@@ -33,7 +36,6 @@ import static org.apache.flink.table.store.types.DataTypeChecks.getPrecision;
  * each field by writeXX or setNullAt. (Same field can not be written repeatedly.) 3. Invoke {@link
  * #complete()}.
  */
-@Internal
 public interface BinaryWriter {
 
     /** Reset writer to prepare next write. */
@@ -64,11 +66,11 @@ public interface BinaryWriter {
 
     void writeTimestamp(int pos, Timestamp value, int precision);
 
-    void writeArray(int pos, InternalArray value, ArrayDataSerializer serializer);
+    void writeArray(int pos, InternalArray value, InternalArraySerializer serializer);
 
-    void writeMap(int pos, InternalMap value, MapDataSerializer serializer);
+    void writeMap(int pos, InternalMap value, InternalMapSerializer serializer);
 
-    void writeRow(int pos, InternalRow value, RowDataSerializer serializer);
+    void writeRow(int pos, InternalRow value, InternalRowSerializer serializer);
 
     /** Finally, complete write to set real size to binary. */
     void complete();
@@ -81,7 +83,7 @@ public interface BinaryWriter {
      */
     @Deprecated
     static void write(
-            BinaryWriter writer, int pos, Object o, DataType type, TypeSerializer<?> serializer) {
+            BinaryWriter writer, int pos, Object o, DataType type, Serializer<?> serializer) {
         switch (type.getTypeRoot()) {
             case BOOLEAN:
                 writer.writeBoolean(pos, (boolean) o);
@@ -123,14 +125,14 @@ public interface BinaryWriter {
                 writer.writeDecimal(pos, (Decimal) o, decimalType.getPrecision());
                 break;
             case ARRAY:
-                writer.writeArray(pos, (InternalArray) o, (ArrayDataSerializer) serializer);
+                writer.writeArray(pos, (InternalArray) o, (InternalArraySerializer) serializer);
                 break;
             case MAP:
             case MULTISET:
-                writer.writeMap(pos, (InternalMap) o, (MapDataSerializer) serializer);
+                writer.writeMap(pos, (InternalMap) o, (InternalMapSerializer) serializer);
                 break;
             case ROW:
-                writer.writeRow(pos, (InternalRow) o, (RowDataSerializer) serializer);
+                writer.writeRow(pos, (InternalRow) o, (InternalRowSerializer) serializer);
                 break;
             case BINARY:
             case VARBINARY:
@@ -181,24 +183,26 @@ public interface BinaryWriter {
                 return (writer, pos, value) ->
                         writer.writeTimestamp(pos, (Timestamp) value, timestampPrecision);
             case ARRAY:
-                final TypeSerializer<InternalArray> arraySerializer =
+                final Serializer<InternalArray> arraySerializer =
                         InternalSerializers.create(elementType);
                 return (writer, pos, value) ->
                         writer.writeArray(
-                                pos, (InternalArray) value, (ArrayDataSerializer) arraySerializer);
+                                pos,
+                                (InternalArray) value,
+                                (InternalArraySerializer) arraySerializer);
             case MULTISET:
             case MAP:
-                final TypeSerializer<InternalMap> mapSerializer =
+                final Serializer<InternalMap> mapSerializer =
                         InternalSerializers.create(elementType);
                 return (writer, pos, value) ->
                         writer.writeMap(
-                                pos, (InternalMap) value, (MapDataSerializer) mapSerializer);
+                                pos, (InternalMap) value, (InternalMapSerializer) mapSerializer);
             case ROW:
-                final TypeSerializer<InternalRow> rowSerializer =
+                final Serializer<InternalRow> rowSerializer =
                         InternalSerializers.create(elementType);
                 return (writer, pos, value) ->
                         writer.writeRow(
-                                pos, (InternalRow) value, (RowDataSerializer) rowSerializer);
+                                pos, (InternalRow) value, (InternalRowSerializer) rowSerializer);
             default:
                 throw new IllegalArgumentException();
         }

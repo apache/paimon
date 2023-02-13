@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file;
 
-import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
 import org.apache.flink.table.store.file.utils.ObjectSerializerTestBase;
 
@@ -54,8 +54,8 @@ public class KeyValueSerializerTest extends ObjectSerializerTestBase<KeyValue> {
     public static boolean equals(
             KeyValue kv1,
             KeyValue kv2,
-            RowDataSerializer keySerializer,
-            RowDataSerializer valueSerializer) {
+            InternalRowSerializer keySerializer,
+            InternalRowSerializer valueSerializer) {
         return kv1.sequenceNumber() == kv2.sequenceNumber()
                 && kv1.valueKind() == kv2.valueKind()
                 && keySerializer

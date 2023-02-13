@@ -24,7 +24,7 @@ import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.connector.FlinkRowWrapper;
-import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.utils.OffsetRow;
 import org.apache.flink.table.store.types.RowType;
 
@@ -38,7 +38,7 @@ public class OffsetRowDataHashStreamPartitioner extends StreamPartitioner<RowDat
     private final int offset;
 
     private transient OffsetRow offsetRow;
-    private transient RowDataSerializer serializer;
+    private transient InternalRowSerializer serializer;
 
     public OffsetRowDataHashStreamPartitioner(RowType offsetRowType, int offset) {
         this.offsetRowType = offsetRowType;
@@ -49,7 +49,7 @@ public class OffsetRowDataHashStreamPartitioner extends StreamPartitioner<RowDat
     public void setup(int numberOfChannels) {
         super.setup(numberOfChannels);
         this.offsetRow = new OffsetRow(offsetRowType.getFieldCount(), offset);
-        serializer = new RowDataSerializer(offsetRowType);
+        serializer = new InternalRowSerializer(offsetRowType);
     }
 
     @Override

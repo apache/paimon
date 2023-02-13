@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.predicate;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.table.sink.BucketComputer;
 import org.apache.flink.table.store.types.RowType;
 
@@ -127,7 +127,7 @@ public class BucketSelector implements Serializable {
             }
         }
 
-        RowDataSerializer serializer = new RowDataSerializer(bucketKeyType);
+        InternalRowSerializer serializer = new InternalRowSerializer(bucketKeyType);
         List<Integer> hashCodes = new ArrayList<>();
         assembleRows(
                 bucketValues,
@@ -138,7 +138,7 @@ public class BucketSelector implements Serializable {
         return Optional.of(new BucketSelector(hashCodes.stream().mapToInt(i -> i).toArray()));
     }
 
-    private static int hash(List<Object> columns, RowDataSerializer serializer) {
+    private static int hash(List<Object> columns, InternalRowSerializer serializer) {
         BinaryRow binaryRow = serializer.toBinaryRow(GenericRow.of(columns.toArray()));
         return BucketComputer.hashcode(binaryRow);
     }

@@ -22,7 +22,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
@@ -85,8 +85,8 @@ public class TestFileStore extends KeyValueFileStore {
 
     private final String root;
     private final FileIO fileIO;
-    private final RowDataSerializer keySerializer;
-    private final RowDataSerializer valueSerializer;
+    private final InternalRowSerializer keySerializer;
+    private final InternalRowSerializer valueSerializer;
     private final String commitUser;
 
     private long commitIdentifier;
@@ -112,8 +112,8 @@ public class TestFileStore extends KeyValueFileStore {
                 mfFactory);
         this.root = root;
         this.fileIO = FileIOFinder.find(new Path(root));
-        this.keySerializer = new RowDataSerializer(keyType);
-        this.valueSerializer = new RowDataSerializer(valueType);
+        this.keySerializer = new InternalRowSerializer(keyType);
+        this.valueSerializer = new InternalRowSerializer(valueType);
         this.commitUser = UUID.randomUUID().toString();
 
         this.commitIdentifier = 0L;

@@ -16,18 +16,8 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.data;
+package org.apache.flink.table.store.data.serializer;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.base.BooleanSerializer;
-import org.apache.flink.api.common.typeutils.base.ByteSerializer;
-import org.apache.flink.api.common.typeutils.base.DoubleSerializer;
-import org.apache.flink.api.common.typeutils.base.FloatSerializer;
-import org.apache.flink.api.common.typeutils.base.IntSerializer;
-import org.apache.flink.api.common.typeutils.base.LongSerializer;
-import org.apache.flink.api.common.typeutils.base.ShortSerializer;
-import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.IntType;
@@ -39,26 +29,21 @@ import static org.apache.flink.table.store.types.DataTypeChecks.getFieldTypes;
 import static org.apache.flink.table.store.types.DataTypeChecks.getPrecision;
 import static org.apache.flink.table.store.types.DataTypeChecks.getScale;
 
-/** {@link TypeSerializer} of {@link DataType} for internal data structures. */
-@Internal
+/** {@link Serializer} of {@link DataType} for internal data structures. */
 public final class InternalSerializers {
 
-    /**
-     * Creates a {@link TypeSerializer} for internal data structures of the given {@link DataType}.
-     */
+    /** Creates a {@link Serializer} for internal data structures of the given {@link DataType}. */
     @SuppressWarnings("unchecked")
-    public static <T> TypeSerializer<T> create(DataType type) {
-        return (TypeSerializer<T>) createInternal(type);
+    public static <T> Serializer<T> create(DataType type) {
+        return (Serializer<T>) createInternal(type);
     }
 
-    /**
-     * Creates a {@link TypeSerializer} for internal data structures of the given {@link RowType}.
-     */
-    public static RowDataSerializer create(RowType type) {
-        return (RowDataSerializer) createInternal(type);
+    /** Creates a {@link Serializer} for internal data structures of the given {@link RowType}. */
+    public static InternalRowSerializer create(RowType type) {
+        return (InternalRowSerializer) createInternal(type);
     }
 
-    private static TypeSerializer<?> createInternal(DataType type) {
+    private static Serializer<?> createInternal(DataType type) {
         // ordered by type root definition
         switch (type.getTypeRoot()) {
             case CHAR:
@@ -68,7 +53,7 @@ public final class InternalSerializers {
                 return BooleanSerializer.INSTANCE;
             case BINARY:
             case VARBINARY:
-                return BytePrimitiveArraySerializer.INSTANCE;
+                return BinarySerializer.INSTANCE;
             case DECIMAL:
                 return new DecimalSerializer(getPrecision(type), getScale(type));
             case TINYINT:
@@ -89,15 +74,15 @@ public final class InternalSerializers {
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 return new TimestampSerializer(getPrecision(type));
             case ARRAY:
-                return new ArrayDataSerializer(((ArrayType) type).getElementType());
+                return new InternalArraySerializer(((ArrayType) type).getElementType());
             case MULTISET:
-                return new MapDataSerializer(
+                return new InternalMapSerializer(
                         ((MultisetType) type).getElementType(), new IntType(false));
             case MAP:
                 MapType mapType = (MapType) type;
-                return new MapDataSerializer(mapType.getKeyType(), mapType.getValueType());
+                return new InternalMapSerializer(mapType.getKeyType(), mapType.getValueType());
             case ROW:
-                return new RowDataSerializer(getFieldTypes(type).toArray(new DataType[0]));
+                return new InternalRowSerializer(getFieldTypes(type).toArray(new DataType[0]));
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported type '" + type + "' to get internal serializer");

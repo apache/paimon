@@ -16,13 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.data;
+package org.apache.flink.table.store.data.serializer;
 
-import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
-import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
-import org.apache.flink.core.memory.DataInputView;
-import org.apache.flink.core.memory.DataOutputView;
+import org.apache.flink.table.store.data.AbstractPagedInputView;
+import org.apache.flink.table.store.data.AbstractPagedOutputView;
+import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.io.DataInputView;
+import org.apache.flink.table.store.io.DataOutputView;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentUtils;
 import org.apache.flink.table.store.memory.MemorySegmentWritable;
@@ -46,33 +46,17 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
     }
 
     @Override
-    public boolean isImmutableType() {
-        return false;
-    }
-
-    @Override
-    public TypeSerializer<BinaryRow> duplicate() {
+    public BinaryRowSerializer duplicate() {
         return new BinaryRowSerializer(numFields);
     }
 
-    @Override
     public BinaryRow createInstance() {
         return new BinaryRow(numFields);
     }
 
     @Override
     public BinaryRow copy(BinaryRow from) {
-        return copy(from, new BinaryRow(numFields));
-    }
-
-    @Override
-    public BinaryRow copy(BinaryRow from, BinaryRow reuse) {
-        return from.copy(reuse);
-    }
-
-    @Override
-    public int getLength() {
-        return -1;
+        return from.copy();
     }
 
     @Override
@@ -82,10 +66,7 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
             serializeWithoutLength(record, (MemorySegmentWritable) target);
         } else {
             MemorySegmentUtils.copyToView(
-                    record.getSegments(),
-                    record.getOffset(),
-                    record.getSizeInBytes(),
-                    org.apache.flink.table.store.io.DataOutputView.convertFlinkToStore(target));
+                    record.getSegments(), record.getOffset(), record.getSizeInBytes(), target);
         }
     }
 
@@ -99,7 +80,6 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
         return row;
     }
 
-    @Override
     public BinaryRow deserialize(BinaryRow reuse, DataInputView source) throws IOException {
         MemorySegment[] segments = reuse.getSegments();
         checkArgument(
@@ -168,7 +148,7 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
     @Override
     public BinaryRow deserializeFromPages(AbstractPagedInputView headerLessView)
             throws IOException {
-        return deserializeFromPages(createInstance(), headerLessView);
+        return deserializeFromPages(new BinaryRow(getArity()), headerLessView);
     }
 
     @Override
@@ -304,13 +284,6 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
     }
 
     @Override
-    public void copy(DataInputView source, DataOutputView target) throws IOException {
-        int length = source.readInt();
-        target.writeInt(length);
-        target.write(source, length);
-    }
-
-    @Override
     public boolean equals(Object obj) {
         return obj instanceof BinaryRowSerializer
                 && numFields == ((BinaryRowSerializer) obj).numFields;
@@ -319,63 +292,5 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
     @Override
     public int hashCode() {
         return Integer.hashCode(numFields);
-    }
-
-    @Override
-    public TypeSerializerSnapshot<BinaryRow> snapshotConfiguration() {
-        return new BinaryRowSerializerSnapshot(numFields);
-    }
-
-    /** {@link TypeSerializerSnapshot} for {@link BinaryRowSerializer}. */
-    public static final class BinaryRowSerializerSnapshot
-            implements TypeSerializerSnapshot<BinaryRow> {
-        private static final int CURRENT_VERSION = 3;
-
-        private int previousNumFields;
-
-        @SuppressWarnings("unused")
-        public BinaryRowSerializerSnapshot() {
-            // this constructor is used when restoring from a checkpoint/savepoint.
-        }
-
-        BinaryRowSerializerSnapshot(int numFields) {
-            this.previousNumFields = numFields;
-        }
-
-        @Override
-        public int getCurrentVersion() {
-            return CURRENT_VERSION;
-        }
-
-        @Override
-        public void writeSnapshot(DataOutputView out) throws IOException {
-            out.writeInt(previousNumFields);
-        }
-
-        @Override
-        public void readSnapshot(int readVersion, DataInputView in, ClassLoader userCodeClassLoader)
-                throws IOException {
-            this.previousNumFields = in.readInt();
-        }
-
-        @Override
-        public TypeSerializer<BinaryRow> restoreSerializer() {
-            return new BinaryRowSerializer(previousNumFields);
-        }
-
-        @Override
-        public TypeSerializerSchemaCompatibility<BinaryRow> resolveSchemaCompatibility(
-                TypeSerializer<BinaryRow> newSerializer) {
-            if (!(newSerializer instanceof BinaryRowSerializer)) {
-                return TypeSerializerSchemaCompatibility.incompatible();
-            }
-
-            BinaryRowSerializer newBinaryRowSerializer = (BinaryRowSerializer) newSerializer;
-            if (previousNumFields != newBinaryRowSerializer.numFields) {
-                return TypeSerializerSchemaCompatibility.incompatible();
-            } else {
-                return TypeSerializerSchemaCompatibility.compatibleAsIs();
-            }
-        }
     }
 }

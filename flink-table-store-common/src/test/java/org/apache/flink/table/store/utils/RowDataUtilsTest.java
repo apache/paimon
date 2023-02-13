@@ -22,8 +22,8 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.RowDataSerializer;
 import org.apache.flink.table.store.data.Timestamp;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.datagen.DataGenerator;
 import org.apache.flink.table.store.datagen.RandomGeneratorVisitor;
 import org.apache.flink.table.store.datagen.RowDataGenerator;
@@ -65,7 +65,7 @@ public class RowDataUtilsTest {
 
     private RowDataGenerator rowDataGenerator;
 
-    private RowDataSerializer serializer;
+    private InternalRowSerializer serializer;
 
     @BeforeEach
     public void before() throws Exception {
@@ -81,7 +81,7 @@ public class RowDataUtilsTest {
                         .toArray(DataGenerator[]::new);
         this.rowDataGenerator = new RowDataGenerator(generators);
         this.rowDataGenerator.open();
-        this.serializer = new RowDataSerializer(ROW_TYPE);
+        this.serializer = new InternalRowSerializer(ROW_TYPE);
     }
 
     @Test

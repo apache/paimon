@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.sort;
 import org.apache.flink.table.store.codegen.RecordComparator;
 import org.apache.flink.table.store.data.AbstractPagedOutputView;
 import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.BinaryRowSerializer;
+import org.apache.flink.table.store.data.serializer.BinaryRowSerializer;
 import org.apache.flink.table.store.file.compression.BlockCompressionFactory;
 import org.apache.flink.table.store.file.disk.ChannelReaderInputView;
 import org.apache.flink.table.store.file.disk.ChannelReaderInputViewIterator;
@@ -62,7 +62,7 @@ public class BinaryExternalMerger extends AbstractBinaryExternalMerger<BinaryRow
     @Override
     protected MutableObjectIterator<BinaryRow> channelReaderInputViewIterator(
             ChannelReaderInputView inView) {
-        return new ChannelReaderInputViewIterator<>(inView, null, serializer.duplicate());
+        return new ChannelReaderInputViewIterator(inView, null, serializer.duplicate());
     }
 
     @Override

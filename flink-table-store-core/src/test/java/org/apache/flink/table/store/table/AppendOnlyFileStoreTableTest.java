@@ -21,7 +21,7 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -167,7 +167,8 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         Random random = new Random();
         int numOfBucket = Math.max(random.nextInt(8), 1);
         FileStoreTable table = createFileStoreTable(numOfBucket);
-        RowDataSerializer serializer = new RowDataSerializer(table.schema().logicalRowType());
+        InternalRowSerializer serializer =
+                new InternalRowSerializer(table.schema().logicalRowType());
         TableWrite write = table.newWrite(commitUser);
 
         TableCommit commit = table.newCommit(commitUser);
