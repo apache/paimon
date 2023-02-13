@@ -58,7 +58,7 @@ public class FlinkConnectorOptions {
     public static final ConfigOption<Integer> SINK_PARALLELISM = FactoryUtil.SINK_PARALLELISM;
 
     public static final ConfigOption<Boolean> SINK_SHUFFLE_BY_PARTITION =
-            ConfigOptions.key("sink-store.shuffle-by-partition.enable")
+            ConfigOptions.key("sink.partition-shuffle")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
