@@ -27,6 +27,7 @@ import org.apache.flink.table.store.connector.FlinkCatalog;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.catalog.Identifier;
+import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.ExceptionUtils;
@@ -370,6 +371,18 @@ public class HiveCatalogITCase {
                                         .await())
                 .hasRootCauseMessage(
                         String.format("Field names %s cannot contain upper case", "[A, C]"));
+    }
+
+    @Test
+    public void testQuickPathInShowTables() throws Exception {
+        collect("CREATE TABLE t ( a INT, b STRING )");
+        List<Row> tables = collect("SHOW TABLES");
+        Assert.assertEquals("[+I[t]]", tables.toString());
+
+        new LocalFileIO()
+                .delete(new org.apache.flink.table.store.fs.Path(path, "test_db.db/t"), true);
+        tables = collect("SHOW TABLES");
+        Assert.assertEquals("[]", tables.toString());
     }
 
     private List<Row> collect(String sql) throws Exception {
