@@ -38,7 +38,6 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.Set;
 
 import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
@@ -52,7 +51,7 @@ public class ContinuousFileSplitEnumerator
 
     private final SplitEnumeratorContext<FileStoreSourceSplit> context;
 
-    private final Map<Integer, Queue<FileStoreSourceSplit>> bucketSplits;
+    private final Map<Integer, LinkedList<FileStoreSourceSplit>> bucketSplits;
 
     private Long nextSnapshotId;
 
@@ -91,6 +90,16 @@ public class ContinuousFileSplitEnumerator
                 .add(split);
     }
 
+    private void addSplitsBack(Collection<FileStoreSourceSplit> splits) {
+        new LinkedList<>(splits).descendingIterator().forEachRemaining(this::addSplitToHead);
+    }
+
+    private void addSplitToHead(FileStoreSourceSplit split) {
+        bucketSplits
+                .computeIfAbsent(((DataSplit) split.split()).bucket(), i -> new LinkedList<>())
+                .addFirst(split);
+    }
+
     @Override
     public void start() {
         context.callAsync(
@@ -121,7 +130,7 @@ public class ContinuousFileSplitEnumerator
     @Override
     public void addSplitsBack(List<FileStoreSourceSplit> splits, int subtaskId) {
         LOG.debug("File Source Enumerator adds splits back: {}", splits);
-        addSplits(splits);
+        addSplitsBack(splits);
     }
 
     @Override
