@@ -18,11 +18,11 @@
 
 package org.apache.flink.table.store.file.sort;
 
-import org.apache.flink.table.store.data.AbstractRowDataSerializer;
 import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.BinaryRowSerializer;
 import org.apache.flink.table.store.data.BinaryRowWriter;
 import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.serializer.AbstractRowDataSerializer;
+import org.apache.flink.table.store.data.serializer.BinaryRowSerializer;
 import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.memory.MemorySegmentPool;

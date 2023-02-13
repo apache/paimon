@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.api.common.typeutils.base.ListSerializer;
-import org.apache.flink.api.java.typeutils.runtime.NullableSerializer;
-import org.apache.flink.core.memory.DataInputViewStreamWrapper;
-import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
-import org.apache.flink.table.store.data.InternalSerializers;
+import org.apache.flink.table.store.data.serializer.InternalSerializers;
+import org.apache.flink.table.store.data.serializer.ListSerializer;
+import org.apache.flink.table.store.data.serializer.NullableSerializer;
 import org.apache.flink.table.store.format.FieldStats;
+import org.apache.flink.table.store.io.DataInputViewStreamWrapper;
+import org.apache.flink.table.store.io.DataOutputViewStreamWrapper;
 import org.apache.flink.table.store.types.DataType;
 
 import java.io.IOException;
@@ -135,8 +135,7 @@ public class LeafPredicate implements Predicate {
 
     private ListSerializer<Object> objectsSerializer() {
         return new ListSerializer<>(
-                NullableSerializer.wrapIfNullIsNotSupported(
-                        InternalSerializers.create(type), false));
+                NullableSerializer.wrapIfNullIsNotSupported(InternalSerializers.create(type)));
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {

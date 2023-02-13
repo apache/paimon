@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
@@ -93,17 +93,17 @@ public class KeyValueFileStoreReadTest {
         expected.entrySet().removeIf(e -> e.getValue() == 0);
 
         RowType partitionType = RowType.of(new DataType[] {new IntType(false)}, new String[] {"c"});
-        RowDataSerializer partitionSerializer = new RowDataSerializer(partitionType);
+        InternalRowSerializer partitionSerializer = new InternalRowSerializer(partitionType);
         List<String> keyNames = Arrays.asList("a", "b", "c");
         RowType keyType =
                 RowType.of(
                         new DataType[] {new IntType(false), new IntType(false), new IntType(false)},
                         keyNames.toArray(new String[0]));
         RowType projectedKeyType = RowType.of(new IntType(false), new IntType(false));
-        RowDataSerializer projectedKeySerializer = new RowDataSerializer(projectedKeyType);
+        InternalRowSerializer projectedKeySerializer = new InternalRowSerializer(projectedKeyType);
         RowType valueType =
                 RowType.of(new DataType[] {new BigIntType(false)}, new String[] {"count"});
-        RowDataSerializer valueSerializer = new RowDataSerializer(valueType);
+        InternalRowSerializer valueSerializer = new InternalRowSerializer(valueType);
 
         TestFileStore store =
                 createStore(
@@ -172,8 +172,8 @@ public class KeyValueFileStoreReadTest {
                         TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
                         DeduplicateMergeFunction.factory());
 
-        RowDataSerializer projectedValueSerializer =
-                new RowDataSerializer(
+        InternalRowSerializer projectedValueSerializer =
+                new InternalRowSerializer(
                         new IntType(false),
                         new BigIntType(),
                         new VarCharType(false, 8),
@@ -212,8 +212,8 @@ public class KeyValueFileStoreReadTest {
             List<KeyValue> data,
             int[][] keyProjection,
             int[][] valueProjection,
-            RowDataSerializer projectedKeySerializer,
-            RowDataSerializer projectedValueSerializer,
+            InternalRowSerializer projectedKeySerializer,
+            InternalRowSerializer projectedValueSerializer,
             TestFileStore store,
             Function<KeyValue, BinaryRow> partitionCalculator)
             throws Exception {

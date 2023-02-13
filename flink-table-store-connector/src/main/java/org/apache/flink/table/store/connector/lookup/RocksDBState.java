@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.connector.lookup;
 
-import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.core.memory.DataInputDeserializer;
-import org.apache.flink.core.memory.DataOutputSerializer;
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.serializer.Serializer;
+import org.apache.flink.table.store.io.DataInputDeserializer;
+import org.apache.flink.table.store.io.DataOutputSerializer;
 
 import org.apache.flink.shaded.guava30.com.google.common.cache.Cache;
 import org.apache.flink.shaded.guava30.com.google.common.cache.CacheBuilder;
@@ -44,9 +44,9 @@ public abstract class RocksDBState<CacheV> {
 
     protected final ColumnFamilyHandle columnFamily;
 
-    protected final TypeSerializer<InternalRow> keySerializer;
+    protected final Serializer<InternalRow> keySerializer;
 
-    protected final TypeSerializer<InternalRow> valueSerializer;
+    protected final Serializer<InternalRow> valueSerializer;
 
     protected final DataOutputSerializer keyOutView;
 
@@ -59,8 +59,8 @@ public abstract class RocksDBState<CacheV> {
     public RocksDBState(
             RocksDB db,
             ColumnFamilyHandle columnFamily,
-            TypeSerializer<InternalRow> keySerializer,
-            TypeSerializer<InternalRow> valueSerializer,
+            Serializer<InternalRow> keySerializer,
+            Serializer<InternalRow> valueSerializer,
             long lruCacheSize) {
         this.db = db;
         this.columnFamily = columnFamily;

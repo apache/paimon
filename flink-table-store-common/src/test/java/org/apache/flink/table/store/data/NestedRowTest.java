@@ -17,6 +17,7 @@
 
 package org.apache.flink.table.store.data;
 
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.types.DataTypes;
 
@@ -63,8 +64,8 @@ public class NestedRowTest {
         gRow.setField(3, null);
 
         // layer2
-        RowDataSerializer serializer =
-                new RowDataSerializer(
+        InternalRowSerializer serializer =
+                new InternalRowSerializer(
                         DataTypes.INT(),
                         DataTypes.BIGINT(),
                         DataTypes.STRING(),
@@ -109,8 +110,8 @@ public class NestedRowTest {
         gRow.setField(2, BinaryString.fromString("12345678"));
         gRow.setField(3, null);
 
-        RowDataSerializer serializer =
-                new RowDataSerializer(
+        InternalRowSerializer serializer =
+                new InternalRowSerializer(
                         DataTypes.INT(),
                         DataTypes.BIGINT(),
                         DataTypes.STRING(),

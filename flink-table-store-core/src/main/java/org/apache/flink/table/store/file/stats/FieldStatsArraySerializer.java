@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.stats;
 
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.casting.CastExecutor;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.types.ArrayType;
@@ -41,7 +41,7 @@ import static org.apache.flink.table.store.file.utils.SerializationUtils.newByte
 /** Serializer for array of {@link FieldStats}. */
 public class FieldStatsArraySerializer {
 
-    private final RowDataSerializer serializer;
+    private final InternalRowSerializer serializer;
 
     private final InternalRow.FieldGetter[] fieldGetters;
 
@@ -55,7 +55,7 @@ public class FieldStatsArraySerializer {
     public FieldStatsArraySerializer(
             RowType type, int[] indexMapping, CastExecutor<Object, Object>[] converterMapping) {
         RowType safeType = toAllFieldsNullableRowType(type);
-        this.serializer = new RowDataSerializer(safeType);
+        this.serializer = new InternalRowSerializer(safeType);
         this.fieldGetters =
                 IntStream.range(0, safeType.getFieldCount())
                         .mapToObj(

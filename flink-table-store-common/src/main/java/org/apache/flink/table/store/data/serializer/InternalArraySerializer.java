@@ -16,61 +16,48 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.data;
+package org.apache.flink.table.store.data.serializer;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
-import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
-import org.apache.flink.core.memory.DataInputView;
-import org.apache.flink.core.memory.DataOutputView;
-import org.apache.flink.table.store.io.DataInputViewStream;
-import org.apache.flink.table.store.io.DataOutputViewStream;
+import org.apache.flink.table.store.data.BinaryArray;
+import org.apache.flink.table.store.data.BinaryArrayWriter;
+import org.apache.flink.table.store.data.BinaryWriter;
+import org.apache.flink.table.store.data.GenericArray;
+import org.apache.flink.table.store.data.InternalArray;
+import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.io.DataInputView;
+import org.apache.flink.table.store.io.DataOutputView;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentUtils;
 import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.utils.InstantiationUtil;
 
 import java.io.IOException;
 import java.lang.reflect.Array;
 import java.util.Arrays;
 
 /** Serializer for {@link InternalArray}. */
-@Internal
-public class ArrayDataSerializer extends TypeSerializer<InternalArray> {
+public class InternalArraySerializer implements Serializer<InternalArray> {
     private static final long serialVersionUID = 1L;
 
     private final DataType eleType;
-    private final TypeSerializer<Object> eleSer;
+    private final Serializer<Object> eleSer;
     private final InternalArray.ElementGetter elementGetter;
 
     private transient BinaryArray reuseArray;
     private transient BinaryArrayWriter reuseWriter;
 
-    public ArrayDataSerializer(DataType eleType) {
+    public InternalArraySerializer(DataType eleType) {
         this(eleType, InternalSerializers.create(eleType));
     }
 
-    private ArrayDataSerializer(DataType eleType, TypeSerializer<Object> eleSer) {
+    private InternalArraySerializer(DataType eleType, Serializer<Object> eleSer) {
         this.eleType = eleType;
         this.eleSer = eleSer;
         this.elementGetter = InternalArray.createElementGetter(eleType);
     }
 
     @Override
-    public boolean isImmutableType() {
-        return false;
-    }
-
-    @Override
-    public TypeSerializer<InternalArray> duplicate() {
-        return new ArrayDataSerializer(eleType, eleSer.duplicate());
-    }
-
-    @Override
-    public InternalArray createInstance() {
-        return new BinaryArray();
+    public InternalArraySerializer duplicate() {
+        return new InternalArraySerializer(eleType, eleSer.duplicate());
     }
 
     @Override
@@ -82,11 +69,6 @@ public class ArrayDataSerializer extends TypeSerializer<InternalArray> {
         } else {
             return toBinaryArray(from);
         }
-    }
-
-    @Override
-    public InternalArray copy(InternalArray from, InternalArray reuse) {
-        return copy(from);
     }
 
     private GenericArray copyGenericArray(GenericArray array) {
@@ -123,11 +105,6 @@ public class ArrayDataSerializer extends TypeSerializer<InternalArray> {
     }
 
     @Override
-    public int getLength() {
-        return -1;
-    }
-
-    @Override
     public void serialize(InternalArray record, DataOutputView target) throws IOException {
         BinaryArray binaryArray = toBinaryArray(record);
         target.writeInt(binaryArray.getSizeInBytes());
@@ -135,7 +112,7 @@ public class ArrayDataSerializer extends TypeSerializer<InternalArray> {
                 binaryArray.getSegments(),
                 binaryArray.getOffset(),
                 binaryArray.getSizeInBytes(),
-                org.apache.flink.table.store.io.DataOutputView.convertFlinkToStore(target));
+                target);
     }
 
     public BinaryArray toBinaryArray(InternalArray from) {
@@ -175,12 +152,6 @@ public class ArrayDataSerializer extends TypeSerializer<InternalArray> {
         return deserializeReuse(new BinaryArray(), source);
     }
 
-    @Override
-    public InternalArray deserialize(InternalArray reuse, DataInputView source) throws IOException {
-        return deserializeReuse(
-                reuse instanceof BinaryArray ? (BinaryArray) reuse : new BinaryArray(), source);
-    }
-
     private BinaryArray deserializeReuse(BinaryArray reuse, DataInputView source)
             throws IOException {
         int length = source.readInt();
@@ -188,13 +159,6 @@ public class ArrayDataSerializer extends TypeSerializer<InternalArray> {
         source.readFully(bytes);
         reuse.pointTo(MemorySegment.wrap(bytes), 0, bytes.length);
         return reuse;
-    }
-
-    @Override
-    public void copy(DataInputView source, DataOutputView target) throws IOException {
-        int length = source.readInt();
-        target.writeInt(length);
-        target.write(source, length);
     }
 
     @Override
@@ -206,7 +170,7 @@ public class ArrayDataSerializer extends TypeSerializer<InternalArray> {
             return false;
         }
 
-        ArrayDataSerializer that = (ArrayDataSerializer) o;
+        InternalArraySerializer that = (InternalArraySerializer) o;
 
         return eleType.equals(that.eleType);
     }
@@ -214,87 +178,5 @@ public class ArrayDataSerializer extends TypeSerializer<InternalArray> {
     @Override
     public int hashCode() {
         return eleType.hashCode();
-    }
-
-    @VisibleForTesting
-    public TypeSerializer getEleSer() {
-        return eleSer;
-    }
-
-    @Override
-    public TypeSerializerSnapshot<InternalArray> snapshotConfiguration() {
-        return new ArrayDataSerializerSnapshot(eleType, eleSer);
-    }
-
-    /** {@link TypeSerializerSnapshot} for {@link ArrayDataSerializer}. */
-    public static final class ArrayDataSerializerSnapshot
-            implements TypeSerializerSnapshot<InternalArray> {
-        private static final int CURRENT_VERSION = 3;
-
-        private DataType previousType;
-        private TypeSerializer previousEleSer;
-
-        @SuppressWarnings("unused")
-        public ArrayDataSerializerSnapshot() {
-            // this constructor is used when restoring from a checkpoint/savepoint.
-        }
-
-        ArrayDataSerializerSnapshot(DataType eleType, TypeSerializer eleSer) {
-            this.previousType = eleType;
-            this.previousEleSer = eleSer;
-        }
-
-        @Override
-        public int getCurrentVersion() {
-            return CURRENT_VERSION;
-        }
-
-        @Override
-        public void writeSnapshot(DataOutputView out) throws IOException {
-            DataOutputViewStream outStream =
-                    new DataOutputViewStream(
-                            org.apache.flink.table.store.io.DataOutputView.convertFlinkToStore(
-                                    out));
-            InstantiationUtil.serializeObject(outStream, previousType);
-            InstantiationUtil.serializeObject(outStream, previousEleSer);
-        }
-
-        @Override
-        public void readSnapshot(int readVersion, DataInputView in, ClassLoader userCodeClassLoader)
-                throws IOException {
-            try {
-                DataInputViewStream inStream =
-                        new DataInputViewStream(
-                                org.apache.flink.table.store.io.DataInputView.convertFlinkToStore(
-                                        in));
-                this.previousType =
-                        InstantiationUtil.deserializeObject(inStream, userCodeClassLoader);
-                this.previousEleSer =
-                        InstantiationUtil.deserializeObject(inStream, userCodeClassLoader);
-            } catch (ClassNotFoundException e) {
-                throw new IOException(e);
-            }
-        }
-
-        @Override
-        public TypeSerializer<InternalArray> restoreSerializer() {
-            return new ArrayDataSerializer(previousType, previousEleSer);
-        }
-
-        @Override
-        public TypeSerializerSchemaCompatibility<InternalArray> resolveSchemaCompatibility(
-                TypeSerializer<InternalArray> newSerializer) {
-            if (!(newSerializer instanceof ArrayDataSerializer)) {
-                return TypeSerializerSchemaCompatibility.incompatible();
-            }
-
-            ArrayDataSerializer newArrayDataSerializer = (ArrayDataSerializer) newSerializer;
-            if (!previousType.equals(newArrayDataSerializer.eleType)
-                    || !previousEleSer.equals(newArrayDataSerializer.eleSer)) {
-                return TypeSerializerSchemaCompatibility.incompatible();
-            } else {
-                return TypeSerializerSchemaCompatibility.compatibleAsIs();
-            }
-        }
     }
 }

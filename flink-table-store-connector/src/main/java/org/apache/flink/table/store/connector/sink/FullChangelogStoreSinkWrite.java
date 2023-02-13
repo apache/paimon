@@ -30,8 +30,8 @@ import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.connector.BinaryRowTypeSerializer;
 import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.BinaryRowSerializer;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -89,7 +89,7 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
                         (Class<Tuple3<Long, BinaryRow, Integer>>) (Class<?>) Tuple3.class,
                         new TypeSerializer[] {
                             LongSerializer.INSTANCE,
-                            new BinaryRowSerializer(
+                            new BinaryRowTypeSerializer(
                                     table.schema().logicalPartitionType().getFieldCount()),
                             IntSerializer.INSTANCE
                         });

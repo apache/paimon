@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.RowDataSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowKind;
@@ -192,7 +192,8 @@ public class KeyValue {
     }
 
     @VisibleForTesting
-    public KeyValue copy(RowDataSerializer keySerializer, RowDataSerializer valueSerializer) {
+    public KeyValue copy(
+            InternalRowSerializer keySerializer, InternalRowSerializer valueSerializer) {
         return new KeyValue()
                 .replace(
                         keySerializer.copy(key),

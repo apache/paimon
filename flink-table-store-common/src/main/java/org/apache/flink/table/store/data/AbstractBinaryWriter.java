@@ -17,13 +17,12 @@
 
 package org.apache.flink.table.store.data;
 
-import org.apache.flink.annotation.Internal;
-import org.apache.flink.core.memory.DataOutputViewStreamWrapper;
+import org.apache.flink.table.store.data.serializer.InternalArraySerializer;
+import org.apache.flink.table.store.data.serializer.InternalMapSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentUtils;
 
-import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
@@ -38,14 +37,11 @@ import static org.apache.flink.table.store.data.BinarySection.MAX_FIX_PART_DATA_
  *
  * <p>If want to reuse this writer, please invoke {@link #reset()} first.
  */
-@Internal
 abstract class AbstractBinaryWriter implements BinaryWriter {
 
     protected MemorySegment segment;
 
     protected int cursor;
-
-    protected DataOutputViewStreamWrapper outputView;
 
     /** Set offset and size to fix len part. */
     protected abstract void setOffsetAndSize(int pos, int offset, long size);
@@ -61,19 +57,18 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
     /** See {@link MemorySegmentUtils#readBinaryString(MemorySegment[], int, int, long)}. */
     @Override
     public void writeString(int pos, BinaryString input) {
-        BinaryString string = input;
-        if (string.getSegments() == null) {
-            String javaObject = string.toString();
+        if (input.getSegments() == null) {
+            String javaObject = input.toString();
             writeBytes(pos, javaObject.getBytes(StandardCharsets.UTF_8));
         } else {
-            int len = string.getSizeInBytes();
+            int len = input.getSizeInBytes();
             if (len <= 7) {
                 byte[] bytes = MemorySegmentUtils.allocateReuseBytes(len);
                 MemorySegmentUtils.copyToBytes(
-                        string.getSegments(), string.getOffset(), bytes, 0, len);
+                        input.getSegments(), input.getOffset(), bytes, 0, len);
                 writeBytesToFixLenPart(segment, getFieldOffset(pos), bytes, len);
             } else {
-                writeSegmentsToVarLenPart(pos, string.getSegments(), string.getOffset(), len);
+                writeSegmentsToVarLenPart(pos, input.getSegments(), input.getOffset(), len);
             }
         }
     }
@@ -88,21 +83,21 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
     }
 
     @Override
-    public void writeArray(int pos, InternalArray input, ArrayDataSerializer serializer) {
+    public void writeArray(int pos, InternalArray input, InternalArraySerializer serializer) {
         BinaryArray binary = serializer.toBinaryArray(input);
         writeSegmentsToVarLenPart(
                 pos, binary.getSegments(), binary.getOffset(), binary.getSizeInBytes());
     }
 
     @Override
-    public void writeMap(int pos, InternalMap input, MapDataSerializer serializer) {
+    public void writeMap(int pos, InternalMap input, InternalMapSerializer serializer) {
         BinaryMap binary = serializer.toBinaryMap(input);
         writeSegmentsToVarLenPart(
                 pos, binary.getSegments(), binary.getOffset(), binary.getSizeInBytes());
     }
 
     @Override
-    public void writeRow(int pos, InternalRow input, RowDataSerializer serializer) {
+    public void writeRow(int pos, InternalRow input, InternalRowSerializer serializer) {
         if (input instanceof BinarySection) {
             BinarySection row = (BinarySection) input;
             writeSegmentsToVarLenPart(
@@ -229,7 +224,7 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
         for (MemorySegment sourceSegment : segments) {
             int remain = sourceSegment.size() - fromOffset;
             if (remain > 0) {
-                int copySize = remain > needCopy ? needCopy : remain;
+                int copySize = Math.min(remain, needCopy);
                 sourceSegment.copyTo(fromOffset, segment, toOffset, copySize);
                 needCopy -= copySize;
                 toOffset += copySize;
@@ -296,45 +291,7 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
         segment.putLong(fieldOffset, offsetAndSize);
     }
 
-    @Internal
     public MemorySegment getSegments() {
         return segment;
-    }
-
-    /** OutputView for write Generic. */
-    private class BinaryRowWriterOutputView extends OutputStream {
-
-        /**
-         * Writes the specified byte to this output stream. The general contract for <code>write
-         * </code> is that one byte is written to the output stream. The byte to be written is the
-         * eight low-order bits of the argument <code>b</code>. The 24 high-order bits of <code>b
-         * </code> are ignored.
-         */
-        @Override
-        public void write(int b) throws IOException {
-            ensureCapacity(1);
-            segment.put(cursor, (byte) b);
-            cursor += 1;
-        }
-
-        @Override
-        public void write(byte[] b) throws IOException {
-            ensureCapacity(b.length);
-            segment.put(cursor, b, 0, b.length);
-            cursor += b.length;
-        }
-
-        @Override
-        public void write(byte[] b, int off, int len) throws IOException {
-            ensureCapacity(len);
-            segment.put(cursor, b, off, len);
-            cursor += len;
-        }
-
-        public void write(MemorySegment seg, int off, int len) throws IOException {
-            ensureCapacity(len);
-            seg.copyTo(off, segment, cursor, len);
-            cursor += len;
-        }
     }
 }

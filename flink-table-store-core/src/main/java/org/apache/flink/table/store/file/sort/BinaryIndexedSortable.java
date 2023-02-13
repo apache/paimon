@@ -22,9 +22,9 @@ import org.apache.flink.table.store.codegen.NormalizedKeyComputer;
 import org.apache.flink.table.store.codegen.RecordComparator;
 import org.apache.flink.table.store.data.AbstractPagedOutputView;
 import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.BinaryRowSerializer;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.RandomAccessInputView;
+import org.apache.flink.table.store.data.serializer.BinaryRowSerializer;
 import org.apache.flink.table.store.file.memory.MemorySegmentPool;
 import org.apache.flink.table.store.memory.MemorySegment;
 
@@ -101,8 +101,8 @@ public abstract class BinaryIndexedSortable implements IndexedSortable {
         this.indexEntriesPerSegment = segmentSize / this.indexEntrySize;
         this.lastIndexEntryOffset = (this.indexEntriesPerSegment - 1) * this.indexEntrySize;
 
-        this.serializer1 = (BinaryRowSerializer) serializer.duplicate();
-        this.serializer2 = (BinaryRowSerializer) serializer.duplicate();
+        this.serializer1 = serializer.duplicate();
+        this.serializer2 = serializer.duplicate();
         this.row1 = this.serializer1.createInstance();
         this.row2 = this.serializer2.createInstance();
 

@@ -17,6 +17,9 @@
 
 package org.apache.flink.table.store.data;
 
+import org.apache.flink.table.store.data.serializer.InternalArraySerializer;
+import org.apache.flink.table.store.data.serializer.InternalMapSerializer;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowKind;
@@ -101,10 +104,10 @@ public class RowDataTest {
         writer.writeString(9, str);
         writer.writeDecimal(10, decimal1, 5);
         writer.writeDecimal(11, decimal2, 20);
-        writer.writeArray(12, array, new ArrayDataSerializer(DataTypes.INT()));
-        writer.writeMap(13, map, new MapDataSerializer(DataTypes.INT(), DataTypes.INT()));
+        writer.writeArray(12, array, new InternalArraySerializer(DataTypes.INT()));
+        writer.writeMap(13, map, new InternalMapSerializer(DataTypes.INT(), DataTypes.INT()));
         writer.writeRow(
-                14, underRow, new RowDataSerializer(RowType.of(new IntType(), new IntType())));
+                14, underRow, new InternalRowSerializer(RowType.of(new IntType(), new IntType())));
         writer.writeBinary(15, bytes);
         writer.writeTimestamp(16, timestamp1, 3);
         writer.writeTimestamp(17, timestamp2, 9);
