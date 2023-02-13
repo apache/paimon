@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 

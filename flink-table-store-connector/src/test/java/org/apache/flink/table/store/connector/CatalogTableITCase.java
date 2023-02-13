@@ -26,8 +26,9 @@ import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.types.Row;
 
 import org.apache.commons.lang3.StringUtils;
-import org.jetbrains.annotations.NotNull;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+
+import javax.annotation.Nonnull;
 
 import java.util.Arrays;
 import java.util.List;
@@ -273,7 +274,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                                 : "[5],[10]")));
     }
 
-    @NotNull
+    @Nonnull
     private List<String> getRowStringList(List<Row> rows) {
         return rows.stream()
                 .map(

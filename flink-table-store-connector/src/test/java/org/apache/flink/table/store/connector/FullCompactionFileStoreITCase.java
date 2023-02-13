@@ -22,8 +22,8 @@ import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 
@@ -34,7 +34,7 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
     private final String table = "T";
 
     @Override
-    @Before
+    @BeforeEach
     public void before() throws IOException {
         super.before();
         String options =
