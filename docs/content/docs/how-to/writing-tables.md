@@ -96,6 +96,9 @@ Use `INSERT INTO` to apply records and changes to tables.
 INSERT INTO MyTable SELECT ...
 ```
 
+Table Store supports shuffle data by bucket in sink phase. To improve data skew, Table Store also
+supports shuffling data by partition fields. You can add option `sink.partition-shuffle` to the table.
+
 {{< /tab >}}
 
 {{< tab "Spark3" >}}
@@ -226,10 +229,3 @@ For more information of drop-partition, see
 {{< /tab >}}
 
 {{< /tabs >}}
-
-## Sink Data Shuffle
-
-Table Store supports shuffle data by bucket in sink phase. To improve data skew, Table Store also supports shuffling data by dynamic partition fields. You can add option `sink.partition-shuffle` to the table or enable it in job as followed.
-```
-INSERT TABLE mytable /*+ OPTIONS('sink.partition-shuffle'='true') */ SELECT ...;
-```
