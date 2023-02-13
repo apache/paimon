@@ -31,7 +31,7 @@ under the License.
 ## Download
 
 [Download](https://repo.maven.apache.org/maven2/org/apache/flink/flink-table-store-oss/{{< version >}}/flink-table-store-oss-{{< version >}}.jar)
-flink table store shaded jar for Spark, Hive and Trino.
+flink table store shaded jar.
 
 {{< /stable >}}
 
@@ -58,12 +58,16 @@ You can find the shaded jars under
 
 {{< tab "Flink" >}}
 
-[Prepare OSS jar](https://nightlies.apache.org/flink/flink-docs-master/docs/deployment/filesystems/oss/#shaded-hadoop-oss-file-system), then configure `flink-conf.yaml` like
+Put `flink-table-store-oss-{{< version >}}.jar` into `lib` directory of your Flink home, and create catalog:
 
-```yaml
-fs.oss.endpoint: oss-cn-hangzhou.aliyuncs.com
-fs.oss.accessKeyId: xxx
-fs.oss.accessKeySecret: yyy
+```sql
+CREATE CATALOG my_catalog WITH (
+    'type' = 'table-store',
+    'warehouse' = 'oss://path/to/warehouse',
+    'fs.oss.endpoint' = 'oss-cn-hangzhou.aliyuncs.com',
+    'fs.oss.accessKeyId' = 'xxx',
+    'fs.oss.accessKeySecret' = 'yyy'
+);
 ```
 
 {{< /tab >}}
