@@ -344,4 +344,27 @@ public class OrcFilters {
             return "OR(" + Arrays.toString(preds) + ")";
         }
     }
+
+    /** An AND predicate that can be evaluated by the OrcInputFormat. */
+    public static class And extends Predicate {
+        private final Predicate[] preds;
+
+        public And(Predicate... predicates) {
+            this.preds = predicates;
+        }
+
+        @Override
+        public SearchArgument.Builder add(SearchArgument.Builder builder) {
+            SearchArgument.Builder withAnd = builder.startAnd();
+            for (Predicate pred : preds) {
+                withAnd = pred.add(withAnd);
+            }
+            return withAnd.end();
+        }
+
+        @Override
+        public String toString() {
+            return "AND(" + Arrays.toString(preds) + ")";
+        }
+    }
 }

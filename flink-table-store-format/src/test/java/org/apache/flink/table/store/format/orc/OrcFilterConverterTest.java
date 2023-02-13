@@ -73,6 +73,25 @@ public class OrcFilterConverterTest {
                                 new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1),
                                 new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 2)),
                         new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 3)));
+
+        test(
+                builder.between(0, 1L, 3L),
+                new OrcFilters.And(
+                        new OrcFilters.Not(
+                                new OrcFilters.LessThan("long1", PredicateLeaf.Type.LONG, 1)),
+                        new OrcFilters.LessThanEquals("long1", PredicateLeaf.Type.LONG, 3)));
+
+        test(
+                builder.notIn(0, Arrays.asList(1L, 2L, 3L)),
+                new OrcFilters.And(
+                        new OrcFilters.And(
+                                new OrcFilters.Not(
+                                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1)),
+                                new OrcFilters.Not(
+                                        new OrcFilters.Equals(
+                                                "long1", PredicateLeaf.Type.LONG, 2))),
+                        new OrcFilters.Not(
+                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 3))));
     }
 
     private void test(Predicate predicate, OrcFilters.Predicate orcPredicate) {
