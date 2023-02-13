@@ -19,13 +19,8 @@
 package org.apache.flink.table.store.connector.action;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.connector.FlinkUtils;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.Options;
-import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.FileStoreTableFactory;
+import org.apache.flink.table.store.table.SupportsWrite;
 import org.apache.flink.table.store.table.sink.TableCommit;
 
 import org.slf4j.Logger;
@@ -41,23 +36,19 @@ import static org.apache.flink.table.store.connector.action.Action.getPartitions
 import static org.apache.flink.table.store.connector.action.Action.getTablePath;
 
 /** Table drop partition action for Flink. */
-public class DropPartitionAction implements Action {
+public class DropPartitionAction extends AbstractActionBase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(CompactAction.class);
+    private static final Logger LOG = LoggerFactory.getLogger(DropPartitionAction.class);
 
     private final TableCommit commit;
 
     DropPartitionAction(Path tablePath, List<Map<String, String>> partitions) {
-        Options tableOptions = new Options();
-        tableOptions.set(CoreOptions.PATH, tablePath.toString());
-        FileStoreTable table =
-                FileStoreTableFactory.create(
-                        FlinkUtils.catalogOptions(
-                                tableOptions.toMap(),
-                                StreamExecutionEnvironment.getExecutionEnvironment()
-                                        .getConfiguration()));
+        super(tablePath);
+
         this.commit =
-                table.newCommit(UUID.randomUUID().toString()).withOverwritePartitions(partitions);
+                ((SupportsWrite) table)
+                        .newCommit(UUID.randomUUID().toString())
+                        .withOverwritePartitions(partitions);
     }
 
     public static Optional<Action> create(String[] args) {

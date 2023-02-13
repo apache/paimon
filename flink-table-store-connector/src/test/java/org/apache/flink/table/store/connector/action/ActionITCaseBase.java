@@ -61,7 +61,7 @@ public class ActionITCaseBase extends AbstractTestBase {
 
     @BeforeEach
     public void before() throws IOException {
-        tablePath = new Path(getTempDirPath());
+        tablePath = new Path(getTempDirPath(), "default.db/test_table_" + UUID.randomUUID());
         commitUser = UUID.randomUUID().toString();
         incrementalIdentifier = 0;
     }

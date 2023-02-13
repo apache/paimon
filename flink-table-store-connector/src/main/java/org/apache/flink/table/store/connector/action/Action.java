@@ -99,6 +99,7 @@ public interface Action {
         // supported actions
         private static final String COMPACT = "compact";
         private static final String DROP_PARTITION = "drop-partition";
+        private static final String DELETE = "delete";
 
         public static Optional<Action> create(String[] args) {
             String action = args[0].toLowerCase();
@@ -109,6 +110,8 @@ public interface Action {
                     return CompactAction.create(actionArgs);
                 case DROP_PARTITION:
                     return DropPartitionAction.create(actionArgs);
+                case DELETE:
+                    return DeleteAction.create(actionArgs);
                 default:
                     System.err.println("Unknown action \"" + action + "\"");
                     printHelp();

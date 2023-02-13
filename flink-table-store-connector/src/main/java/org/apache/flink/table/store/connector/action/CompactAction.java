@@ -26,14 +26,12 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.connector.FlinkUtils;
 import org.apache.flink.table.store.connector.sink.CompactorSinkBuilder;
 import org.apache.flink.table.store.connector.source.CompactorSourceBuilder;
 import org.apache.flink.table.store.connector.utils.StreamExecutionEnvironmentUtils;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.FileStoreTableFactory;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,7 +44,7 @@ import static org.apache.flink.table.store.connector.action.Action.getPartitions
 import static org.apache.flink.table.store.connector.action.Action.getTablePath;
 
 /** Table compact action for Flink. */
-public class CompactAction implements Action {
+public class CompactAction extends AbstractActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(CompactAction.class);
 
@@ -54,18 +52,10 @@ public class CompactAction implements Action {
     private final CompactorSinkBuilder sinkBuilder;
 
     CompactAction(Path tablePath) {
-        Options tableOptions = new Options();
-        tableOptions.set(CoreOptions.PATH, tablePath.toString());
-        tableOptions.set(CoreOptions.WRITE_ONLY, false);
-        FileStoreTable table =
-                FileStoreTableFactory.create(
-                        FlinkUtils.catalogOptions(
-                                tableOptions.toMap(),
-                                StreamExecutionEnvironment.getExecutionEnvironment()
-                                        .getConfiguration()));
+        super(tablePath, new Options().set(CoreOptions.WRITE_ONLY, false));
 
-        sourceBuilder = new CompactorSourceBuilder(tablePath.toString(), table);
-        sinkBuilder = new CompactorSinkBuilder(table);
+        sourceBuilder = new CompactorSourceBuilder(tablePath.toString(), (FileStoreTable) table);
+        sinkBuilder = new CompactorSinkBuilder((FileStoreTable) table);
     }
 
     // ------------------------------------------------------------------------
