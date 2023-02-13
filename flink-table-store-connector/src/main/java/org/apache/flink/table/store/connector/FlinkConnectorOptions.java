@@ -58,11 +58,11 @@ public class FlinkConnectorOptions {
     public static final ConfigOption<Integer> SINK_PARALLELISM = FactoryUtil.SINK_PARALLELISM;
 
     public static final ConfigOption<Boolean> SINK_SHUFFLE_BY_PARTITION =
-            ConfigOptions.key("sink.shuffle-by-partition.enable")
+            ConfigOptions.key("sink-store.shuffle-by-partition.enable")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "The option to enable shuffle data by dynamic partition fields in sink phase");
+                            "The option to enable shuffle data by dynamic partition fields in sink phase for table store.");
 
     public static final ConfigOption<Integer> SCAN_PARALLELISM =
             ConfigOptions.key("scan.parallelism")

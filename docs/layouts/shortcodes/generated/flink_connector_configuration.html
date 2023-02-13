@@ -21,6 +21,12 @@
             <td>Define a custom parallelism for the scan source. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration.</td>
         </tr>
         <tr>
+            <td><h5>sink-store.shuffle-by-partition.enable</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>The option to enable shuffle data by dynamic partition fields in sink phase for table store.</td>
+        </tr>
+        <tr>
             <td><h5>sink.parallelism</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
