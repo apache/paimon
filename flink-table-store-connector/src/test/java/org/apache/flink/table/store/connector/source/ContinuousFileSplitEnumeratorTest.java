@@ -105,6 +105,57 @@ public class ContinuousFileSplitEnumeratorTest {
         }
     }
 
+    @Test
+    public void testSplitAllocationIsFair() throws Exception {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingSplitEnumeratorContext<>(1);
+        context.registerReader(0, "test-host");
+
+        List<FileStoreSourceSplit> initialSplits = new ArrayList<>();
+        for (int i = 1; i <= 2; i++) {
+            initialSplits.add(createSnapshotSplit(i, 0, Collections.emptyList()));
+            initialSplits.add(createSnapshotSplit(i, 1, Collections.emptyList()));
+        }
+
+        List<FileStoreSourceSplit> expectedSplits = new ArrayList<>(initialSplits);
+
+        final ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(initialSplits)
+                        .setDiscoveryInterval(3)
+                        .build();
+
+        // each time a split is allocated from bucket-0 and bucket-1
+        enumerator.handleSplitRequest(0, "test-host");
+        Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
+                context.getSplitAssignments();
+        // Only subtask-0 is allocated.
+        Assertions.assertThat(assignments.size()).isEqualTo(1);
+        Assertions.assertThat(assignments.containsKey(0)).isTrue();
+        List<FileStoreSourceSplit> assignedSplits = assignments.get(0).getAssignedSplits();
+        Assertions.assertThat(assignedSplits.size()).isEqualTo(2);
+        for (int i = 0; i < 2; i++) {
+            Assertions.assertThat(assignedSplits.get(i)).isEqualTo(expectedSplits.get(i));
+        }
+
+        // clear assignments
+        context.getSplitAssignments().clear();
+        Assertions.assertThat(context.getSplitAssignments().size()).isEqualTo(0);
+
+        // continuing to allocate the rest splits
+        enumerator.handleSplitRequest(0, "test-host");
+        assignments = context.getSplitAssignments();
+        // Only subtask-0 is allocated.
+        Assertions.assertThat(assignments.size()).isEqualTo(1);
+        Assertions.assertThat(assignments.containsKey(0)).isTrue();
+        assignedSplits = assignments.get(0).getAssignedSplits();
+        Assertions.assertThat(assignedSplits.size()).isEqualTo(2);
+        for (int i = 0; i < 2; i++) {
+            Assertions.assertThat(assignedSplits.get(i)).isEqualTo(expectedSplits.get(i + 2));
+        }
+    }
+
     private static FileStoreSourceSplit createSnapshotSplit(
             int snapshotId, int bucket, List<DataFileMeta> files) {
         return new FileStoreSourceSplit(
