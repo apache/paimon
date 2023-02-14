@@ -481,17 +481,6 @@ public final class ExceptionUtils {
     }
 
     /**
-     * The same as {@link #findThrowable(Throwable, Predicate)}, but rethrows original exception if
-     * the expected exception was not found.
-     */
-    public static <T extends Throwable> void assertThrowable(
-            T throwable, Predicate<Throwable> predicate) throws T {
-        if (!findThrowable(throwable, predicate).isPresent()) {
-            throw (T) throwable;
-        }
-    }
-
-    /**
      * Checks whether a throwable chain contains a specific error message and returns the
      * corresponding throwable.
      *
