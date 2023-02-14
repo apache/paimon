@@ -38,15 +38,14 @@ under the License.
     <dependencies>
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-code-splitter</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
+            <artifactId>flink-shaded-jackson</artifactId>
+            <version>${flink.shaded.jackson.version}-${flink.shaded.version}</version>
         </dependency>
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-shaded-jackson</artifactId>
-            <version>${flink.shaded.jackson.version}-${flink.shaded.version}</version>
+            <artifactId>flink-shaded-guava</artifactId>
+            <version>${flink.shaded.guava.version}-${flink.shaded.version}</version>
         </dependency>
 
         <!-- Java compiler -->
@@ -196,12 +195,6 @@ under the License.
                     <artifactId>slf4j-reload4j</artifactId>
                 </exclusion>
             </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-common</artifactId>
-            <version>1.16.0</version>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 

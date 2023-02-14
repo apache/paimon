@@ -19,7 +19,6 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.api.common.accumulators.LongCounter;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
@@ -28,6 +27,7 @@ import org.apache.flink.table.store.format.FormatWriterFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.LongCounter;
 
 import javax.annotation.Nullable;
 
@@ -72,8 +72,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 fileIO.getFileSize(path),
                 recordCount(),
                 stats,
-                seqNumCounter.getLocalValue() - super.recordCount(),
-                seqNumCounter.getLocalValue() - 1,
+                seqNumCounter.getValue() - super.recordCount(),
+                seqNumCounter.getValue() - 1,
                 schemaId);
     }
 }

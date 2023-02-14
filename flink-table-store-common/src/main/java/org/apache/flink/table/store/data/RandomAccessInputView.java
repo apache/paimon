@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.data;
 
-import org.apache.flink.core.memory.SeekableDataInputView;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.utils.MathUtils;
 
@@ -26,7 +25,7 @@ import java.io.EOFException;
 import java.util.ArrayList;
 
 /** A {@link AbstractPagedInputView} to read pages in memory. */
-public class RandomAccessInputView extends AbstractPagedInputView implements SeekableDataInputView {
+public class RandomAccessInputView extends AbstractPagedInputView {
 
     private final ArrayList<MemorySegment> segments;
 
@@ -55,7 +54,6 @@ public class RandomAccessInputView extends AbstractPagedInputView implements See
         this.limitInLastSegment = limitInLastSegment;
     }
 
-    @Override
     public void setReadPosition(long position) {
         final int bufferNum = (int) (position >>> this.segmentSizeBits);
         final int offset = (int) (position & this.segmentSizeMask);

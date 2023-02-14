@@ -16,34 +16,34 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.datagen;
+package org.apache.flink.table.store.connector;
 
-import org.apache.flink.table.store.utils.SerializableFunction;
+import org.apache.flink.core.io.SimpleVersionedSerializer;
+import org.apache.flink.table.store.data.serializer.VersionedSerializer;
 
-/** Utility for mapping the output of a {@link DataGenerator}. */
-public class DataGeneratorMapper<A, B> implements DataGenerator<B> {
+import java.io.IOException;
 
-    private final DataGenerator<A> generator;
+/** Wrap a {@link VersionedSerializer} to {@link SimpleVersionedSerializer}. */
+public class VersionedSerializerWrapper<T> implements SimpleVersionedSerializer<T> {
 
-    private final SerializableFunction<A, B> mapper;
+    private final VersionedSerializer<T> serializer;
 
-    public DataGeneratorMapper(DataGenerator<A> generator, SerializableFunction<A, B> mapper) {
-        this.generator = generator;
-        this.mapper = mapper;
+    public VersionedSerializerWrapper(VersionedSerializer<T> serializer) {
+        this.serializer = serializer;
     }
 
     @Override
-    public void open() {
-        generator.open();
+    public int getVersion() {
+        return serializer.getVersion();
     }
 
     @Override
-    public boolean hasNext() {
-        return generator.hasNext();
+    public byte[] serialize(T obj) throws IOException {
+        return serializer.serialize(obj);
     }
 
     @Override
-    public B next() {
-        return mapper.apply(generator.next());
+    public T deserialize(int version, byte[] serialized) throws IOException {
+        return serializer.deserialize(version, serialized);
     }
 }

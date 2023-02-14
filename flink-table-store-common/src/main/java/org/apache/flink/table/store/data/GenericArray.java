@@ -19,8 +19,7 @@
 package org.apache.flink.table.store.data;
 
 import org.apache.flink.table.store.types.ArrayType;
-
-import org.apache.commons.lang3.ArrayUtils;
+import org.apache.flink.table.store.utils.ArrayUtils;
 
 import java.util.Arrays;
 import java.util.Objects;

@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.api.common.time.Time;
-
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
@@ -231,16 +229,6 @@ public class TimeUtils {
         private static String createTimeUnitString(TimeUnit timeUnit) {
             return timeUnit.name() + ": (" + String.join(" | ", timeUnit.getLabels()) + ")";
         }
-    }
-
-    /**
-     * Translates {@link Time} to {@link Duration}.
-     *
-     * @param time time to transform into duration
-     * @return duration equal to the given time
-     */
-    public static Duration toDuration(Time time) {
-        return Duration.of(time.getSize(), toChronoUnit(time.getUnit()));
     }
 
     private static ChronoUnit toChronoUnit(java.util.concurrent.TimeUnit timeUnit) {

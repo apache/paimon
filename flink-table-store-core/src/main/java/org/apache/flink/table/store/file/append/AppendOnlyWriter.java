@@ -19,7 +19,6 @@
 
 package org.apache.flink.table.store.file.append;
 
-import org.apache.flink.api.common.accumulators.LongCounter;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.io.CompactIncrement;
@@ -32,6 +31,7 @@ import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.LongCounter;
 import org.apache.flink.table.store.utils.Preconditions;
 
 import java.util.ArrayList;
@@ -122,7 +122,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
             flushedFiles.addAll(writer.result());
 
             // Reopen the writer to accept further records.
-            seqNumCounter.resetLocal();
+            seqNumCounter.reset();
             seqNumCounter.add(getMaxSequenceNumber(flushedFiles) + 1);
             writer = createRollingRowWriter();
         }

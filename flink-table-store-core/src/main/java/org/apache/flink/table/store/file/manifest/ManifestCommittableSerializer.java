@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.core.io.SimpleVersionedSerializer;
+import org.apache.flink.table.store.data.serializer.VersionedSerializer;
 import org.apache.flink.table.store.io.DataInputDeserializer;
 import org.apache.flink.table.store.io.DataOutputViewStreamWrapper;
 import org.apache.flink.table.store.table.sink.FileCommittable;
@@ -30,9 +30,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** {@link SimpleVersionedSerializer} for {@link ManifestCommittable}. */
-public class ManifestCommittableSerializer
-        implements SimpleVersionedSerializer<ManifestCommittable> {
+/** {@link VersionedSerializer} for {@link ManifestCommittable}. */
+public class ManifestCommittableSerializer implements VersionedSerializer<ManifestCommittable> {
 
     private static final int CURRENT_VERSION = 2;
 

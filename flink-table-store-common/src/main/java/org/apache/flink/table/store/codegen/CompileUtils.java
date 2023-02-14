@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.codegen;
 
-import org.apache.flink.api.common.InvalidProgramException;
-
 import org.apache.flink.shaded.guava30.com.google.common.cache.Cache;
 import org.apache.flink.shaded.guava30.com.google.common.cache.CacheBuilder;
 
@@ -85,7 +83,7 @@ public final class CompileUtils {
             compiler.cook(code);
         } catch (Throwable t) {
             System.out.println(addLineNumber(code));
-            throw new InvalidProgramException(
+            throw new RuntimeException(
                     "Table program cannot be compiled. This is a bug. Please file an issue.", t);
         }
         try {

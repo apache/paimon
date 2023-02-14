@@ -18,8 +18,7 @@
 
 package org.apache.flink.table.store.format.orc;
 
-import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.api.common.serialization.BulkWriter;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
@@ -110,8 +109,8 @@ public class OrcFileFormat extends FileFormat {
      * <p>TODO: The {@link ThreadLocalClassLoaderConfiguration} in {@link OrcWriterFactory} should
      * be removed after https://issues.apache.org/jira/browse/ORC-653 is fixed.
      *
-     * @param type The data type for the {@link BulkWriter}
-     * @return The factory of the {@link BulkWriter}
+     * @param type The data type for the writer
+     * @return The factory of the writer
      */
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {

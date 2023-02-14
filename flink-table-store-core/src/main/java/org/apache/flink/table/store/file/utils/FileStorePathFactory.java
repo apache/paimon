@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.fs.Path;

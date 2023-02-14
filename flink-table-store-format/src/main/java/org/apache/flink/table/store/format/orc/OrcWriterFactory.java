@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.format.orc;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.format.FormatWriter;
@@ -42,7 +41,7 @@ import java.util.UUID;
 import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 
 /**
- * A factory that creates an ORC {@link BulkWriter}. The factory takes a user supplied {@link
+ * A factory that creates an ORC {@link FormatWriter}. The factory takes a user supplied {@link
  * Vectorizer} implementation to convert the element into an {@link
  * org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch}.
  */

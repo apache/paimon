@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
@@ -104,10 +103,7 @@ public class ManifestList {
         fileIO.deleteQuietly(pathFactory.toManifestListPath(fileName));
     }
 
-    /**
-     * Creator of {@link ManifestList}. It reueses {@link FormatReaderFactory} and {@link
-     * BulkWriter.Factory} from {@link FileFormat}.
-     */
+    /** Creator of {@link ManifestList}. */
     public static class Factory {
 
         private final FileIO fileIO;

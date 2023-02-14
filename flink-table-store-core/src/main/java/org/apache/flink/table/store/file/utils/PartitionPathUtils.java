@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.core.fs.Path;
+import org.apache.flink.table.store.fs.Path;
 
 import java.util.BitSet;
 import java.util.LinkedHashMap;

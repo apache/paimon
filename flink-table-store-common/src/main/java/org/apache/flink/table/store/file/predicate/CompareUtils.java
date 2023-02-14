@@ -18,23 +18,31 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArrayComparator;
 import org.apache.flink.table.store.types.DataType;
+
+import static java.lang.Math.min;
 
 /** Utils for comparator. */
 public class CompareUtils {
     private CompareUtils() {}
 
-    private static final BytePrimitiveArrayComparator BINARY_COMPARATOR =
-            new BytePrimitiveArrayComparator(true);
-
     public static int compareLiteral(DataType type, Object v1, Object v2) {
         if (v1 instanceof Comparable) {
             return ((Comparable<Object>) v1).compareTo(v2);
         } else if (v1 instanceof byte[]) {
-            return BINARY_COMPARATOR.compare((byte[]) v1, (byte[]) v2);
+            return compare((byte[]) v1, (byte[]) v2);
         } else {
             throw new RuntimeException("Unsupported type: " + type);
         }
+    }
+
+    private static int compare(byte[] first, byte[] second) {
+        for (int x = 0; x < min(first.length, second.length); x++) {
+            int cmp = first[x] - second[x];
+            if (cmp != 0) {
+                return cmp;
+            }
+        }
+        return first.length - second.length;
     }
 }

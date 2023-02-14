@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.format.parquet.writer;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.format.FormatWriter;
 
@@ -28,7 +27,7 @@ import java.io.IOException;
 
 import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 
-/** A simple {@link BulkWriter} implementation that wraps a {@link ParquetWriter}. */
+/** A simple {@link FormatWriter} implementation that wraps a {@link ParquetWriter}. */
 public class ParquetBulkWriter implements FormatWriter {
 
     /** The ParquetWriter to write to. */

@@ -75,6 +75,7 @@ under the License.
         <flink.connector.version>1.15</flink.connector.version>
         <flink.shaded.version>15.0</flink.shaded.version>
         <flink.shaded.jackson.version>2.12.4</flink.shaded.jackson.version>
+        <flink.shaded.guava.version>30.1.1-jre</flink.shaded.guava.version>
         <hadoop.version>2.8.5</hadoop.version>
         <scala.version>2.12.7</scala.version>
         <scala.binary.version>2.12</scala.binary.version>
