@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.annotation.Public;
-
 /**
  * This interface is basically Java's {@link java.util.function.Consumer} interface enhanced with
  * the ability to throw an exception.
@@ -27,7 +25,6 @@ import org.apache.flink.annotation.Public;
  * @param <T> type of the consumed elements.
  * @param <E> type of the exception thrown.
  */
-@Public
 @FunctionalInterface
 public interface ThrowingConsumer<T, E extends Throwable> {
 

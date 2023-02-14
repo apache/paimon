@@ -17,13 +17,11 @@
 
 package org.apache.flink.table.store.data;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentUtils;
 import org.apache.flink.table.store.types.RowKind;
 
 /** Writer for {@link BinaryRow}. */
-@Internal
 public final class BinaryRowWriter extends AbstractBinaryWriter {
 
     private final int nullBitsSizeInBytes;

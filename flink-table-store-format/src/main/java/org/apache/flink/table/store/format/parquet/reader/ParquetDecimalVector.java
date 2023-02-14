@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.format.parquet.reader;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.columnar.BytesColumnVector;
 import org.apache.flink.table.store.data.columnar.ColumnVector;
@@ -33,7 +32,6 @@ import org.apache.parquet.Preconditions;
  * Parquet write decimal as int32 and int64 and binary, this class wrap the real vector to provide
  * {@link DecimalColumnVector} interface.
  */
-@Internal
 public class ParquetDecimalVector implements DecimalColumnVector {
 
     private final ColumnVector vector;

@@ -18,15 +18,12 @@
 
 package org.apache.flink.table.store.datagen;
 
-import org.apache.flink.annotation.Experimental;
-
 import org.apache.commons.math3.random.RandomDataGenerator;
 
 import java.util.HashMap;
 import java.util.Map;
 
 /** Random generator. */
-@Experimental
 public abstract class RandomGenerator<T> implements DataGenerator<T> {
 
     protected transient RandomDataGenerator random;

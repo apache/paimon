@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.benchmark.utils;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.IllegalConfigurationException;
 
@@ -37,7 +36,6 @@ import java.util.Map;
  * Global configuration object for benchmark. Similar to Java properties configuration objects it
  * includes key-value pairs which represent the framework's configuration.
  */
-@Internal
 public final class BenchmarkGlobalConfiguration {
 
     private static final Logger LOG =

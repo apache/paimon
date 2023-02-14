@@ -18,10 +18,7 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-
 /** Byte column vector. */
-@Internal
 public interface ByteColumnVector extends ColumnVector {
     byte getByte(int i);
 }

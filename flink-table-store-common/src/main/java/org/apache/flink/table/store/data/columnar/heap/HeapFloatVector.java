@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.data.columnar.heap;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.columnar.writable.WritableFloatVector;
 
 import java.nio.ByteBuffer;
@@ -29,7 +28,6 @@ import java.util.Arrays;
  * This class represents a nullable double precision floating point column vector. This class will
  * be used for operations on all floating point float types.
  */
-@Internal
 public class HeapFloatVector extends AbstractHeapVector implements WritableFloatVector {
 
     private static final long serialVersionUID = 8928878923550041110L;

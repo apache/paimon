@@ -18,13 +18,11 @@
 
 package org.apache.flink.table.store.data.columnar.heap;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.columnar.writable.WritableBooleanVector;
 
 import java.util.Arrays;
 
 /** This class represents a nullable heap boolean column vector. */
-@Internal
 public class HeapBooleanVector extends AbstractHeapVector implements WritableBooleanVector {
 
     private static final long serialVersionUID = 4131239076731313596L;

@@ -18,10 +18,7 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-
 /** Short column vector. */
-@Internal
 public interface ShortColumnVector extends ColumnVector {
     short getShort(int i);
 }

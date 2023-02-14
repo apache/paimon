@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;

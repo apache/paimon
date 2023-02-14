@@ -18,14 +18,11 @@
 
 package org.apache.flink.table.store.io;
 
-import org.apache.flink.annotation.PublicEvolving;
-
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 
 /** Utility class that turns an {@link OutputStream} into a {@link DataOutputView}. */
-@PublicEvolving
 public class DataOutputViewStreamWrapper extends DataOutputStream implements DataOutputView {
 
     private byte[] tempBuffer;

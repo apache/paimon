@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.types;
 
-import org.apache.flink.annotation.PublicEvolving;
-
 /**
  * Data type of a date consisting of {@code year-month-day} with values ranging from {@code
  * 0000-01-01} to {@code 9999-12-31}. Compared to the SQL standard, the range starts at year {@code
@@ -27,7 +25,6 @@ import org.apache.flink.annotation.PublicEvolving;
  *
  * <p>A conversion from and to {@code int} describes the number of days since epoch.
  */
-@PublicEvolving
 public final class DateType extends DataType {
 
     private static final long serialVersionUID = 1L;

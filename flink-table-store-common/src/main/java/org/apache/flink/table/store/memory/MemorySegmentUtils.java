@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.memory;
 
-import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.data.BinaryArray;
 import org.apache.flink.table.store.data.BinaryMap;
 import org.apache.flink.table.store.data.BinaryString;

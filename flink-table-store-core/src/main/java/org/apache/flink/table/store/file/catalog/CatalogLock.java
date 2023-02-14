@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.annotation.Internal;
-
 import java.io.Closeable;
 import java.io.Serializable;
 import java.util.concurrent.Callable;
@@ -27,7 +25,6 @@ import java.util.concurrent.Callable;
 /**
  * An interface that allows source and sink to use global lock to some transaction-related things.
  */
-@Internal
 public interface CatalogLock extends Closeable {
 
     /** Run with catalog lock. The caller should tell catalog the database and table name. */

@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.annotation.Internal;
-
 import javax.annotation.Nullable;
 
 import java.util.concurrent.CompletableFuture;
@@ -31,7 +29,6 @@ import java.util.concurrent.ExecutionException;
  * <p>This class is modelled after Google Guava's Preconditions class, and partly takes code from
  * that class. We add this code to the Flink code base in order to reduce external dependencies.
  */
-@Internal
 public final class Preconditions {
 
     // ------------------------------------------------------------------------

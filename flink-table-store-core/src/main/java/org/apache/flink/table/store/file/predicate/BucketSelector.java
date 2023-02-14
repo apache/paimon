@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.serializer.InternalRowSerializer;

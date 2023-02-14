@@ -18,11 +18,9 @@
 
 package org.apache.flink.table.store.data.columnar.writable;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.columnar.DoubleColumnVector;
 
 /** Writable {@link DoubleColumnVector}. */
-@Internal
 public interface WritableDoubleVector extends WritableColumnVector, DoubleColumnVector {
 
     /** Set double at rowId with the provided value. */

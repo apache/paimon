@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.mergetree;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.compact.CompactManager;
