@@ -30,22 +30,22 @@ import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.delegation.Parser;
 import org.apache.flink.table.operations.Operation;
 import org.apache.flink.table.operations.ddl.CreateCatalogOperation;
+import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 
-import org.junit.Before;
+import org.junit.jupiter.api.BeforeEach;
 
 import javax.annotation.Nullable;
 
+import java.io.File;
 import java.io.IOException;
-import java.net.URI;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
@@ -59,16 +59,15 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
     protected TableEnvironment sEnv;
     protected String path;
 
-    @Before
+    @BeforeEach
     public void before() throws IOException {
         tEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
         String catalog = "TABLE_STORE";
-        URI uri = TEMPORARY_FOLDER.newFolder().toURI();
-        path = uri.toString();
+        path = getTempDirPath();
         tEnv.executeSql(
                 String.format(
                         "CREATE CATALOG %s WITH (" + "'type'='table-store', 'warehouse'='%s')",
-                        catalog, uri));
+                        catalog, path));
         tEnv.useCatalog(catalog);
 
         sEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inStreamingMode().build());
@@ -134,7 +133,9 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
     }
 
     protected Path getTableDirectory(String tableName) {
-        return new Path(path + String.format("%s.db/%s", tEnv.getCurrentDatabase(), tableName));
+        return new Path(
+                new File(path, String.format("%s.db/%s", tEnv.getCurrentDatabase(), tableName))
+                        .toString());
     }
 
     @Nullable

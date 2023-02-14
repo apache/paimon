@@ -22,8 +22,8 @@ import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.kafka.KafkaTableTestBase;
 import org.apache.flink.types.Row;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -55,7 +55,7 @@ import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil
  */
 public class CompositePkAndMultiPartitionedTableWIthKafkaLogITCase extends KafkaTableTestBase {
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         init(createAndRegisterTempFile("").toString());
     }

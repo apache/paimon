@@ -23,8 +23,8 @@ import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.kafka.KafkaTableTestBase;
 import org.apache.flink.types.Row;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.List;
@@ -34,13 +34,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** ITCase for table with log system. */
 public class LogSystemITCase extends KafkaTableTestBase {
 
-    @Before
+    @BeforeEach
     public void before() throws IOException {
         tEnv.executeSql(
                 String.format(
                         "CREATE CATALOG TABLE_STORE WITH ("
                                 + "'type'='table-store', 'warehouse'='%s')",
-                        TEMPORARY_FOLDER.newFolder().toURI()));
+                        getTempDirPath()));
         tEnv.useCatalog("TABLE_STORE");
     }
 

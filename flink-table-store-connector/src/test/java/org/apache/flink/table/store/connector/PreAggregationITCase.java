@@ -20,7 +20,7 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.types.Row;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;

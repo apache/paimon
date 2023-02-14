@@ -22,7 +22,7 @@ import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
-import org.apache.flink.test.util.AbstractTestBase;
+import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.util.DockerImageVersions;
 
 import org.apache.kafka.clients.admin.AdminClient;
@@ -35,9 +35,12 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.TopicExistsException;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.ClassRule;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.extension.AfterAllCallback;
+import org.junit.jupiter.api.extension.BeforeAllCallback;
+import org.junit.jupiter.api.extension.ExtensionContext;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.KafkaContainer;
@@ -66,24 +69,26 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
     private static final Network NETWORK = Network.newNetwork();
     private static final int zkTimeoutMills = 30000;
 
-    @ClassRule
-    public static final KafkaContainer KAFKA_CONTAINER =
-            new KafkaContainer(DockerImageName.parse(DockerImageVersions.KAFKA)) {
-                @Override
-                protected void doStart() {
-                    super.doStart();
-                    if (LOG.isInfoEnabled()) {
-                        this.followOutput(new Slf4jLogConsumer(LOG));
-                    }
-                }
-            }.withEmbeddedZookeeper()
-                    .withNetwork(NETWORK)
-                    .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS)
-                    .withEnv(
-                            "KAFKA_TRANSACTION_MAX_TIMEOUT_MS",
-                            String.valueOf(Duration.ofHours(2).toMillis()))
-                    // Disable log deletion to prevent records from being deleted during test run
-                    .withEnv("KAFKA_LOG_RETENTION_MS", "-1");
+    @RegisterExtension
+    public static final KafkaContainerExtension KAFKA_CONTAINER =
+            (KafkaContainerExtension)
+                    new KafkaContainerExtension(DockerImageName.parse(DockerImageVersions.KAFKA)) {
+                        @Override
+                        protected void doStart() {
+                            super.doStart();
+                            if (LOG.isInfoEnabled()) {
+                                this.followOutput(new Slf4jLogConsumer(LOG));
+                            }
+                        }
+                    }.withEmbeddedZookeeper()
+                            .withNetwork(NETWORK)
+                            .withNetworkAliases(INTER_CONTAINER_KAFKA_ALIAS)
+                            .withEnv(
+                                    "KAFKA_TRANSACTION_MAX_TIMEOUT_MS",
+                                    String.valueOf(Duration.ofHours(2).toMillis()))
+                            // Disable log deletion to prevent records from being deleted during
+                            // test run
+                            .withEnv("KAFKA_LOG_RETENTION_MS", "-1");
 
     protected StreamExecutionEnvironment env;
     protected StreamTableEnvironment tEnv;
@@ -91,7 +96,7 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
     // Timer for scheduling logging task if the test hangs
     private final Timer loggingTimer = new Timer("Debug Logging Timer");
 
-    @Before
+    @BeforeEach
     public void setup() {
         env = StreamExecutionEnvironment.getExecutionEnvironment();
         tEnv = StreamTableEnvironment.create(env);
@@ -114,7 +119,7 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
                 });
     }
 
-    @After
+    @AfterEach
     public void after() throws ExecutionException, InterruptedException {
         // Cancel timer for debug logging
         cancelTimeoutLogger();
@@ -245,5 +250,23 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
                                 partition,
                                 beginningOffsets.get(partition),
                                 endOffsets.get(partition)));
+    }
+
+    /** Kafka container extension for junit5. */
+    private static class KafkaContainerExtension extends KafkaContainer
+            implements BeforeAllCallback, AfterAllCallback {
+        private KafkaContainerExtension(DockerImageName dockerImageName) {
+            super(dockerImageName);
+        }
+
+        @Override
+        public void beforeAll(ExtensionContext extensionContext) throws Exception {
+            this.doStart();
+        }
+
+        @Override
+        public void afterAll(ExtensionContext extensionContext) throws Exception {
+            this.close();
+        }
     }
 }

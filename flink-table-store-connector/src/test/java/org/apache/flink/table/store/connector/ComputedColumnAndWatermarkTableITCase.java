@@ -21,8 +21,8 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.table.store.kafka.KafkaTableTestBase;
 import org.apache.flink.types.Row;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.util.Arrays;
@@ -47,7 +47,7 @@ import static org.apache.flink.table.store.connector.util.ReadWriteTableTestUtil
 /** Table store IT case when the table has computed column and watermark spec. */
 public class ComputedColumnAndWatermarkTableITCase extends KafkaTableTestBase {
 
-    @Before
+    @BeforeEach
     public void setUp() throws Exception {
         init(createAndRegisterTempFile("").toString());
     }

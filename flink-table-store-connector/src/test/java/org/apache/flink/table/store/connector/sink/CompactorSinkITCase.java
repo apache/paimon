@@ -23,6 +23,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.connector.source.CompactorSourceBuilder;
+import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.Snapshot;
@@ -41,11 +42,9 @@ import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.test.util.AbstractTestBase;
 
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -54,6 +53,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** IT cases for {@link CompactorSinkBuilder} and {@link CompactorSink}. */
 public class CompactorSinkITCase extends AbstractTestBase {
@@ -68,9 +69,9 @@ public class CompactorSinkITCase extends AbstractTestBase {
     private Path tablePath;
     private String commitUser;
 
-    @Before
+    @BeforeEach
     public void before() throws IOException {
-        tablePath = new Path(TEMPORARY_FOLDER.newFolder().toString());
+        tablePath = new Path(getTempDirPath());
         commitUser = UUID.randomUUID().toString();
     }
 
@@ -92,8 +93,8 @@ public class CompactorSinkITCase extends AbstractTestBase {
         commit.commit(1, write.prepareCommit(true, 1));
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
-        Assert.assertEquals(2, snapshot.id());
-        Assert.assertEquals(Snapshot.CommitKind.APPEND, snapshot.commitKind());
+        assertEquals(2, snapshot.id());
+        assertEquals(Snapshot.CommitKind.APPEND, snapshot.commitKind());
 
         write.close();
         commit.close();
@@ -112,18 +113,18 @@ public class CompactorSinkITCase extends AbstractTestBase {
         env.execute();
 
         snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
-        Assert.assertEquals(3, snapshot.id());
-        Assert.assertEquals(Snapshot.CommitKind.COMPACT, snapshot.commitKind());
+        assertEquals(3, snapshot.id());
+        assertEquals(Snapshot.CommitKind.COMPACT, snapshot.commitKind());
 
         DataTableScan.DataFilePlan plan = table.newScan().plan();
-        Assert.assertEquals(3, plan.splits().size());
+        assertEquals(3, plan.splits().size());
         for (DataSplit split : plan.splits) {
             if (split.partition().getInt(1) == 15) {
                 // compacted
-                Assert.assertEquals(1, split.files().size());
+                assertEquals(1, split.files().size());
             } else {
                 // not compacted
-                Assert.assertEquals(2, split.files().size());
+                assertEquals(2, split.files().size());
             }
         }
     }

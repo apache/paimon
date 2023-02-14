@@ -18,8 +18,7 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.api.common.JobID;
-import org.apache.flink.client.program.ClusterClient;
+import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.jobgraph.SavepointConfigOptions;
 import org.apache.flink.table.store.file.Snapshot;
@@ -29,7 +28,7 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.types.Row;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nullable;
 
@@ -82,13 +81,12 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
                         + "END";
 
         sEnv.getConfig().getConfiguration().set(SavepointConfigOptions.SAVEPOINT_PATH, path);
-        ClusterClient<?> client = MINI_CLUSTER_RESOURCE.getClusterClient();
 
         // step1: run streaming insert
-        JobID jobId = startJobAndCommitSnapshot(streamSql, null);
+        JobClient jobClient = startJobAndCommitSnapshot(streamSql, null);
 
         // step2: stop with savepoint
-        stopJobSafely(client, jobId);
+        stopJobSafely(jobClient);
 
         final Snapshot snapshotBeforeRescale = findLatestSnapshot("T3");
         assertThat(snapshotBeforeRescale).isNotNull();
@@ -109,9 +107,10 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
         assertThat(batchSql("SELECT * FROM T3")).containsExactlyInAnyOrderElementsOf(committedData);
 
         // step5: resume streaming job
-        JobID resumedJobId = startJobAndCommitSnapshot(streamSql, snapshotAfterRescale.id());
+        JobClient resumedJobClient =
+                startJobAndCommitSnapshot(streamSql, snapshotAfterRescale.id());
         // stop job
-        stopJobSafely(client, resumedJobId);
+        stopJobSafely(resumedJobClient);
 
         // check snapshot and schema
         Snapshot lastSnapshot = findLatestSnapshot("T3");
@@ -137,18 +136,17 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
         }
     }
 
-    private JobID startJobAndCommitSnapshot(String sql, @Nullable Long initSnapshotId)
+    private JobClient startJobAndCommitSnapshot(String sql, @Nullable Long initSnapshotId)
             throws Exception {
-        JobID jobId = sEnv.executeSql(sql).getJobClient().get().getJobID();
+        JobClient jobClient = sEnv.executeSql(sql).getJobClient().get();
         // let job run until the first snapshot is finished
         waitForTheNextSnapshot(initSnapshotId);
-        return jobId;
+        return jobClient;
     }
 
-    private void stopJobSafely(ClusterClient<?> client, JobID jobId)
-            throws ExecutionException, InterruptedException {
-        client.stopWithSavepoint(jobId, true, path, SavepointFormatType.DEFAULT);
-        while (!client.getJobStatus(jobId).get().isGloballyTerminalState()) {
+    private void stopJobSafely(JobClient client) throws ExecutionException, InterruptedException {
+        client.stopWithSavepoint(true, path, SavepointFormatType.DEFAULT);
+        while (!client.getJobStatus().get().isGloballyTerminalState()) {
             Thread.sleep(2000L);
         }
     }

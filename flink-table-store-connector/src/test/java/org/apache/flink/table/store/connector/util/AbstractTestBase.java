@@ -18,11 +18,13 @@
 
 package org.apache.flink.table.store.connector.util;
 
+import org.apache.flink.client.program.ClusterClient;
+import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.table.store.utils.FileIOUtils;
-import org.apache.flink.test.junit5.MiniClusterExtension;
 import org.apache.flink.util.TestLogger;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.Logger;
@@ -41,14 +43,28 @@ public class AbstractTestBase extends TestLogger {
     private static final int DEFAULT_PARALLELISM = 4;
 
     @RegisterExtension
-    protected static final MiniClusterExtension MINI_CLUSTER_EXTENSION =
-            new MiniClusterExtension(
+    protected static final MiniClusterWithClientExtension MINI_CLUSTER_EXTENSION =
+            new MiniClusterWithClientExtension(
                     new MiniClusterResourceConfiguration.Builder()
                             .setNumberTaskManagers(1)
                             .setNumberSlotsPerTaskManager(DEFAULT_PARALLELISM)
                             .build());
 
     @TempDir protected static Path temporaryFolder;
+
+    @AfterEach
+    public final void cleanupRunningJobs() throws Exception {
+        ClusterClient<?> clusterClient = MINI_CLUSTER_EXTENSION.createRestClusterClient();
+        for (JobStatusMessage path : clusterClient.listJobs().get()) {
+            if (!path.getJobState().isTerminalState()) {
+                try {
+                    clusterClient.cancel(path.getJobId()).get();
+                } catch (Exception ignored) {
+                    // ignore exceptions when cancelling dangling jobs
+                }
+            }
+        }
+    }
 
     // ----------------------------------------------------------------------------------------------------------------
     //  Temporary File Utilities

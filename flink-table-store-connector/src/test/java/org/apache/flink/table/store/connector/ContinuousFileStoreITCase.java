@@ -22,13 +22,14 @@ import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
+import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 import org.apache.flink.types.Row;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -41,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** SQL ITCase for continuous file store. */
-@RunWith(Parameterized.class)
+@ExtendWith(ParameterizedTestExtension.class)
 public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
     private final boolean changelogFile;
@@ -50,7 +51,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         this.changelogFile = changelogFile;
     }
 
-    @Parameterized.Parameters(name = "changelogFile-{0}")
+    @Parameters(name = "changelogFile-{0}")
     public static Collection<Boolean> parameters() {
         return Arrays.asList(true, false);
     }
@@ -64,22 +65,22 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                         + options);
     }
 
-    @Test
+    @TestTemplate
     public void testWithoutPrimaryKey() throws Exception {
         testSimple("T1");
     }
 
-    @Test
+    @TestTemplate
     public void testWithPrimaryKey() throws Exception {
         testSimple("T2");
     }
 
-    @Test
+    @TestTemplate
     public void testProjectionWithoutPrimaryKey() throws Exception {
         testProjection("T1");
     }
 
-    @Test
+    @TestTemplate
     public void testProjectionWithPrimaryKey() throws Exception {
         testProjection("T2");
     }
@@ -108,7 +109,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("8", "9"));
     }
 
-    @Test
+    @TestTemplate
     public void testContinuousLatest() throws TimeoutException {
         batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
 
@@ -121,7 +122,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of("7", "8", "9"), Row.of("10", "11", "12"));
     }
 
-    @Test
+    @TestTemplate
     public void testContinuousFromTimestamp() throws Exception {
         String sql =
                 "SELECT * FROM T1 /*+ OPTIONS('log.scan'='from-timestamp', 'log.scan.timestamp-millis'='%s') */";
@@ -182,7 +183,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
     public void testLackStartupTimestamp() {
         assertThatThrownBy(
                         () ->
@@ -191,7 +192,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 .hasMessageContaining("Unable to create a source for reading table");
     }
 
-    @Test
+    @TestTemplate
     public void testConfigureStartupTimestamp() throws Exception {
         // Configure 'log.scan.timestamp-millis' without 'log.scan'.
         BlockingIterator<Row, Row> iterator =
@@ -214,7 +215,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 .hasMessageContaining("Unable to create a source for reading table");
     }
 
-    @Test
+    @TestTemplate
     public void testConfigureStartupSnapshot() throws Exception {
         // Configure 'scan.snapshot-id' without 'scan.mode'.
         BlockingIterator<Row, Row> iterator =
@@ -245,7 +246,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 .hasMessageContaining("Unable to create a source for reading table");
     }
 
-    @Test
+    @TestTemplate
     public void testIgnoreOverwrite() throws TimeoutException {
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(streamSqlIter("SELECT * FROM T1"));
@@ -261,7 +262,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("9", "10", "11"));
     }
 
-    @Test
+    @TestTemplate
     public void testUnsupportedUpsert() {
         assertThatThrownBy(
                 () ->
@@ -270,7 +271,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 "File store continuous reading dose not support upsert changelog mode");
     }
 
-    @Test
+    @TestTemplate
     public void testUnsupportedEventual() {
         assertThatThrownBy(
                 () ->

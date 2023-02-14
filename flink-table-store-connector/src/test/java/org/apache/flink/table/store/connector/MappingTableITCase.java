@@ -21,13 +21,13 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.test.util.AbstractTestBase;
+import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.types.Row;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.List;
@@ -42,10 +42,10 @@ public class MappingTableITCase extends AbstractTestBase {
     private TableEnvironment tEnv;
     private String path;
 
-    @Before
+    @BeforeEach
     public void before() throws IOException {
         tEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
-        path = TEMPORARY_FOLDER.newFolder().toURI().toString();
+        path = getTempDirPath();
     }
 
     @Test
