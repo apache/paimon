@@ -79,5 +79,6 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected abstract String warehouse();
 
-    protected abstract TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException ;
+    protected abstract TableSchema getDataTableSchema(Identifier identifier)
+            throws TableNotExistException;
 }
