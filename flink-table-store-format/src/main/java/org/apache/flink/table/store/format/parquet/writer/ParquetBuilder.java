@@ -33,5 +33,5 @@ import java.io.Serializable;
 public interface ParquetBuilder<T> extends Serializable {
 
     /** Creates and configures a parquet writer to the given output file. */
-    ParquetWriter<T> createWriter(OutputFile out) throws IOException;
+    ParquetWriter<T> createWriter(OutputFile out, String compression) throws IOException;
 }

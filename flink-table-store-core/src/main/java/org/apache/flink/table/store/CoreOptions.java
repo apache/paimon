@@ -104,6 +104,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Define the default false positive probability for bloom filters.");
 
+    public static final ConfigOption<String> FILE_COMPRESSION_PER_LEVEL =
+            key("file.compression.per.level")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Define different compression policies for different level, you can add the conf like this : 'file.compression.per.level' = '0:lz4,1:zlib', for orc file format, the compression value  could be  NONE, ZLIB, SNAPPY, LZO, LZ4, for parquet file format , the compression value could be  UNCOMPRESSED,SNAPPY,GZIP,LZO,BROTLI,LZ4,ZSTD, and is case insensitive .");
+
     public static final ConfigOption<String> MANIFEST_FORMAT =
             key("manifest.format")
                     .stringType()
@@ -525,6 +532,10 @@ public class CoreOptions implements Serializable {
 
     public double orcBloomFilterFpp() {
         return options.get(ORC_BLOOM_FILTER_FPP);
+    }
+
+    public String fileCompressionPerLevel() {
+        return options.get(FILE_COMPRESSION_PER_LEVEL);
     }
 
     public int snapshotNumRetainMin() {

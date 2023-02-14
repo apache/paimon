@@ -32,6 +32,10 @@ import org.apache.flink.table.store.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.Arrays;
+import java.util.Map;
+import java.util.stream.Collectors;
+
 /** A factory to create {@link FileWriter}s for writing {@link KeyValue} files. */
 public class KeyValueFileWriterFactory {
 
@@ -43,6 +47,7 @@ public class KeyValueFileWriterFactory {
     @Nullable private final FileStatsExtractor fileStatsExtractor;
     private final DataFilePathFactory pathFactory;
     private final long suggestedFileSize;
+    private final String fileCompressionPerLevel;
 
     private KeyValueFileWriterFactory(
             FileIO fileIO,
@@ -52,7 +57,8 @@ public class KeyValueFileWriterFactory {
             FormatWriterFactory writerFactory,
             @Nullable FileStatsExtractor fileStatsExtractor,
             DataFilePathFactory pathFactory,
-            long suggestedFileSize) {
+            long suggestedFileSize,
+            String fileCompressionPerLevel) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.keyType = keyType;
@@ -61,6 +67,7 @@ public class KeyValueFileWriterFactory {
         this.fileStatsExtractor = fileStatsExtractor;
         this.pathFactory = pathFactory;
         this.suggestedFileSize = suggestedFileSize;
+        this.fileCompressionPerLevel = fileCompressionPerLevel;
     }
 
     public RowType keyType() {
@@ -78,16 +85,40 @@ public class KeyValueFileWriterFactory {
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(int level) {
         return new RollingFileWriter<>(
-                () -> createDataFileWriter(pathFactory.newPath(), level), suggestedFileSize);
+                () ->
+                        createDataFileWriter(
+                                pathFactory.newPath(),
+                                level,
+                                getCompression(level, fileCompressionPerLevel)),
+                suggestedFileSize);
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
         return new RollingFileWriter<>(
-                () -> createDataFileWriter(pathFactory.newChangelogPath(), level),
+                () ->
+                        createDataFileWriter(
+                                pathFactory.newChangelogPath(),
+                                level,
+                                getCompression(level, fileCompressionPerLevel)),
                 suggestedFileSize);
     }
 
-    private KeyValueDataFileWriter createDataFileWriter(Path path, int level) {
+    private String getCompression(int level, String fileCompressionPerLevel) {
+        if (null != fileCompressionPerLevel) {
+            Map<Integer, String> compressions =
+                    Arrays.stream(fileCompressionPerLevel.split(","))
+                            .collect(
+                                    Collectors.toMap(
+                                            e -> Integer.valueOf(e.split(":")[0]),
+                                            e -> e.split(":")[1]));
+            if (compressions.containsKey(level)) {
+                return compressions.get(level);
+            }
+        }
+        return null;
+    }
+
+    private KeyValueDataFileWriter createDataFileWriter(Path path, int level, String compression) {
         KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
         return new KeyValueDataFileWriter(
                 fileIO,
@@ -98,7 +129,8 @@ public class KeyValueFileWriterFactory {
                 valueType,
                 fileStatsExtractor,
                 schemaId,
-                level);
+                level,
+                compression);
     }
 
     public void deleteFile(String filename) {
@@ -145,7 +177,8 @@ public class KeyValueFileWriterFactory {
             this.suggestedFileSize = suggestedFileSize;
         }
 
-        public KeyValueFileWriterFactory build(BinaryRow partition, int bucket) {
+        public KeyValueFileWriterFactory build(
+                BinaryRow partition, int bucket, String fileCompressionPerLevel) {
             RowType recordType = KeyValue.schema(keyType, valueType);
             return new KeyValueFileWriterFactory(
                     fileIO,
@@ -155,7 +188,8 @@ public class KeyValueFileWriterFactory {
                     fileFormat.createWriterFactory(recordType),
                     fileFormat.createStatsExtractor(recordType).orElse(null),
                     pathFactory.createDataFilePathFactory(partition, bucket),
-                    suggestedFileSize);
+                    suggestedFileSize,
+                    fileCompressionPerLevel);
         }
     }
 }

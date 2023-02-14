@@ -73,7 +73,7 @@ public abstract class FileStatsExtractorTestBase {
         FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
         Path path = new Path(tempDir.toString() + "/test");
         PositionOutputStream out = new LocalFileIO().newOutputStream(path, false);
-        FormatWriter writer = writerFactory.create(out);
+        FormatWriter writer = writerFactory.create(out, null);
 
         List<GenericRow> data = createData(rowType);
         for (GenericRow row : data) {

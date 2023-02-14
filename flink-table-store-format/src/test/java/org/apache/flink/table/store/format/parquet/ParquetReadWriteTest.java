@@ -294,7 +294,8 @@ public class ParquetReadWriteTest {
         conf.setInteger("parquet.block.size", rowGroupSize);
         ParquetWriterFactory factory =
                 new ParquetWriterFactory(new RowDataParquetBuilder(ROW_TYPE, conf));
-        FormatWriter writer = factory.create(new LocalFileIO().newOutputStream(path, false));
+        FormatWriter writer =
+                factory.create(new LocalFileIO().newOutputStream(path, false), "snappy");
         for (InternalRow row : rows) {
             writer.addElement(row);
         }

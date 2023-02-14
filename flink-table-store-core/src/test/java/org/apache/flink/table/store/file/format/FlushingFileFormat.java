@@ -50,8 +50,10 @@ public class FlushingFileFormat extends FileFormat {
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return PositionOutputStream -> {
-            FormatWriter wrapped = format.createWriterFactory(type).create(PositionOutputStream);
+
+        return (PositionOutputStream, level) -> {
+            FormatWriter wrapped =
+                    format.createWriterFactory(type).create(PositionOutputStream, null);
             return new FormatWriter() {
                 @Override
                 public void addElement(InternalRow rowData) throws IOException {

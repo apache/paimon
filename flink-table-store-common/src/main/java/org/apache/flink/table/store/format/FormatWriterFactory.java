@@ -29,8 +29,9 @@ public interface FormatWriterFactory {
      * Creates a writer that writes to the given stream.
      *
      * @param out The output stream to write the encoded data to.
+     * @param compression the compression value.
      * @throws IOException Thrown if the writer cannot be opened, or if the output stream throws an
      *     exception.
      */
-    FormatWriter create(PositionOutputStream out) throws IOException;
+    FormatWriter create(PositionOutputStream out, String compression) throws IOException;
 }

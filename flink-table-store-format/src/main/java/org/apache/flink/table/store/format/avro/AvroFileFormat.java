@@ -138,7 +138,8 @@ public class AvroFileFormat extends FileFormat {
         }
 
         @Override
-        public FormatWriter create(PositionOutputStream out) throws IOException {
+        public FormatWriter create(PositionOutputStream out, String compression)
+                throws IOException {
             AvroBulkWriter<GenericRecord> writer = factory.create(out);
             RowDataToAvroConverters.RowDataToAvroConverter converter =
                     RowDataToAvroConverters.createConverter(rowType);
