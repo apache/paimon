@@ -349,6 +349,11 @@ public class OrcFilters {
     public static class And extends Predicate {
         private final Predicate[] preds;
 
+        /**
+         * Creates an AND predicate.
+         *
+         * @param predicates The disjunctive predicates.
+         */
         public And(Predicate... predicates) {
             this.preds = predicates;
         }
