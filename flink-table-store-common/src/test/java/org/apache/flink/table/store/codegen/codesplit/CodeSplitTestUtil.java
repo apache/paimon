@@ -17,10 +17,10 @@
 
 package org.apache.flink.table.store.codegen.codesplit;
 
-import org.apache.flink.util.FileUtils;
-import org.apache.flink.util.StringUtils;
+import org.apache.flink.table.store.utils.FileIOUtils;
+import org.apache.flink.table.store.utils.Pair;
+import org.apache.flink.table.store.utils.StringUtils;
 
-import org.apache.commons.lang3.tuple.Pair;
 import org.codehaus.commons.compiler.CompileException;
 import org.codehaus.janino.SimpleCompiler;
 import org.junit.jupiter.api.Assertions;
@@ -34,7 +34,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Util class for code split tests. */
@@ -70,7 +70,7 @@ public final class CodeSplitTestUtil {
 
     public static String readResource(String resourcePath) {
         try {
-            return FileUtils.readFileUtf8(
+            return FileIOUtils.readFileUtf8(
                     new File(
                             BlockStatementGrouperTest.class
                                     .getClassLoader()

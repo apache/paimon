@@ -22,7 +22,7 @@
 
 package org.apache.flink.table.store.fs;
 
-import org.apache.commons.lang3.StringUtils;
+import org.apache.flink.table.store.utils.StringUtils;
 
 import java.io.Serializable;
 import java.net.URI;

@@ -22,6 +22,7 @@ import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
+import org.apache.flink.table.store.connector.VersionedSerializerWrapper;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -199,7 +200,9 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                         initialCommitUser,
                         user -> new StoreCommitter(table.newCommit(user)),
                         new RestoreAndFailCommittableStateManager(
-                                ManifestCommittableSerializer::new));
+                                () ->
+                                        new VersionedSerializerWrapper<>(
+                                                new ManifestCommittableSerializer())));
         return createTestHarness(operator);
     }
 

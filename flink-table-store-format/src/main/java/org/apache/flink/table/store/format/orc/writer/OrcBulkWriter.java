@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.format.orc.writer;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.format.FormatWriter;
 
@@ -29,7 +28,7 @@ import java.io.IOException;
 
 import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 
-/** A {@link BulkWriter} implementation that writes data in ORC format. */
+/** A {@link FormatWriter} implementation that writes data in ORC format. */
 public class OrcBulkWriter implements FormatWriter {
 
     private final Writer writer;

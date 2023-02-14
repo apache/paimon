@@ -33,7 +33,7 @@ import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.util.CloseableIterator;
+import org.apache.flink.table.store.utils.CloseableIterator;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;

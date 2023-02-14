@@ -41,7 +41,7 @@ import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.VarCharType;
-import org.apache.flink.util.CloseableIterator;
+import org.apache.flink.table.store.utils.CloseableIterator;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;

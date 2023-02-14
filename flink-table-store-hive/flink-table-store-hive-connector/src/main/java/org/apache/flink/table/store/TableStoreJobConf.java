@@ -19,6 +19,7 @@
 package org.apache.flink.table.store;
 
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
+import org.apache.flink.table.store.options.Options;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
@@ -59,15 +60,8 @@ public class TableStoreJobConf {
         return jobConf.get(INTERNAL_LOCATION);
     }
 
-    @SuppressWarnings("unchecked")
-    public org.apache.flink.configuration.Configuration getCatalogConfig() {
-        return org.apache.flink.configuration.Configuration.fromMap(
-                JsonSerdeUtil.fromJson(jobConf.get(INTERNAL_CATALOG_CONFIG), Map.class));
-    }
-
     /** Extract table store catalog conf from Hive conf. */
-    public static org.apache.flink.configuration.Configuration extractCatalogConfig(
-            Configuration hiveConf) {
+    public static Options extractCatalogConfig(Configuration hiveConf) {
         Map<String, String> configMap = new HashMap<>();
         for (Map.Entry<String, String> entry : hiveConf) {
             String name = entry.getKey();
@@ -77,6 +71,6 @@ public class TableStoreJobConf {
                 configMap.put(name, value);
             }
         }
-        return org.apache.flink.configuration.Configuration.fromMap(configMap);
+        return Options.fromMap(configMap);
     }
 }

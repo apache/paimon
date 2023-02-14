@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.api.common.accumulators.LongCounter;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
@@ -29,6 +28,7 @@ import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.LongCounter;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.core.io.SimpleVersionedSerializer;
+import org.apache.flink.table.store.data.serializer.VersionedSerializer;
 import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.io.NewFilesIncrement;
@@ -35,8 +35,8 @@ import java.util.List;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.serializeBinaryRow;
 
-/** {@link SimpleVersionedSerializer} for {@link FileCommittable}. */
-public class FileCommittableSerializer implements SimpleVersionedSerializer<FileCommittable> {
+/** {@link VersionedSerializer} for {@link FileCommittable}. */
+public class FileCommittableSerializer implements VersionedSerializer<FileCommittable> {
 
     private static final int CURRENT_VERSION = 2;
 
