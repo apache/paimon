@@ -20,7 +20,6 @@ package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.Table;
 
 import java.util.List;
@@ -90,14 +89,6 @@ public interface Catalog extends AutoCloseable {
      * @throws DatabaseNotExistException if the database does not exist
      */
     List<String> listTables(String databaseName) throws DatabaseNotExistException;
-
-    /**
-     * Return the table location path identified by the given {@link Identifier}.
-     *
-     * @param identifier Path of the table
-     * @return The requested table location
-     */
-    Path getTableLocation(Identifier identifier);
 
     /**
      * Return a {@link Table} identified by the given {@link Identifier}.

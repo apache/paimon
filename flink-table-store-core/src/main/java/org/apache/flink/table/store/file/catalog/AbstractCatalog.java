@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.catalog;
 
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
@@ -26,6 +27,8 @@ import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.system.SystemTableLoader;
 
 import org.apache.commons.lang3.StringUtils;
+
+import static org.apache.flink.table.store.table.system.SystemTableLoader.SYSTEM_TABLES;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -39,38 +42,35 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public Path getTableLocation(Identifier identifier) {
-        if (identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER)) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Table name[%s] cannot contain '%s' separator",
-                            identifier.getObjectName(), SYSTEM_TABLE_SPLITTER));
-        }
-        return new Path(databasePath(identifier.getDatabaseName()), identifier.getObjectName());
-    }
-
-    @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
-        String inputTableName = identifier.getObjectName();
-        if (inputTableName.contains(SYSTEM_TABLE_SPLITTER)) {
-            String[] splits = StringUtils.split(inputTableName, SYSTEM_TABLE_SPLITTER);
-            if (splits.length != 2) {
-                throw new IllegalArgumentException(
-                        "System table can only contain one '$' separator, but this is: "
-                                + inputTableName);
-            }
+        if (isSystemTable(identifier)) {
+            String[] splits = tableAndSystemName(identifier);
             String table = splits[0];
             String type = splits[1];
             Identifier originidentifier = new Identifier(identifier.getDatabaseName(), table);
             if (!tableExists(originidentifier)) {
                 throw new TableNotExistException(identifier);
             }
-            Path location = getTableLocation(originidentifier);
+            Path location = getDataTableLocation(originidentifier);
             return SystemTableLoader.load(type, fileIO, location);
         } else {
             TableSchema tableSchema = getDataTableSchema(identifier);
-            return FileStoreTableFactory.create(fileIO, getTableLocation(identifier), tableSchema);
+            return FileStoreTableFactory.create(
+                    fileIO, getDataTableLocation(identifier), tableSchema);
         }
+    }
+
+    @Override
+    public boolean tableExists(Identifier identifier) {
+        Identifier tableIdentifier = identifier;
+        if (isSystemTable(identifier)) {
+            String[] splits = tableAndSystemName(identifier);
+            if (!SYSTEM_TABLES.contains(splits[1].toLowerCase())) {
+                return false;
+            }
+            tableIdentifier = new Identifier(identifier.getDatabaseName(), splits[0]);
+        }
+        return dataTableExists(tableIdentifier);
     }
 
     protected Path databasePath(String database) {
@@ -81,4 +81,31 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected abstract TableSchema getDataTableSchema(Identifier identifier)
             throws TableNotExistException;
+
+    protected abstract boolean dataTableExists(Identifier identifier);
+
+    @VisibleForTesting
+    public Path getDataTableLocation(Identifier identifier) {
+        if (identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Table name[%s] cannot contain '%s' separator",
+                            identifier.getObjectName(), SYSTEM_TABLE_SPLITTER));
+        }
+        return new Path(databasePath(identifier.getDatabaseName()), identifier.getObjectName());
+    }
+
+    private boolean isSystemTable(Identifier identifier) {
+        return identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER);
+    }
+
+    private String[] tableAndSystemName(Identifier identifier) {
+        String[] splits = StringUtils.split(identifier.getObjectName(), SYSTEM_TABLE_SPLITTER);
+        if (splits.length != 2) {
+            throw new IllegalArgumentException(
+                    "System table can only contain one '$' separator, but this is: "
+                            + identifier.getObjectName());
+        }
+        return splits;
+    }
 }
