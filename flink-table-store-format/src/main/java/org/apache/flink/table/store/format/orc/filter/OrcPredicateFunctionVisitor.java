@@ -123,7 +123,16 @@ public class OrcPredicateFunctionVisitor
 
     @Override
     public Optional<OrcFilters.Predicate> visitAnd(List<Optional<OrcFilters.Predicate>> children) {
-        return Optional.empty();
+        if (children.size() != 2) {
+            throw new RuntimeException("Illegal and children: " + children.size());
+        }
+
+        Optional<OrcFilters.Predicate> c1 = children.get(0);
+        if (!c1.isPresent()) {
+            return Optional.empty();
+        }
+        Optional<OrcFilters.Predicate> c2 = children.get(1);
+        return c2.map(value -> new OrcFilters.And(c1.get(), value));
     }
 
     @Override
