@@ -89,7 +89,7 @@ public class FlinkSinkBuilder {
                         table.schema(),
                         table.options()
                                 .toConfiguration()
-                                .getBoolean(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION));
+                                .get(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION));
         PartitionTransformation<RowData> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
         if (parallelism != null) {

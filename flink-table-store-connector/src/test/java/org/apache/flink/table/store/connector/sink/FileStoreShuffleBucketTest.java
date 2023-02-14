@@ -36,8 +36,8 @@ import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 import org.apache.flink.table.types.logical.RowType;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -53,7 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class FileStoreShuffleBucketTest extends CatalogITCaseBase {
     private static final int TOTAL_SOURCE_RECORD_COUNT = 1000;
 
-    @Before
+    @BeforeEach
     public void after() throws Exception {
         super.before();
         CollectStoreSinkWrite.writeRowsMap.clear();
