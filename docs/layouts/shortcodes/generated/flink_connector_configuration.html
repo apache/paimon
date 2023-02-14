@@ -26,5 +26,11 @@
             <td>Integer</td>
             <td>Defines a custom parallelism for the sink. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration.</td>
         </tr>
+        <tr>
+            <td><h5>sink.partition-shuffle</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>The option to enable shuffle data by dynamic partition fields in sink phase for table store.</td>
+        </tr>
     </tbody>
 </table>
