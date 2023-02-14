@@ -18,10 +18,7 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-
 /** Long column vector. */
-@Internal
 public interface LongColumnVector extends ColumnVector {
     long getLong(int i);
 }

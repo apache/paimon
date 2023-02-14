@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.types;
 
-import org.apache.flink.annotation.Experimental;
 import org.apache.flink.table.store.utils.InstantiationUtil;
 
 import org.assertj.core.api.AbstractAssert;
@@ -31,7 +30,6 @@ import static org.assertj.core.api.Assertions.fail;
 import static org.assertj.core.api.Assertions.not;
 
 /** Assertions for {@link DataType}. */
-@Experimental
 public class DataTypeAssert extends AbstractAssert<DataTypeAssert, DataType> {
 
     public DataTypeAssert(DataType dataType) {

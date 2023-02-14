@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.file.schema.SchemaSerializer;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.types.DataField;
@@ -40,7 +39,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 
 /** A utility class that provide abilities for JSON serialization and deserialization. */
-@Internal
 public class JsonSerdeUtil {
 
     /**

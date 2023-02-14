@@ -18,13 +18,10 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-
 /**
  * Bytes column vector to get {@link Bytes}, it include original data and offset and length. The
  * data in {@link Bytes} maybe reuse.
  */
-@Internal
 public interface BytesColumnVector extends ColumnVector {
     Bytes getBytes(int i);
 

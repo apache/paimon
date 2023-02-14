@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.format.parquet.writer;
 
-import org.apache.flink.annotation.Internal;
-
 import org.apache.parquet.io.OutputFile;
 import org.apache.parquet.io.PositionOutputStream;
 
@@ -34,7 +32,6 @@ import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
  * <p>Because the implementation goes against an open stream, rather than open its own streams
  * against a file, instances can create one stream only.
  */
-@Internal
 public class StreamOutputFile implements OutputFile {
 
     private static final long DEFAULT_BLOCK_SIZE = 64L * 1024L * 1024L;

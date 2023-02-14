@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.format.orc.writer;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.fs.PositionOutputStream;
 
 import com.google.protobuf.CodedOutputStream;
@@ -53,7 +52,6 @@ import static org.apache.orc.impl.WriterImpl.getEstimatedBufferSize;
  * <p>NOTE: If the ORC dependency version is updated, this file may have to be updated as well to be
  * in sync with the new version's PhysicalFsWriter.
  */
-@Internal
 public class PhysicalWriterImpl implements PhysicalWriter {
 
     private static final Logger LOG = LoggerFactory.getLogger(PhysicalWriterImpl.class);

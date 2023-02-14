@@ -18,10 +18,7 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-
 /** Float column vector. */
-@Internal
 public interface FloatColumnVector extends ColumnVector {
     float getFloat(int i);
 }

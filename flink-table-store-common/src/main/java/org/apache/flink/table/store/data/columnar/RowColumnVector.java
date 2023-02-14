@@ -18,10 +18,7 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-
 /** Row column vector. */
-@Internal
 public interface RowColumnVector extends ColumnVector {
     ColumnarRow getRow(int i);
 }

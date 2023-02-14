@@ -18,11 +18,9 @@
 
 package org.apache.flink.table.store.data.columnar.writable;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.columnar.BooleanColumnVector;
 
 /** Writable {@link BooleanColumnVector}. */
-@Internal
 public interface WritableBooleanVector extends WritableColumnVector, BooleanColumnVector {
 
     /** Set boolean at rowId with the provided value. */

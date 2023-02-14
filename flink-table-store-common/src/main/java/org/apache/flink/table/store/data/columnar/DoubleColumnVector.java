@@ -18,10 +18,7 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-
 /** Double column vector. */
-@Internal
 public interface DoubleColumnVector extends ColumnVector {
     double getDouble(int i);
 }

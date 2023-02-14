@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.compact.CompactUnit;
 import org.apache.flink.table.store.file.mergetree.LevelSortedRun;
 import org.apache.flink.table.store.file.mergetree.SortedRun;

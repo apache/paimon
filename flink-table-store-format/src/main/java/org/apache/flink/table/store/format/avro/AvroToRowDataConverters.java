@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.format.avro;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.GenericArray;
@@ -51,7 +50,6 @@ import java.util.Map;
 import static org.apache.flink.table.store.format.avro.AvroSchemaConverter.extractValueTypeToAvroMap;
 
 /** Tool class used to convert from Avro {@link GenericRecord} to {@link InternalRow}. * */
-@Internal
 public class AvroToRowDataConverters {
 
     /**

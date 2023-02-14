@@ -18,11 +18,9 @@
 
 package org.apache.flink.table.store.data.columnar.writable;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.columnar.ByteColumnVector;
 
 /** Writable {@link ByteColumnVector}. */
-@Internal
 public interface WritableByteVector extends WritableColumnVector, ByteColumnVector {
 
     /** Set byte at rowId with the provided value. */

@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.data.columnar.heap;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.columnar.writable.WritableDoubleVector;
 
 import java.nio.ByteBuffer;
@@ -30,7 +29,6 @@ import java.util.Arrays;
  * be used for operations on all floating point double types and as such will use a 64-bit double
  * value to hold the biggest possible value.
  */
-@Internal
 public class HeapDoubleVector extends AbstractHeapVector implements WritableDoubleVector {
 
     private static final long serialVersionUID = 6193940154117411328L;

@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.format.orc.writer;
 
-import org.apache.flink.annotation.PublicEvolving;
-
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.orc.TypeDescription;
 import org.apache.orc.Writer;
@@ -39,7 +37,6 @@ import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
  *
  * @param <T> The type of the element
  */
-@PublicEvolving
 public abstract class Vectorizer<T> implements Serializable {
 
     private final TypeDescription schema;

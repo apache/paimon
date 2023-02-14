@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.annotation;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.options.ConfigOption;
 
 import java.lang.annotation.ElementType;
@@ -32,7 +31,6 @@ public final class Documentation {
     /** Annotation used on config option fields to override the documented default. */
     @Target(ElementType.FIELD)
     @Retention(RetentionPolicy.RUNTIME)
-    @Internal
     public @interface OverrideDefault {
         String value();
     }
@@ -64,7 +62,6 @@ public final class Documentation {
      */
     @Target(ElementType.FIELD)
     @Retention(RetentionPolicy.RUNTIME)
-    @Internal
     public @interface Section {
 
         /** The sections in the config docs where this option should be included. */
@@ -81,7 +78,6 @@ public final class Documentation {
      */
     @Target({ElementType.FIELD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
-    @Internal
     public @interface SuffixOption {
         String value();
     }

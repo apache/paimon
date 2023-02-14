@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.disk.IOManager;
@@ -49,7 +48,6 @@ public interface TableWrite extends AutoCloseable {
      * <p>Most probably, these files are created by another job. Currently this method is only used
      * by the dedicated compact job to see files created by writer jobs.
      */
-    @Internal
     void notifyNewFiles(long snapshotId, BinaryRow partition, int bucket, List<DataFileMeta> files);
 
     List<FileCommittable> prepareCommit(boolean blocking, long commitIdentifier) throws Exception;

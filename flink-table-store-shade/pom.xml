@@ -77,12 +77,6 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-annotations</artifactId>
-            <version>${flink.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
             <artifactId>flink-table-common</artifactId>
             <version>${flink.version}</version>
             <exclusions>
@@ -240,7 +234,6 @@ under the License.
                                     <include>org.apache.flink:flink-hadoop-fs</include>
                                     <include>org.apache.flink:flink-shaded-jackson</include>
                                     <include>org.apache.flink:flink-shaded-guava</include>
-                                    <include>org.apache.flink:flink-annotations</include>
                                     <include>org.apache.flink:flink-shaded-asm-9</include>
 
                                     <!-- Flink Table -->

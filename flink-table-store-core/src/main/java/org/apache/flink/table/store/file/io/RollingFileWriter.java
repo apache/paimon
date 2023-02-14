@@ -19,7 +19,7 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.utils.Preconditions;
 
 import org.slf4j.Logger;
