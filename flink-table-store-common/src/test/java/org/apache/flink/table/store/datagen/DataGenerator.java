@@ -18,13 +18,10 @@
 
 package org.apache.flink.table.store.datagen;
 
-import org.apache.flink.annotation.Experimental;
-
 import java.io.Serializable;
 import java.util.Iterator;
 
 /** Stateful and re-scalable data generator. */
-@Experimental
 public interface DataGenerator<T> extends Serializable, Iterator<T> {
 
     void open();

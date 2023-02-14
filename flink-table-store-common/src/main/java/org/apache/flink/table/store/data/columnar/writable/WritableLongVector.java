@@ -18,11 +18,9 @@
 
 package org.apache.flink.table.store.data.columnar.writable;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.columnar.LongColumnVector;
 
 /** Writable {@link LongColumnVector}. */
-@Internal
 public interface WritableLongVector extends WritableColumnVector, LongColumnVector {
 
     /** Set long at rowId with the provided value. */

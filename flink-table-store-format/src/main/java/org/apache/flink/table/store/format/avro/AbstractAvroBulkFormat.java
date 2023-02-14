@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.format.avro;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.IteratorResultIterator;
 import org.apache.flink.table.store.file.utils.RecordReader;
@@ -45,7 +44,6 @@ import java.util.function.Function;
  *
  * <p>NOTE: Copied from Flink.
  */
-@Internal
 public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
 
     private static final long serialVersionUID = 1L;

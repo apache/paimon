@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.io;
 
-import org.apache.flink.annotation.Public;
 import org.apache.flink.table.store.memory.MemorySegment;
 
 import java.io.DataInput;
@@ -28,7 +27,6 @@ import java.io.IOException;
  * This interface defines a view over some memory that can be used to sequentially read the contents
  * of the memory. The view is typically backed by one or more {@link MemorySegment}.
  */
-@Public
 public interface DataInputView extends DataInput {
 
     /**

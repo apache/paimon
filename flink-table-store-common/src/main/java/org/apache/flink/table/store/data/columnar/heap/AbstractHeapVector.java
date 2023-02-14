@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.data.columnar.heap;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.core.memory.MemoryUtils;
 import org.apache.flink.table.store.data.columnar.writable.AbstractWritableVector;
 
@@ -26,7 +25,6 @@ import java.nio.ByteOrder;
 import java.util.Arrays;
 
 /** Heap vector that nullable shared structure. */
-@Internal
 public abstract class AbstractHeapVector extends AbstractWritableVector {
 
     public static final boolean LITTLE_ENDIAN = ByteOrder.nativeOrder() == ByteOrder.LITTLE_ENDIAN;

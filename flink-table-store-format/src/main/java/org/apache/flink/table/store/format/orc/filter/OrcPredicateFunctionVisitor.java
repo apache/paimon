@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.format.orc.filter;
 
-import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.predicate.FieldRef;
@@ -220,7 +219,6 @@ public class OrcPredicateFunctionVisitor
      * @param <U> type of the third argument
      * @param <R> type of the return value
      */
-    @PublicEvolving
     @FunctionalInterface
     private interface TriFunction<S, T, U, R> {
 

@@ -17,7 +17,6 @@
 
 package org.apache.flink.table.store.data;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentUtils;
 import org.apache.flink.table.store.types.DataType;
@@ -25,7 +24,6 @@ import org.apache.flink.table.store.types.DataType;
 import java.io.Serializable;
 
 /** Writer for binary array. See {@link BinaryArray}. */
-@Internal
 public final class BinaryArrayWriter extends AbstractBinaryWriter {
 
     private final int nullBitsSizeInBytes;

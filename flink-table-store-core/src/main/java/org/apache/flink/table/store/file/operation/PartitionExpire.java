@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;

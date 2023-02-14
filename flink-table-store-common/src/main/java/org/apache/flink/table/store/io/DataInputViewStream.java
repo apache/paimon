@@ -18,14 +18,11 @@
 
 package org.apache.flink.table.store.io;
 
-import org.apache.flink.annotation.Internal;
-
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 
 /** An input stream that draws its data from a {@link DataInputView}. */
-@Internal
 public class DataInputViewStream extends InputStream {
 
     protected DataInputView inputView;

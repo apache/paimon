@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.datagen;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.options.ConfigOption;
 
 import java.util.Arrays;
@@ -26,7 +25,6 @@ import java.util.HashSet;
 import java.util.Set;
 
 /** Container class for wrapping a {@link DataGenerator with its configuration options}. */
-@Internal
 public class DataGeneratorContainer {
 
     private final DataGenerator generator;

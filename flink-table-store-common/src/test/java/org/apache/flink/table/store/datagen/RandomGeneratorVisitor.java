@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.datagen;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.GenericArray;
@@ -62,7 +61,6 @@ import java.util.stream.Collectors;
 import static org.apache.flink.table.store.options.ConfigOptions.key;
 
 /** Creates a random {@link DataGeneratorContainer} for a particular logical type. */
-@Internal
 @SuppressWarnings("unchecked")
 public class RandomGeneratorVisitor extends DataGenVisitorBase {
 

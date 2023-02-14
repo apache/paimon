@@ -18,13 +18,10 @@
 
 package org.apache.flink.table.store.io;
 
-import org.apache.flink.annotation.Internal;
-
 import java.io.IOException;
 import java.io.OutputStream;
 
 /** An output stream that draws its data from a {@link DataOutputView}. */
-@Internal
 public class DataOutputViewStream extends OutputStream {
     protected DataOutputView outputView;
 

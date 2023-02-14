@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.annotation.Internal;
-
 import javax.annotation.Nullable;
 
 /**
@@ -27,7 +25,6 @@ import javax.annotation.Nullable;
  *
  * @param <E> The type of the records returned by the iterator.
  */
-@Internal
 public abstract class RecyclableIterator<E> implements RecordReader.RecordIterator<E> {
 
     @Nullable private final Runnable recycler;

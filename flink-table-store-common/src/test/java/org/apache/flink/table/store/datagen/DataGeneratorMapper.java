@@ -18,11 +18,9 @@
 
 package org.apache.flink.table.store.datagen;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.util.function.SerializableFunction;
 
 /** Utility for mapping the output of a {@link DataGenerator}. */
-@Internal
 public class DataGeneratorMapper<A, B> implements DataGenerator<B> {
 
     private final DataGenerator<A> generator;

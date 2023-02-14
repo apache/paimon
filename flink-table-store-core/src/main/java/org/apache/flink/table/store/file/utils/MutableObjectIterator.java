@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.annotation.Internal;
-
 import java.io.IOException;
 
 /**
@@ -34,7 +32,6 @@ import java.io.IOException;
  *
  * @param <E> The element type of the collection iterated over.
  */
-@Internal
 public interface MutableObjectIterator<E> {
 
     /**

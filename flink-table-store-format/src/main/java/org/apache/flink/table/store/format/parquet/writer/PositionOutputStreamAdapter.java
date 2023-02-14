@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.format.parquet.writer;
 
-import org.apache.flink.annotation.Internal;
-
 import org.apache.parquet.io.PositionOutputStream;
 
 import java.io.IOException;
@@ -27,7 +25,6 @@ import java.io.IOException;
 import static org.apache.parquet.Preconditions.checkNotNull;
 
 /** An adapter to turn Flink's {@link PositionOutputStream} into a {@link PositionOutputStream}. */
-@Internal
 class PositionOutputStreamAdapter extends PositionOutputStream {
 
     /** The Flink stream written to. */

@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.io;
 
-import org.apache.flink.annotation.PublicEvolving;
-
 import java.io.DataInputStream;
 import java.io.EOFException;
 import java.io.IOException;
@@ -29,7 +27,6 @@ import java.io.InputStream;
  * Utility class that turns an {@link InputStream} into a {@link
  * org.apache.flink.core.memory.DataInputView}.
  */
-@PublicEvolving
 public class DataInputViewStreamWrapper extends DataInputStream implements DataInputView {
 
     public DataInputViewStreamWrapper(InputStream in) {

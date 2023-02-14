@@ -18,9 +18,8 @@
 
 package org.apache.flink.table.store.format.orc;
 
-import org.apache.flink.annotation.PublicEvolving;
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.BulkWriter;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.format.FormatWriter;
 import org.apache.flink.table.store.format.FormatWriterFactory;
@@ -47,7 +46,6 @@ import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
  * Vectorizer} implementation to convert the element into an {@link
  * org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch}.
  */
-@PublicEvolving
 public class OrcWriterFactory implements FormatWriterFactory {
 
     private final Vectorizer<InternalRow> vectorizer;

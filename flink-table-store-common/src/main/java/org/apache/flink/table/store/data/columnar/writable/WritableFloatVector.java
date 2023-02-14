@@ -18,11 +18,9 @@
 
 package org.apache.flink.table.store.data.columnar.writable;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.columnar.FloatColumnVector;
 
 /** Writable {@link FloatColumnVector}. */
-@Internal
 public interface WritableFloatVector extends WritableColumnVector, FloatColumnVector {
 
     /** Set float at rowId with the provided value. */

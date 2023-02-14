@@ -18,12 +18,10 @@
 
 package org.apache.flink.table.store.data.columnar.writable;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.columnar.ColumnVector;
 import org.apache.flink.table.store.data.columnar.Dictionary;
 
 /** Writable {@link ColumnVector}. */
-@Internal
 public interface WritableColumnVector extends ColumnVector {
 
     /** Resets the column to default state. */

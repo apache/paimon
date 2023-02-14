@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.kafka;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
@@ -26,6 +25,7 @@ import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDe
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions.LogConsistency;
 import org.apache.flink.table.store.CoreOptions.StartupMode;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.types.DataType;
 

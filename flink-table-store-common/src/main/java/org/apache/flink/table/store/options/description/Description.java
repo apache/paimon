@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.options.description;
 
-import org.apache.flink.annotation.PublicEvolving;
-
 import java.util.ArrayList;
 import java.util.List;
 
@@ -52,7 +50,6 @@ public class Description {
      * 	.build();
      * }</pre>
      */
-    @PublicEvolving
     public static class DescriptionBuilder {
 
         private final List<BlockElement> blocks = new ArrayList<>();

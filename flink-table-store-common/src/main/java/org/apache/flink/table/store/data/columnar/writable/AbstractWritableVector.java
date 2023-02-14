@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.data.columnar.writable;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.columnar.ColumnVector;
 import org.apache.flink.table.store.data.columnar.Dictionary;
 
@@ -28,7 +27,6 @@ import java.io.Serializable;
  * Contains the shared structure for {@link ColumnVector}s, including NULL information and
  * dictionary. NOTE: if there are some nulls, must set {@link #noNulls} to false.
  */
-@Internal
 public abstract class AbstractWritableVector implements WritableColumnVector, Serializable {
 
     private static final long serialVersionUID = 1L;

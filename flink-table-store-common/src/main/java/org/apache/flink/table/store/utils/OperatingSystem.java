@@ -18,10 +18,7 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.annotation.Internal;
-
 /** An enumeration indicating the operating system that the JVM runs on. */
-@Internal
 public enum OperatingSystem {
     LINUX,
     WINDOWS,

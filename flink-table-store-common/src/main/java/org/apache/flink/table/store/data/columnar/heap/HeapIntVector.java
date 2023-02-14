@@ -18,13 +18,11 @@
 
 package org.apache.flink.table.store.data.columnar.heap;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.columnar.writable.WritableIntVector;
 
 import java.util.Arrays;
 
 /** This class represents a nullable int column vector. */
-@Internal
 public class HeapIntVector extends AbstractHeapVector implements WritableIntVector {
 
     private static final long serialVersionUID = -2749499358889718254L;

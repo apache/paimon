@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.data.columnar.heap;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.table.store.data.columnar.writable.WritableBytesVector;
 
 import java.util.Arrays;
@@ -36,7 +35,6 @@ import java.util.Arrays;
  * first. You can mix "by value" and "by reference" in the same column vector, though that use is
  * probably not typical.
  */
-@Internal
 public class HeapBytesVector extends AbstractHeapVector implements WritableBytesVector {
 
     private static final long serialVersionUID = -8529155738773478597L;

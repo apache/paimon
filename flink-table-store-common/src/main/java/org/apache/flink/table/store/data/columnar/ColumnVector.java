@@ -18,10 +18,7 @@
 
 package org.apache.flink.table.store.data.columnar;
 
-import org.apache.flink.annotation.Internal;
-
 /** Nullable column vector. Access data through specific subclasses. */
-@Internal
 public interface ColumnVector {
     boolean isNullAt(int i);
 }

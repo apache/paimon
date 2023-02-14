@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file;
 
-import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.types.BigIntType;

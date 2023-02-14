@@ -17,8 +17,6 @@
 
 package org.apache.flink.table.store.format.orc;
 
-import org.apache.flink.annotation.Internal;
-
 import org.apache.hadoop.conf.Configuration;
 
 import java.net.URL;
@@ -29,7 +27,6 @@ import java.net.URL;
  * <p>Since the conf is effectively cached across Flink jobs, at least force the thread local
  * classloader to avoid classloader leaks.
  */
-@Internal
 public final class ThreadLocalClassLoaderConfiguration extends Configuration {
     public ThreadLocalClassLoaderConfiguration() {}
 
