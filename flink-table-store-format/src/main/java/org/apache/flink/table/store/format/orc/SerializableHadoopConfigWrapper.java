@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.format.orc;
 
-import org.apache.flink.core.memory.DataInputDeserializer;
-import org.apache.flink.core.memory.DataOutputSerializer;
+import org.apache.flink.table.store.io.DataInputDeserializer;
+import org.apache.flink.table.store.io.DataOutputSerializer;
 
 import org.apache.hadoop.conf.Configuration;
 

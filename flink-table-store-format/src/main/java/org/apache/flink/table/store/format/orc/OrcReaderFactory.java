@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.format.orc;
 
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.columnar.ColumnVector;
 import org.apache.flink.table.store.data.columnar.ColumnarRow;
@@ -32,6 +31,7 @@ import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.Pair;
 import org.apache.flink.table.store.utils.Pool;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
@@ -254,14 +254,14 @@ public class OrcReaderFactory implements FormatReaderFactory {
         org.apache.orc.Reader orcReader = createReader(conf, fileIO, path);
 
         // get offset and length for the stripes that start in the split
-        Tuple2<Long, Long> offsetAndLength =
+        Pair<Long, Long> offsetAndLength =
                 getOffsetAndLengthForSplit(splitStart, splitLength, orcReader.getStripes());
 
         // create ORC row reader configuration
         org.apache.orc.Reader.Options options =
                 new org.apache.orc.Reader.Options()
                         .schema(schema)
-                        .range(offsetAndLength.f0, offsetAndLength.f1)
+                        .range(offsetAndLength.getLeft(), offsetAndLength.getRight())
                         .useZeroCopy(OrcConf.USE_ZEROCOPY.getBoolean(conf))
                         .skipCorruptRecords(OrcConf.SKIP_CORRUPT_DATA.getBoolean(conf))
                         .tolerateMissingSchema(OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf));
@@ -298,7 +298,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
         return reader.nextBatch(rowBatch);
     }
 
-    private static Tuple2<Long, Long> getOffsetAndLengthForSplit(
+    private static Pair<Long, Long> getOffsetAndLengthForSplit(
             long splitStart, long splitLength, List<StripeInformation> stripes) {
         long splitEnd = splitStart + splitLength;
         long readStart = Long.MAX_VALUE;
@@ -314,9 +314,9 @@ public class OrcReaderFactory implements FormatReaderFactory {
 
         if (readStart < Long.MAX_VALUE) {
             // at least one split is included
-            return Tuple2.of(readStart, readEnd - readStart);
+            return Pair.of(readStart, readEnd - readStart);
         } else {
-            return Tuple2.of(0L, 0L);
+            return Pair.of(0L, 0L);
         }
     }
 

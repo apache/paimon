@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.util.CloseableIterator;
+import org.apache.flink.table.store.utils.CloseableIterator;
 
 import java.io.IOException;
 

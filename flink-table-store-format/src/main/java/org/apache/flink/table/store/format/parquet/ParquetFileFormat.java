@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.format.parquet;
 
-import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FileStatsExtractor;
@@ -53,8 +53,7 @@ public class ParquetFileFormat extends FileFormat {
     public FormatReaderFactory createReaderFactory(
             RowType type, int[][] projection, List<Predicate> filters) {
         return new ParquetReaderFactory(
-                getParquetConfiguration(formatOptions),
-                (RowType) Projection.of(projection).project(type));
+                getParquetConfiguration(formatOptions), Projection.of(projection).project(type));
     }
 
     @Override

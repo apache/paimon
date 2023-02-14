@@ -19,8 +19,7 @@ package org.apache.flink.table.store.data;
 
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.types.RowType;
-
-import org.apache.commons.lang3.RandomStringUtils;
+import org.apache.flink.table.store.utils.StringUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -55,8 +54,8 @@ public class DataFormatTestUtil {
         // header (8 bytes) + 2 * string in fixed-length part (8 bytes each)
         BinaryRow row = new BinaryRow(2);
         BinaryRowWriter writer = new BinaryRowWriter(row);
-        writer.writeString(0, BinaryString.fromString(RandomStringUtils.randomNumeric(2)));
-        writer.writeString(1, BinaryString.fromString(RandomStringUtils.randomNumeric(2)));
+        writer.writeString(0, BinaryString.fromString(StringUtils.randomNumericString(2)));
+        writer.writeString(1, BinaryString.fromString(StringUtils.randomNumericString(2)));
         writer.complete();
         return row;
     }
@@ -68,8 +67,8 @@ public class DataFormatTestUtil {
         // 64 byte length string (8 bytes in fixed-length, 64 bytes in variable-length)
         BinaryRow row = new BinaryRow(2);
         BinaryRowWriter writer = new BinaryRowWriter(row);
-        writer.writeString(0, BinaryString.fromString(RandomStringUtils.randomNumeric(72)));
-        writer.writeString(1, BinaryString.fromString(RandomStringUtils.randomNumeric(64)));
+        writer.writeString(0, BinaryString.fromString(StringUtils.randomNumericString(72)));
+        writer.writeString(1, BinaryString.fromString(StringUtils.randomNumericString(64)));
         writer.complete();
         return row;
     }

@@ -17,7 +17,7 @@
 
 package org.apache.flink.table.store.codegen.codesplit;
 
-import org.apache.flink.util.FileUtils;
+import org.apache.flink.table.store.utils.FileIOUtils;
 
 import java.io.File;
 import java.util.function.Function;
@@ -39,7 +39,7 @@ abstract class CodeRewriterTestBase<R extends CodeRewriter> {
     R runTest(String filename) {
         try {
             String code =
-                    FileUtils.readFileUtf8(
+                    FileIOUtils.readFileUtf8(
                             new File(
                                     CodeRewriterTestBase.class
                                             .getClassLoader()
@@ -51,7 +51,7 @@ abstract class CodeRewriterTestBase<R extends CodeRewriter> {
                                                             + ".java")
                                             .toURI()));
             String expected =
-                    FileUtils.readFileUtf8(
+                    FileIOUtils.readFileUtf8(
                             new File(
                                     CodeRewriterTestBase.class
                                             .getClassLoader()

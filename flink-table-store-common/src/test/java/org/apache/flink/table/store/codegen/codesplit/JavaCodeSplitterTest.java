@@ -17,7 +17,7 @@
 
 package org.apache.flink.table.store.codegen.codesplit;
 
-import org.apache.flink.util.FileUtils;
+import org.apache.flink.table.store.utils.FileIOUtils;
 
 import org.junit.jupiter.api.Test;
 
@@ -86,7 +86,7 @@ class JavaCodeSplitterTest {
     private void runTest(String filename, int maxLength, int maxMembers) {
         try {
             String code =
-                    FileUtils.readFileUtf8(
+                    FileIOUtils.readFileUtf8(
                             new File(
                                     JavaCodeSplitterTest.class
                                             .getClassLoader()
@@ -94,7 +94,7 @@ class JavaCodeSplitterTest {
                                                     "codesplit/splitter/code/" + filename + ".java")
                                             .toURI()));
             String expected =
-                    FileUtils.readFileUtf8(
+                    FileIOUtils.readFileUtf8(
                             new File(
                                     JavaCodeSplitterTest.class
                                             .getClassLoader()

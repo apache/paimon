@@ -74,8 +74,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ParquetReadWriteTest {
 
     private static final LocalDateTime BASE_TIME = LocalDateTime.now();
-    private static final org.apache.flink.configuration.Configuration EMPTY_CONF =
-            new org.apache.flink.configuration.Configuration();
 
     private static final RowType ROW_TYPE =
             RowType.builder()

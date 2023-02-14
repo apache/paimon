@@ -18,13 +18,11 @@
 
 package org.apache.flink.table.store.format.avro;
 
-import org.apache.flink.api.common.serialization.BulkWriter;
-
 import org.apache.avro.file.DataFileWriter;
 
 import java.io.IOException;
 
-/** A simple {@link BulkWriter} implementation that wraps an Avro {@link DataFileWriter}. */
+/** A simple writer implementation that wraps an Avro {@link DataFileWriter}. */
 public class AvroBulkWriter<T> {
 
     /** The underlying Avro writer. */

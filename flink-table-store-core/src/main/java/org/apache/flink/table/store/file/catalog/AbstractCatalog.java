@@ -24,8 +24,7 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.system.SystemTableLoader;
-
-import org.apache.commons.lang3.StringUtils;
+import org.apache.flink.table.store.utils.StringUtils;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {

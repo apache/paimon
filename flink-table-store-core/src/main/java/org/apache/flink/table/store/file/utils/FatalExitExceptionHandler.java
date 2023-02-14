@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.core.security.FlinkSecurityManager;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,6 +34,7 @@ public final class FatalExitExceptionHandler implements Thread.UncaughtException
     public static final FatalExitExceptionHandler INSTANCE = new FatalExitExceptionHandler();
     public static final int EXIT_CODE = -17;
 
+    @SuppressWarnings("finally")
     @Override
     public void uncaughtException(Thread t, Throwable e) {
         try {
@@ -45,7 +44,7 @@ public final class FatalExitExceptionHandler implements Thread.UncaughtException
                     e);
             ThreadUtils.errorLogThreadDump(LOG);
         } finally {
-            FlinkSecurityManager.forceProcessExit(EXIT_CODE);
+            System.exit(EXIT_CODE);
         }
     }
 }

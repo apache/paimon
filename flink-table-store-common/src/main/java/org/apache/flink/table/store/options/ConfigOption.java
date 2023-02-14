@@ -25,7 +25,7 @@ import java.util.Collections;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 
 /**
  * A {@code ConfigOption} describes a configuration parameter. It encapsulates the configuration

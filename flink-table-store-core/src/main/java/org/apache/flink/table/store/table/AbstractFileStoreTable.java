@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;

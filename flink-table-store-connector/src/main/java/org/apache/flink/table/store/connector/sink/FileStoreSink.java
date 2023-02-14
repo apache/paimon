@@ -20,6 +20,7 @@ package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.connector.VersionedSerializerWrapper;
 import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -73,6 +74,7 @@ public class FileStoreSink extends FlinkSink {
 
     @Override
     protected CommittableStateManager createCommittableStateManager() {
-        return new RestoreAndFailCommittableStateManager(ManifestCommittableSerializer::new);
+        return new RestoreAndFailCommittableStateManager(
+                () -> new VersionedSerializerWrapper<>(new ManifestCommittableSerializer()));
     }
 }

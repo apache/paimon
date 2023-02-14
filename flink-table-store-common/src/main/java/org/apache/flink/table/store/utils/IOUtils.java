@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.util.ExceptionUtils;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
+
+import static java.util.Arrays.asList;
 
 /** An utility class for I/O related functionality. */
 public final class IOUtils {
@@ -111,6 +111,11 @@ public final class IOUtils {
     // ------------------------------------------------------------------------
     //  Silent I/O cleanup / closing
     // ------------------------------------------------------------------------
+
+    /** @see #closeAll(Iterable) */
+    public static void closeAll(AutoCloseable... closeables) throws Exception {
+        closeAll(asList(closeables));
+    }
 
     /**
      * Closes all {@link AutoCloseable} objects in the parameter, suppressing exceptions. Exception
