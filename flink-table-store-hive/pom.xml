@@ -84,6 +84,20 @@ under the License.
                 <hive.version>3.1.2</hive.version>
             </properties>
         </profile>
+
+        <profile>
+            <id>hive-3.1-hdp-3.1</id>
+            <properties>
+                <hive.main.version>3</hive.main.version>
+                <hive.version>3.1.0.3.1.5.190-1</hive.version>
+            </properties>
+            <repositories>
+                <repository>
+                    <id>HDPReleases</id>
+                    <url>https://repo.hortonworks.com/repository/releases/</url>
+                </repository>
+            </repositories>
+        </profile>
     </profiles>
 
 </project>
