@@ -24,32 +24,48 @@ import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.connector.FlinkRowWrapper;
+import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.table.sink.BucketComputer;
+import org.apache.flink.table.store.table.sink.PartitionComputer;
+
+import java.util.Objects;
+import java.util.function.Function;
 
 /** A {@link StreamPartitioner} to partition records by bucket. */
 public class BucketStreamPartitioner extends StreamPartitioner<RowData> {
 
     private final TableSchema schema;
+    private final boolean shuffleByPartitionEnable;
 
-    private transient BucketComputer computer;
-    private transient int numberOfChannels;
+    private transient Function<InternalRow, Integer> partitioner;
 
-    public BucketStreamPartitioner(TableSchema schema) {
+    public BucketStreamPartitioner(TableSchema schema, boolean shuffleByPartitionEnable) {
         this.schema = schema;
+        this.shuffleByPartitionEnable = shuffleByPartitionEnable;
     }
 
     @Override
     public void setup(int numberOfChannels) {
         super.setup(numberOfChannels);
-        this.computer = new BucketComputer(schema);
-        this.numberOfChannels = numberOfChannels;
+        BucketComputer bucketComputer = new BucketComputer(schema);
+        if (shuffleByPartitionEnable) {
+            PartitionComputer partitionComputer = new PartitionComputer(schema);
+            partitioner =
+                    row ->
+                            Math.abs(
+                                            Objects.hash(
+                                                    bucketComputer.bucket(row),
+                                                    partitionComputer.partition(row)))
+                                    % numberOfChannels;
+        } else {
+            partitioner = row -> bucketComputer.bucket(row) % numberOfChannels;
+        }
     }
 
     @Override
     public int selectChannel(SerializationDelegate<StreamRecord<RowData>> record) {
-        return computer.bucket(new FlinkRowWrapper(record.getInstance().getValue()))
-                % numberOfChannels;
+        return partitioner.apply(new FlinkRowWrapper(record.getInstance().getValue()));
     }
 
     @Override
@@ -69,6 +85,6 @@ public class BucketStreamPartitioner extends StreamPartitioner<RowData> {
 
     @Override
     public String toString() {
-        return "bucket-assigner";
+        return shuffleByPartitionEnable ? "bucket-partition-assigner" : "bucket-assigner";
     }
 }

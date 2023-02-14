@@ -62,6 +62,13 @@ public class FlinkConnectorOptions {
                                     + "By default, if this option is not defined, the planner will derive the parallelism "
                                     + "for each statement individually by also considering the global configuration.");
 
+    public static final ConfigOption<Boolean> SINK_SHUFFLE_BY_PARTITION =
+            ConfigOptions.key("sink.partition-shuffle")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "The option to enable shuffle data by dynamic partition fields in sink phase for table store.");
+
     public static final ConfigOption<Integer> SCAN_PARALLELISM =
             ConfigOptions.key("scan.parallelism")
                     .intType()

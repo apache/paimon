@@ -83,7 +83,11 @@ public abstract class FlinkSink implements Serializable {
         // When the job restarts, commitUser will be recovered from states and this value is
         // ignored.
         String initialCommitUser = UUID.randomUUID().toString();
+        return sinkFrom(input, initialCommitUser, createWriteProvider(initialCommitUser));
+    }
 
+    public DataStreamSink<?> sinkFrom(
+            DataStream<RowData> input, String commitUser, StoreSinkWrite.Provider sinkProvider) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
@@ -101,8 +105,7 @@ public abstract class FlinkSink implements Serializable {
                 input.transform(
                                 WRITER_NAME,
                                 typeInfo,
-                                createWriteOperator(
-                                        createWriteProvider(initialCommitUser), isStreaming))
+                                createWriteOperator(sinkProvider, isStreaming))
                         .setParallelism(input.getParallelism());
 
         SingleOutputStreamOperator<?> committed =
@@ -111,7 +114,7 @@ public abstract class FlinkSink implements Serializable {
                                 typeInfo,
                                 new CommitterOperator(
                                         streamingCheckpointEnabled,
-                                        initialCommitUser,
+                                        commitUser,
                                         createCommitterFactory(streamingCheckpointEnabled),
                                         createCommittableStateManager()))
                         .setParallelism(1)
