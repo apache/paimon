@@ -126,7 +126,7 @@ public interface Action {
             System.out.println("Available actions:");
             System.out.println("  " + COMPACT);
             System.out.println("  " + DROP_PARTITION);
-            System.out.println();
+            System.out.println("  " + DELETE);
 
             System.out.println("For detailed options of each action, run <action> --help");
         }
