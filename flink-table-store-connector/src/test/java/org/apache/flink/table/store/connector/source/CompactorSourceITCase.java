@@ -21,6 +21,7 @@ package org.apache.flink.table.store.connector.source;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.BinaryRowWriter;
 import org.apache.flink.table.store.data.BinaryString;
@@ -38,11 +39,10 @@ import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.util.CloseableIterator;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -71,9 +71,9 @@ public class CompactorSourceITCase extends AbstractTestBase {
     private Path tablePath;
     private String commitUser;
 
-    @Before
+    @BeforeEach
     public void before() throws IOException {
-        tablePath = new Path(TEMPORARY_FOLDER.newFolder().toString());
+        tablePath = new Path(getTempDirPath());
         commitUser = UUID.randomUUID().toString();
     }
 

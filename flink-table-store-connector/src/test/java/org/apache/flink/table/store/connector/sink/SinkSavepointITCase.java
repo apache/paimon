@@ -18,12 +18,11 @@
 
 package org.apache.flink.table.store.connector.sink;
 
-import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.JobStatus;
-import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.StateBackendOptions;
+import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
 import org.apache.flink.runtime.scheduler.stopwithsavepoint.StopWithSavepointStoppingException;
@@ -33,15 +32,15 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.file.utils.FailingFileIO;
-import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.ExceptionUtils;
 
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -53,47 +52,46 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 /** IT cases for {@link FileStoreSink} when writing file store and with savepoints. */
 public class SinkSavepointITCase extends AbstractTestBase {
 
     private String path;
     private String failingName;
 
-    @Before
+    @BeforeEach
     public void before() throws Exception {
-        path = TEMPORARY_FOLDER.newFolder().toPath().toString();
+        path = getTempDirPath();
         // for failure tests
         failingName = UUID.randomUUID().toString();
         FailingFileIO.reset(failingName, 100, 500);
     }
 
-    @Test(timeout = 180000)
+    @Test
+    @Timeout(180000)
     public void testRecoverFromSavepoint() throws Exception {
         String failingPath = FailingFileIO.getFailingPath(failingName, path);
         String savepointPath = null;
-        JobID jobId;
-        ClusterClient<?> client = MINI_CLUSTER_RESOURCE.getClusterClient();
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         OUTER:
         while (true) {
             // start a new job or recover from savepoint
-            jobId = runRecoverFromSavepointJob(failingPath, savepointPath);
+            JobClient jobClient = runRecoverFromSavepointJob(failingPath, savepointPath);
             while (true) {
                 // wait for a random number of time before stopping with savepoint
                 Thread.sleep(random.nextInt(5000));
-                if (client.getJobStatus(jobId).get() == JobStatus.FINISHED) {
+                if (jobClient.getJobStatus().get() == JobStatus.FINISHED) {
                     // job finished, check for result
                     break OUTER;
                 }
                 try {
                     // try to stop with savepoint
                     savepointPath =
-                            client.stopWithSavepoint(
-                                            jobId,
-                                            false,
-                                            path + "/savepoint",
-                                            SavepointFormatType.DEFAULT)
+                            jobClient
+                                    .stopWithSavepoint(
+                                            false, path + "/savepoint", SavepointFormatType.DEFAULT)
                                     .get();
                     break;
                 } catch (Exception e) {
@@ -113,7 +111,7 @@ public class SinkSavepointITCase extends AbstractTestBase {
                 }
             }
             // wait for job to stop
-            while (!client.getJobStatus(jobId).get().isGloballyTerminalState()) {
+            while (!jobClient.getJobStatus().get().isGloballyTerminalState()) {
                 Thread.sleep(1000);
             }
             // recover from savepoint in the next round
@@ -122,7 +120,7 @@ public class SinkSavepointITCase extends AbstractTestBase {
         checkRecoverFromSavepointResult(failingPath);
     }
 
-    private JobID runRecoverFromSavepointJob(String failingPath, String savepointPath)
+    private JobClient runRecoverFromSavepointJob(String failingPath, String savepointPath)
             throws Exception {
         Configuration conf = new Configuration();
         if (savepointPath != null) {
@@ -187,17 +185,15 @@ public class SinkSavepointITCase extends AbstractTestBase {
         FailingFileIO.retryArtificialException(() -> tEnv.executeSql(createSinkSql));
 
         String insertIntoSql = "INSERT INTO T SELECT * FROM default_catalog.default_database.S";
-        JobID jobId =
+        JobClient jobClient =
                 FailingFileIO.retryArtificialException(() -> tEnv.executeSql(insertIntoSql))
                         .getJobClient()
-                        .get()
-                        .getJobID();
+                        .get();
 
-        ClusterClient<?> client = MINI_CLUSTER_RESOURCE.getClusterClient();
-        while (client.getJobStatus(jobId).get() == JobStatus.INITIALIZING) {
+        while (jobClient.getJobStatus().get() == JobStatus.INITIALIZING) {
             Thread.sleep(1000);
         }
-        return jobId;
+        return jobClient;
     }
 
     private void checkRecoverFromSavepointResult(String failingPath) throws Exception {
@@ -221,12 +217,11 @@ public class SinkSavepointITCase extends AbstractTestBase {
         try (CloseableIterator<Row> it = tEnv.executeSql("SELECT * FROM T").collect()) {
             while (it.hasNext()) {
                 Row row = it.next();
-                Assert.assertEquals(1, row.getArity());
+                assertEquals(1, row.getArity());
                 actual.add((Integer) row.getField(0));
             }
         }
         Collections.sort(actual);
-        Assert.assertEquals(
-                IntStream.range(0, 100000).boxed().collect(Collectors.toList()), actual);
+        assertEquals(IntStream.range(0, 100000).boxed().collect(Collectors.toList()), actual);
     }
 }

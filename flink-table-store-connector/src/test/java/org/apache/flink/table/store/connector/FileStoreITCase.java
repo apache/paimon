@@ -36,6 +36,7 @@ import org.apache.flink.table.store.connector.sink.FlinkSinkBuilder;
 import org.apache.flink.table.store.connector.source.ContinuousFileStoreSource;
 import org.apache.flink.table.store.connector.source.FlinkSourceBuilder;
 import org.apache.flink.table.store.connector.source.StaticFileStoreSource;
+import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
@@ -49,18 +50,15 @@ import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.table.types.utils.TypeConversions;
-import org.apache.flink.test.util.AbstractTestBase;
+import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
+import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 
-import org.junit.Assume;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -79,12 +77,14 @@ import static org.apache.flink.table.store.CoreOptions.PATH;
 import static org.apache.flink.table.store.connector.LogicalTypeConversion.toDataType;
 import static org.apache.flink.table.store.file.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * ITCase for {@link StaticFileStoreSource}, {@link ContinuousFileStoreSource} and {@link
  * FileStoreSink}.
  */
-@RunWith(Parameterized.class)
+@ExtendWith(ParameterizedTestExtension.class)
 public class FileStoreITCase extends AbstractTestBase {
 
     public static final RowType TABLE_TYPE =
@@ -124,7 +124,7 @@ public class FileStoreITCase extends AbstractTestBase {
         this.env = isBatch ? buildBatchEnv() : buildStreamEnv();
     }
 
-    @Parameterized.Parameters(name = "isBatch-{0}")
+    @Parameters(name = "isBatch-{0}")
     public static List<Boolean> getVarSeg() {
         return Arrays.asList(true, false);
     }
@@ -133,7 +133,7 @@ public class FileStoreITCase extends AbstractTestBase {
         return new SerializableRowData(row, InternalSerializers.create(TABLE_TYPE));
     }
 
-    @Test
+    @TestTemplate
     public void testPartitioned() throws Exception {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
 
@@ -153,7 +153,7 @@ public class FileStoreITCase extends AbstractTestBase {
         assertThat(results).containsExactlyInAnyOrder(expected);
     }
 
-    @Test
+    @TestTemplate
     public void testNonPartitioned() throws Exception {
         FileStoreTable table = buildFileStoreTable(new int[0], new int[] {2});
 
@@ -170,9 +170,9 @@ public class FileStoreITCase extends AbstractTestBase {
         assertThat(results).containsExactlyInAnyOrder(expected);
     }
 
-    @Test
+    @TestTemplate
     public void testOverwrite() throws Exception {
-        Assume.assumeTrue(isBatch);
+        assumeTrue(isBatch);
 
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
 
@@ -219,7 +219,7 @@ public class FileStoreITCase extends AbstractTestBase {
         assertThat(results).containsExactlyInAnyOrder(expected);
     }
 
-    @Test
+    @TestTemplate
     public void testPartitionedNonKey() throws Exception {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[0]);
 
@@ -241,12 +241,12 @@ public class FileStoreITCase extends AbstractTestBase {
         assertThat(results).containsExactlyInAnyOrder(expected);
     }
 
-    @Test
+    @TestTemplate
     public void testKeyedProjection() throws Exception {
         testProjection(buildFileStoreTable(new int[0], new int[] {2}));
     }
 
-    @Test
+    @TestTemplate
     public void testNonKeyedProjection() throws Exception {
         testProjection(buildFileStoreTable(new int[0], new int[0]));
     }
@@ -289,18 +289,18 @@ public class FileStoreITCase extends AbstractTestBase {
         assertThat(results).containsExactlyInAnyOrder(expected);
     }
 
-    @Test
+    @TestTemplate
     public void testContinuous() throws Exception {
         innerTestContinuous(buildFileStoreTable(new int[0], new int[] {2}));
     }
 
-    @Test
+    @TestTemplate
     public void testContinuousWithoutPK() throws Exception {
         innerTestContinuous(buildFileStoreTable(new int[0], new int[0]));
     }
 
     private void innerTestContinuous(FileStoreTable table) throws Exception {
-        Assume.assumeFalse(isBatch);
+        assumeFalse(isBatch);
 
         BlockingIterator<RowData, Row> iterator =
                 BlockingIterator.of(
@@ -346,7 +346,7 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     public FileStoreTable buildFileStoreTable(int[] partitions, int[] primaryKey) throws Exception {
-        return buildFileStoreTable(isBatch, TEMPORARY_FOLDER, partitions, primaryKey);
+        return buildFileStoreTable(isBatch, getTempDirPath(), partitions, primaryKey);
     }
 
     private static RowData srcRow(RowKind kind, int v, String p, int k) {
@@ -369,9 +369,9 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     public static FileStoreTable buildFileStoreTable(
-            boolean noFail, TemporaryFolder temporaryFolder, int[] partitions, int[] primaryKey)
+            boolean noFail, String temporaryPath, int[] partitions, int[] primaryKey)
             throws Exception {
-        Options options = buildConfiguration(noFail, temporaryFolder.newFolder());
+        Options options = buildConfiguration(noFail, temporaryPath);
         Path tablePath = new CoreOptions(options.toMap()).path();
         UpdateSchema updateSchema =
                 new UpdateSchema(
@@ -392,15 +392,15 @@ public class FileStoreITCase extends AbstractTestBase {
                 });
     }
 
-    public static Options buildConfiguration(boolean noFail, File folder) {
+    public static Options buildConfiguration(boolean noFail, String temporaryPath) {
         Options options = new Options();
         options.set(BUCKET, NUM_BUCKET);
         if (noFail) {
-            options.set(PATH, folder.toURI().toString());
+            options.set(PATH, temporaryPath);
         } else {
             String failingName = UUID.randomUUID().toString();
             FailingFileIO.reset(failingName, 3, 100);
-            options.set(PATH, FailingFileIO.getFailingPath(failingName, folder.getPath()));
+            options.set(PATH, FailingFileIO.getFailingPath(failingName, temporaryPath));
         }
         options.set(FILE_FORMAT, "avro");
         return options;

@@ -21,12 +21,12 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
-import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.List;
@@ -41,14 +41,14 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     private TableEnvironment env;
 
-    @Before
+    @BeforeEach
     public void before() throws Exception {
         env = TableEnvironment.create(EnvironmentSettings.newInstance().inStreamingMode().build());
         env.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(100));
         env.getConfig()
                 .getConfiguration()
                 .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
-        String path = TEMPORARY_FOLDER.newFolder().toURI().toString();
+        String path = getTempDirPath();
         env.executeSql(
                 String.format(
                         "CREATE CATALOG my_catalog WITH ('type'='table-store', 'warehouse'='%s')",

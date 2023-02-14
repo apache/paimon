@@ -24,7 +24,7 @@ import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 
 import org.awaitility.Awaitility;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
