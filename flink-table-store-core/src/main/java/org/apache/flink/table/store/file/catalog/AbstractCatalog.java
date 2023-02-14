@@ -68,7 +68,7 @@ public abstract class AbstractCatalog implements Catalog {
             Path location = getTableLocation(originidentifier);
             return SystemTableLoader.load(type, fileIO, location);
         } else {
-            TableSchema tableSchema = getTableSchema(identifier);
+            TableSchema tableSchema = getDataTableSchema(identifier);
             return FileStoreTableFactory.create(fileIO, getTableLocation(identifier), tableSchema);
         }
     }
@@ -78,4 +78,6 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected abstract String warehouse();
+
+    protected abstract TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException ;
 }

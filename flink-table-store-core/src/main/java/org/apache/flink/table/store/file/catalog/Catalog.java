@@ -101,15 +101,6 @@ public interface Catalog extends AutoCloseable {
     Path getTableLocation(Identifier identifier);
 
     /**
-     * Return a {@link TableSchema} identified by the given {@link Identifier}.
-     *
-     * @param identifier Path of the table
-     * @return The requested table schema
-     * @throws TableNotExistException if the target does not exist
-     */
-    TableSchema getTableSchema(Identifier identifier) throws TableNotExistException;
-
-    /**
      * Return a {@link Table} identified by the given {@link Identifier}.
      *
      * @param identifier Path of the table
