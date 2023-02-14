@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
@@ -80,6 +81,7 @@ public class FlinkCatalog extends AbstractCatalog {
         }
     }
 
+    @VisibleForTesting
     public Catalog catalog() {
         return catalog;
     }

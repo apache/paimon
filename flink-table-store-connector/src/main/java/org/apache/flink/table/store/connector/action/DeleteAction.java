@@ -151,7 +151,7 @@ public class DeleteAction extends AbstractActionBase {
             Table queriedTable =
                     tEnv.sqlQuery(
                             String.format(
-                                    "SELECT * FROM %s WHERE %s;",
+                                    "SELECT * FROM %s WHERE %s",
                                     identifier.getEscapedFullName('`'), filter));
 
             List<DataStructureConverter<Object, Object>> converters =
