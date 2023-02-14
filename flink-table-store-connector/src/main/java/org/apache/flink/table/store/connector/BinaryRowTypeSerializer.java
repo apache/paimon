@@ -120,7 +120,11 @@ public final class BinaryRowTypeSerializer extends TypeSerializer<BinaryRow> {
         return new BinaryRowTypeSerializerSnapshot(serializer.getArity());
     }
 
-    private static class BinaryRowTypeSerializerSnapshot
+    /**
+     * {@link TypeSerializerSnapshot} for {@link BinaryRow}. It checks the compatibility of
+     * numFields without checking type.
+     */
+    public static class BinaryRowTypeSerializerSnapshot
             implements TypeSerializerSnapshot<BinaryRow> {
 
         private int numFields;
