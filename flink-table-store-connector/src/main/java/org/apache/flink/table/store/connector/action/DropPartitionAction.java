@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.connector.action;
 
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.SupportsWrite;
 import org.apache.flink.table.store.table.sink.TableCommit;
 
@@ -36,14 +36,18 @@ import static org.apache.flink.table.store.connector.action.Action.getPartitions
 import static org.apache.flink.table.store.connector.action.Action.getTablePath;
 
 /** Table drop partition action for Flink. */
-public class DropPartitionAction extends AbstractActionBase {
+public class DropPartitionAction extends ActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(DropPartitionAction.class);
 
     private final TableCommit commit;
 
-    DropPartitionAction(Path tablePath, List<Map<String, String>> partitions) {
-        super(tablePath);
+    DropPartitionAction(
+            String warehouse,
+            String databaseName,
+            String tableName,
+            List<Map<String, String>> partitions) {
+        super(warehouse, databaseName, tableName);
 
         this.commit =
                 ((SupportsWrite) table)
@@ -61,7 +65,7 @@ public class DropPartitionAction extends AbstractActionBase {
             return Optional.empty();
         }
 
-        Path tablePath = getTablePath(params);
+        Tuple3<String, String, String> tablePath = getTablePath(params);
 
         if (tablePath == null) {
             return Optional.empty();
@@ -83,7 +87,8 @@ public class DropPartitionAction extends AbstractActionBase {
             return Optional.empty();
         }
 
-        return Optional.of(new DropPartitionAction(tablePath, partitions));
+        return Optional.of(
+                new DropPartitionAction(tablePath.f0, tablePath.f1, tablePath.f2, partitions));
     }
 
     private static void printHelp() {

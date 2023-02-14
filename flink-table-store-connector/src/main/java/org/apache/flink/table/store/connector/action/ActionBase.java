@@ -21,7 +21,6 @@ package org.apache.flink.table.store.connector.action;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.file.catalog.Identifier;
-import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.Table;
@@ -30,24 +29,22 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** Abstract base of {@link Action}. */
-public abstract class AbstractActionBase implements Action {
+public abstract class ActionBase implements Action {
 
-    private static final Logger LOG = LoggerFactory.getLogger(AbstractActionBase.class);
+    private static final Logger LOG = LoggerFactory.getLogger(ActionBase.class);
 
-    protected final Catalog catalog;
+    protected Catalog catalog;
 
-    protected final Identifier identifier;
+    protected Identifier identifier;
 
     protected Table table;
 
-    AbstractActionBase(Path tablePath) {
-        this(tablePath, new Options());
+    ActionBase(String warehouse, String databaseName, String tableName) {
+        this(warehouse, databaseName, tableName, new Options());
     }
 
-    AbstractActionBase(Path tablePath, Options options) {
-        String warehouse = tablePath.getParent().getParent().getPath();
-        identifier = Identifier.fromPath(tablePath);
-
+    ActionBase(String warehouse, String databaseName, String tableName, Options options) {
+        identifier = new Identifier(databaseName, tableName);
         catalog =
                 CatalogFactory.createCatalog(
                         CatalogOptions.create(
@@ -59,9 +56,9 @@ public abstract class AbstractActionBase implements Action {
                 table = table.copy(options.toMap());
             }
         } catch (Catalog.TableNotExistException e) {
-            LOG.error(String.format("Table doesn't exist in path %s.", tablePath.getPath()), e);
-            System.err.printf("Table doesn't exist in path %s.\n", tablePath.getPath());
-            System.exit(1);
+            LOG.error("Table doesn't exist in given path.", e);
+            System.err.println("Table doesn't exist in given path.");
+            throw new RuntimeException(e);
         }
     }
 }

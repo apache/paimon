@@ -248,7 +248,12 @@ Run the following command to submit a 'delete' job for the table.
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table <table-name>
-    [--where <filter_spec>]
+    --where <filter_spec>
+    
+filter_spec is equal to the 'WHERE' clause in SQL DELETE statement. Examples:
+    age >= 18 AND age <= 60
+    animal <> 'cat'
+    id > (SELECT count(*) FROM employee)
 ```
 
 For more information of 'delete', see

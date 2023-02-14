@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.connector.action;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.ReadableConfig;
@@ -29,7 +30,6 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.sink.CompactorSinkBuilder;
 import org.apache.flink.table.store.connector.source.CompactorSourceBuilder;
 import org.apache.flink.table.store.connector.utils.StreamExecutionEnvironmentUtils;
-import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 
@@ -44,17 +44,18 @@ import static org.apache.flink.table.store.connector.action.Action.getPartitions
 import static org.apache.flink.table.store.connector.action.Action.getTablePath;
 
 /** Table compact action for Flink. */
-public class CompactAction extends AbstractActionBase {
+public class CompactAction extends ActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(CompactAction.class);
 
     private final CompactorSourceBuilder sourceBuilder;
     private final CompactorSinkBuilder sinkBuilder;
 
-    CompactAction(Path tablePath) {
-        super(tablePath, new Options().set(CoreOptions.WRITE_ONLY, false));
+    CompactAction(String warehouse, String database, String tableName) {
+        super(warehouse, database, tableName, new Options().set(CoreOptions.WRITE_ONLY, false));
 
-        sourceBuilder = new CompactorSourceBuilder(tablePath.toString(), (FileStoreTable) table);
+        sourceBuilder =
+                new CompactorSourceBuilder(identifier.getFullName(), (FileStoreTable) table);
         sinkBuilder = new CompactorSinkBuilder((FileStoreTable) table);
     }
 
@@ -91,13 +92,13 @@ public class CompactAction extends AbstractActionBase {
             return Optional.empty();
         }
 
-        Path tablePath = getTablePath(params);
+        Tuple3<String, String, String> tablePath = getTablePath(params);
 
         if (tablePath == null) {
             return Optional.empty();
         }
 
-        CompactAction action = new CompactAction(tablePath);
+        CompactAction action = new CompactAction(tablePath.f0, tablePath.f1, tablePath.f2);
 
         if (params.has("partition")) {
             List<Map<String, String>> partitions = getPartitions(params);

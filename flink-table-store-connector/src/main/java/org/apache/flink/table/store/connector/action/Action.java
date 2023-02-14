@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.connector.action;
 
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.PathUtils;
 
 import javax.annotation.Nullable;
 
@@ -37,13 +38,13 @@ public interface Action {
     void run() throws Exception;
 
     @Nullable
-    static Path getTablePath(MultipleParameterTool params) {
+    static Tuple3<String, String, String> getTablePath(MultipleParameterTool params) {
         String warehouse = params.get("warehouse");
         String database = params.get("database");
         String table = params.get("table");
         String path = params.get("path");
 
-        Path tablePath = null;
+        Tuple3<String, String, String> tablePath = null;
         int count = 0;
         if (warehouse != null || database != null || table != null) {
             if (warehouse == null || database == null || table == null) {
@@ -52,11 +53,15 @@ public interface Action {
                                 + "Run <action> --help for help.");
                 return null;
             }
-            tablePath = new Path(new Path(warehouse, database + ".db"), table);
+            tablePath = Tuple3.of(warehouse, database, table);
             count++;
         }
         if (path != null) {
-            tablePath = new Path(path);
+            tablePath =
+                    Tuple3.of(
+                            PathUtils.warehouse(path),
+                            PathUtils.database(path),
+                            PathUtils.table(path));
             count++;
         }
 

@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.connector.action;
 
-import org.apache.flink.table.store.fs.Path;
-
 import java.util.Optional;
 
 import static org.apache.flink.table.store.connector.action.Action.Factory.printHelp;
@@ -31,8 +29,8 @@ public class FlinkActions {
     //  Java API
     // ------------------------------------------------------------------------
 
-    public static CompactAction compact(Path tablePath) {
-        return new CompactAction(tablePath);
+    public static CompactAction compact(String warehouse, String database, String tableName) {
+        return new CompactAction(warehouse, database, tableName);
     }
 
     // ------------------------------------------------------------------------

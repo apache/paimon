@@ -81,7 +81,8 @@ public class Identifier implements Serializable {
         if (paths.length < 2) {
             throw new IllegalArgumentException(
                     String.format(
-                            "Cannot get splits from '%s' to get database and table", tablePath));
+                            "Path '%s' is not a legacy path, please use catalog table path instead: 'warehouse_path/your_database.db/your_table'.",
+                            tablePath));
         }
 
         String database = paths[paths.length - 2];

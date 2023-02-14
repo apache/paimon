@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector.action;
 
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -30,46 +31,32 @@ import org.apache.flink.table.data.conversion.DataStructureConverter;
 import org.apache.flink.table.data.conversion.DataStructureConverters;
 import org.apache.flink.table.store.connector.FlinkCatalog;
 import org.apache.flink.table.store.connector.sink.FlinkSinkBuilder;
-import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.SupportsWrite;
-import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
-import java.util.function.BiFunction;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static org.apache.flink.table.store.connector.action.Action.getTablePath;
 import static org.apache.flink.table.store.file.catalog.Catalog.DEFAULT_DATABASE;
 
 /** Delete from table action for Flink. */
-public class DeleteAction extends AbstractActionBase {
+public class DeleteAction extends ActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(DeleteAction.class);
 
     private final FlinkCatalog flinkCatalog;
 
-    @Nullable private String filter;
+    private final String filter;
 
-    public DeleteAction(Path tablePath) {
-        super(tablePath);
-        flinkCatalog = new FlinkCatalog(catalog, "table-store", DEFAULT_DATABASE);
-    }
-
-    public DeleteAction withFilter(String filter) {
+    public DeleteAction(String warehouse, String databaseName, String tableName, String filter) {
+        super(warehouse, databaseName, tableName);
         this.filter = filter;
-        return this;
+        flinkCatalog = new FlinkCatalog(catalog, "table-store", DEFAULT_DATABASE);
     }
 
     public static Optional<Action> create(String[] args) {
@@ -82,22 +69,18 @@ public class DeleteAction extends AbstractActionBase {
             return Optional.empty();
         }
 
-        Path tablePath = getTablePath(params);
+        Tuple3<String, String, String> tablePath = getTablePath(params);
 
         if (tablePath == null) {
             return Optional.empty();
         }
 
-        DeleteAction action = new DeleteAction(tablePath);
-
-        if (params.has("where")) {
-            String filter = params.get("where");
-            if (filter == null) {
-                return Optional.empty();
-            }
-
-            action.withFilter(filter);
+        String filter = params.get("where");
+        if (filter == null) {
+            return Optional.empty();
         }
+
+        DeleteAction action = new DeleteAction(tablePath.f0, tablePath.f1, tablePath.f2, filter);
 
         return Optional.of(action);
     }
@@ -109,19 +92,15 @@ public class DeleteAction extends AbstractActionBase {
         System.out.println("Syntax:");
         System.out.println(
                 "  delete --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> [--where <filter_spec>]");
-        System.out.println("  delete --path <table-path> [--where <filter_spec>]");
+                        + "--table <table-name> --where <filter_spec>");
+        System.out.println("  delete --path <table-path> --where <filter_spec>");
         System.out.println();
 
         System.out.println(
-                "The '--where <filter_spec>' part is equal to the 'WHERE' clause in SQL DELETE statement");
+                "The '--where <filter_spec>' part is equal to the 'WHERE' clause in SQL DELETE statement. If you want delete all records, please use overwrite (see doc).");
         System.out.println();
 
         System.out.println("Examples:");
-        System.out.println(
-                "  delete --warehouse hdfs:///path/to/warehouse --database test_db --table test_table");
-        System.out.println("  It's equal to 'DELETE FROM test_table' which deletes all records");
-        System.out.println();
         System.out.println(
                 "  delete --path hdfs:///path/to/warehouse/test_db.db/test_table --where id > (SELECT count(*) FROM employee)");
         System.out.println(
@@ -130,54 +109,44 @@ public class DeleteAction extends AbstractActionBase {
 
     @Override
     public void run() throws Exception {
-        if (filter == null) {
-            LOG.debug("Run delete action with no filter.");
-            ((SupportsWrite) table)
-                    .deleteWhere(
-                            UUID.randomUUID().toString(),
-                            new ArrayList<>(),
-                            Lock.factory(catalog.lockFactory().orElse(null), identifier));
-        } else {
-            LOG.debug("Run delete action with filter '{}'.", filter);
+        LOG.debug("Run delete action with filter '{}'.", filter);
 
-            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-            env.setParallelism(1);
-            StreamTableEnvironment tEnv =
-                    StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        StreamTableEnvironment tEnv =
+                StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
 
-            tEnv.registerCatalog(flinkCatalog.getName(), flinkCatalog);
-            tEnv.useCatalog(flinkCatalog.getName());
+        tEnv.registerCatalog(flinkCatalog.getName(), flinkCatalog);
+        tEnv.useCatalog(flinkCatalog.getName());
 
-            Table queriedTable =
-                    tEnv.sqlQuery(
-                            String.format(
-                                    "SELECT * FROM %s WHERE %s",
-                                    identifier.getEscapedFullName('`'), filter));
+        Table queriedTable =
+                tEnv.sqlQuery(
+                        String.format(
+                                "SELECT * FROM %s WHERE %s",
+                                identifier.getEscapedFullName('`'), filter));
 
-            List<DataStructureConverter<Object, Object>> converters =
-                    queriedTable.getResolvedSchema().getColumnDataTypes().stream()
-                            .map(DataStructureConverters::getConverter)
-                            .collect(Collectors.toList());
+        List<DataStructureConverter<Object, Object>> converters =
+                queriedTable.getResolvedSchema().getColumnDataTypes().stream()
+                        .map(DataStructureConverters::getConverter)
+                        .collect(Collectors.toList());
 
-            DataStream<RowData> dataStream =
-                    tEnv.toChangelogStream(queriedTable)
-                            .map(
-                                    row -> {
-                                        BiFunction<Integer, Row, Object> fieldConverter =
-                                                (i, r) ->
-                                                        converters
-                                                                .get(i)
-                                                                .toInternalOrNull(r.getField(i));
+        DataStream<RowData> dataStream =
+                tEnv.toChangelogStream(queriedTable)
+                        .map(
+                                row -> {
+                                    int arity = row.getArity();
+                                    GenericRowData rowData =
+                                            new GenericRowData(RowKind.DELETE, arity);
+                                    for (int i = 0; i < arity; i++) {
+                                        rowData.setField(
+                                                i,
+                                                converters
+                                                        .get(i)
+                                                        .toInternalOrNull(row.getField(i)));
+                                    }
+                                    return rowData;
+                                });
 
-                                        return GenericRowData.ofKind(
-                                                RowKind.DELETE,
-                                                IntStream.range(0, row.getArity())
-                                                        .mapToObj(i -> fieldConverter.apply(i, row))
-                                                        .toArray());
-                                    });
-
-            new FlinkSinkBuilder((FileStoreTable) table).withInput(dataStream).build();
-            env.execute();
-        }
+        new FlinkSinkBuilder((FileStoreTable) table).withInput(dataStream).build();
+        env.execute();
     }
 }

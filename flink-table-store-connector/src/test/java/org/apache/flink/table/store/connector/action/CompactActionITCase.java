@@ -90,7 +90,9 @@ public class CompactActionITCase extends ActionITCaseBase {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
-        new CompactAction(tablePath).withPartitions(getSpecifiedPartitions()).build(env);
+        new CompactAction(warehouse, database, tableName)
+                .withPartitions(getSpecifiedPartitions())
+                .build(env);
         env.execute();
 
         snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
@@ -153,7 +155,9 @@ public class CompactActionITCase extends ActionITCaseBase {
         env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
         env.getCheckpointConfig().setCheckpointInterval(500);
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
-        new CompactAction(tablePath).withPartitions(getSpecifiedPartitions()).build(env);
+        new CompactAction(warehouse, database, tableName)
+                .withPartitions(getSpecifiedPartitions())
+                .build(env);
         JobClient client = env.executeAsync();
 
         // first full compaction

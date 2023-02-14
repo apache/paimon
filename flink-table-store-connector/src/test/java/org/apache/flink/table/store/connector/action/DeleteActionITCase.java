@@ -55,26 +55,21 @@ public class DeleteActionITCase extends ActionITCaseBase {
 
     @BeforeEach
     public void setUp() {
-        init(tablePath.getParent().getParent().getPath());
+        init(warehouse);
     }
 
-    @ParameterizedTest(name = "hasPk-{0}, hasFilter-{1}")
+    @ParameterizedTest(name = "hasPk-{0}")
     @MethodSource("data")
-    public void testDeleteAction(boolean hasPk, boolean hasFilter, List<Row> expected)
+    public void testDeleteAction(boolean hasPk, List<Row> initialRecords, List<Row> expected)
             throws Exception {
         prepareTable(hasPk);
 
-        DeleteAction action = new DeleteAction(tablePath);
-        if (hasFilter) {
-            action.withFilter("k = 1");
-        }
+        DeleteAction action = new DeleteAction(warehouse, database, tableName, "k = 1");
 
         String tableName = Identifier.fromPath(tablePath).getObjectName();
 
         BlockingIterator<Row, Row> iterator =
-                testStreamingRead(
-                        buildSimpleQuery(tableName),
-                        hasPk ? initialRecordsWithPk : initialRecordsWithoutPk);
+                testStreamingRead(buildSimpleQuery(tableName), initialRecords);
 
         action.run();
 
@@ -113,48 +108,28 @@ public class DeleteActionITCase extends ActionITCaseBase {
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
     }
 
-    private final List<Row> initialRecordsWithPk =
-            Arrays.asList(
-                    changelogRow("+I", 1L, "World"),
-                    changelogRow("+I", 2L, "Store"),
-                    changelogRow("+I", 3L, "Developer"));
-    private final List<Row> initialRecordsWithoutPk =
-            Arrays.asList(
-                    changelogRow("+I", 1L, "Hi"),
-                    changelogRow("+I", 1L, "Hello"),
-                    changelogRow("+I", 1L, "World"),
-                    changelogRow("+I", 2L, "Flink"),
-                    changelogRow("+I", 2L, "Table"),
-                    changelogRow("+I", 2L, "Store"),
-                    changelogRow("+I", 3L, "Developer"));
-
     private static List<Arguments> data() {
         return Arrays.asList(
-                arguments(true, true, Collections.singletonList(changelogRow("-D", 1L, "World"))),
                 arguments(
                         true,
+                        Arrays.asList(
+                                changelogRow("+I", 1L, "World"),
+                                changelogRow("+I", 2L, "Store"),
+                                changelogRow("+I", 3L, "Developer")),
+                        Collections.singletonList(changelogRow("-D", 1L, "World"))),
+                arguments(
                         false,
                         Arrays.asList(
-                                changelogRow("-D", 1L, "World"),
-                                changelogRow("-D", 2L, "Store"),
-                                changelogRow("-D", 3L, "Developer"))),
-                arguments(
-                        false,
-                        true,
+                                changelogRow("+I", 1L, "Hi"),
+                                changelogRow("+I", 1L, "Hello"),
+                                changelogRow("+I", 1L, "World"),
+                                changelogRow("+I", 2L, "Flink"),
+                                changelogRow("+I", 2L, "Table"),
+                                changelogRow("+I", 2L, "Store"),
+                                changelogRow("+I", 3L, "Developer")),
                         Arrays.asList(
                                 changelogRow("-D", 1L, "Hi"),
                                 changelogRow("-D", 1L, "Hello"),
-                                changelogRow("-D", 1L, "World"))),
-                arguments(
-                        false,
-                        false,
-                        Arrays.asList(
-                                changelogRow("-D", 1L, "Hi"),
-                                changelogRow("-D", 1L, "Hello"),
-                                changelogRow("-D", 1L, "World"),
-                                changelogRow("-D", 2L, "Flink"),
-                                changelogRow("-D", 2L, "Table"),
-                                changelogRow("-D", 2L, "Store"),
-                                changelogRow("-D", 3L, "Developer"))));
+                                changelogRow("-D", 1L, "World"))));
     }
 }

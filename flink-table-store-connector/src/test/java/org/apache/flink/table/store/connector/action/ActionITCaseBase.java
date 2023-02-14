@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector.action;
 
+import org.apache.flink.table.store.PathUtils;
 import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.data.DataFormatTestUtil;
 import org.apache.flink.table.store.data.GenericRow;
@@ -51,6 +52,9 @@ import java.util.UUID;
 public class ActionITCaseBase extends AbstractTestBase {
 
     protected Path tablePath;
+    protected String warehouse;
+    protected String database;
+    protected String tableName;
     protected String commitUser;
 
     protected SnapshotManager snapshotManager;
@@ -61,7 +65,10 @@ public class ActionITCaseBase extends AbstractTestBase {
 
     @BeforeEach
     public void before() throws IOException {
-        tablePath = new Path(getTempDirPath(), "default.db/test_table_" + UUID.randomUUID());
+        warehouse = getTempDirPath();
+        database = "default";
+        tableName = "test_table_" + UUID.randomUUID();
+        tablePath = PathUtils.path(warehouse, database, tableName);
         commitUser = UUID.randomUUID().toString();
         incrementalIdentifier = 0;
     }
