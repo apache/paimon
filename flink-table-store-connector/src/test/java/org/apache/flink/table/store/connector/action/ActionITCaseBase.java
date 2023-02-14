@@ -51,7 +51,6 @@ import java.util.UUID;
 /** {@link Action} test base. */
 public class ActionITCaseBase extends AbstractTestBase {
 
-    protected Path tablePath;
     protected String warehouse;
     protected String database;
     protected String tableName;
@@ -68,7 +67,6 @@ public class ActionITCaseBase extends AbstractTestBase {
         warehouse = getTempDirPath();
         database = "default";
         tableName = "test_table_" + UUID.randomUUID();
-        tablePath = PathUtils.path(warehouse, database, tableName);
         commitUser = UUID.randomUUID().toString();
         incrementalIdentifier = 0;
     }
@@ -89,6 +87,7 @@ public class ActionITCaseBase extends AbstractTestBase {
             List<String> primaryKeys,
             Map<String, String> options)
             throws Exception {
+        Path tablePath = PathUtils.path(warehouse, database, tableName);
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         TableSchema tableSchema =
                 schemaManager.commitNewVersion(

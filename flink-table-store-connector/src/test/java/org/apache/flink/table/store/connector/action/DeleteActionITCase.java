@@ -20,7 +20,6 @@ package org.apache.flink.table.store.connector.action;
 
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.catalog.Identifier;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.types.DataType;
@@ -65,8 +64,6 @@ public class DeleteActionITCase extends ActionITCaseBase {
         prepareTable(hasPk);
 
         DeleteAction action = new DeleteAction(warehouse, database, tableName, "k = 1");
-
-        String tableName = Identifier.fromPath(tablePath).getObjectName();
 
         BlockingIterator<Row, Row> iterator =
                 testStreamingRead(buildSimpleQuery(tableName), initialRecords);
