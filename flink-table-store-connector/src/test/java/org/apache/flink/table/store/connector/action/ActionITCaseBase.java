@@ -18,11 +18,11 @@
 
 package org.apache.flink.table.store.connector.action;
 
-import org.apache.flink.table.store.PathUtils;
 import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.data.DataFormatTestUtil;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.file.catalog.CatalogUtils;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
@@ -87,7 +87,7 @@ public class ActionITCaseBase extends AbstractTestBase {
             List<String> primaryKeys,
             Map<String, String> options)
             throws Exception {
-        Path tablePath = PathUtils.path(warehouse, database, tableName);
+        Path tablePath = CatalogUtils.path(warehouse, database, tableName);
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         TableSchema tableSchema =
                 schemaManager.commitNewVersion(

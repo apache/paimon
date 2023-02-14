@@ -20,7 +20,7 @@ package org.apache.flink.table.store.connector.action;
 
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.flink.table.store.PathUtils;
+import org.apache.flink.table.store.file.catalog.CatalogUtils;
 
 import javax.annotation.Nullable;
 
@@ -59,9 +59,9 @@ public interface Action {
         if (path != null) {
             tablePath =
                     Tuple3.of(
-                            PathUtils.warehouse(path),
-                            PathUtils.database(path),
-                            PathUtils.table(path));
+                            CatalogUtils.warehouse(path),
+                            CatalogUtils.database(path),
+                            CatalogUtils.table(path));
             count++;
         }
 

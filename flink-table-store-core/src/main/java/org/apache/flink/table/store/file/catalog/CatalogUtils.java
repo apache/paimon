@@ -16,13 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store;
+package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.table.store.file.catalog.Identifier;
 import org.apache.flink.table.store.fs.Path;
 
-/** Utils for {@link Path}. */
-public class PathUtils {
+/** Utils for {@link Catalog}. */
+public class CatalogUtils {
 
     public static Path path(String warehouse, String database, String table) {
         return new Path(String.format("%s/%s.db/%s", warehouse, database, table));
