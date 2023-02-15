@@ -78,6 +78,14 @@ public class FlinkConnectorOptions {
                                     + "By default, if this option is not defined, the planner will derive the parallelism "
                                     + "for each statement individually by also considering the global configuration.");
 
+    public static final ConfigOption<Boolean> STREAMING_READ_ATOMIC =
+            ConfigOptions.key("streaming-read-atomic")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "The option to enable return per iterator instead of per record in streaming read."
+                                    + " This can ensure that there will be no checkpoint segmentation in iterator consumption.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
