@@ -83,8 +83,17 @@ public class FlinkConnectorOptions {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "The option to enable return per iterator instead of per record in streaming read."
-                                    + " This can ensure that there will be no checkpoint segmentation in iterator consumption.");
+                            Description.builder()
+                                    .text(
+                                            "The option to enable return per iterator instead of per record in streaming read.")
+                                    .text(
+                                            "This can ensure that there will be no checkpoint segmentation in iterator consumption.")
+                                    .linebreak()
+                                    .text(
+                                            "By default, streaming source checkpoint will be performed in any time,"
+                                                    + " this means 'UPDATE_BEFORE' and 'UPDATE_AFTER' can be split into two checkpoint."
+                                                    + " Downstream can see intermediate state.")
+                                    .build());
 
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
