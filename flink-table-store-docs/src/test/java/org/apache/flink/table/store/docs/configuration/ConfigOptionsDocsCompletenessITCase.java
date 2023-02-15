@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.docs.configuration;
 
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.table.store.annotation.Documentation;
 import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.flink.table.store.utils.Pair;
 
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -134,9 +134,9 @@ public class ConfigOptionsDocsCompletenessITCase {
                                                                 })
                                                         .get());
                             }
-                            return new Tuple2<>(entry.getKey(), consolidated);
+                            return Pair.of(entry.getKey(), consolidated);
                         })
-                .collect(Collectors.toMap((t) -> t.f0, (t) -> t.f1));
+                .collect(Collectors.toMap(Pair::getLeft, Pair::getRight));
     }
 
     private static void compareDocumentedAndExistingOptions(
