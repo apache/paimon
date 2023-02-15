@@ -56,7 +56,7 @@ import org.apache.flink.table.store.types.TimestampType;
 import org.apache.flink.table.store.types.VarBinaryType;
 import org.apache.flink.table.store.types.VarCharType;
 
-import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang.StringUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;

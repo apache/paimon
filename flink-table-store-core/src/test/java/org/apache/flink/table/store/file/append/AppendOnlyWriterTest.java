@@ -19,7 +19,6 @@
 
 package org.apache.flink.table.store.file.append;
 
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.BinaryString;
@@ -39,6 +38,7 @@ import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.VarCharType;
+import org.apache.flink.table.store.utils.Pair;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -127,7 +127,7 @@ public class AppendOnlyWriterTest {
     @Test
     public void testMultipleCommits() throws Exception {
         RecordWriter<InternalRow> writer =
-                createWriter(1024 * 1024L, true, Collections.emptyList()).f0;
+                createWriter(1024 * 1024L, true, Collections.emptyList()).getLeft();
 
         // Commit 5 continues txn.
         for (int txn = 0; txn < 5; txn += 1) {
@@ -234,10 +234,10 @@ public class AppendOnlyWriterTest {
 
         // increase target file size to test compaction
         long targetFileSize = 1024 * 1024L;
-        Tuple2<AppendOnlyWriter, LinkedList<DataFileMeta>> writerAndToCompact =
+        Pair<AppendOnlyWriter, LinkedList<DataFileMeta>> writerAndToCompact =
                 createWriter(targetFileSize, true, firstInc.newFilesIncrement().newFiles());
-        writer = writerAndToCompact.f0;
-        LinkedList<DataFileMeta> toCompact = writerAndToCompact.f1;
+        writer = writerAndToCompact.getLeft();
+        LinkedList<DataFileMeta> toCompact = writerAndToCompact.getRight();
         assertThat(toCompact).containsExactlyElementsOf(firstInc.newFilesIncrement().newFiles());
         writer.write(row(id, String.format("%03d", id), PART));
         writer.sync();
@@ -298,14 +298,14 @@ public class AppendOnlyWriterTest {
     }
 
     private AppendOnlyWriter createEmptyWriter(long targetFileSize) {
-        return createWriter(targetFileSize, false, Collections.emptyList()).f0;
+        return createWriter(targetFileSize, false, Collections.emptyList()).getLeft();
     }
 
-    private Tuple2<AppendOnlyWriter, LinkedList<DataFileMeta>> createWriter(
+    private Pair<AppendOnlyWriter, LinkedList<DataFileMeta>> createWriter(
             long targetFileSize, boolean forceCompact, List<DataFileMeta> scannedFiles) {
         FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>(scannedFiles);
-        return new Tuple2<>(
+        return Pair.of(
                 new AppendOnlyWriter(
                         LocalFileIO.create(),
                         SCHEMA_ID,
