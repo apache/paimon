@@ -31,6 +31,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -92,6 +94,26 @@ public class OrcFilterConverterTest {
                                                 "long1", PredicateLeaf.Type.LONG, 2))),
                         new OrcFilters.Not(
                                 new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 3))));
+
+        assertThat(
+                        builder.in(
+                                        0,
+                                        LongStream.range(1L, 22L)
+                                                .boxed()
+                                                .collect(Collectors.toList()))
+                                .visit(OrcPredicateFunctionVisitor.VISITOR)
+                                .isPresent())
+                .isFalse();
+
+        assertThat(
+                        builder.notIn(
+                                        0,
+                                        LongStream.range(1L, 22L)
+                                                .boxed()
+                                                .collect(Collectors.toList()))
+                                .visit(OrcPredicateFunctionVisitor.VISITOR)
+                                .isPresent())
+                .isFalse();
     }
 
     private void test(Predicate predicate, OrcFilters.Predicate orcPredicate) {
