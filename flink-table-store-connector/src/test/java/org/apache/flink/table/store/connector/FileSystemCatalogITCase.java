@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.table.store.file.catalog.AbstractCatalog;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.Identifier;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
@@ -81,7 +82,7 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
         Identifier identifier = new Identifier(DB_NAME, "t3");
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
-        Path tablePath = catalog.getTableLocation(identifier);
+        Path tablePath = ((AbstractCatalog) catalog).getDataTableLocation(identifier);
         assertEquals(
                 tablePath.toString(),
                 new File(path, DB_NAME + ".db" + File.separator + "t3").toString());

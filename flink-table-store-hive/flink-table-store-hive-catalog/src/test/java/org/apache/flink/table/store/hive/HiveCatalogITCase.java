@@ -24,6 +24,7 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.store.connector.FlinkCatalog;
+import org.apache.flink.table.store.file.catalog.AbstractCatalog;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.catalog.Identifier;
@@ -303,7 +304,8 @@ public class HiveCatalogITCase {
         Identifier identifier = new Identifier("test_db", "t3");
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
-        org.apache.flink.table.store.fs.Path tablePath = catalog.getTableLocation(identifier);
+        org.apache.flink.table.store.fs.Path tablePath =
+                ((AbstractCatalog) catalog).getDataTableLocation(identifier);
         Assert.assertEquals(tablePath.toString(), path + "test_db.db" + File.separator + "t3");
 
         // TODO: the hiverunner (4.0) has a bug ,it can not rename the table path correctly ,
