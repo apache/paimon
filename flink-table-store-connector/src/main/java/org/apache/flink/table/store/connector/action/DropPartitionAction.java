@@ -18,14 +18,9 @@
 
 package org.apache.flink.table.store.connector.action;
 
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.connector.FlinkUtils;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.Options;
-import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.FileStoreTableFactory;
+import org.apache.flink.table.store.table.SupportsWrite;
 import org.apache.flink.table.store.table.sink.TableCommit;
 
 import org.slf4j.Logger;
@@ -41,23 +36,23 @@ import static org.apache.flink.table.store.connector.action.Action.getPartitions
 import static org.apache.flink.table.store.connector.action.Action.getTablePath;
 
 /** Table drop partition action for Flink. */
-public class DropPartitionAction implements Action {
+public class DropPartitionAction extends ActionBase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(CompactAction.class);
+    private static final Logger LOG = LoggerFactory.getLogger(DropPartitionAction.class);
 
     private final TableCommit commit;
 
-    DropPartitionAction(Path tablePath, List<Map<String, String>> partitions) {
-        Options tableOptions = new Options();
-        tableOptions.set(CoreOptions.PATH, tablePath.toString());
-        FileStoreTable table =
-                FileStoreTableFactory.create(
-                        FlinkUtils.catalogOptions(
-                                tableOptions.toMap(),
-                                StreamExecutionEnvironment.getExecutionEnvironment()
-                                        .getConfiguration()));
+    DropPartitionAction(
+            String warehouse,
+            String databaseName,
+            String tableName,
+            List<Map<String, String>> partitions) {
+        super(warehouse, databaseName, tableName);
+
         this.commit =
-                table.newCommit(UUID.randomUUID().toString()).withOverwritePartitions(partitions);
+                ((SupportsWrite) table)
+                        .newCommit(UUID.randomUUID().toString())
+                        .withOverwritePartitions(partitions);
     }
 
     public static Optional<Action> create(String[] args) {
@@ -70,7 +65,7 @@ public class DropPartitionAction implements Action {
             return Optional.empty();
         }
 
-        Path tablePath = getTablePath(params);
+        Tuple3<String, String, String> tablePath = getTablePath(params);
 
         if (tablePath == null) {
             return Optional.empty();
@@ -92,7 +87,8 @@ public class DropPartitionAction implements Action {
             return Optional.empty();
         }
 
-        return Optional.of(new DropPartitionAction(tablePath, partitions));
+        return Optional.of(
+                new DropPartitionAction(tablePath.f0, tablePath.f1, tablePath.f2, partitions));
     }
 
     private static void printHelp() {

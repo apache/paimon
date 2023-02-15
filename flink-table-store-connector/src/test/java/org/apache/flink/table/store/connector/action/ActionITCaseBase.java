@@ -22,6 +22,7 @@ import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.data.DataFormatTestUtil;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.file.catalog.CatalogUtils;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
@@ -50,7 +51,9 @@ import java.util.UUID;
 /** {@link Action} test base. */
 public class ActionITCaseBase extends AbstractTestBase {
 
-    protected Path tablePath;
+    protected String warehouse;
+    protected String database;
+    protected String tableName;
     protected String commitUser;
 
     protected SnapshotManager snapshotManager;
@@ -61,7 +64,9 @@ public class ActionITCaseBase extends AbstractTestBase {
 
     @BeforeEach
     public void before() throws IOException {
-        tablePath = new Path(getTempDirPath());
+        warehouse = getTempDirPath();
+        database = "default";
+        tableName = "test_table_" + UUID.randomUUID();
         commitUser = UUID.randomUUID().toString();
         incrementalIdentifier = 0;
     }
@@ -82,6 +87,7 @@ public class ActionITCaseBase extends AbstractTestBase {
             List<String> primaryKeys,
             Map<String, String> options)
             throws Exception {
+        Path tablePath = CatalogUtils.path(warehouse, database, tableName);
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         TableSchema tableSchema =
                 schemaManager.commitNewVersion(

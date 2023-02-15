@@ -52,7 +52,9 @@ public class DropPartitionITCase extends ActionITCaseBase {
         FileStoreTable table = prepareTable(hasPk);
 
         new DropPartitionAction(
-                        tablePath,
+                        warehouse,
+                        database,
+                        tableName,
                         Collections.singletonList(Collections.singletonMap("partKey0", "0")))
                 .run();
 
@@ -99,7 +101,9 @@ public class DropPartitionITCase extends ActionITCaseBase {
         partitions1.put("partKey0", "1");
         partitions1.put("partKey1", "0");
 
-        new DropPartitionAction(tablePath, Arrays.asList(partitions0, partitions1)).run();
+        new DropPartitionAction(
+                        warehouse, database, tableName, Arrays.asList(partitions0, partitions1))
+                .run();
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
         assertThat(snapshot.id()).isEqualTo(5);

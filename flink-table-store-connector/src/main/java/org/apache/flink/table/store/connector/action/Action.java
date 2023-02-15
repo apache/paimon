@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.connector.action;
 
+import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.file.catalog.CatalogUtils;
 
 import javax.annotation.Nullable;
 
@@ -37,13 +38,13 @@ public interface Action {
     void run() throws Exception;
 
     @Nullable
-    static Path getTablePath(MultipleParameterTool params) {
+    static Tuple3<String, String, String> getTablePath(MultipleParameterTool params) {
         String warehouse = params.get("warehouse");
         String database = params.get("database");
         String table = params.get("table");
         String path = params.get("path");
 
-        Path tablePath = null;
+        Tuple3<String, String, String> tablePath = null;
         int count = 0;
         if (warehouse != null || database != null || table != null) {
             if (warehouse == null || database == null || table == null) {
@@ -52,11 +53,15 @@ public interface Action {
                                 + "Run <action> --help for help.");
                 return null;
             }
-            tablePath = new Path(new Path(warehouse, database + ".db"), table);
+            tablePath = Tuple3.of(warehouse, database, table);
             count++;
         }
         if (path != null) {
-            tablePath = new Path(path);
+            tablePath =
+                    Tuple3.of(
+                            CatalogUtils.warehouse(path),
+                            CatalogUtils.database(path),
+                            CatalogUtils.table(path));
             count++;
         }
 
@@ -99,6 +104,7 @@ public interface Action {
         // supported actions
         private static final String COMPACT = "compact";
         private static final String DROP_PARTITION = "drop-partition";
+        private static final String DELETE = "delete";
 
         public static Optional<Action> create(String[] args) {
             String action = args[0].toLowerCase();
@@ -109,6 +115,8 @@ public interface Action {
                     return CompactAction.create(actionArgs);
                 case DROP_PARTITION:
                     return DropPartitionAction.create(actionArgs);
+                case DELETE:
+                    return DeleteAction.create(actionArgs);
                 default:
                     System.err.println("Unknown action \"" + action + "\"");
                     printHelp();
@@ -123,7 +131,7 @@ public interface Action {
             System.out.println("Available actions:");
             System.out.println("  " + COMPACT);
             System.out.println("  " + DROP_PARTITION);
-            System.out.println();
+            System.out.println("  " + DELETE);
 
             System.out.println("For detailed options of each action, run <action> --help");
         }

@@ -18,11 +18,13 @@
 
 package org.apache.flink.table.store.file.catalog;
 
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.utils.StringUtils;
 
 import java.io.Serializable;
 import java.util.Objects;
 
+import static org.apache.flink.table.store.file.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /** Identifies an object in a catalog. */
@@ -50,6 +52,11 @@ public class Identifier implements Serializable {
         return String.format("%s.%s", database, table);
     }
 
+    public String getEscapedFullName(char escapeChar) {
+        return String.format(
+                "%c%s%c.%c%s%c", escapeChar, database, escapeChar, escapeChar, table, escapeChar);
+    }
+
     public static Identifier fromString(String fullName) {
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(fullName), "fullName cannot be null or empty");
@@ -58,10 +65,30 @@ public class Identifier implements Serializable {
 
         if (paths.length != 2) {
             throw new IllegalArgumentException(
-                    String.format("Cannot get split '%s' to get database and table", fullName));
+                    String.format(
+                            "Cannot get splits from '%s' to get database and table", fullName));
         }
 
         return new Identifier(paths[0], paths[1]);
+    }
+
+    public static Identifier fromPath(Path tablePath) {
+        return fromPath(tablePath.getPath());
+    }
+
+    public static Identifier fromPath(String tablePath) {
+        String[] paths = tablePath.split("/");
+        if (paths.length < 2) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Path '%s' is not a legacy path, please use catalog table path instead: 'warehouse_path/your_database.db/your_table'.",
+                            tablePath));
+        }
+
+        String database = paths[paths.length - 2];
+        database = database.substring(0, database.length() - DB_SUFFIX.length());
+
+        return new Identifier(database, paths[paths.length - 1]);
     }
 
     @Override
