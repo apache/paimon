@@ -21,6 +21,7 @@ package org.apache.flink.table.store.connector.source;
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
+import org.apache.flink.api.connector.source.SplitsAssignment;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
@@ -163,22 +164,28 @@ public class ContinuousFileSplitEnumerator
     }
 
     private void assignSplits() {
+        Map<Integer, List<FileStoreSourceSplit>> toAssignSplits = new HashMap<>();
         bucketSplits.forEach(
                 (bucket, splits) -> {
                     if (splits.size() > 0) {
                         // To ensure the order of consumption, the data of the same bucket is given
                         // to a task to be consumed.
                         int task = bucket % context.currentParallelism();
-                        if (readersAwaitingSplit.remove(task)) {
+                        if (readersAwaitingSplit.contains(task)) {
                             // if the reader that requested another split has failed in the
                             // meantime, remove
                             // it from the list of waiting readers
                             if (!context.registeredReaders().containsKey(task)) {
+                                readersAwaitingSplit.remove(task);
                                 return;
                             }
-                            context.assignSplit(splits.poll(), task);
+                            toAssignSplits
+                                    .computeIfAbsent(task, i -> new ArrayList<>())
+                                    .add(splits.poll());
                         }
                     }
                 });
+        toAssignSplits.keySet().forEach(readersAwaitingSplit::remove);
+        context.assignSplits(new SplitsAssignment<>(toAssignSplits));
     }
 }
