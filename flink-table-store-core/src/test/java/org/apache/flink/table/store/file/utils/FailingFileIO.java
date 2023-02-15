@@ -27,8 +27,7 @@ import org.apache.flink.table.store.fs.PositionOutputStreamWrapper;
 import org.apache.flink.table.store.fs.SeekableInputStream;
 import org.apache.flink.table.store.fs.SeekableInputStreamWrapper;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.util.ExceptionUtils;
-import org.apache.flink.util.function.RunnableWithException;
+import org.apache.flink.table.store.utils.ExceptionUtils;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -187,7 +186,7 @@ public class FailingFileIO extends TraceableFileIO {
         }
     }
 
-    public static void retryArtificialException(RunnableWithException runnable) throws Exception {
+    public static void retryArtificialException(Runnable runnable) throws Exception {
         while (true) {
             try {
                 runnable.run();
