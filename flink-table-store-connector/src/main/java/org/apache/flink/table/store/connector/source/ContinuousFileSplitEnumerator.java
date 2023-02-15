@@ -185,7 +185,7 @@ public class ContinuousFileSplitEnumerator
                         }
                     }
                 });
-        toAssignSplits.forEach((task, splits) -> readersAwaitingSplit.remove(task));
+        toAssignSplits.keySet().forEach(readersAwaitingSplit::remove);
         context.assignSplits(new SplitsAssignment<>(toAssignSplits));
     }
 }
