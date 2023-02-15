@@ -86,7 +86,7 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
             pool.recycler().recycle(iterator);
             return finishSplit();
         }
-        return recordsFunction.forRecords(currentSplitId, iterator.replace(nextBatch));
+        return recordsFunction.createRecords(currentSplitId, iterator.replace(nextBatch));
     }
 
     private boolean reachLimit() {
@@ -167,7 +167,8 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
             currentReader = null;
         }
 
-        final RecordsWithSplitIds<T> finishRecords = recordsFunction.finishedSplit(currentSplitId);
+        final RecordsWithSplitIds<T> finishRecords =
+                recordsFunction.createRecordsWithFinishedSplit(currentSplitId);
         currentSplitId = null;
         return finishRecords;
     }

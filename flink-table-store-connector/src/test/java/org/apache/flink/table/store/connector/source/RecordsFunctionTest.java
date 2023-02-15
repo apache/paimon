@@ -55,7 +55,7 @@ public class RecordsFunctionTest {
     public void testSingle() {
         SingleRecordsFunction function = RecordsFunction.forSingle();
         RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> records =
-                function.forRecords("", iter);
+                function.createRecords("", iter);
         records.nextSplit();
 
         BulkFormat.RecordIterator<RowData> iterator = records.nextRecordFromSplit();
@@ -69,7 +69,7 @@ public class RecordsFunctionTest {
     @Test
     public void testIterate() {
         IterateRecordsFunction function = RecordsFunction.forIterate();
-        RecordsWithSplitIds<RecordAndPosition<RowData>> records = function.forRecords("", iter);
+        RecordsWithSplitIds<RecordAndPosition<RowData>> records = function.createRecords("", iter);
         records.nextSplit();
 
         RecordAndPosition<RowData> record = records.nextRecordFromSplit();

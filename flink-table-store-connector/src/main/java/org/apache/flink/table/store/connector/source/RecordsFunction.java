@@ -29,11 +29,14 @@ import org.apache.flink.table.data.RowData;
 /** Records construction and emitter in source. */
 public interface RecordsFunction<T> extends RecordEmitter<T, RowData, FileStoreSourceSplitState> {
 
-    RecordsWithSplitIds<T> forRecords(
+    /** Create a {@link RecordsWithSplitIds} to emit records. */
+    RecordsWithSplitIds<T> createRecords(
             String splitId, BulkFormat.RecordIterator<RowData> recordsForSplit);
 
-    RecordsWithSplitIds<T> finishedSplit(String splitId);
+    /** Create a {@link RecordsWithSplitIds} to indicate that the split is finished. */
+    RecordsWithSplitIds<T> createRecordsWithFinishedSplit(String splitId);
 
+    /** Emit records for {@code element}. */
     void emitRecord(T element, SourceOutput<RowData> output, FileStoreSourceSplitState state)
             throws Exception;
 
@@ -49,13 +52,14 @@ public interface RecordsFunction<T> extends RecordEmitter<T, RowData, FileStoreS
     class IterateRecordsFunction implements RecordsFunction<RecordAndPosition<RowData>> {
 
         @Override
-        public RecordsWithSplitIds<RecordAndPosition<RowData>> forRecords(
+        public RecordsWithSplitIds<RecordAndPosition<RowData>> createRecords(
                 String splitId, BulkFormat.RecordIterator<RowData> recordsForSplit) {
             return FileRecords.forRecords(splitId, recordsForSplit);
         }
 
         @Override
-        public RecordsWithSplitIds<RecordAndPosition<RowData>> finishedSplit(String splitId) {
+        public RecordsWithSplitIds<RecordAndPosition<RowData>> createRecordsWithFinishedSplit(
+                String splitId) {
             return FileRecords.finishedSplit(splitId);
         }
 
@@ -76,14 +80,14 @@ public interface RecordsFunction<T> extends RecordEmitter<T, RowData, FileStoreS
     class SingleRecordsFunction implements RecordsFunction<BulkFormat.RecordIterator<RowData>> {
 
         @Override
-        public RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> forRecords(
+        public RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> createRecords(
                 String splitId, BulkFormat.RecordIterator<RowData> recordsForSplit) {
             return SingleIteratorRecords.forRecords(splitId, recordsForSplit);
         }
 
         @Override
-        public RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> finishedSplit(
-                String splitId) {
+        public RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>>
+                createRecordsWithFinishedSplit(String splitId) {
             return SingleIteratorRecords.finishedSplit(splitId);
         }
 
