@@ -157,20 +157,12 @@ public class OrcPredicateFunctionVisitor
         if (litType == null) {
             return Optional.empty();
         }
-
-        String colName = fieldRef.name();
-
         // fetch literal and ensure it is serializable
         Object orcObj = toOrcObject(litType, literal);
-        Serializable serializableLiteral;
         // validate that literal is serializable
-        if (orcObj instanceof Serializable) {
-            serializableLiteral = (Serializable) orcObj;
-        } else {
-            return Optional.empty();
-        }
-
-        return Optional.of(func.apply(colName, litType, serializableLiteral));
+        return orcObj instanceof Serializable
+                ? Optional.of(func.apply(fieldRef.name(), litType, (Serializable) orcObj))
+                : Optional.empty();
     }
 
     @Nullable
