@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.options.OptionsUtils;
 import org.apache.flink.table.store.table.TableType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.utils.StringUtils;
@@ -52,6 +53,7 @@ import org.apache.thrift.TException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -340,7 +342,10 @@ public class HiveCatalog extends AbstractCatalog {
 
     private Table newHmsTable(Identifier identifier) {
         long currentTimeMillis = System.currentTimeMillis();
-        final TableType tableType = hiveConf.getEnum(TABLE_TYPE.key(), TableType.MANAGED);
+        TableType tableType =
+                OptionsUtils.convertToEnum(
+                        hiveConf.get(TABLE_TYPE.key(), TableType.MANAGED.toString()),
+                        TableType.class);
         Table table =
                 new Table(
                         identifier.getObjectName(),
@@ -355,7 +360,7 @@ public class HiveCatalog extends AbstractCatalog {
                         new HashMap<>(),
                         null,
                         null,
-                        tableType.toString());
+                        tableType.toString().toUpperCase(Locale.ROOT) + "_TABLE");
         table.getParameters()
                 .put(hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
         if (TableType.EXTERNAL.equals(tableType)) {
