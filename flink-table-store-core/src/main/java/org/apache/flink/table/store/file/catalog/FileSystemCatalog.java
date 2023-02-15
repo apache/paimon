@@ -109,16 +109,16 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public TableSchema getTableSchema(Identifier identifier) throws TableNotExistException {
-        Path path = getTableLocation(identifier);
+    public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+        Path path = getDataTableLocation(identifier);
         return new SchemaManager(fileIO, path)
                 .latest()
                 .orElseThrow(() -> new TableNotExistException(identifier));
     }
 
     @Override
-    public boolean tableExists(Identifier identifier) {
-        return tableExists(getTableLocation(identifier));
+    public boolean dataTableExists(Identifier identifier) {
+        return tableExists(getDataTableLocation(identifier));
     }
 
     private boolean tableExists(Path tablePath) {
@@ -128,7 +128,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
-        Path path = getTableLocation(identifier);
+        Path path = getDataTableLocation(identifier);
         if (!tableExists(path)) {
             if (ignoreIfNotExists) {
                 return;
@@ -147,7 +147,7 @@ public class FileSystemCatalog extends AbstractCatalog {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
         }
 
-        Path path = getTableLocation(identifier);
+        Path path = getDataTableLocation(identifier);
         if (tableExists(path)) {
             if (ignoreIfExists) {
                 return;
@@ -162,7 +162,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
             throws TableNotExistException, TableAlreadyExistException {
-        Path fromPath = getTableLocation(fromTable);
+        Path fromPath = getDataTableLocation(fromTable);
         if (!tableExists(fromPath)) {
             if (ignoreIfNotExists) {
                 return;
@@ -171,7 +171,7 @@ public class FileSystemCatalog extends AbstractCatalog {
             throw new TableNotExistException(fromTable);
         }
 
-        Path toPath = getTableLocation(toTable);
+        Path toPath = getDataTableLocation(toTable);
         if (tableExists(toPath)) {
             throw new TableAlreadyExistException(toTable);
         }
@@ -188,7 +188,7 @@ public class FileSystemCatalog extends AbstractCatalog {
         }
         uncheck(
                 () ->
-                        new SchemaManager(fileIO, getTableLocation(identifier))
+                        new SchemaManager(fileIO, getDataTableLocation(identifier))
                                 .commitChanges(changes));
     }
 

@@ -23,6 +23,10 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.Table;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
 import static org.apache.flink.table.store.table.system.AuditLogTable.AUDIT_LOG;
 import static org.apache.flink.table.store.table.system.FilesTable.FILES;
 import static org.apache.flink.table.store.table.system.OptionsTable.OPTIONS;
@@ -31,6 +35,10 @@ import static org.apache.flink.table.store.table.system.SnapshotsTable.SNAPSHOTS
 
 /** Loader to load system {@link Table}s. */
 public class SystemTableLoader {
+
+    public static final List<String> SYSTEM_TABLES =
+            Collections.unmodifiableList(
+                    Arrays.asList(SNAPSHOTS, OPTIONS, SCHEMAS, AUDIT_LOG, FILES));
 
     public static Table load(String type, FileIO fileIO, Path location) {
         switch (type.toLowerCase()) {

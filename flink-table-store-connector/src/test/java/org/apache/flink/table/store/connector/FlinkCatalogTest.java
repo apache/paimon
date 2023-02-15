@@ -35,6 +35,7 @@ import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
+import org.apache.flink.table.store.file.catalog.AbstractCatalog;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.options.Options;
@@ -284,6 +285,16 @@ public class FlinkCatalogTest {
         Assert.assertFalse(catalog.tableExists(this.path1));
         catalog.createTable(this.path1, this.createTable(), false);
         Assert.assertTrue(catalog.tableExists(this.path1));
+
+        // system tables
+        Assert.assertTrue(
+                catalog.tableExists(
+                        new ObjectPath(
+                                path1.getDatabaseName(), path1.getObjectName() + "$snapshots")));
+        Assert.assertFalse(
+                catalog.tableExists(
+                        new ObjectPath(
+                                path1.getDatabaseName(), path1.getObjectName() + "$unknown")));
     }
 
     @Test
@@ -415,9 +426,8 @@ public class FlinkCatalogTest {
 
     private void checkEquals(ObjectPath path, CatalogTable t1, CatalogTable t2) {
         Path tablePath =
-                ((FlinkCatalog) catalog)
-                        .catalog()
-                        .getTableLocation(FlinkCatalog.toIdentifier(path));
+                ((AbstractCatalog) ((FlinkCatalog) catalog).catalog())
+                        .getDataTableLocation(FlinkCatalog.toIdentifier(path));
         Map<String, String> options = new HashMap<>(t1.getOptions());
         options.put("path", tablePath.toString());
         t1 = ((ResolvedCatalogTable) t1).copy(options);

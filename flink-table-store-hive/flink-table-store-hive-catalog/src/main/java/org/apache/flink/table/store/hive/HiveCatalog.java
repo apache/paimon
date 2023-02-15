@@ -174,11 +174,11 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public TableSchema getTableSchema(Identifier identifier) throws TableNotExistException {
+    public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
         if (!tableStoreTableExists(identifier)) {
             throw new TableNotExistException(identifier);
         }
-        Path tableLocation = getTableLocation(identifier);
+        Path tableLocation = getDataTableLocation(identifier);
         return new SchemaManager(fileIO, tableLocation)
                 .latest()
                 .orElseThrow(
@@ -186,7 +186,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public boolean tableExists(Identifier identifier) {
+    public boolean dataTableExists(Identifier identifier) {
         return tableStoreTableExists(identifier);
     }
 
@@ -377,7 +377,7 @@ public class HiveCatalog extends AbstractCatalog {
                 schema.fields().stream()
                         .map(this::convertToFieldSchema)
                         .collect(Collectors.toList()));
-        sd.setLocation(getTableLocation(identifier).toString());
+        sd.setLocation(getDataTableLocation(identifier).toString());
 
         sd.setInputFormat(INPUT_FORMAT_CLASS_NAME);
         sd.setOutputFormat(OUTPUT_FORMAT_CLASS_NAME);
@@ -402,7 +402,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private boolean schemaFileExists(Identifier identifier) {
-        return new SchemaManager(fileIO, getTableLocation(identifier)).latest().isPresent();
+        return new SchemaManager(fileIO, getDataTableLocation(identifier)).latest().isPresent();
     }
 
     private boolean tableStoreTableExists(Identifier identifier, boolean throwException) {
@@ -438,7 +438,8 @@ public class HiveCatalog extends AbstractCatalog {
 
     private SchemaManager schemaManager(Identifier identifier) {
         checkIdentifierUpperCase(identifier);
-        return new SchemaManager(fileIO, getTableLocation(identifier)).withLock(lock(identifier));
+        return new SchemaManager(fileIO, getDataTableLocation(identifier))
+                .withLock(lock(identifier));
     }
 
     private Lock lock(Identifier identifier) {
