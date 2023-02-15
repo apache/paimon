@@ -23,7 +23,9 @@ import org.apache.flink.table.store.memory.MemorySegmentUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -46,6 +48,9 @@ public class StringUtils {
      * @since 2.1
      */
     public static final int INDEX_NOT_FOUND = -1;
+
+    /** The empty String {@code ""}. */
+    public static final String EMPTY = "";
 
     /**
      * Concatenates input strings together into a single string. Returns NULL if any argument is
@@ -455,5 +460,66 @@ public class StringUtils {
             list.add(str.substring(start, i));
         }
         return list.toArray(new String[list.size()]);
+    }
+
+    /**
+     * Joins the elements of the provided {@code Iterable} into a single String containing the
+     * provided elements.
+     *
+     * <p>No delimiter is added before or after the list. A {@code null} separator is the same as an
+     * empty String ("").
+     *
+     * @param iterable the {@code Iterable} providing the values to join together, may be null
+     * @param separator the separator character to use, null treated as ""
+     * @return the joined String, {@code null} if null iterator input
+     */
+    public static String join(final Iterable<?> iterable, final String separator) {
+        if (iterable == null) {
+            return null;
+        }
+        return join(iterable.iterator(), separator);
+    }
+
+    /**
+     * Joins the elements of the provided {@code Iterator} into a single String containing the
+     * provided elements.
+     *
+     * <p>No delimiter is added before or after the list. A {@code null} separator is the same as an
+     * empty String ("").
+     *
+     * @param iterator the {@code Iterator} of values to join together, may be null
+     * @param separator the separator character to use, null treated as ""
+     * @return the joined String, {@code null} if null iterator input
+     */
+    public static String join(final Iterator<?> iterator, final String separator) {
+
+        // handle null, zero and one elements before building a buffer
+        if (iterator == null) {
+            return null;
+        }
+        if (!iterator.hasNext()) {
+            return EMPTY;
+        }
+        final Object first = iterator.next();
+        if (!iterator.hasNext()) {
+            return Objects.toString(first);
+        }
+
+        // two or more elements
+        final StringBuilder buf = new StringBuilder(256); // Java default is 16, probably too small
+        if (first != null) {
+            buf.append(first);
+        }
+
+        while (iterator.hasNext()) {
+            if (separator != null) {
+                buf.append(separator);
+            }
+            final Object obj = iterator.next();
+            if (obj != null) {
+                buf.append(obj);
+            }
+        }
+        return buf.toString();
     }
 }

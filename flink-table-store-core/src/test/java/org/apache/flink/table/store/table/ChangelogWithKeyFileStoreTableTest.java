@@ -49,7 +49,6 @@ import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.CompatibilityTestUtils;
-import org.apache.flink.util.function.FunctionWithException;
 
 import org.junit.jupiter.api.Test;
 
@@ -387,7 +386,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                         new InputChangelogFollowUpScanner(),
                         1L);
 
-        FunctionWithException<Integer, Void, Exception> assertNextSnapshot =
+        Function<Integer, Void> assertNextSnapshot =
                 i -> {
                     TableScan.Plan plan = enumerator.enumerate();
                     assertThat(plan).isNotNull();
@@ -395,14 +394,18 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                     List<Split> splits = plan.splits();
                     TableRead read = table.newRead();
                     for (int j = 0; j < 2; j++) {
-                        assertThat(
-                                        getResult(
-                                                read,
-                                                splits,
-                                                binaryRow(j + 1),
-                                                0,
-                                                COMPATIBILITY_CHANGELOG_ROW_TO_STRING))
-                                .isEqualTo(expected.get(i).get(j));
+                        try {
+                            assertThat(
+                                            getResult(
+                                                    read,
+                                                    splits,
+                                                    binaryRow(j + 1),
+                                                    0,
+                                                    COMPATIBILITY_CHANGELOG_ROW_TO_STRING))
+                                    .isEqualTo(expected.get(i).get(j));
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
                     }
 
                     return null;
