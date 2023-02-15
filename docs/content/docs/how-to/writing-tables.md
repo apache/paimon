@@ -171,7 +171,7 @@ Currently, Table Store supports two ways to purge partitions.
 
 1. Like purging tables, you can use `INSERT OVERWRITE` to purge data of partitions by inserting empty value to them.
 
-2. Method #1 dose not support to drop multiple partitions. In case that you need to drop multiple partitions, you can submit the drop-partition job through `flink run`.
+2. Method #1 does not support to drop multiple partitions. In case that you need to drop multiple partitions, you can submit the drop-partition job through `flink run`.
 
 {{< tabs "purge-partitions-syntax" >}}
 
@@ -224,6 +224,45 @@ For more information of drop-partition, see
     -c org.apache.flink.table.store.connector.action.FlinkActions \
     /path/to/flink-table-store-dist-{{< version >}}.jar \
     drop-partition --help
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+## Deleting from table
+
+Currently, Table Store supports deleting records via submitting the 'delete' job through `flink run`.
+
+{{< tabs "delete-from-table" >}}
+
+{{< tab "Flink Job" >}}
+
+Run the following command to submit a 'delete' job for the table.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    -c org.apache.flink.table.store.connector.action.FlinkActions \
+    /path/to/flink-table-store-dist-{{< version >}}.jar \
+    delete \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name>
+    --where <filter_spec>
+    
+filter_spec is equal to the 'WHERE' clause in SQL DELETE statement. Examples:
+    age >= 18 AND age <= 60
+    animal <> 'cat'
+    id > (SELECT count(*) FROM employee)
+```
+
+For more information of 'delete', see
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    -c org.apache.flink.table.store.connector.action.FlinkActions \
+    /path/to/flink-table-store-dist-{{< version >}}.jar \
+    delete --help
 ```
 
 {{< /tab >}}

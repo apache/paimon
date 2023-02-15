@@ -199,6 +199,63 @@ public class FlinkActionsE2eTest extends E2eTestBase {
                 "2023-01-21, 1, 1, 31");
     }
 
+    @Test
+    public void testDelete() throws Exception {
+        String tableDdl =
+                "CREATE TABLE IF NOT EXISTS ts_table (\n"
+                        + "    dt STRING,\n"
+                        + "    k int,\n"
+                        + "    v int,\n"
+                        + "    PRIMARY KEY (k, dt) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (dt);";
+
+        String insert =
+                "INSERT INTO ts_table VALUES ('2023-01-13', 0, 15), ('2023-01-14', 0, 19), ('2023-01-13', 0, 39), "
+                        + "('2023-01-15', 0, 34), ('2023-01-15', 0, 56), ('2023-01-15', 0, 37), "
+                        + "('2023-01-16', 1, 25), ('2023-01-17', 1, 50), ('2023-01-18', 1, 75), "
+                        + "('2023-01-19', 1, 23), ('2023-01-20', 1, 28), ('2023-01-21', 1, 31);";
+
+        runSql("SET 'table.dml-sync' = 'true';\n" + insert, catalogDdl, useCatalogCmd, tableDdl);
+
+        // run delete job
+        Container.ExecResult execResult =
+                jobManager.execInContainer(
+                        "bin/flink",
+                        "run",
+                        "-c",
+                        "org.apache.flink.table.store.connector.action.FlinkActions",
+                        "--detached",
+                        "lib/flink-table-store.jar",
+                        "delete",
+                        "--warehouse",
+                        warehousePath,
+                        "--database",
+                        "default",
+                        "--table",
+                        "ts_table",
+                        "--where",
+                        "dt < '2023-01-17'");
+
+        LOG.info(execResult.getStdout());
+        LOG.info(execResult.getStderr());
+
+        // read all data from table store
+        runSql(
+                "INSERT INTO result1 SELECT * FROM ts_table;",
+                catalogDdl,
+                useCatalogCmd,
+                tableDdl,
+                createResultSink("result1", "dt STRING, k INT, v INT"));
+
+        // check the left data
+        checkResult(
+                "2023-01-17, 1, 50",
+                "2023-01-18, 1, 75",
+                "2023-01-19, 1, 23",
+                "2023-01-20, 1, 28",
+                "2023-01-21, 1, 31");
+    }
+
     private void runSql(String sql, String... ddls) throws Exception {
         runSql(String.join("\n", ddls) + "\n" + sql);
     }

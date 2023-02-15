@@ -247,7 +247,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
         StreamExecutionEnvironment env = createStreamExecutionEnvironment(2000);
         env.setParallelism(1);
         env.setRestartStrategy(RestartStrategies.noRestart());
-        FlinkActions.compact(new Path(path + "/default.db/T")).build(env);
+        FlinkActions.compact(path, "default", "T").build(env);
         JobClient client = env.executeAsync();
 
         // write records for a while
@@ -367,7 +367,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
             StreamExecutionEnvironment env =
                     createStreamExecutionEnvironment(random.nextInt(1900) + 100);
             env.setParallelism(2);
-            FlinkActions.compact(new Path(path + "/default.db/T")).build(env);
+            FlinkActions.compact(path, "default", "T").build(env);
             env.executeAsync();
         }
 
