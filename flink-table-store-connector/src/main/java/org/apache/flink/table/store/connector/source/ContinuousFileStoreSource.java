@@ -19,17 +19,21 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
+
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.STREAMING_READ_ATOMIC;
 
 /** Unbounded {@link FlinkSource} for reading records. It continuously monitors new snapshots. */
 public class ContinuousFileStoreSource extends FlinkSource {
@@ -90,5 +94,13 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 nextSnapshotId,
                 table.options().continuousDiscoveryInterval().toMillis(),
                 enumeratorFactory.create(table, scan, nextSnapshotId));
+    }
+
+    @Override
+    public FileStoreSourceReader<?> createSourceReader(
+            SourceReaderContext context, TableRead read, @Nullable Long limit) {
+        return table.options().toConfiguration().get(STREAMING_READ_ATOMIC)
+                ? new FileStoreSourceReader<>(RecordsFunction.forSingle(), context, read, limit)
+                : new FileStoreSourceReader<>(RecordsFunction.forIterate(), context, read, limit);
     }
 }

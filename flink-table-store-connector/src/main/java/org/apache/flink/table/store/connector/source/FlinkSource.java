@@ -64,7 +64,13 @@ public abstract class FlinkSource
         if (predicate != null) {
             read.withFilter(predicate);
         }
-        return new FileStoreSourceReader(context, read, limit);
+
+        return createSourceReader(context, read, limit);
+    }
+
+    public FileStoreSourceReader<?> createSourceReader(
+            SourceReaderContext context, TableRead read, @Nullable Long limit) {
+        return new FileStoreSourceReader<>(RecordsFunction.forSingle(), context, read, limit);
     }
 
     @Override

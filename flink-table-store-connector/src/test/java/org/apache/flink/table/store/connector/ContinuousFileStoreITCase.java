@@ -38,6 +38,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.STREAMING_READ_ATOMIC;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -63,6 +64,12 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)" + options,
                 "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
                         + options);
+    }
+
+    @TestTemplate
+    public void testStreamingAtomic() throws Exception {
+        sql("ALTER TABLE T2 SET ('%s' = 'true')", STREAMING_READ_ATOMIC.key());
+        testSimple("T2");
     }
 
     @TestTemplate
