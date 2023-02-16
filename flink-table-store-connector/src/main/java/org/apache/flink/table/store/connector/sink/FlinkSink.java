@@ -103,7 +103,7 @@ public abstract class FlinkSink implements Serializable {
         CommittableTypeInfo typeInfo = new CommittableTypeInfo();
         SingleOutputStreamOperator<Committable> written =
                 input.transform(
-                                WRITER_NAME,
+                                WRITER_NAME + " -> " + table.name(),
                                 typeInfo,
                                 createWriteOperator(sinkProvider, isStreaming))
                         .setParallelism(input.getParallelism());
