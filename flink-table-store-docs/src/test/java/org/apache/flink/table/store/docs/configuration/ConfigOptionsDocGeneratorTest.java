@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.docs.configuration;
 
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.table.store.annotation.ConfigGroup;
 import org.apache.flink.table.store.annotation.ConfigGroups;
 import org.apache.flink.table.store.annotation.Documentation;
@@ -30,6 +29,7 @@ import org.apache.flink.table.store.options.description.DescribedEnum;
 import org.apache.flink.table.store.options.description.Formatter;
 import org.apache.flink.table.store.options.description.HtmlFormatter;
 import org.apache.flink.table.store.options.description.InlineElement;
+import org.apache.flink.table.store.utils.Pair;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -194,7 +194,7 @@ class ConfigOptionsDocGeneratorTest {
         final String htmlTable =
                 ConfigOptionsDocGenerator.generateTablesForClass(TypeTestConfigGroup.class)
                         .get(0)
-                        .f1;
+                        .getRight();
         assertThat(htmlTable).isEqualTo(expectedTable);
     }
 
@@ -226,7 +226,9 @@ class ConfigOptionsDocGeneratorTest {
                         + "    </tbody>\n"
                         + "</table>\n";
         final String htmlTable =
-                ConfigOptionsDocGenerator.generateTablesForClass(TestConfigGroup.class).get(0).f1;
+                ConfigOptionsDocGenerator.generateTablesForClass(TestConfigGroup.class)
+                        .get(0)
+                        .getRight();
         assertThat(htmlTable).isEqualTo(expectedTable);
     }
 
@@ -267,12 +269,13 @@ class ConfigOptionsDocGeneratorTest {
 
     @Test
     void testLongestPrefixMatching() {
-        final List<Tuple2<ConfigGroup, String>> tables =
+        final List<Pair<ConfigGroup, String>> tables =
                 ConfigOptionsDocGenerator.generateTablesForClass(TestConfigPrefix.class);
         assertThat(tables).hasSize(3);
         final Map<String, String> tablesConverted = new HashMap<>(tables.size());
-        for (final Tuple2<ConfigGroup, String> table : tables) {
-            tablesConverted.put(table.f0 != null ? table.f0.name() : "default", table.f1);
+        for (final Pair<ConfigGroup, String> table : tables) {
+            tablesConverted.put(
+                    table.getLeft() != null ? table.getLeft().name() : "default", table.getRight());
         }
         assertThat(tablesConverted.get("group1"))
                 .contains("a.b.option", "a.b.c.option", "a.b.c.e.option")
@@ -314,12 +317,13 @@ class ConfigOptionsDocGeneratorTest {
 
     @Test
     void testCreatingMultipleGroups() {
-        final List<Tuple2<ConfigGroup, String>> tables =
+        final List<Pair<ConfigGroup, String>> tables =
                 ConfigOptionsDocGenerator.generateTablesForClass(TestConfigMultipleSubGroup.class);
         assertThat(tables).hasSize(3);
         final HashMap<String, String> tablesConverted = new HashMap<>();
-        for (Tuple2<ConfigGroup, String> table : tables) {
-            tablesConverted.put(table.f0 != null ? table.f0.name() : "default", table.f1);
+        for (Pair<ConfigGroup, String> table : tables) {
+            tablesConverted.put(
+                    table.getLeft() != null ? table.getLeft().name() : "default", table.getRight());
         }
         assertThat(tablesConverted)
                 .containsEntry(
@@ -439,7 +443,7 @@ class ConfigOptionsDocGeneratorTest {
                 ConfigOptionsDocGenerator.generateTablesForClass(
                                 TestConfigGroupWithOverriddenDefault.class)
                         .get(0)
-                        .f1;
+                        .getRight();
         assertThat(htmlTable).isEqualTo(expectedTable);
     }
 
@@ -573,7 +577,7 @@ class ConfigOptionsDocGeneratorTest {
         final String htmlTable =
                 ConfigOptionsDocGenerator.generateTablesForClass(TestConfigGroupWithExclusion.class)
                         .get(0)
-                        .f1;
+                        .getRight();
         assertThat(htmlTable).isEqualTo(expectedTable);
     }
 
