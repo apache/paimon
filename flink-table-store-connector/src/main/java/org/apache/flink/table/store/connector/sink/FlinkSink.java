@@ -99,7 +99,7 @@ public abstract class FlinkSink implements Serializable {
         CommittableTypeInfo typeInfo = new CommittableTypeInfo();
         SingleOutputStreamOperator<Committable> written =
                 input.transform(
-                                WRITER_NAME,
+                                WRITER_NAME + " -> " + table.name(),
                                 typeInfo,
                                 createWriteOperator(
                                         createWriteProvider(initialCommitUser), isStreaming))
@@ -107,7 +107,7 @@ public abstract class FlinkSink implements Serializable {
 
         SingleOutputStreamOperator<?> committed =
                 written.transform(
-                                GLOBAL_COMMITTER_NAME,
+                                GLOBAL_COMMITTER_NAME + " -> " + table.name(),
                                 typeInfo,
                                 new CommitterOperator(
                                         streamingCheckpointEnabled,
