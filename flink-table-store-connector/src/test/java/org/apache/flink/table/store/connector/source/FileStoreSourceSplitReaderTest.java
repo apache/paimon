@@ -32,6 +32,7 @@ import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -42,6 +43,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -114,10 +117,15 @@ public class FileStoreSourceSplitReaderTest {
         innerTestOnce(true, 7);
     }
 
+    private FileStoreSourceSplitReader<RecordAndPosition<RowData>> createReader(
+            TableRead tableRead, @Nullable Long limit) {
+        return new FileStoreSourceSplitReader<>(RecordsFunction.forIterate(), tableRead, limit);
+    }
+
     private void innerTestOnce(boolean valueCountMode, int skip) throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
-        FileStoreSourceSplitReader reader =
-                new FileStoreSourceSplitReader(
+        FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
+                createReader(
                         valueCountMode ? rw.createReadWithValueCount() : rw.createReadWithKey(),
                         null);
 
@@ -160,8 +168,8 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testPrimaryKeyWithDelete() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
-        FileStoreSourceSplitReader reader =
-                new FileStoreSourceSplitReader(rw.createReadWithKey(), null);
+        FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
+                createReader(rw.createReadWithKey(), null);
 
         List<Tuple2<Long, Long>> input = kvs();
         RecordWriter<KeyValue> writer = rw.createMergeTreeWriter(row(1), 0);
@@ -203,8 +211,8 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testMultipleBatchInSplit() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
-        FileStoreSourceSplitReader reader =
-                new FileStoreSourceSplitReader(rw.createReadWithKey(), null);
+        FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
+                createReader(rw.createReadWithKey(), null);
 
         List<Tuple2<Long, Long>> input1 = kvs();
         List<DataFileMeta> files = rw.writeFiles(row(1), 0, input1);
@@ -240,8 +248,8 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testRestore() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
-        FileStoreSourceSplitReader reader =
-                new FileStoreSourceSplitReader(rw.createReadWithKey(), null);
+        FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
+                createReader(rw.createReadWithKey(), null);
 
         List<Tuple2<Long, Long>> input = kvs();
         List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
@@ -267,8 +275,8 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testRestoreMultipleBatchInSplit() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
-        FileStoreSourceSplitReader reader =
-                new FileStoreSourceSplitReader(rw.createReadWithKey(), null);
+        FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
+                createReader(rw.createReadWithKey(), null);
 
         List<Tuple2<Long, Long>> input1 = kvs();
         List<DataFileMeta> files = rw.writeFiles(row(1), 0, input1);
@@ -299,8 +307,8 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testMultipleSplits() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
-        FileStoreSourceSplitReader reader =
-                new FileStoreSourceSplitReader(rw.createReadWithKey(), null);
+        FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
+                createReader(rw.createReadWithKey(), null);
 
         List<Tuple2<Long, Long>> input1 = kvs();
         List<DataFileMeta> files1 = rw.writeFiles(row(1), 0, input1);
@@ -338,8 +346,8 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testNoSplit() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
-        FileStoreSourceSplitReader reader =
-                new FileStoreSourceSplitReader(rw.createReadWithKey(), null);
+        FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
+                createReader(rw.createReadWithKey(), null);
         assertThatThrownBy(reader::fetch).hasMessageContaining("no split remaining");
         reader.close();
     }
@@ -347,8 +355,8 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testLimit() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
-        FileStoreSourceSplitReader reader =
-                new FileStoreSourceSplitReader(rw.createReadWithKey(), 2L);
+        FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
+                createReader(rw.createReadWithKey(), 2L);
 
         List<Tuple2<Long, Long>> input = kvs();
         List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
@@ -418,7 +426,9 @@ public class FileStoreSourceSplitReaderTest {
         return kvs;
     }
 
-    private void assignSplit(FileStoreSourceSplitReader reader, FileStoreSourceSplit split) {
+    private void assignSplit(
+            FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader,
+            FileStoreSourceSplit split) {
         SplitsChange<FileStoreSourceSplit> splitsChange =
                 new SplitsAddition<>(Collections.singletonList(split));
         reader.handleSplitsChanges(splitsChange);
