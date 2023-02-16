@@ -92,7 +92,7 @@ under the License.
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-shaded-asm-9</artifactId>
-            <version>9.2-${flink.shaded.version}</version>
+            <version>${flink.shaded.asm.version}-${flink.shaded.version}</version>
         </dependency>
     </dependencies>
 
