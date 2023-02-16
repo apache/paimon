@@ -71,11 +71,12 @@ under the License.
     </modules>
 
     <properties>
-        <flink.version>1.16.0</flink.version>
+        <flink.version>1.16.1</flink.version>
         <flink.connector.version>1.15</flink.connector.version>
         <flink.shaded.version>15.0</flink.shaded.version>
         <flink.shaded.jackson.version>2.12.4</flink.shaded.jackson.version>
         <flink.shaded.guava.version>30.1.1-jre</flink.shaded.guava.version>
+        <flink.shaded.asm.version>9.2</flink.shaded.asm.version>
         <hadoop.version>2.8.5</hadoop.version>
         <scala.version>2.12.7</scala.version>
         <scala.binary.version>2.12</scala.binary.version>
@@ -127,6 +128,9 @@ under the License.
         <janino.version>3.0.11</janino.version>
         <mockito.version>3.4.6</mockito.version>
         <jaxb.api.version>2.3.1</jaxb.api.version>
+        <findbugs.version>1.3.9</findbugs.version>
+        <json-smart.version>2.3.1</json-smart.version>
+        <avro.version>1.11.1</avro.version>
     </properties>
 
     <dependencies>
@@ -206,7 +210,7 @@ under the License.
             <dependency>
                 <groupId>com.google.code.findbugs</groupId>
                 <artifactId>jsr305</artifactId>
-                <version>1.3.9</version>
+                <version>${findbugs.version}</version>
             </dependency>
 
             <dependency>
@@ -265,7 +269,7 @@ under the License.
                 <!-- pin transitive dependency of org.apache.hadoop:hadoop-common:2.8.5 -->
                 <groupId>net.minidev</groupId>
                 <artifactId>json-smart</artifactId>
-                <version>2.3.1</version>
+                <version>${json-smart.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -308,7 +312,7 @@ under the License.
         <profile>
             <id>flink-1.14</id>
             <properties>
-                <flink.version>1.14.5</flink.version>
+                <flink.version>1.14.6</flink.version>
                 <flink.connector.version>1.14</flink.connector.version>
                 <flink.table.api.java.bridge>flink-table-api-java-bridge_${scala.binary.version}</flink.table.api.java.bridge>
                 <flink.table.runtime>flink-table-runtime_${scala.binary.version}</flink.table.runtime>
@@ -322,7 +326,7 @@ under the License.
         <profile>
             <id>flink-1.15</id>
             <properties>
-                <flink.version>1.15.2</flink.version>
+                <flink.version>1.15.3</flink.version>
             </properties>
         </profile>
     </profiles>

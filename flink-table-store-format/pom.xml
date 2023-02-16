@@ -34,6 +34,9 @@ under the License.
     <properties>
         <parquet.version>1.12.3</parquet.version>
         <orc.version>1.5.6</orc.version>
+        <joda-time.version>2.5</joda-time.version>
+        <commons.pool.version>1.6</commons.pool.version>
+        <commons.lang3.version>3.12.0</commons.lang3.version>
     </properties>
 
     <dependencies>
@@ -96,7 +99,7 @@ under the License.
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>3.12.0</version>
+            <version>${commons.lang3.version}</version>
             <scope>provided</scope>
         </dependency>
 
@@ -107,7 +110,7 @@ under the License.
         <dependency>
             <groupId>org.apache.avro</groupId>
             <artifactId>avro</artifactId>
-            <version>1.11.1</version>
+            <version>${avro.version}</version>
         </dependency>
 
         <dependency>
@@ -118,7 +121,7 @@ under the License.
                 In order to handle them, we need to add an optional dependency.
                 Users with those Avro records need to add this dependency themselves. -->
             <optional>true</optional>
-            <version>2.5</version>
+            <version>${joda-time.version}</version>
         </dependency>
 
         <!-- Avro End -->
@@ -170,7 +173,7 @@ under the License.
         <dependency>
             <groupId>commons-pool</groupId>
             <artifactId>commons-pool</artifactId>
-            <version>1.6</version>
+            <version>${commons.pool.version}</version>
         </dependency>
 
         <!-- Parquet End -->

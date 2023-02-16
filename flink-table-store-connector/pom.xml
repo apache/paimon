@@ -31,6 +31,10 @@ under the License.
     <artifactId>flink-table-store-connector</artifactId>
     <name>Flink Table Store : Connector</name>
 
+    <properties>
+        <frocksdbjni.version>6.20.3-ververica-1.0</frocksdbjni.version>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.apache.flink</groupId>
@@ -71,7 +75,7 @@ under the License.
         <dependency>
             <groupId>com.ververica</groupId>
             <artifactId>frocksdbjni</artifactId>
-            <version>6.20.3-ververica-1.0</version>
+            <version>${frocksdbjni.version}</version>
         </dependency>
 
         <dependency>
