@@ -55,7 +55,7 @@ under the License.
         <dependency>
             <groupId>org.lz4</groupId>
             <artifactId>lz4-java</artifactId>
-            <version>1.8.0</version>
+            <version>${lz4.version}</version>
         </dependency>
 
         <!-- test dependencies -->

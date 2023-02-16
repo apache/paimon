@@ -34,6 +34,7 @@ under the License.
     <properties>
         <generated.docs.dir>./docs/layouts/shortcodes/generated</generated.docs.dir>
         <assertj.version>3.21.0</assertj.version>
+        <jsoup.version>1.15.3</jsoup.version>
     </properties>
 
     <dependencies>
@@ -56,7 +57,7 @@ under the License.
             <!-- Used for parsing HTML -->
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>
-            <version>1.15.3</version>
+            <version>${jsoup.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
