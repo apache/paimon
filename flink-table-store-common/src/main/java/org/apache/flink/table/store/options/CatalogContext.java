@@ -20,6 +20,7 @@ package org.apache.flink.table.store.options;
 
 import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.fs.FileIOLoader;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.hadoop.HadoopFileIOLoader;
 import org.apache.flink.table.store.table.TableType;
 
@@ -104,8 +105,10 @@ public class CatalogContext {
         }
     }
 
-    public static CatalogContext empty() {
-        return create(new Options());
+    public static CatalogContext create(Path warehouse) {
+        Options options = new Options();
+        options.set(WAREHOUSE, warehouse.toUri().toString());
+        return create(options);
     }
 
     public static CatalogContext create(Options options) {

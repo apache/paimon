@@ -134,7 +134,7 @@ public class SchemaValidation {
                         checkArgument(
                                 schema.fieldNames().contains(field),
                                 "Nonexistent sequence field: '%s'",
-                                sequenceField));
+                                field));
     }
 
     private static void validatePrimaryKeysType(List<DataField> fields, List<String> primaryKeys) {

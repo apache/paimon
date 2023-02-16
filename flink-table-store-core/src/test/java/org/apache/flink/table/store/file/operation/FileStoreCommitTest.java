@@ -28,10 +28,10 @@ import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.SchemaUtils;
 import org.apache.flink.table.store.file.utils.FailingFileIO;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.utils.TraceableFileIO;
-import org.apache.flink.table.store.fs.FileIOFinder;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.RowKind;
@@ -514,8 +514,8 @@ public class FileStoreCommitTest {
                         ? FailingFileIO.getFailingPath(failingName, tempDir.toString())
                         : TraceableFileIO.SCHEME + "://" + tempDir.toString();
         Path path = new Path(tempDir.toUri());
-        SchemaManager schemaManager = new SchemaManager(FileIOFinder.find(path), path);
-        schemaManager.createTable(
+        SchemaUtils.forceCommit(
+                new SchemaManager(new LocalFileIO(), path),
                 new Schema(
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
                         TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),

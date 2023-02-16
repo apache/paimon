@@ -23,6 +23,7 @@ import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.SchemaUtils;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.MemorySize;
@@ -96,9 +97,9 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
         conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(pages * 1024));
         conf.set(CoreOptions.PAGE_SIZE, new MemorySize(1024));
         configure.accept(conf);
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         TableSchema schema =
-                schemaManager.createTable(
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.singletonList("pt"),

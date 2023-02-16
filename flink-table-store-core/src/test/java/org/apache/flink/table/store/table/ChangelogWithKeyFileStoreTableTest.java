@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.SchemaUtils;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.Options;
@@ -711,9 +712,9 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         conf.set(CoreOptions.PATH, tablePath.toString());
         conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         configure.accept(conf);
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         TableSchema tableSchema =
-                schemaManager.createTable(
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),

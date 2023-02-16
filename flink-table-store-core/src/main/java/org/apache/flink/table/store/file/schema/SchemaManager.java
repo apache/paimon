@@ -140,7 +140,12 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    /** Create {@link SchemaChange}s. */
+    /** Update {@link SchemaChange}s. */
+    public TableSchema commitChanges(SchemaChange... changes) throws Exception {
+        return commitChanges(Arrays.asList(changes));
+    }
+
+    /** Update {@link SchemaChange}s. */
     public TableSchema commitChanges(List<SchemaChange> changes) throws Exception {
         while (true) {
             TableSchema schema =
@@ -347,7 +352,8 @@ public class SchemaManager implements Serializable {
         updateNestedColumn(newFields, new String[] {updateFieldName}, 0, updateFunc);
     }
 
-    private boolean commit(TableSchema newSchema) throws Exception {
+    @VisibleForTesting
+    boolean commit(TableSchema newSchema) throws Exception {
         SchemaValidation.validateTableSchema(newSchema);
 
         Path schemaPath = toSchemaPath(newSchema.id());

@@ -54,7 +54,6 @@ import java.util.stream.IntStream;
 import static org.apache.flink.table.store.file.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for {@link SchemaManager}. */
 public class SchemaManagerTest {
@@ -84,16 +83,17 @@ public class SchemaManagerTest {
     public void afterEach() {
         // assert no temp file
         File schema = new File(tempDir.toFile(), "schema");
-        assertThat(schema.exists()).isTrue();
-        String[] versions = schema.list();
-        assertThat(versions).isNotNull();
-        for (String version : versions) {
-            assertThat(version.startsWith(".")).isFalse();
+        if (schema.exists()) {
+            String[] versions = schema.list();
+            assertThat(versions).isNotNull();
+            for (String version : versions) {
+                assertThat(version.startsWith(".")).isFalse();
+            }
         }
     }
 
     @Test
-    public void testCommitNewVersion() throws Exception {
+    public void testCreateTable() throws Exception {
         TableSchema tableSchema = retryArtificialException(() -> manager.createTable(schema));
 
         Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
@@ -113,7 +113,10 @@ public class SchemaManagerTest {
         assertThat(tableSchema.partitionKeys()).isEqualTo(partitionKeys);
         assertThat(tableSchema.primaryKeys()).isEqualTo(primaryKeys);
         assertThat(tableSchema.options()).isEqualTo(options);
+    }
 
+    @Test
+    public void testCreateTableIllegal() {
         assertThatThrownBy(
                         () ->
                                 retryArtificialException(
@@ -135,34 +138,23 @@ public class SchemaManagerTest {
     @Test
     public void testUpdateOptions() throws Exception {
         retryArtificialException(() -> manager.createTable(this.schema));
-        Map<String, String> newOptions = Collections.singletonMap("new_k", "new_v");
-        Schema schema =
-                new Schema(
-                        rowType.getFields(),
-                        partitionKeys,
-                        primaryKeys,
-                        newOptions,
-                        "my_comment_2");
-        retryArtificialException(() -> manager.createTable(schema));
+        retryArtificialException(
+                () -> manager.commitChanges(SchemaChange.setOption("new_k", "new_v")));
         Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
         assertThat(latest.isPresent()).isTrue();
-        assertThat(latest.get().options()).isEqualTo(newOptions);
-    }
-
-    @Test
-    public void testUpdateSchema() throws Exception {
-        retryArtificialException(() -> manager.createTable(this.schema));
-        RowType newType = RowType.of(new IntType(), new BigIntType());
-        Schema schema =
-                new Schema(
-                        newType.getFields(), partitionKeys, primaryKeys, options, "my_comment_3");
-        assertThrows(
-                UnsupportedOperationException.class,
-                () -> retryArtificialException(() -> manager.createTable(schema)));
+        assertThat(latest.get().options()).containsEntry("new_k", "new_v");
     }
 
     @Test
     public void testConcurrentCommit() throws Exception {
+        manager.createTable(
+                new Schema(
+                        rowType.getFields(),
+                        partitionKeys,
+                        primaryKeys,
+                        Collections.singletonMap("id", "-1"),
+                        "my_comment_4"));
+
         int threadNumber = ThreadLocalRandom.current().nextInt(3) + 2;
         List<Thread> threads = new ArrayList<>();
         for (int i = 0; i < threadNumber; i++) {
@@ -177,17 +169,12 @@ public class SchemaManagerTest {
                                     throw new RuntimeException(e);
                                 }
 
-                                Map<String, String> options = new HashMap<>();
-                                options.put("id", String.valueOf(id));
-                                Schema schema =
-                                        new Schema(
-                                                rowType.getFields(),
-                                                partitionKeys,
-                                                primaryKeys,
-                                                options,
-                                                "my_comment_4");
                                 try {
-                                    retryArtificialException(() -> manager.createTable(schema));
+                                    retryArtificialException(
+                                            () ->
+                                                    manager.commitChanges(
+                                                            SchemaChange.setOption(
+                                                                    "id", String.valueOf(id))));
                                 } catch (Exception e) {
                                     throw new RuntimeException(e);
                                 }
@@ -210,7 +197,7 @@ public class SchemaManagerTest {
                         .collect(Collectors.toSet());
         assertThat(ids)
                 .containsExactlyInAnyOrder(
-                        IntStream.range(0, threadNumber)
+                        IntStream.range(-1, threadNumber)
                                 .mapToObj(String::valueOf)
                                 .toArray(String[]::new));
     }
@@ -283,19 +270,9 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testAppendOnlyTableWithPrimaryKey() throws Exception {
+    public void testAppendOnlyTableWithPrimaryKey() {
         RowType newType = RowType.of(new IntType(), new BigIntType());
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
-        Schema changeLogSchema =
-                new Schema(
-                        newType.getFields(),
-                        partitionKeys,
-                        primaryKeys,
-                        options,
-                        "change-log table");
-        retryArtificialException(() -> manager.createTable(changeLogSchema));
-
         options.put(CoreOptions.WRITE_MODE.key(), WriteMode.APPEND_ONLY.toString());
         Schema schema =
                 new Schema(

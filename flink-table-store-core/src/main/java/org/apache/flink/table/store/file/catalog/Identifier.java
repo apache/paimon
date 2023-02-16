@@ -63,6 +63,10 @@ public class Identifier implements Serializable {
                 "%c%s%c.%c%s%c", escapeChar, database, escapeChar, escapeChar, table, escapeChar);
     }
 
+    public static Identifier create(String db, String table) {
+        return new Identifier(db, table);
+    }
+
     public static Identifier fromString(String fullName) {
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(fullName), "fullName cannot be null or empty");
