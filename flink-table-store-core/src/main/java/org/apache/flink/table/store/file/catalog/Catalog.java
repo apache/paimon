@@ -30,6 +30,7 @@ import java.util.Optional;
  * This interface is responsible for reading and writing metadata such as database/table from a
  * table store catalog.
  *
+ * @see CatalogFactory
  * @since 0.4.0
  */
 @Experimental
