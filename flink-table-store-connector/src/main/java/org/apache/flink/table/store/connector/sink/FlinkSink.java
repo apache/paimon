@@ -110,7 +110,7 @@ public abstract class FlinkSink implements Serializable {
 
         SingleOutputStreamOperator<?> committed =
                 written.transform(
-                                GLOBAL_COMMITTER_NAME,
+                                GLOBAL_COMMITTER_NAME + " -> " + table.name(),
                                 typeInfo,
                                 new CommitterOperator(
                                         streamingCheckpointEnabled,
