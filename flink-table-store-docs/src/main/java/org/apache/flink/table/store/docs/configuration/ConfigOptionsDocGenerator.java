@@ -18,11 +18,10 @@
 
 package org.apache.flink.table.store.docs.configuration;
 
-import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.table.store.annotation.ConfigGroup;
 import org.apache.flink.table.store.annotation.ConfigGroups;
 import org.apache.flink.table.store.annotation.Documentation;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.options.ConfigOption;
 import org.apache.flink.table.store.options.description.DescribedEnum;
 import org.apache.flink.table.store.options.description.Description;
@@ -30,6 +29,7 @@ import org.apache.flink.table.store.options.description.Formatter;
 import org.apache.flink.table.store.options.description.HtmlFormatter;
 import org.apache.flink.table.store.options.description.InlineElement;
 import org.apache.flink.table.store.options.description.TextElement;
+import org.apache.flink.table.store.utils.Pair;
 import org.apache.flink.table.store.utils.ThrowingConsumer;
 import org.apache.flink.table.store.utils.TimeUtils;
 
@@ -154,13 +154,12 @@ public class ConfigOptionsDocGenerator {
                                     }
 
                                     return Arrays.stream(sections)
-                                            .map(section -> Tuple2.of(section, option));
+                                            .map(section -> Pair.of(section, option));
                                 })
                         .collect(
                                 Collectors.groupingBy(
-                                        option -> option.f0,
-                                        Collectors.mapping(
-                                                option -> option.f1, Collectors.toList())));
+                                        Pair::getLeft,
+                                        Collectors.mapping(Pair::getRight, Collectors.toList())));
 
         optionsGroupedBySection.forEach(
                 (section, options) -> {
@@ -226,10 +225,10 @@ public class ConfigOptionsDocGenerator {
                 packageName,
                 ConfigOptionsDocGenerator.DEFAULT_PATH_PREFIX,
                 optionsClass -> {
-                    List<Tuple2<ConfigGroup, String>> tables = generateTablesForClass(optionsClass);
-                    for (Tuple2<ConfigGroup, String> group : tables) {
+                    List<Pair<ConfigGroup, String>> tables = generateTablesForClass(optionsClass);
+                    for (Pair<ConfigGroup, String> group : tables) {
                         String name;
-                        if (group.f0 == null) {
+                        if (group.getLeft() == null) {
                             Matcher matcher =
                                     CLASS_NAME_PATTERN.matcher(optionsClass.getSimpleName());
                             if (!matcher.matches()) {
@@ -240,12 +239,12 @@ public class ConfigOptionsDocGenerator {
                             }
                             name = matcher.group(CLASS_PREFIX_GROUP);
                         } else {
-                            name = group.f0.name();
+                            name = group.getLeft().name();
                         }
                         String outputFile = toSnakeCase(name) + "_configuration.html";
                         Files.write(
                                 Paths.get(outputDirectory, outputFile),
-                                group.f1.getBytes(StandardCharsets.UTF_8));
+                                group.getRight().getBytes(StandardCharsets.UTF_8));
                     }
                 });
     }
@@ -277,13 +276,13 @@ public class ConfigOptionsDocGenerator {
     }
 
     @VisibleForTesting
-    static List<Tuple2<ConfigGroup, String>> generateTablesForClass(Class<?> optionsClass) {
+    static List<Pair<ConfigGroup, String>> generateTablesForClass(Class<?> optionsClass) {
         ConfigGroups configGroups = optionsClass.getAnnotation(ConfigGroups.class);
         List<OptionWithMetaInfo> allOptions = extractConfigOptions(optionsClass);
         if (allOptions.isEmpty()) {
             return Collections.emptyList();
         }
-        List<Tuple2<ConfigGroup, String>> tables;
+        List<Pair<ConfigGroup, String>> tables;
         if (configGroups != null) {
             tables = new ArrayList<>(configGroups.groups().length + 1);
             Tree tree = new Tree(configGroups.groups(), allOptions);
@@ -291,17 +290,17 @@ public class ConfigOptionsDocGenerator {
                 List<OptionWithMetaInfo> configOptions = tree.findConfigOptions(group);
                 if (!configOptions.isEmpty()) {
                     sortOptions(configOptions);
-                    tables.add(Tuple2.of(group, toHtmlTable(configOptions)));
+                    tables.add(Pair.of(group, toHtmlTable(configOptions)));
                 }
             }
             List<OptionWithMetaInfo> configOptions = tree.getDefaultOptions();
             if (!configOptions.isEmpty()) {
                 sortOptions(configOptions);
-                tables.add(Tuple2.of(null, toHtmlTable(configOptions)));
+                tables.add(Pair.of(null, toHtmlTable(configOptions)));
             }
         } else {
             sortOptions(allOptions);
-            tables = Collections.singletonList(Tuple2.of(null, toHtmlTable(allOptions)));
+            tables = Collections.singletonList(Pair.of(null, toHtmlTable(allOptions)));
         }
         return tables;
     }
