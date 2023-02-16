@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
 import javax.annotation.Nullable;
@@ -29,7 +31,12 @@ import java.util.Objects;
 import static org.apache.flink.table.store.utils.EncodingUtils.escapeIdentifier;
 import static org.apache.flink.table.store.utils.EncodingUtils.escapeSingleQuotes;
 
-/** Defines the field of a row type. */
+/**
+ * Defines the field of a row type.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public final class DataField implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -71,6 +78,10 @@ public final class DataField implements Serializable {
 
     public DataField newName(String newName) {
         return new DataField(id, newName, type, description);
+    }
+
+    public DataField newDescription(String newDescription) {
+        return new DataField(id, name, type, newDescription);
     }
 
     @Nullable

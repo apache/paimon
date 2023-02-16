@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.data;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentUtils;
 
@@ -32,7 +33,12 @@ import static org.apache.flink.table.store.memory.MemorySegmentUtils.allocateReu
 import static org.apache.flink.table.store.memory.MemorySegmentUtils.allocateReuseChars;
 import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
-/** A string which is backed by {@link MemorySegment}s. */
+/**
+ * A string which is backed by {@link MemorySegment}s.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public final class BinaryString extends BinarySection implements Comparable<BinaryString> {
 
     public static final BinaryString EMPTY_UTF8 = BinaryString.fromBytes(encodeUTF8(""));

@@ -22,12 +22,11 @@ import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.system.SystemTableLoader;
 import org.apache.flink.table.store.utils.StringUtils;
-
-import static org.apache.flink.table.store.table.system.SystemTableLoader.SYSTEM_TABLES;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -46,30 +45,17 @@ public abstract class AbstractCatalog implements Catalog {
             String[] splits = tableAndSystemName(identifier);
             String table = splits[0];
             String type = splits[1];
-            Identifier originidentifier = new Identifier(identifier.getDatabaseName(), table);
-            if (!tableExists(originidentifier)) {
-                throw new TableNotExistException(identifier);
-            }
-            Path location = getDataTableLocation(originidentifier);
-            return SystemTableLoader.load(type, fileIO, location);
+            FileStoreTable originTable =
+                    getDataTable(new Identifier(identifier.getDatabaseName(), table));
+            return SystemTableLoader.load(type, fileIO, originTable);
         } else {
-            TableSchema tableSchema = getDataTableSchema(identifier);
-            return FileStoreTableFactory.create(
-                    fileIO, getDataTableLocation(identifier), tableSchema);
+            return getDataTable(identifier);
         }
     }
 
-    @Override
-    public boolean tableExists(Identifier identifier) {
-        Identifier tableIdentifier = identifier;
-        if (isSystemTable(identifier)) {
-            String[] splits = tableAndSystemName(identifier);
-            if (!SYSTEM_TABLES.contains(splits[1].toLowerCase())) {
-                return false;
-            }
-            tableIdentifier = new Identifier(identifier.getDatabaseName(), splits[0]);
-        }
-        return dataTableExists(tableIdentifier);
+    private FileStoreTable getDataTable(Identifier identifier) throws TableNotExistException {
+        TableSchema tableSchema = getDataTableSchema(identifier);
+        return FileStoreTableFactory.create(fileIO, getDataTableLocation(identifier), tableSchema);
     }
 
     protected Path databasePath(String database) {
@@ -80,8 +66,6 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected abstract TableSchema getDataTableSchema(Identifier identifier)
             throws TableNotExistException;
-
-    protected abstract boolean dataTableExists(Identifier identifier);
 
     @VisibleForTesting
     public Path getDataTableLocation(Identifier identifier) {
@@ -96,6 +80,13 @@ public abstract class AbstractCatalog implements Catalog {
 
     private boolean isSystemTable(Identifier identifier) {
         return identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER);
+    }
+
+    protected void checkNotSystemTable(Identifier identifier, String method) {
+        if (isSystemTable(identifier)) {
+            throw new IllegalArgumentException(
+                    String.format("System table '%s' does not support %s.", identifier, method));
+        }
     }
 
     private String[] tableAndSystemName(Identifier identifier) {

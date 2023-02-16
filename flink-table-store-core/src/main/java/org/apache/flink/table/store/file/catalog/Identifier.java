@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.catalog;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.utils.StringUtils;
 
@@ -27,7 +28,12 @@ import java.util.Objects;
 import static org.apache.flink.table.store.file.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
-/** Identifies an object in a catalog. */
+/**
+ * Identifies an object in a catalog.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public class Identifier implements Serializable {
 
     private static final long serialVersionUID = 1L;

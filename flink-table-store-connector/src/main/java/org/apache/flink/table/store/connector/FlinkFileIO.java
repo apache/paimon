@@ -28,7 +28,7 @@ import org.apache.flink.table.store.fs.FileStatus;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.PositionOutputStream;
 import org.apache.flink.table.store.fs.SeekableInputStream;
-import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.options.CatalogContext;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -54,7 +54,7 @@ public class FlinkFileIO implements FileIO {
     }
 
     @Override
-    public void configure(CatalogOptions config) {}
+    public void configure(CatalogContext context) {}
 
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {

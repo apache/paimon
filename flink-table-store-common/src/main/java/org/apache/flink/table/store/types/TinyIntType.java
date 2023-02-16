@@ -18,7 +18,14 @@
 
 package org.apache.flink.table.store.types;
 
-/** Data type of a 1-byte signed integer with values from -128 to 127. */
+import org.apache.flink.table.store.annotation.Experimental;
+
+/**
+ * Data type of a 1-byte signed integer with values from -128 to 127.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public class TinyIntType extends DataType {
 
     private static final long serialVersionUID = 1L;

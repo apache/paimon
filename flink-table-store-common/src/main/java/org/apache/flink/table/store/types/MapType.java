@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.utils.Preconditions;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
@@ -31,7 +32,10 @@ import java.util.Set;
  * {@code NULL}). A map cannot contain duplicate keys; each key can map to at most one value. There
  * is no restriction of key types; it is the responsibility of the user to ensure uniqueness. The
  * map type is an extension to the SQL standard.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public class MapType extends DataType {
 
     private static final long serialVersionUID = 1L;

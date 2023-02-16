@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.options;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -42,7 +44,10 @@ import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
  *
  * <p>The size can be parsed from a text expression. If the expression is a pure number, the value
  * will be interpreted as bytes.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public class MemorySize implements java.io.Serializable, Comparable<MemorySize> {
 
     private static final long serialVersionUID = 1L;

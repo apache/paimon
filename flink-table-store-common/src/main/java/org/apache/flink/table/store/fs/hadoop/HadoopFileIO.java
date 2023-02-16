@@ -25,7 +25,7 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.PositionOutputStream;
 import org.apache.flink.table.store.fs.SeekableInputStream;
 import org.apache.flink.table.store.hadoop.SerializableConfiguration;
-import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.options.CatalogContext;
 
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -53,8 +53,8 @@ public class HadoopFileIO implements FileIO {
     }
 
     @Override
-    public void configure(CatalogOptions config) {
-        this.hadoopConf = new SerializableConfiguration(config.hadoopConf());
+    public void configure(CatalogContext context) {
+        this.hadoopConf = new SerializableConfiguration(context.hadoopConf());
     }
 
     @Override

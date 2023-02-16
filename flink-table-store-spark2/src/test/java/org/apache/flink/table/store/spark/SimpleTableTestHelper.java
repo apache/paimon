@@ -20,8 +20,8 @@ package org.apache.flink.table.store.spark;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.Options;
@@ -48,9 +48,9 @@ public class SimpleTableTestHelper {
         // orc is shaded, can not find shaded classes in ide
         options.put(CoreOptions.FILE_FORMAT.key(), "avro");
         new SchemaManager(LocalFileIO.create(), path)
-                .commitNewVersion(
-                        new UpdateSchema(
-                                rowType,
+                .createTable(
+                        new Schema(
+                                rowType.getFields(),
                                 Collections.emptyList(),
                                 Collections.emptyList(),
                                 options,

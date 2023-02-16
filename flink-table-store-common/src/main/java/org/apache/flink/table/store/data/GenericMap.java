@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.data;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.types.MapType;
 import org.apache.flink.table.store.types.MultisetType;
 
@@ -35,7 +36,10 @@ import java.util.Objects;
  * internal data structures.
  *
  * <p>Both keys and values can contain null for representing nullability.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public final class GenericMap implements InternalMap {
 
     private final Map<?, ?> map;

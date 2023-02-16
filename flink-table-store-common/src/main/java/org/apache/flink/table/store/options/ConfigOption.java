@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.options;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.options.description.Description;
 
 import java.util.Arrays;
@@ -36,7 +37,9 @@ import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
  * option is immutable.
  *
  * @param <T> The type of value associated with the configuration option.
+ * @since 0.4.0
  */
+@Experimental
 public class ConfigOption<T> {
 
     private static final FallbackKey[] EMPTY = new FallbackKey[0];

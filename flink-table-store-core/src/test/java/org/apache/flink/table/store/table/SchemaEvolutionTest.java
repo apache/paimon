@@ -23,11 +23,9 @@ import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.sink.TableWrite;
@@ -53,8 +51,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
 
-import static org.apache.flink.table.store.file.schema.TableSchema.KEY_FIELD_PREFIX;
-import static org.apache.flink.table.store.file.schema.TableSchema.SYSTEM_FIELD_NAMES;
+import static org.apache.flink.table.store.file.schema.SystemColumns.KEY_FIELD_PREFIX;
+import static org.apache.flink.table.store.file.schema.SystemColumns.SYSTEM_FIELD_NAMES;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -76,14 +74,14 @@ public class SchemaEvolutionTest {
 
     @Test
     public void testAddField() throws Exception {
-        UpdateSchema updateSchema =
-                new UpdateSchema(
-                        RowType.of(new IntType(), new BigIntType()),
+        Schema schema =
+                new Schema(
+                        RowType.of(new IntType(), new BigIntType()).getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        schemaManager.commitNewVersion(updateSchema);
+        schemaManager.createTable(schema);
 
         FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
 
@@ -136,14 +134,14 @@ public class SchemaEvolutionTest {
     @Test
     public void testAddDuplicateField() throws Exception {
         final String columnName = "f3";
-        UpdateSchema updateSchema =
-                new UpdateSchema(
-                        RowType.of(new IntType(), new BigIntType()),
+        Schema schema =
+                new Schema(
+                        RowType.of(new IntType(), new BigIntType()).getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        schemaManager.commitNewVersion(updateSchema);
+        schemaManager.createTable(schema);
         schemaManager.commitChanges(
                 Collections.singletonList(SchemaChange.addColumn(columnName, new BigIntType())));
         assertThatThrownBy(
@@ -158,14 +156,14 @@ public class SchemaEvolutionTest {
 
     @Test
     public void testUpdateFieldType() throws Exception {
-        UpdateSchema updateSchema =
-                new UpdateSchema(
-                        RowType.of(new IntType(), new BigIntType()),
+        Schema schema =
+                new Schema(
+                        RowType.of(new IntType(), new BigIntType()).getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        schemaManager.commitNewVersion(updateSchema);
+        schemaManager.createTable(schema);
 
         schemaManager.commitChanges(
                 Collections.singletonList(SchemaChange.updateColumnType("f0", new BigIntType())));
@@ -184,14 +182,14 @@ public class SchemaEvolutionTest {
 
     @Test
     public void testRenameField() throws Exception {
-        UpdateSchema updateSchema =
-                new UpdateSchema(
-                        RowType.of(new IntType(), new BigIntType()),
+        Schema schema =
+                new Schema(
+                        RowType.of(new IntType(), new BigIntType()).getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        schemaManager.commitNewVersion(updateSchema);
+        schemaManager.createTable(schema);
         assertThat(schemaManager.latest().get().fieldNames()).containsExactly("f0", "f1");
 
         // Rename "f0" to "f01", "f1" to "f0", "f01" to "f1"
@@ -216,15 +214,15 @@ public class SchemaEvolutionTest {
 
     @Test
     public void testDropField() throws Exception {
-        UpdateSchema updateSchema =
-                new UpdateSchema(
-                        RowType.of(
-                                new IntType(), new BigIntType(), new IntType(), new BigIntType()),
+        Schema schema =
+                new Schema(
+                        RowType.of(new IntType(), new BigIntType(), new IntType(), new BigIntType())
+                                .getFields(),
                         Collections.singletonList("f0"),
                         Arrays.asList("f0", "f2"),
                         new HashMap<>(),
                         "");
-        schemaManager.commitNewVersion(updateSchema);
+        schemaManager.createTable(schema);
         assertThat(schemaManager.latest().get().fieldNames())
                 .containsExactly("f0", "f1", "f2", "f3");
 
@@ -248,14 +246,14 @@ public class SchemaEvolutionTest {
 
     @Test
     public void testDropAllFields() throws Exception {
-        UpdateSchema updateSchema =
-                new UpdateSchema(
-                        RowType.of(new IntType(), new BigIntType()),
+        Schema schema =
+                new Schema(
+                        RowType.of(new IntType(), new BigIntType()).getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        schemaManager.commitNewVersion(updateSchema);
+        schemaManager.createTable(schema);
         assertThat(schemaManager.latest().get().fieldNames()).containsExactly("f0", "f1");
 
         schemaManager.commitChanges(Collections.singletonList(SchemaChange.dropColumn("f0")));
@@ -281,46 +279,48 @@ public class SchemaEvolutionTest {
 
     @Test
     public void testCreateAlterSystemField() throws Exception {
-        UpdateSchema updateSchema1 =
-                new UpdateSchema(
+        Schema schema1 =
+                new Schema(
                         RowType.of(
-                                new DataType[] {new IntType(), new BigIntType()},
-                                new String[] {"f0", "_VALUE_COUNT"}),
+                                        new DataType[] {new IntType(), new BigIntType()},
+                                        new String[] {"f0", "_VALUE_COUNT"})
+                                .getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        assertThatThrownBy(() -> schemaManager.commitNewVersion(updateSchema1))
+        assertThatThrownBy(() -> schemaManager.createTable(schema1))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage(
                         String.format(
                                 "Field name[%s] in schema cannot be exist in [%s]",
                                 "_VALUE_COUNT", SYSTEM_FIELD_NAMES.toString()));
 
-        UpdateSchema updateSchema2 =
-                new UpdateSchema(
+        Schema schema2 =
+                new Schema(
                         RowType.of(
-                                new DataType[] {new IntType(), new BigIntType()},
-                                new String[] {"f0", "_KEY_f1"}),
+                                        new DataType[] {new IntType(), new BigIntType()},
+                                        new String[] {"f0", "_KEY_f1"})
+                                .getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        assertThatThrownBy(() -> schemaManager.commitNewVersion(updateSchema2))
+        assertThatThrownBy(() -> schemaManager.createTable(schema2))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage(
                         String.format(
                                 "Field name[%s] in schema cannot start with [%s]",
                                 "_KEY_f1", KEY_FIELD_PREFIX));
 
-        UpdateSchema updateSchema =
-                new UpdateSchema(
-                        RowType.of(new IntType(), new BigIntType()),
+        Schema schema =
+                new Schema(
+                        RowType.of(new IntType(), new BigIntType()).getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        schemaManager.commitNewVersion(updateSchema);
+        schemaManager.createTable(schema);
 
         assertThatThrownBy(
                         () ->
@@ -357,8 +357,7 @@ public class SchemaEvolutionTest {
             if (filter != null) {
                 read.withFilter(filter);
             }
-            RecordReader<InternalRow> reader = read.createReader(split);
-            RecordReaderUtils.forEachRemaining(reader, consumer);
+            read.createReader(split).forEachRemaining(consumer);
         }
     }
 }

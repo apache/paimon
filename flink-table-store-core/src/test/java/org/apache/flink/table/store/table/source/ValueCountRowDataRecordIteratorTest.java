@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.utils.ProjectedRow;
@@ -77,8 +76,7 @@ public class ValueCountRowDataRecordIteratorTest extends RowDataRecordIteratorTe
                 input,
                 kvIterator ->
                         new ValueCountRowDataRecordIterator(
-                                RecordReaderUtils.transform(
-                                        kvIterator,
+                                kvIterator.transform(
                                         kv ->
                                                 kv.replaceKey(
                                                         ProjectedRow.from(

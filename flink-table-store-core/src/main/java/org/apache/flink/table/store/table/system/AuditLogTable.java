@@ -26,10 +26,10 @@ import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.predicate.PredicateReplaceVisitor;
-import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.Table;
@@ -53,7 +53,6 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
-import static org.apache.flink.table.store.file.utils.RecordReaderUtils.transform;
 
 /** A {@link Table} for reading audit log of table. */
 public class AuditLogTable implements DataTable {
@@ -251,7 +250,7 @@ public class AuditLogTable implements DataTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
-            return transform(dataRead.createReader(split), this::convertRow);
+            return dataRead.createReader(split).transform(this::convertRow);
         }
 
         private InternalRow convertRow(InternalRow data) {

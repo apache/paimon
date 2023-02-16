@@ -37,8 +37,8 @@ import org.apache.flink.table.store.connector.source.ContinuousFileStoreSource;
 import org.apache.flink.table.store.connector.source.FlinkSourceBuilder;
 import org.apache.flink.table.store.connector.source.StaticFileStoreSource;
 import org.apache.flink.table.store.connector.util.AbstractTestBase;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.file.utils.FailingFileIO;
 import org.apache.flink.table.store.fs.Path;
@@ -373,9 +373,9 @@ public class FileStoreITCase extends AbstractTestBase {
             throws Exception {
         Options options = buildConfiguration(noFail, temporaryPath);
         Path tablePath = new CoreOptions(options.toMap()).path();
-        UpdateSchema updateSchema =
-                new UpdateSchema(
-                        toDataType(TABLE_TYPE),
+        Schema schema =
+                new Schema(
+                        toDataType(TABLE_TYPE).getFields(),
                         Arrays.stream(partitions)
                                 .mapToObj(i -> TABLE_TYPE.getFieldNames().get(i))
                                 .collect(Collectors.toList()),
@@ -386,8 +386,7 @@ public class FileStoreITCase extends AbstractTestBase {
                         "");
         return retryArtificialException(
                 () -> {
-                    new SchemaManager(LocalFileIO.create(), tablePath)
-                            .commitNewVersion(updateSchema);
+                    new SchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
                     return FileStoreTableFactory.create(LocalFileIO.create(), options);
                 });
     }

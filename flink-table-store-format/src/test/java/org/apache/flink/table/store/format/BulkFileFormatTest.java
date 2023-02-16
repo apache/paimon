@@ -20,12 +20,11 @@ package org.apache.flink.table.store.format;
 
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.PositionOutputStream;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.Options;
+import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
 
@@ -83,8 +82,8 @@ public class BulkFileFormatTest {
         RecordReader<InternalRow> reader =
                 fileFormat.createReaderFactory(rowType).createReader(new LocalFileIO(), path);
         List<InternalRow> result = new ArrayList<>();
-        RecordReaderUtils.forEachRemaining(
-                reader, rowData -> result.add(GenericRow.of(rowData.getInt(0), rowData.getInt(0))));
+        reader.forEachRemaining(
+                rowData -> result.add(GenericRow.of(rowData.getInt(0), rowData.getInt(0))));
 
         assertThat(result).isEqualTo(expected);
     }

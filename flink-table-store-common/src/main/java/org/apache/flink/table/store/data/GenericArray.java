@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.data;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.utils.ArrayUtils;
 
@@ -32,7 +33,10 @@ import java.util.Objects;
  *
  * <p>{@link GenericArray} is a generic implementation of {@link InternalArray} which wraps regular
  * Java arrays.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public final class GenericArray implements InternalArray {
 
     private final Object array;

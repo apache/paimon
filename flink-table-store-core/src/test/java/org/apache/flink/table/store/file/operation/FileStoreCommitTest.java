@@ -26,8 +26,8 @@ import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.FailingFileIO;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.utils.TraceableFileIO;
@@ -515,9 +515,9 @@ public class FileStoreCommitTest {
                         : TraceableFileIO.SCHEME + "://" + tempDir.toString();
         Path path = new Path(tempDir.toUri());
         SchemaManager schemaManager = new SchemaManager(FileIOFinder.find(path), path);
-        schemaManager.commitNewVersion(
-                new UpdateSchema(
-                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+        schemaManager.createTable(
+                new Schema(
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
                         TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
                         TestKeyValueGenerator.getPrimaryKeys(
                                 TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),

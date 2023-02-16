@@ -40,14 +40,13 @@ import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.descriptors.DescriptorProperties;
-import org.apache.flink.table.descriptors.Schema;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.Identifier;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaChange;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.types.logical.RowType;
@@ -174,7 +173,12 @@ public class FlinkCatalog extends AbstractCatalog {
 
     @Override
     public boolean tableExists(ObjectPath tablePath) throws CatalogException {
-        return catalog.tableExists(toIdentifier(tablePath));
+        try {
+            catalog.getTable(toIdentifier(tablePath));
+            return true;
+        } catch (Catalog.TableNotExistException e) {
+            return false;
+        }
     }
 
     @Override
@@ -310,15 +314,16 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     private CatalogTableImpl toCatalogTable(FileStoreTable table) {
-        UpdateSchema updateSchema = table.schema().toUpdateSchema();
         TableSchema schema;
-        Map<String, String> newOptions = new HashMap<>(updateSchema.options());
+        Map<String, String> newOptions = new HashMap<>(table.schema().options());
 
         // try to read schema from options
         // in the case of virtual columns and watermark
         DescriptorProperties tableSchemaProps = new DescriptorProperties(true);
         tableSchemaProps.putProperties(newOptions);
-        Optional<TableSchema> optional = tableSchemaProps.getOptionalTableSchema(Schema.SCHEMA);
+        Optional<TableSchema> optional =
+                tableSchemaProps.getOptionalTableSchema(
+                        org.apache.flink.table.descriptors.Schema.SCHEMA);
         if (optional.isPresent()) {
             schema = optional.get();
 
@@ -328,21 +333,26 @@ public class FlinkCatalog extends AbstractCatalog {
             removeProperties.asMap().keySet().forEach(newOptions::remove);
         } else {
             TableSchema.Builder builder = TableSchema.builder();
-            for (RowType.RowField field : toLogicalType(updateSchema.rowType()).getFields()) {
+            for (RowType.RowField field :
+                    toLogicalType(table.schema().logicalRowType()).getFields()) {
                 builder.field(field.getName(), fromLogicalToDataType(field.getType()));
             }
-            if (updateSchema.primaryKeys().size() > 0) {
-                builder.primaryKey(updateSchema.primaryKeys().toArray(new String[0]));
+            if (table.schema().primaryKeys().size() > 0) {
+                builder.primaryKey(table.schema().primaryKeys().toArray(new String[0]));
             }
 
             schema = builder.build();
         }
 
         return new DataCatalogTable(
-                table, schema, updateSchema.partitionKeys(), newOptions, updateSchema.comment());
+                table,
+                schema,
+                table.schema().partitionKeys(),
+                newOptions,
+                table.schema().comment());
     }
 
-    public static UpdateSchema fromCatalogTable(CatalogTable catalogTable) {
+    public static Schema fromCatalogTable(CatalogTable catalogTable) {
         TableSchema schema = catalogTable.getSchema();
         RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
         List<String> primaryKeys = new ArrayList<>();
@@ -362,8 +372,8 @@ public class FlinkCatalog extends AbstractCatalog {
             options.putAll(tableSchemaProps.asMap());
         }
 
-        return new UpdateSchema(
-                toDataType(rowType),
+        return new Schema(
+                toDataType(rowType).getFields(),
                 catalogTable.getPartitionKeys(),
                 primaryKeys,
                 options,

@@ -91,7 +91,7 @@ public class SinkRecordConverterTest {
                 new TableSchema(
                         0,
                         fields,
-                        TableSchema.currentHighestFieldId(fields),
+                        RowType.currentHighestFieldId(fields),
                         "".equals(partK)
                                 ? Collections.emptyList()
                                 : Arrays.asList(partK.split(",")),

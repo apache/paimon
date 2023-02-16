@@ -27,8 +27,8 @@ import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
@@ -79,9 +79,9 @@ public class KeyValueFileStoreScanTest {
 
         SchemaManager schemaManager =
                 new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
-        schemaManager.commitNewVersion(
-                new UpdateSchema(
-                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+        schemaManager.createTable(
+                new Schema(
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
                         TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
                         TestKeyValueGenerator.getPrimaryKeys(
                                 TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),

@@ -18,10 +18,15 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 /**
  * Data type of a 4-byte single precision floating point number. Compared to the SQL standard, the
  * type does not take parameters.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public class FloatType extends DataType {
 
     private static final long serialVersionUID = 1L;

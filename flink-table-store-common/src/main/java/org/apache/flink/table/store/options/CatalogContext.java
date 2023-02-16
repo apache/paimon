@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.options;
 
-import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.fs.FileIOLoader;
 import org.apache.flink.table.store.fs.hadoop.HadoopFileIOLoader;
 import org.apache.flink.table.store.table.TableType;
@@ -28,13 +28,16 @@ import org.apache.hadoop.conf.Configuration;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
-import java.util.Map;
-import java.util.Set;
 
 import static org.apache.flink.table.store.options.ConfigOptions.key;
 
-/** Configuration for {@link FileIO}. */
-public class CatalogOptions {
+/**
+ * Context of catalog.
+ *
+ * @since 0.4.0
+ */
+@Experimental
+public class CatalogContext {
 
     public static final ConfigOption<String> WAREHOUSE =
             ConfigOptions.key("warehouse")
@@ -90,62 +93,36 @@ public class CatalogOptions {
     private final Configuration hadoopConf;
     @Nullable private final FileIOLoader fallbackIOLoader;
 
-    public CatalogOptions(
+    private CatalogContext(
             Options options, Configuration hadoopConf, @Nullable FileIOLoader fallbackIOLoader) {
         this.options = options;
         this.hadoopConf = hadoopConf;
-        if (fallbackIOLoader == null && get(FS_ALLOW_HADOOP_FALLBACK)) {
+        if (fallbackIOLoader == null && options.get(FS_ALLOW_HADOOP_FALLBACK)) {
             this.fallbackIOLoader = new HadoopFileIOLoader();
         } else {
             this.fallbackIOLoader = fallbackIOLoader;
         }
     }
 
-    public static CatalogOptions empty() {
+    public static CatalogContext empty() {
         return create(new Options());
     }
 
-    public static CatalogOptions create(Options options) {
+    public static CatalogContext create(Options options) {
         return create(options, new Configuration());
     }
 
-    public static CatalogOptions create(Options options, Configuration hadoopConf) {
+    public static CatalogContext create(Options options, Configuration hadoopConf) {
         return create(options, hadoopConf, null);
     }
 
-    public static CatalogOptions create(
+    public static CatalogContext create(
             Options options, Configuration hadoopConf, @Nullable FileIOLoader fallbackIOLoader) {
-        return new CatalogOptions(options, hadoopConf, fallbackIOLoader);
+        return new CatalogContext(options, hadoopConf, fallbackIOLoader);
     }
 
     public Options options() {
         return options;
-    }
-
-    /**
-     * Returns the value to which the specified key is mapped, or {@code null} if this map contains
-     * no mapping for the key.
-     */
-    @Nullable
-    public String get(String key) {
-        return options.get(key);
-    }
-
-    public <T> T get(ConfigOption<T> option) {
-        return options.get(option);
-    }
-
-    public String get(String key, String defaultValue) {
-        String value = get(key);
-        if (value == null) {
-            value = defaultValue;
-        }
-        return value;
-    }
-
-    /** Returns a {@link Set} view of the keys contained in this map. */
-    public Set<String> keySet() {
-        return options.keySet();
     }
 
     /** Return hadoop {@link Configuration}. */
@@ -156,9 +133,5 @@ public class CatalogOptions {
     @Nullable
     public FileIOLoader fallbackIO() {
         return fallbackIOLoader;
-    }
-
-    public Map<String, String> toMap() {
-        return options.toMap();
     }
 }

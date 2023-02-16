@@ -27,9 +27,9 @@ import org.apache.flink.table.store.data.BinaryRowWriter;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -284,9 +284,9 @@ public class CompactorSourceITCase extends AbstractTestBase {
     private FileStoreTable createFileStoreTable() throws Exception {
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         TableSchema tableSchema =
-                schemaManager.commitNewVersion(
-                        new UpdateSchema(
-                                ROW_TYPE,
+                schemaManager.createTable(
+                        new Schema(
+                                ROW_TYPE.getFields(),
                                 Arrays.asList("dt", "hh"),
                                 Arrays.asList("dt", "hh", "k"),
                                 Collections.emptyMap(),

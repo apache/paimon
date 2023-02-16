@@ -22,10 +22,10 @@ import org.apache.flink.table.store.file.catalog.AbstractCatalog;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.catalog.Identifier;
 import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.OptionsUtils;
@@ -60,8 +60,8 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.flink.table.store.hive.HiveCatalogLock.checkMaxSleep;
-import static org.apache.flink.table.store.options.CatalogOptions.LOCK_ENABLED;
-import static org.apache.flink.table.store.options.CatalogOptions.TABLE_TYPE;
+import static org.apache.flink.table.store.options.CatalogContext.LOCK_ENABLED;
+import static org.apache.flink.table.store.options.CatalogContext.TABLE_TYPE;
 import static org.apache.flink.table.store.utils.Preconditions.checkState;
 
 /** A catalog implementation for Hive. */
@@ -188,13 +188,9 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public boolean dataTableExists(Identifier identifier) {
-        return tableStoreTableExists(identifier);
-    }
-
-    @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
+        checkNotSystemTable(identifier, "dropTable");
         if (!tableStoreTableExists(identifier)) {
             if (ignoreIfNotExists) {
                 return;
@@ -212,14 +208,14 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void createTable(
-            Identifier identifier, UpdateSchema updateSchema, boolean ignoreIfExists)
+    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException {
+        checkNotSystemTable(identifier, "createTable");
         String databaseName = identifier.getDatabaseName();
         if (!databaseExists(databaseName)) {
             throw new DatabaseNotExistException(databaseName);
         }
-        if (tableExists(identifier)) {
+        if (tableStoreTableExists(identifier)) {
             if (ignoreIfExists) {
                 return;
             } else {
@@ -227,12 +223,12 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
 
-        checkFieldNamesUpperCase(updateSchema.rowType().getFieldNames());
+        checkFieldNamesUpperCase(schema.rowType().getFieldNames());
         // first commit changes to underlying files
         // if changes on Hive fails there is no harm to perform the same changes to files again
-        TableSchema schema;
+        TableSchema tableSchema;
         try {
-            schema = schemaManager(identifier).commitNewVersion(updateSchema);
+            tableSchema = schemaManager(identifier).createTable(schema);
         } catch (Exception e) {
             throw new RuntimeException(
                     "Failed to commit changes of table "
@@ -241,7 +237,7 @@ public class HiveCatalog extends AbstractCatalog {
                     e);
         }
         Table table = newHmsTable(identifier);
-        updateHmsTable(table, identifier, schema);
+        updateHmsTable(table, identifier, tableSchema);
         try {
             client.createTable(table);
         } catch (TException e) {
@@ -252,6 +248,8 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
             throws TableNotExistException, TableAlreadyExistException {
+        checkNotSystemTable(fromTable, "renameTable");
+        checkNotSystemTable(toTable, "renameTable");
         if (!tableStoreTableExists(fromTable)) {
             if (ignoreIfNotExists) {
                 return;
@@ -260,7 +258,7 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
 
-        if (tableExists(toTable)) {
+        if (tableStoreTableExists(toTable)) {
             throw new TableAlreadyExistException(toTable);
         }
 
@@ -280,6 +278,7 @@ public class HiveCatalog extends AbstractCatalog {
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException {
+        checkNotSystemTable(identifier, "alterTable");
         if (!tableStoreTableExists(identifier)) {
             if (ignoreIfNotExists) {
                 return;

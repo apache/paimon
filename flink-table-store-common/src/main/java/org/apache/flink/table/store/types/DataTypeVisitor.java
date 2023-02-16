@@ -18,12 +18,16 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 /**
  * The visitor definition of {@link DataType}. The visitor transforms a data type into instances of
  * {@code R}.
  *
  * @param <R> result type
+ * @since 0.4.0
  */
+@Experimental
 public interface DataTypeVisitor<R> {
 
     R visit(CharType charType);

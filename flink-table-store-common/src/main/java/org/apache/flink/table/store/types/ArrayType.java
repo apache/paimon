@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.utils.Preconditions;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
@@ -30,7 +31,10 @@ import java.util.Set;
  * Data type of an array of elements with same subtype. Compared to the SQL standard, the maximum
  * cardinality of an array cannot be specified but is fixed at {@link Integer#MAX_VALUE}. Also, any
  * valid type is supported as a subtype.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public final class ArrayType extends DataType {
 
     private static final long serialVersionUID = 1L;

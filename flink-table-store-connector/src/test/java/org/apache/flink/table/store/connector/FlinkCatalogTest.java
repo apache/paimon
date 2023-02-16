@@ -37,7 +37,7 @@ import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.store.file.catalog.AbstractCatalog;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.options.CatalogContext;
 import org.apache.flink.table.store.options.Options;
 
 import org.junit.Assert;
@@ -80,7 +80,7 @@ public class FlinkCatalogTest {
         catalog =
                 FlinkCatalogFactory.createCatalog(
                         "test-catalog",
-                        CatalogOptions.create(conf),
+                        CatalogContext.create(conf),
                         FlinkCatalogTest.class.getClassLoader());
     }
 

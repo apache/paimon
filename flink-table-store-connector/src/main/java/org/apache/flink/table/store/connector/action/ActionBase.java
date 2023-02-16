@@ -21,7 +21,7 @@ package org.apache.flink.table.store.connector.action;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.file.catalog.Identifier;
-import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.options.CatalogContext;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.Table;
 
@@ -47,8 +47,8 @@ public abstract class ActionBase implements Action {
         identifier = new Identifier(databaseName, tableName);
         catalog =
                 CatalogFactory.createCatalog(
-                        CatalogOptions.create(
-                                new Options().set(CatalogOptions.WAREHOUSE, warehouse)));
+                        CatalogContext.create(
+                                new Options().set(CatalogContext.WAREHOUSE, warehouse)));
 
         try {
             table = catalog.getTable(identifier);

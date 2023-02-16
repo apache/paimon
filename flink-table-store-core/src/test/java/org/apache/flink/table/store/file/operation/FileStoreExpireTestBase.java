@@ -25,8 +25,8 @@ import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
@@ -58,9 +58,9 @@ public class FileStoreExpireTestBase {
         store = createStore();
         snapshotManager = store.snapshotManager();
         SchemaManager schemaManager = new SchemaManager(fileIO, new Path(tempDir.toUri()));
-        schemaManager.commitNewVersion(
-                new UpdateSchema(
-                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+        schemaManager.createTable(
+                new Schema(
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
                         TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
                         TestKeyValueGenerator.getPrimaryKeys(
                                 TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),

@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.data;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.types.RowKind;
 
 import javax.annotation.Nullable;
@@ -28,7 +29,10 @@ import java.util.Objects;
  * An implementation of {@link InternalRow} which is backed by two concatenated {@link InternalRow}.
  *
  * <p>This implementation is mutable to allow for performant changes in hot code paths.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public class JoinedRow implements InternalRow {
 
     private RowKind rowKind = RowKind.INSERT;

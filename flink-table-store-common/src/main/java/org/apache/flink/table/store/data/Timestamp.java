@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.data;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.types.LocalZonedTimestampType;
 import org.apache.flink.table.store.types.TimestampType;
 import org.apache.flink.table.store.utils.Preconditions;
@@ -34,7 +35,10 @@ import java.time.LocalTime;
  * <p>This data structure is immutable and consists of a milliseconds and nanos-of-millisecond since
  * {@code 1970-01-01 00:00:00}. It might be stored in a compact representation (as a long value) if
  * values are small enough.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public final class Timestamp implements Comparable<Timestamp> {
 
     // the number of milliseconds in a day

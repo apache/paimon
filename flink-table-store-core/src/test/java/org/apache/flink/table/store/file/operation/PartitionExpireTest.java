@@ -21,9 +21,8 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.AbstractFileStoreTable;
@@ -70,9 +69,9 @@ public class PartitionExpireTest {
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
         assertThatThrownBy(
                         () ->
-                                schemaManager.commitNewVersion(
-                                        new UpdateSchema(
-                                                RowType.of(VarCharType.STRING_TYPE),
+                                schemaManager.createTable(
+                                        new Schema(
+                                                RowType.of(VarCharType.STRING_TYPE).getFields(),
                                                 Collections.emptyList(),
                                                 Collections.emptyList(),
                                                 Collections.singletonMap(
@@ -85,9 +84,9 @@ public class PartitionExpireTest {
     @Test
     public void test() throws Exception {
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
-        schemaManager.commitNewVersion(
-                new UpdateSchema(
-                        RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE),
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
                         Collections.singletonList("f0"),
                         Collections.emptyList(),
                         Collections.emptyMap(),
@@ -121,9 +120,9 @@ public class PartitionExpireTest {
 
     private List<String> read() throws IOException {
         List<String> ret = new ArrayList<>();
-        RecordReaderUtils.forEachRemaining(
-                table.newRead().createReader(table.newScan().plan().splits()),
-                row -> ret.add(row.getString(0) + ":" + row.getString(1)));
+        table.newRead()
+                .createReader(table.newScan().plan().splits())
+                .forEachRemaining(row -> ret.add(row.getString(0) + ":" + row.getString(1)));
         return ret;
     }
 

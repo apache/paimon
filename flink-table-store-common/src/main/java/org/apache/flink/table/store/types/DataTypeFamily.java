@@ -18,13 +18,18 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 /**
  * An enumeration of Data type families for clustering {@link DataTypeRoot}s into categories.
  *
  * <p>The enumeration is very close to the SQL standard in terms of naming and completeness.
  * However, it reflects just a subset of the evolving standard and contains some extensions
  * (indicated by {@code EXTENSION}).
+ *
+ * @since 0.4.0
  */
+@Experimental
 public enum DataTypeFamily {
     PREDEFINED,
 

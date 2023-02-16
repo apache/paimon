@@ -18,7 +18,14 @@
 
 package org.apache.flink.table.store.types;
 
-/** Data type of a boolean with a (possibly) three-valued logic of {@code TRUE, FALSE, UNKNOWN}. */
+import org.apache.flink.table.store.annotation.Experimental;
+
+/**
+ * Data type of a boolean with a (possibly) three-valued logic of {@code TRUE, FALSE, UNKNOWN}.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public class BooleanType extends DataType {
 
     private static final long serialVersionUID = 1L;

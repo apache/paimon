@@ -18,10 +18,17 @@
 
 package org.apache.flink.table.store.fs;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 import java.io.IOException;
 import java.io.OutputStream;
 
-/** {@code PositionOutputStream} provides position methods. */
+/**
+ * {@code PositionOutputStream} provides position methods.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public abstract class PositionOutputStream extends OutputStream {
 
     /**

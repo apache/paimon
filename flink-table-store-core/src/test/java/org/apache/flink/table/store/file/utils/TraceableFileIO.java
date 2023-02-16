@@ -27,7 +27,7 @@ import org.apache.flink.table.store.fs.PositionOutputStreamWrapper;
 import org.apache.flink.table.store.fs.SeekableInputStream;
 import org.apache.flink.table.store.fs.SeekableInputStreamWrapper;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.options.CatalogContext;
 import org.apache.flink.table.store.utils.ThreadUtils;
 
 import javax.annotation.concurrent.GuardedBy;
@@ -80,8 +80,8 @@ public class TraceableFileIO implements FileIO {
     }
 
     @Override
-    public void configure(CatalogOptions config) {
-        originalFs.configure(config);
+    public void configure(CatalogContext context) {
+        originalFs.configure(context);
     }
 
     @Override

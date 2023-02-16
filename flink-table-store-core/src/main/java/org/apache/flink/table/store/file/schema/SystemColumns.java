@@ -16,28 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.utils;
+package org.apache.flink.table.store.file.schema;
 
-import javax.annotation.Nullable;
+import java.util.Arrays;
+import java.util.List;
 
-/**
- * Utility base class for iterators that accept a recycler.
- *
- * @param <E> The type of the records returned by the iterator.
- */
-public abstract class RecyclableIterator<E> implements RecordReader.RecordIterator<E> {
+/** System columns for key value store. */
+public class SystemColumns {
 
-    @Nullable private final Runnable recycler;
+    /** System field names. */
+    public static final String KEY_FIELD_PREFIX = "_KEY_";
 
-    /** Creates a {@code RecyclableIterator} with the given optional recycler. */
-    protected RecyclableIterator(@Nullable Runnable recycler) {
-        this.recycler = recycler;
-    }
-
-    @Override
-    public void releaseBatch() {
-        if (recycler != null) {
-            recycler.run();
-        }
-    }
+    public static final String VALUE_COUNT = "_VALUE_COUNT";
+    public static final String SEQUENCE_NUMBER = "_SEQUENCE_NUMBER";
+    public static final String VALUE_KIND = "_VALUE_KIND";
+    public static final List<String> SYSTEM_FIELD_NAMES =
+            Arrays.asList(VALUE_COUNT, SEQUENCE_NUMBER, VALUE_KIND);
 }

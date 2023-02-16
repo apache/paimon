@@ -1151,7 +1151,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         LocalFileIO.create().mkdirs(path);
         // update schema
         new SchemaManager(LocalFileIO.create(), path)
-                .commitNewVersion(FlinkCatalog.fromCatalogTable(context.getCatalogTable()));
+                .createTable(FlinkCatalog.fromCatalogTable(context.getCatalogTable()));
 
         DynamicTableSink tableSink =
                 new TableStoreSink(
