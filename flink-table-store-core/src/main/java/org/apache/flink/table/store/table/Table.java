@@ -31,8 +31,6 @@ import java.util.Map;
 /**
  * A table provides basic abstraction for table type and table scan and table read.
  *
- * <p>
- *
  * <p>Example of distributed reading a table:
  *
  * <pre>{@code
