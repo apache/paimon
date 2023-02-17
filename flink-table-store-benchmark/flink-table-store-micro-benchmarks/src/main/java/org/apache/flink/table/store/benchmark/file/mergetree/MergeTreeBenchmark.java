@@ -177,8 +177,12 @@ public class MergeTreeBenchmark {
                         flushingFormat,
                         pathFactory,
                         options.targetFileSize());
-        writerFactory = writerBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
-        compactWriterFactory = writerBuilder.build(BinaryRowDataUtil.EMPTY_ROW, 0);
+        writerFactory =
+                writerBuilder.build(
+                        BinaryRowDataUtil.EMPTY_ROW, 0, options.fileCompressionPerLevel());
+        compactWriterFactory =
+                writerBuilder.build(
+                        BinaryRowDataUtil.EMPTY_ROW, 0, options.fileCompressionPerLevel());
         return createMergeTreeWriter(Collections.emptyList());
     }
 

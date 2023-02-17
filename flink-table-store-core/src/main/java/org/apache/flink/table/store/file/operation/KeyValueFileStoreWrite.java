@@ -143,7 +143,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     restoreFiles);
         }
 
-        KeyValueFileWriterFactory writerFactory = writerFactoryBuilder.build(partition, bucket);
+        KeyValueFileWriterFactory writerFactory =
+                writerFactoryBuilder.build(partition, bucket, options.fileCompressionPerLevel());
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
         CompactManager compactManager =
@@ -199,7 +200,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private MergeTreeCompactRewriter createRewriter(
             BinaryRow partition, int bucket, Comparator<InternalRow> keyComparator) {
         KeyValueFileReaderFactory readerFactory = readerFactoryBuilder.build(partition, bucket);
-        KeyValueFileWriterFactory writerFactory = writerFactoryBuilder.build(partition, bucket);
+        KeyValueFileWriterFactory writerFactory =
+                writerFactoryBuilder.build(partition, bucket, options.fileCompressionPerLevel());
 
         if (options.changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
             return new FullChangelogMergeTreeCompactRewriter(

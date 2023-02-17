@@ -183,6 +183,12 @@
             <td>Define the default false positive probability for bloom filters.</td>
         </tr>
         <tr>
+            <td><h5>file.compression.per.level</h5></td>
+            <td style="word-wrap: break-word;"></td>
+            <td>Map</td>
+            <td>Define different compression policies for different level, you can add the conf like this: 'file.compression.per.level' = '0:lz4,1:zlib', for orc file format, the compression value could be NONE, ZLIB, SNAPPY, LZO, LZ4, for parquet file format, the compression value could be UNCOMPRESSED, SNAPPY, GZIP, LZO, BROTLI, LZ4, ZSTD.</td>
+        </tr>
+        <tr>
             <td><h5>page-size</h5></td>
             <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>

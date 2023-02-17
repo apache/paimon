@@ -120,7 +120,7 @@ public class ManifestFile {
         private long numDeletedFiles = 0;
 
         ManifestEntryWriter(FormatWriterFactory factory, Path path) {
-            super(ManifestFile.this.fileIO, factory, path, serializer::toRow);
+            super(ManifestFile.this.fileIO, factory, path, serializer::toRow, null);
 
             this.partitionStatsCollector = new FieldStatsCollector(partitionType);
             this.partitionStatsSerializer = new FieldStatsArraySerializer(partitionType);

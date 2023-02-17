@@ -176,8 +176,12 @@ public class MergeTreeTest {
                         flushingAvro,
                         pathFactory,
                         options.targetFileSize());
-        writerFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
-        compactWriterFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
+        writerFactory =
+                writerFactoryBuilder.build(
+                        BinaryRow.EMPTY_ROW, 0, options.fileCompressionPerLevel());
+        compactWriterFactory =
+                writerFactoryBuilder.build(
+                        BinaryRow.EMPTY_ROW, 0, options.fileCompressionPerLevel());
         writer = createMergeTreeWriter(Collections.emptyList());
     }
 

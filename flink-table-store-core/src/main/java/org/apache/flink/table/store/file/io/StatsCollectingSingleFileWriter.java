@@ -51,8 +51,9 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             Path path,
             Function<T, InternalRow> converter,
             RowType writeSchema,
-            @Nullable FileStatsExtractor fileStatsExtractor) {
-        super(fileIO, factory, path, converter);
+            @Nullable FileStatsExtractor fileStatsExtractor,
+            String compression) {
+        super(fileIO, factory, path, converter, compression);
         this.fileStatsExtractor = fileStatsExtractor;
         if (this.fileStatsExtractor == null) {
             this.fieldStatsCollector = new FieldStatsCollector(writeSchema);

@@ -50,9 +50,9 @@ public class ParquetWriterFactory implements FormatWriterFactory {
     }
 
     @Override
-    public FormatWriter create(PositionOutputStream stream) throws IOException {
+    public FormatWriter create(PositionOutputStream stream, String compression) throws IOException {
         final OutputFile out = new StreamOutputFile(stream);
-        final ParquetWriter<InternalRow> writer = writerBuilder.createWriter(out);
+        final ParquetWriter<InternalRow> writer = writerBuilder.createWriter(out, compression);
         return new ParquetBulkWriter(writer);
     }
 }
