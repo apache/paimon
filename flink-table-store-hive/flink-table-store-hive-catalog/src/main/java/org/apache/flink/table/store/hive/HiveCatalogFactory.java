@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.hive;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.fs.FileIO;
@@ -53,21 +54,21 @@ public class HiveCatalogFactory implements CatalogFactory {
     }
 
     @Override
-    public Catalog create(FileIO fileIO, Path warehouse, CatalogOptions options) {
+    public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
         String uri =
                 Preconditions.checkNotNull(
-                        options.get(CatalogOptions.URI),
+                        context.options().get(CatalogOptions.URI),
                         CatalogOptions.URI.key()
                                 + " must be set for table store "
                                 + IDENTIFIER
                                 + " catalog");
 
         Configuration hadoopConfig = new Configuration();
-        options.toMap().forEach(hadoopConfig::set);
+        context.options().toMap().forEach(hadoopConfig::set);
         hadoopConfig.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
         hadoopConfig.set(
                 HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouse.toUri().toString());
 
-        return new HiveCatalog(fileIO, hadoopConfig, options.get(METASTORE_CLIENT_CLASS));
+        return new HiveCatalog(fileIO, hadoopConfig, context.options().get(METASTORE_CLIENT_CLASS));
     }
 }

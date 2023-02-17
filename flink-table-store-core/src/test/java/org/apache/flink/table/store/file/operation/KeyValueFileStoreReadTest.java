@@ -29,13 +29,13 @@ import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunct
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.fs.FileIOFinder;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.flink.table.store.reader.RecordReaderIterator;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
@@ -264,9 +264,9 @@ public class KeyValueFileStoreReadTest {
         Path path = new Path(tempDir.toUri());
         SchemaManager schemaManager = new SchemaManager(FileIOFinder.find(path), path);
         boolean valueCountMode = mfFactory.create() instanceof ValueCountMergeFunction;
-        schemaManager.commitNewVersion(
-                new UpdateSchema(
-                        valueCountMode ? keyType : valueType,
+        schemaManager.createTable(
+                new Schema(
+                        (valueCountMode ? keyType : valueType).getFields(),
                         partitionType.getFieldNames(),
                         valueCountMode
                                 ? Collections.emptyList()

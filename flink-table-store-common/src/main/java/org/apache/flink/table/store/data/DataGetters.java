@@ -18,7 +18,14 @@
 
 package org.apache.flink.table.store.data;
 
-/** Getters to get data. */
+import org.apache.flink.table.store.annotation.Experimental;
+
+/**
+ * Getters to get data.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public interface DataGetters {
 
     /** Returns true if the element is null at the given position. */

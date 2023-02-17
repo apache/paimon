@@ -30,11 +30,9 @@ import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.stats.FieldStatsConverters;
 import org.apache.flink.table.store.file.utils.IteratorRecordReader;
-import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.file.utils.SerializationUtils;
 import org.apache.flink.table.store.format.FieldStats;
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.DataSplit;
@@ -117,11 +115,6 @@ public class FilesTable implements Table {
     }
 
     @Override
-    public Path location() {
-        return storeTable.location();
-    }
-
-    @Override
     public TableScan newScan() {
         return new FilesScan(storeTable);
     }
@@ -134,11 +127,6 @@ public class FilesTable implements Table {
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
         return new FilesTable(storeTable.copy(dynamicOptions));
-    }
-
-    @Override
-    public FileIO fileIO() {
-        return storeTable.fileIO();
     }
 
     private static class FilesScan implements TableScan {

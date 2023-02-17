@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.data.columnar;
 
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecyclableIterator;
+import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.flink.table.store.utils.RecyclableIterator;
 
 import javax.annotation.Nullable;
 

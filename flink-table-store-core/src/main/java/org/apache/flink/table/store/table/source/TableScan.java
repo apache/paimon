@@ -18,13 +18,19 @@
 
 package org.apache.flink.table.store.table.source;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.table.Table;
 
 import java.util.List;
 
-/** A scan of {@link Table} to generate {@link Split} splits. */
+/**
+ * A scan of {@link Table} to generate {@link Split} splits.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public interface TableScan {
 
     default TableScan withFilter(List<Predicate> predicates) {
@@ -38,7 +44,12 @@ public interface TableScan {
 
     Plan plan();
 
-    /** Plan of scan. */
+    /**
+     * Plan of scan.
+     *
+     * @since 0.4.0
+     */
+    @Experimental
     interface Plan {
         List<Split> splits();
     }

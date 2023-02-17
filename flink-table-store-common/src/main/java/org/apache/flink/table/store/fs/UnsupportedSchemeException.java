@@ -18,9 +18,16 @@
 
 package org.apache.flink.table.store.fs;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 import java.io.IOException;
 
-/** An exception to indicate that a specific file system scheme is not supported. */
+/**
+ * An exception to indicate that a specific file system scheme is not supported.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public class UnsupportedSchemeException extends IOException {
 
     private static final long serialVersionUID = 1L;

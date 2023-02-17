@@ -23,8 +23,8 @@ import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.kafka.KafkaLogStoreFactory;
@@ -71,9 +71,9 @@ public class ChangelogModeTest {
             @Nullable LogStoreTableFactory logStoreTableFactory)
             throws Exception {
         new SchemaManager(LocalFileIO.create(), path)
-                .commitNewVersion(
-                        new UpdateSchema(
-                                RowType.of(new IntType(), new IntType()),
+                .createTable(
+                        new Schema(
+                                RowType.of(new IntType(), new IntType()).getFields(),
                                 Collections.emptyList(),
                                 Collections.singletonList("f0"),
                                 options.toMap(),

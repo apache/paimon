@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.oss;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.options.Options;
 
 import org.apache.hadoop.conf.Configuration;
@@ -76,13 +76,13 @@ public class OSSFileIO extends HadoopCompliantFileIO {
     }
 
     @Override
-    public void configure(CatalogOptions config) {
+    public void configure(CatalogContext context) {
         hadoopOptions = new Options();
         // read all configuration with prefix 'CONFIG_PREFIXES'
-        for (String key : config.keySet()) {
+        for (String key : context.options().keySet()) {
             for (String prefix : CONFIG_PREFIXES) {
                 if (key.startsWith(prefix)) {
-                    String value = config.get(key);
+                    String value = context.options().get(key);
                     if (CASE_SENSITIVE_KEYS.containsKey(key.toLowerCase())) {
                         key = CASE_SENSITIVE_KEYS.get(key.toLowerCase());
                     }

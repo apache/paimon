@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.options;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.options.description.Description;
 
 import java.time.Duration;
@@ -64,7 +65,10 @@ import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
  *     .defaultValue(0.9)
  *     .withDeprecatedKeys("cpu.threshold");
  * }</pre>
+ *
+ * @since 0.4.0
  */
+@Experimental
 public class ConfigOptions {
 
     /**

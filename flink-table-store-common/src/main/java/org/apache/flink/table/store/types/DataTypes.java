@@ -18,9 +18,16 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 import java.util.Arrays;
 
-/** Utils for creating {@link DataType}s. */
+/**
+ * Utils for creating {@link DataType}s.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public class DataTypes {
 
     public static IntType INT() {

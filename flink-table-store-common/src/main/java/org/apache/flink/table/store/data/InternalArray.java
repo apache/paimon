@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.data;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataType;
 
@@ -35,8 +36,10 @@ import static org.apache.flink.table.store.types.DataTypeChecks.getScale;
  * <p>Note: All elements of this data structure must be internal data structures and must be of the
  * same type. See {@link InternalRow} for more information about internal data structures.
  *
- * <p>Use {@link GenericArray} to construct instances of this interface from regular Java arrays.
+ * @see GenericArray
+ * @since 0.4.0
  */
+@Experimental
 public interface InternalArray extends DataGetters {
 
     /** Returns the number of elements in this array. */

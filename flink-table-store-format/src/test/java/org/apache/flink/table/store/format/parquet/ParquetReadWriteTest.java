@@ -25,12 +25,12 @@ import org.apache.flink.table.store.data.GenericMap;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.Timestamp;
-import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FormatWriter;
 import org.apache.flink.table.store.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.Options;
+import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.BooleanType;
@@ -67,7 +67,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.file.utils.RecordReaderUtils.forEachRemaining;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ParquetReaderFactory}. */
@@ -228,8 +227,8 @@ public class ParquetReadWriteTest {
                         500);
 
         AtomicInteger cnt = new AtomicInteger(0);
-        forEachRemaining(
-                format.createReader(new LocalFileIO(), testPath),
+        RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), testPath);
+        reader.forEachRemaining(
                 row -> {
                     int i = cnt.get();
                     assertThat(row.getDouble(0)).isEqualTo(i);
@@ -266,8 +265,8 @@ public class ParquetReadWriteTest {
                         500);
 
         AtomicInteger cnt = new AtomicInteger(0);
-        forEachRemaining(
-                format.createReader(new LocalFileIO(), testPath),
+        RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), testPath);
+        reader.forEachRemaining(
                 row -> {
                     int i = cnt.get();
                     assertThat(row.getDouble(0)).isEqualTo(i);
@@ -318,8 +317,7 @@ public class ParquetReadWriteTest {
 
         AtomicInteger cnt = new AtomicInteger(0);
         final AtomicReference<InternalRow> previousRow = new AtomicReference<>();
-        forEachRemaining(
-                reader,
+        reader.forEachRemaining(
                 row -> {
                     if (previousRow.get() == null) {
                         previousRow.set(row);

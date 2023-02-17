@@ -18,7 +18,8 @@
 
 package org.apache.flink.table.store.fs;
 
-import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.catalog.CatalogContext;
+import org.apache.flink.table.store.options.Options;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -28,7 +29,7 @@ public class FileIOFinder {
 
     public static FileIO find(Path path) {
         try {
-            return FileIO.get(path, CatalogOptions.empty());
+            return FileIO.get(path, CatalogContext.create(new Options()));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

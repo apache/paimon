@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.types.RowKind;
 
 import javax.annotation.Nullable;

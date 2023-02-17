@@ -21,10 +21,9 @@ package org.apache.flink.table.store.format.avro;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.utils.FileIOUtils;
 
 import org.apache.avro.Schema;
@@ -126,8 +125,7 @@ class AvroBulkFormatTest {
         RecordReader<InternalRow> reader =
                 bulkFormat.createReader(new LocalFileIO(), new Path(tmpFile.toString()));
         AtomicInteger i = new AtomicInteger(0);
-        RecordReaderUtils.forEachRemaining(
-                reader,
+        reader.forEachRemaining(
                 rowData -> assertThat(rowData).isEqualTo(TEST_DATA.get(i.getAndIncrement())));
     }
 }

@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.utils.Preconditions;
 
 import javax.annotation.Nullable;

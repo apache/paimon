@@ -20,6 +20,8 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.source.DataTableScan;
 
 /** A {@link Table} for data. */
@@ -31,4 +33,8 @@ public interface DataTable extends Table {
     CoreOptions options();
 
     SnapshotManager snapshotManager();
+
+    Path location();
+
+    FileIO fileIO();
 }

@@ -29,8 +29,8 @@ import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.connector.FlinkRowData;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordReader.RecordIterator;
+import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.flink.table.store.reader.RecordReader.RecordIterator;
 import org.apache.flink.table.store.table.source.TableRead;
 
 import javax.annotation.Nullable;

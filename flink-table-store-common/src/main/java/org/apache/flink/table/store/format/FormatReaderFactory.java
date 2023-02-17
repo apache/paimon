@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.format;
 
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.reader.RecordReader;
 
 import java.io.IOException;
 import java.io.Serializable;

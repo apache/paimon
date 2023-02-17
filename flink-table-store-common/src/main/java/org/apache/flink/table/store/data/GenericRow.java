@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.data;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
 
@@ -39,7 +40,10 @@ import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
  * InternalRow} for more information about internal data structures.
  *
  * <p>The fields in {@link GenericRow} can be null for representing nullability.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public final class GenericRow implements InternalRow {
 
     /** The array to store the actual internal format values. */

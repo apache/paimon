@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.options.Options;
 
 import java.util.Map;
@@ -27,9 +27,9 @@ import java.util.Map;
 /** Utils for Flink. */
 public class FlinkUtils {
 
-    public static CatalogOptions catalogOptions(
+    public static CatalogContext createCatalogContext(
             Map<String, String> options, ReadableConfig flinkConf) {
-        return CatalogOptions.create(
+        return CatalogContext.create(
                 Options.fromMap(options),
                 HadoopUtils.getHadoopConfiguration(
                         TableConfigUtils.extractConfiguration(flinkConf)),

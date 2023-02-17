@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 
@@ -48,11 +48,11 @@ public class SparkSource implements DataSourceRegister, ReadSupport, SessionConf
 
     @Override
     public DataSourceReader createReader(DataSourceOptions options) {
-        CatalogOptions catalogOptions =
-                CatalogOptions.create(
+        CatalogContext catalogContext =
+                CatalogContext.create(
                         Options.fromMap(options.asMap()),
                         SparkSession.active().sessionState().newHadoopConf());
-        return new SparkDataSourceReader(FileStoreTableFactory.create(catalogOptions));
+        return new SparkDataSourceReader(FileStoreTableFactory.create(catalogContext));
     }
 
     @Override

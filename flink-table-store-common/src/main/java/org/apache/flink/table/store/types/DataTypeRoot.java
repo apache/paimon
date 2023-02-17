@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Set;
@@ -40,7 +42,10 @@ import java.util.Set;
  *   <li>Think about the behavior of all type roots for the implementation. A default fallback is
  *       dangerous when introducing a new type root in the future.
  * </ul>
+ *
+ * @since 0.4.0
  */
+@Experimental
 public enum DataTypeRoot {
     CHAR(DataTypeFamily.PREDEFINED, DataTypeFamily.CHARACTER_STRING),
 

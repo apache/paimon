@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store;
 
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.Options;
@@ -39,8 +39,9 @@ public class FileStoreTestUtils {
             throws Exception {
         Path tablePath = CoreOptions.path(conf);
         new SchemaManager(LocalFileIO.create(), tablePath)
-                .commitNewVersion(
-                        new UpdateSchema(rowType, partitionKeys, primaryKeys, conf.toMap(), ""));
+                .createTable(
+                        new Schema(
+                                rowType.getFields(), partitionKeys, primaryKeys, conf.toMap(), ""));
 
         // only path, other config should be read from file store.
         conf = new Options();

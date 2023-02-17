@@ -16,7 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.utils;
+package org.apache.flink.table.store.utils;
+
+import org.apache.flink.table.store.reader.RecordReader;
 
 import javax.annotation.Nullable;
 

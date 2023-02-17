@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 import java.util.Objects;
 
 /**
@@ -28,7 +30,9 @@ import java.util.Objects;
  * {@link java.time.LocalDateTime}.
  *
  * @see LocalZonedTimestampType
+ * @since 0.4.0
  */
+@Experimental
 public class TimestampType extends DataType {
 
     private static final long serialVersionUID = 1L;

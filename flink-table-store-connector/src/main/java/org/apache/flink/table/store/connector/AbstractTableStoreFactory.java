@@ -31,13 +31,13 @@ import org.apache.flink.table.factories.DynamicTableSourceFactory;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import org.apache.flink.table.store.CoreOptions.LogConsistency;
 import org.apache.flink.table.store.annotation.VisibleForTesting;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.connector.sink.TableStoreSink;
 import org.apache.flink.table.store.connector.source.SystemTableSource;
 import org.apache.flink.table.store.connector.source.TableStoreSource;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
-import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
@@ -134,8 +134,8 @@ public abstract class AbstractTableStoreFactory
         }
     }
 
-    static CatalogOptions createCatalogOptions(DynamicTableFactory.Context context) {
-        return FlinkUtils.catalogOptions(
+    static CatalogContext createCatalogContext(DynamicTableFactory.Context context) {
+        return FlinkUtils.createCatalogContext(
                 context.getCatalogTable().getOptions(), context.getConfiguration());
     }
 
@@ -145,15 +145,15 @@ public abstract class AbstractTableStoreFactory
         if (origin instanceof DataCatalogTable) {
             table = ((DataCatalogTable) origin).table().copy(origin.getOptions());
         } else {
-            table = FileStoreTableFactory.create(createCatalogOptions(context));
+            table = FileStoreTableFactory.create(createCatalogContext(context));
         }
 
         TableSchema tableSchema = table.schema();
-        UpdateSchema updateSchema = FlinkCatalog.fromCatalogTable(context.getCatalogTable());
+        Schema schema = FlinkCatalog.fromCatalogTable(context.getCatalogTable());
 
-        RowType rowType = toLogicalType(updateSchema.rowType());
-        List<String> partitionKeys = updateSchema.partitionKeys();
-        List<String> primaryKeys = updateSchema.primaryKeys();
+        RowType rowType = toLogicalType(schema.rowType());
+        List<String> partitionKeys = schema.partitionKeys();
+        List<String> primaryKeys = schema.primaryKeys();
 
         // compare fields to ignore the outside nullability and nested fields' comments
         Preconditions.checkArgument(

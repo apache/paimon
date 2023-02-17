@@ -18,21 +18,19 @@
 
 package org.apache.flink.table.store.connector.action;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.data.DataFormatTestUtil;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.catalog.CatalogUtils;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordReaderUtils;
+import org.apache.flink.table.store.file.catalog.Catalog;
+import org.apache.flink.table.store.file.catalog.CatalogFactory;
+import org.apache.flink.table.store.file.catalog.Identifier;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
@@ -87,12 +85,14 @@ public class ActionITCaseBase extends AbstractTestBase {
             List<String> primaryKeys,
             Map<String, String> options)
             throws Exception {
-        Path tablePath = CatalogUtils.path(warehouse, database, tableName);
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
-        TableSchema tableSchema =
-                schemaManager.commitNewVersion(
-                        new UpdateSchema(rowType, partitionKeys, primaryKeys, options, ""));
-        return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        Identifier identifier = Identifier.create(database, tableName);
+        catalog.createDatabase(database, true);
+        catalog.createTable(
+                identifier,
+                new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, ""),
+                false);
+        return (FileStoreTable) catalog.getTable(identifier);
     }
 
     protected GenericRow rowData(Object... values) {
@@ -111,8 +111,8 @@ public class ActionITCaseBase extends AbstractTestBase {
             throws Exception {
         RecordReader<InternalRow> recordReader = read.createReader(splits);
         List<String> result = new ArrayList<>();
-        RecordReaderUtils.forEachRemaining(
-                recordReader, row -> result.add(DataFormatTestUtil.rowDataToString(row, rowType)));
+        recordReader.forEachRemaining(
+                row -> result.add(DataFormatTestUtil.rowDataToString(row, rowType)));
         return result;
     }
 }

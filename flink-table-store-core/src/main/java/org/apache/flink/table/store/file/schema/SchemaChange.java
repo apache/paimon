@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.schema;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.types.DataType;
 
 import javax.annotation.Nullable;
@@ -25,7 +26,12 @@ import javax.annotation.Nullable;
 import java.util.Arrays;
 import java.util.Objects;
 
-/** Schema change to table. */
+/**
+ * Schema change to table.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public interface SchemaChange {
 
     static SchemaChange setOption(String key, String value) {

@@ -18,12 +18,19 @@
 
 package org.apache.flink.table.store.file.predicate;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.format.FieldStats;
 
 import java.io.Serializable;
 import java.util.Optional;
 
-/** Predicate which returns Boolean and provides testing by stats. */
+/**
+ * Predicate which returns Boolean and provides testing by stats.
+ *
+ * @see PredicateBuilder
+ * @since 0.4.0
+ */
+@Experimental
 public interface Predicate extends Serializable {
 
     /**

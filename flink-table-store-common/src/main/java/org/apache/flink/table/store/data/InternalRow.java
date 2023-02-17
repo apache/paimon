@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.data;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypeChecks;
 import org.apache.flink.table.store.types.RowKind;
@@ -77,7 +78,12 @@ import static org.apache.flink.table.store.types.DataTypeChecks.getScale;
  * </pre>
  *
  * <p>Nullability is always handled by the container data structure.
+ *
+ * @see GenericRow
+ * @see JoinedRow
+ * @since 0.4.0
  */
+@Experimental
 public interface InternalRow extends DataGetters {
 
     /**

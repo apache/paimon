@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.data;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.types.DecimalType;
 
 import javax.annotation.Nonnull;
@@ -34,16 +35,16 @@ import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
  *
  * <p>This data structure is immutable and might store decimal values in a compact representation
  * (as a long value) if values are small enough.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public final class Decimal implements Comparable<Decimal> {
 
     // member fields and static fields are package-visible,
     // in order to be accessible for DecimalUtils
 
     static final int MAX_COMPACT_PRECISION = 18;
-
-    /** Maximum number of decimal digits an Int can represent. (1e9 < Int.MaxValue < 1e10) */
-    static final int MAX_INT_DIGITS = 9;
 
     /** Maximum number of decimal digits a Long can represent. (1e18 < Long.MaxValue < 1e19) */
     static final int MAX_LONG_DIGITS = 18;

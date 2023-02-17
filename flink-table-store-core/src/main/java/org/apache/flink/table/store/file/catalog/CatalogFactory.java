@@ -18,9 +18,10 @@
 
 package org.apache.flink.table.store.file.catalog;
 
+import org.apache.flink.table.store.annotation.Experimental;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.utils.Preconditions;
 
 import java.io.IOException;
@@ -34,17 +35,22 @@ import static org.apache.flink.table.store.options.CatalogOptions.METASTORE;
 import static org.apache.flink.table.store.options.CatalogOptions.WAREHOUSE;
 import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
-/** Factory to create {@link Catalog}. Each factory should have a unique identifier. */
+/**
+ * Factory to create {@link Catalog}. Each factory should have a unique identifier.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public interface CatalogFactory {
 
     String identifier();
 
-    Catalog create(FileIO fileIO, Path warehouse, CatalogOptions options);
+    Catalog create(FileIO fileIO, Path warehouse, CatalogContext context);
 
-    static Path warehouse(CatalogOptions options) {
+    static Path warehouse(CatalogContext context) {
         String warehouse =
                 Preconditions.checkNotNull(
-                        options.get(WAREHOUSE),
+                        context.options().get(WAREHOUSE),
                         "Table store '" + WAREHOUSE.key() + "' path must be set");
         return new Path(warehouse);
     }
@@ -53,17 +59,17 @@ public interface CatalogFactory {
      * If the ClassLoader is not specified, using the context ClassLoader of current thread as
      * default.
      */
-    static Catalog createCatalog(CatalogOptions options) {
+    static Catalog createCatalog(CatalogContext options) {
         return createCatalog(options, Thread.currentThread().getContextClassLoader());
     }
 
-    static Catalog createCatalog(CatalogOptions options, ClassLoader classLoader) {
+    static Catalog createCatalog(CatalogContext context, ClassLoader classLoader) {
         // manual validation
         // because different catalog types may have different options
         // we can't list them all in the optionalOptions() method
-        String warehouse = warehouse(options).toUri().toString();
+        String warehouse = warehouse(context).toUri().toString();
 
-        String metastore = options.get(METASTORE);
+        String metastore = context.options().get(METASTORE);
         List<CatalogFactory> factories = new ArrayList<>();
         ServiceLoader.load(CatalogFactory.class, classLoader)
                 .iterator()
@@ -91,7 +97,7 @@ public interface CatalogFactory {
         FileIO fileIO;
 
         try {
-            fileIO = FileIO.get(warehousePath, options);
+            fileIO = FileIO.get(warehousePath, context);
             if (fileIO.exists(warehousePath)) {
                 checkArgument(
                         fileIO.isDir(warehousePath),
@@ -105,6 +111,6 @@ public interface CatalogFactory {
             throw new UncheckedIOException(e);
         }
 
-        return factories.get(0).create(fileIO, warehousePath, options);
+        return factories.get(0).create(fileIO, warehousePath, context);
     }
 }

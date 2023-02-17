@@ -18,9 +18,16 @@
 
 package org.apache.flink.table.store.table.source;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 import java.io.Serializable;
 
-/** An input split for reading. */
+/**
+ * An input split for reading.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public interface Split extends Serializable {
 
     long rowCount();

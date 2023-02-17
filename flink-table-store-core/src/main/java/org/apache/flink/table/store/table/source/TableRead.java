@@ -18,19 +18,25 @@
 
 package org.apache.flink.table.store.table.source;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.reader.RecordReader;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/** An abstraction layer above {@link FileStoreRead} to provide reading of {@link InternalRow}. */
+/**
+ * An abstraction layer above {@link FileStoreRead} to provide reading of {@link InternalRow}.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public interface TableRead {
 
     default TableRead withFilter(List<Predicate> predicates) {
@@ -43,6 +49,9 @@ public interface TableRead {
     TableRead withFilter(Predicate predicate);
 
     default TableRead withProjection(int[] projection) {
+        if (projection == null) {
+            return this;
+        }
         int[][] nestedProjection =
                 Arrays.stream(projection).mapToObj(i -> new int[] {i}).toArray(int[][]::new);
         return withProjection(nestedProjection);

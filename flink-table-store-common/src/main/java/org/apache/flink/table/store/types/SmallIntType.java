@@ -18,7 +18,14 @@
 
 package org.apache.flink.table.store.types;
 
-/** Data type of a 2-byte signed integer with values from -32,768 to 32,767. */
+import org.apache.flink.table.store.annotation.Experimental;
+
+/**
+ * Data type of a 2-byte signed integer with values from -32,768 to 32,767.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public final class SmallIntType extends DataType {
 
     private static final long serialVersionUID = 1L;

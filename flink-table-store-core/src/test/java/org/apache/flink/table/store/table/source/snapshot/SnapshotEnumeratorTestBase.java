@@ -23,16 +23,16 @@ import org.apache.flink.table.store.data.BinaryRowWriter;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.TraceableFileIO;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileIOFinder;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.Options;
+import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.flink.table.store.reader.RecordReaderIterator;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.source.Split;
@@ -124,9 +124,9 @@ public abstract class SnapshotEnumeratorTestBase {
     protected FileStoreTable createFileStoreTable(Options conf) throws Exception {
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         TableSchema tableSchema =
-                schemaManager.commitNewVersion(
-                        new UpdateSchema(
-                                ROW_TYPE,
+                schemaManager.createTable(
+                        new Schema(
+                                ROW_TYPE.getFields(),
                                 Collections.singletonList("pt"),
                                 Arrays.asList("pt", "a"),
                                 conf.toMap(),

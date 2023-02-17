@@ -33,13 +33,10 @@ import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnType;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypeCasts;
 import org.apache.flink.table.store.types.DataTypeVisitor;
-import org.apache.flink.table.store.types.MapType;
-import org.apache.flink.table.store.types.MultisetType;
 import org.apache.flink.table.store.types.ReassignFieldId;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Preconditions;
@@ -109,61 +106,32 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    /** Create a new schema from {@link UpdateSchema}. */
-    public TableSchema commitNewVersion(UpdateSchema updateSchema) throws Exception {
-        RowType rowType = updateSchema.rowType();
-        List<String> partitionKeys = updateSchema.partitionKeys();
-        List<String> primaryKeys = updateSchema.primaryKeys();
-        Map<String, String> options = updateSchema.options();
-
-        validatePrimaryKeysType(updateSchema, primaryKeys);
+    /** Create a new schema from {@link Schema}. */
+    public TableSchema createTable(Schema schema) throws Exception {
         while (true) {
-            long id;
-            int highestFieldId;
-            List<DataField> fields;
-            Optional<TableSchema> latest = latest();
-            if (latest.isPresent()) {
-                TableSchema oldTableSchema = latest.get();
-                Preconditions.checkArgument(
-                        oldTableSchema.primaryKeys().equals(primaryKeys),
-                        "Primary key modification is not supported, "
-                                + "old primaryKeys is %s, new primaryKeys is %s",
-                        oldTableSchema.primaryKeys(),
-                        primaryKeys);
+            latest().ifPresent(
+                            latest -> {
+                                throw new IllegalStateException(
+                                        "Schema in filesystem exists, please use updating,"
+                                                + " latest schema is: "
+                                                + latest());
+                            });
 
-                if (!updateSchema
-                                .rowType()
-                                .getFields()
-                                .equals(oldTableSchema.logicalRowType().getFields())
-                        || !updateSchema.partitionKeys().equals(oldTableSchema.partitionKeys())) {
-                    throw new UnsupportedOperationException(
-                            "TODO: support update field types and partition keys. ");
-                }
-
-                fields = oldTableSchema.fields();
-                id = oldTableSchema.id() + 1;
-                highestFieldId = oldTableSchema.highestFieldId();
-            } else {
-                fields = TableSchema.newFields(rowType);
-                highestFieldId = TableSchema.currentHighestFieldId(fields);
-                id = 0;
-            }
-
-            String sequenceField = options.get(CoreOptions.SEQUENCE_FIELD.key());
-            Preconditions.checkArgument(
-                    sequenceField == null || rowType.getFieldNames().contains(sequenceField),
-                    "Nonexistent sequence field: '%s'",
-                    sequenceField);
+            List<DataField> fields = schema.fields();
+            List<String> partitionKeys = schema.partitionKeys();
+            List<String> primaryKeys = schema.primaryKeys();
+            Map<String, String> options = schema.options();
+            int highestFieldId = RowType.currentHighestFieldId(fields);
 
             TableSchema newSchema =
                     new TableSchema(
-                            id,
+                            0,
                             fields,
                             highestFieldId,
                             partitionKeys,
                             primaryKeys,
                             options,
-                            updateSchema.comment());
+                            schema.comment());
 
             boolean success = commit(newSchema);
             if (success) {
@@ -172,30 +140,12 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private void validatePrimaryKeysType(UpdateSchema updateSchema, List<String> primaryKeys) {
-        if (!primaryKeys.isEmpty()) {
-            Map<String, DataField> rowFields = new HashMap<>();
-            for (DataField rowField : updateSchema.rowType().getFields()) {
-                rowFields.put(rowField.name(), rowField);
-            }
-            for (String primaryKeyName : primaryKeys) {
-                DataField rowField = rowFields.get(primaryKeyName);
-                DataType dataType = rowField.type();
-                if (PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES.stream()
-                        .anyMatch(c -> c.isInstance(dataType))) {
-                    throw new UnsupportedOperationException(
-                            String.format(
-                                    "The type %s in primary key field %s is unsupported",
-                                    dataType.getClass().getSimpleName(), primaryKeyName));
-                }
-            }
-        }
+    /** Update {@link SchemaChange}s. */
+    public TableSchema commitChanges(SchemaChange... changes) throws Exception {
+        return commitChanges(Arrays.asList(changes));
     }
 
-    public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
-            Arrays.asList(MapType.class, ArrayType.class, RowType.class, MultisetType.class);
-
-    /** Create {@link SchemaChange}s. */
+    /** Update {@link SchemaChange}s. */
     public TableSchema commitChanges(List<SchemaChange> changes) throws Exception {
         while (true) {
             TableSchema schema =
@@ -402,8 +352,9 @@ public class SchemaManager implements Serializable {
         updateNestedColumn(newFields, new String[] {updateFieldName}, 0, updateFunc);
     }
 
-    private boolean commit(TableSchema newSchema) throws Exception {
-        CoreOptions.validateTableSchema(newSchema);
+    @VisibleForTesting
+    boolean commit(TableSchema newSchema) throws Exception {
+        SchemaValidation.validateTableSchema(newSchema);
 
         Path schemaPath = toSchemaPath(newSchema.id());
         Callable<Boolean> callable = () -> fileIO.writeFileUtf8(schemaPath, newSchema.toString());

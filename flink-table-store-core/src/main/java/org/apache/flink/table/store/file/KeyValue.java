@@ -33,8 +33,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.apache.flink.table.store.file.schema.TableSchema.SEQUENCE_NUMBER;
-import static org.apache.flink.table.store.file.schema.TableSchema.VALUE_KIND;
+import static org.apache.flink.table.store.file.schema.SystemColumns.SEQUENCE_NUMBER;
+import static org.apache.flink.table.store.file.schema.SystemColumns.VALUE_KIND;
 import static org.apache.flink.table.store.utils.Preconditions.checkState;
 
 /**

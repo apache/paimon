@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.s3;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.options.Options;
 
 import org.apache.hadoop.conf.Configuration;
@@ -67,18 +67,18 @@ public class S3FileIO extends HadoopCompliantFileIO {
     }
 
     @Override
-    public void configure(CatalogOptions config) {
-        this.hadoopOptions = mirrorCertainHadoopConfig(loadHadoopConfigFromFlink(config));
+    public void configure(CatalogContext context) {
+        this.hadoopOptions = mirrorCertainHadoopConfig(loadHadoopConfigFromFlink(context));
     }
 
     // add additional config entries from the IO config to the Hadoop config
-    private Options loadHadoopConfigFromFlink(CatalogOptions options) {
+    private Options loadHadoopConfigFromFlink(CatalogContext context) {
         Options hadoopConfig = new Options();
-        for (String key : options.keySet()) {
+        for (String key : context.options().keySet()) {
             for (String prefix : CONFIG_PREFIXES) {
                 if (key.startsWith(prefix)) {
                     String newKey = HADOOP_CONFIG_PREFIX + key.substring(prefix.length());
-                    String value = options.get(key);
+                    String value = context.options().get(key);
                     hadoopConfig.set(newKey, value);
 
                     LOG.debug("Adding config entry for {} as {} to Hadoop config", key, newKey);

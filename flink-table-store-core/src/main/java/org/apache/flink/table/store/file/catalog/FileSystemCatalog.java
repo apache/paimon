@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.file.catalog;
 
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileStatus;
 import org.apache.flink.table.store.fs.Path;
@@ -116,11 +116,6 @@ public class FileSystemCatalog extends AbstractCatalog {
                 .orElseThrow(() -> new TableNotExistException(identifier));
     }
 
-    @Override
-    public boolean dataTableExists(Identifier identifier) {
-        return tableExists(getDataTableLocation(identifier));
-    }
-
     private boolean tableExists(Path tablePath) {
         return new SchemaManager(fileIO, tablePath).listAllIds().size() > 0;
     }
@@ -128,6 +123,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
+        checkNotSystemTable(identifier, "dropTable");
         Path path = getDataTableLocation(identifier);
         if (!tableExists(path)) {
             if (ignoreIfNotExists) {
@@ -141,8 +137,9 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void createTable(Identifier identifier, UpdateSchema table, boolean ignoreIfExists)
+    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException {
+        checkNotSystemTable(identifier, "createTable");
         if (!databaseExists(identifier.getDatabaseName())) {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
         }
@@ -156,12 +153,14 @@ public class FileSystemCatalog extends AbstractCatalog {
             throw new TableAlreadyExistException(identifier);
         }
 
-        uncheck(() -> new SchemaManager(fileIO, path).commitNewVersion(table));
+        uncheck(() -> new SchemaManager(fileIO, path).createTable(schema));
     }
 
     @Override
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
             throws TableNotExistException, TableAlreadyExistException {
+        checkNotSystemTable(fromTable, "renameTable");
+        checkNotSystemTable(toTable, "renameTable");
         Path fromPath = getDataTableLocation(fromTable);
         if (!tableExists(fromPath)) {
             if (ignoreIfNotExists) {
@@ -183,7 +182,8 @@ public class FileSystemCatalog extends AbstractCatalog {
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException {
-        if (!tableExists(identifier)) {
+        checkNotSystemTable(identifier, "alterTable");
+        if (!tableExists(getDataTableLocation(identifier))) {
             throw new TableNotExistException(identifier);
         }
         uncheck(

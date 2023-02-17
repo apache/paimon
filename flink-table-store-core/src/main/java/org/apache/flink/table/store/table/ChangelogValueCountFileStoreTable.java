@@ -33,9 +33,9 @@ import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
@@ -53,7 +53,7 @@ import org.apache.flink.table.store.types.RowType;
 import java.util.Collections;
 import java.util.List;
 
-import static org.apache.flink.table.store.file.schema.TableSchema.VALUE_COUNT;
+import static org.apache.flink.table.store.file.schema.SystemColumns.VALUE_COUNT;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode without primary keys. */
 public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {

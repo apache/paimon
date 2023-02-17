@@ -18,11 +18,11 @@
 
 package org.apache.flink.table.store.s3;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileIOLoader;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.PluginFileIO;
-import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.plugin.PluginLoader;
 
 /** A {@link PluginLoader} to load oss. */
@@ -66,7 +66,7 @@ public class S3Loader implements FileIOLoader {
         @Override
         protected FileIO createFileIO(Path path) {
             FileIO fileIO = getLoader().newInstance(S3_CLASS);
-            fileIO.configure(CatalogOptions.create(options));
+            fileIO.configure(CatalogContext.create(options));
             return fileIO;
         }
 

@@ -20,13 +20,13 @@ package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.Options;
+import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.flink.table.store.reader.RecordReaderIterator;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -91,9 +91,9 @@ public abstract class CommitterOperatorTestBase {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
-        schemaManager.commitNewVersion(
-                new UpdateSchema(
-                        ROW_TYPE,
+        schemaManager.createTable(
+                new Schema(
+                        ROW_TYPE.getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         conf.toMap(),

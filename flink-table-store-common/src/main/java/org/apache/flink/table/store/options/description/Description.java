@@ -18,13 +18,18 @@
 
 package org.apache.flink.table.store.options.description;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Description for {@link org.apache.flink.table.store.options.ConfigOption}. Allows providing
  * multiple rich formats.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public class Description {
 
     private final List<BlockElement> blocks;

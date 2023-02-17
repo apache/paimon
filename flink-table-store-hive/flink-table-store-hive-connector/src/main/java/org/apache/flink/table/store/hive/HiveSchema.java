@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.hive;
 
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.types.DataField;
@@ -80,8 +80,8 @@ public class HiveSchema {
         Path path = new Path(location);
         Options options = new Options();
         options.set(CoreOptions.PATH, path.toUri().toString());
-        CatalogOptions catalogOptions = CatalogOptions.create(options, configuration);
-        TableSchema tableSchema = FileStoreTableFactory.create(catalogOptions).schema();
+        CatalogContext catalogContext = CatalogContext.create(options, configuration);
+        TableSchema tableSchema = FileStoreTableFactory.create(catalogContext).schema();
 
         if (properties.containsKey(serdeConstants.LIST_COLUMNS)
                 && properties.containsKey(serdeConstants.LIST_COLUMN_TYPES)) {

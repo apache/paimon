@@ -18,7 +18,14 @@
 
 package org.apache.flink.table.store.types;
 
-/** Lists all kinds of changes that a row can describe in a changelog. */
+import org.apache.flink.table.store.annotation.Experimental;
+
+/**
+ * Lists all kinds of changes that a row can describe in a changelog.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public enum RowKind {
 
     // Note: Enums have no stable hash code across different JVMs, use toByteValue() for

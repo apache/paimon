@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.spark;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaChange;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Preconditions;
@@ -73,11 +73,11 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
         this.name = name;
-        CatalogOptions catalogOptions =
-                CatalogOptions.create(
+        CatalogContext catalogContext =
+                CatalogContext.create(
                         Options.fromMap(options),
                         SparkSession.active().sessionState().newHadoopConf());
-        this.catalog = CatalogFactory.createCatalog(catalogOptions);
+        this.catalog = CatalogFactory.createCatalog(catalogContext);
     }
 
     @Override
@@ -294,7 +294,7 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         }
     }
 
-    private UpdateSchema toUpdateSchema(
+    private Schema toUpdateSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
         Preconditions.checkArgument(
                 Arrays.stream(partitions)
@@ -313,8 +313,8 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
                         : Arrays.stream(pkAsString.split(","))
                                 .map(String::trim)
                                 .collect(Collectors.toList());
-        return new UpdateSchema(
-                (RowType) toFlinkType(schema),
+        return new Schema(
+                ((RowType) toFlinkType(schema)).getFields(),
                 Arrays.stream(partitions)
                         .map(partition -> partition.references()[0].describe())
                         .collect(Collectors.toList()),

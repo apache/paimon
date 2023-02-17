@@ -24,9 +24,9 @@ import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.IteratorRecordReader;
-import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -79,11 +79,6 @@ public class OptionsTable implements Table {
     }
 
     @Override
-    public Path location() {
-        return location;
-    }
-
-    @Override
     public TableScan newScan() {
         return new OptionsScan();
     }
@@ -96,11 +91,6 @@ public class OptionsTable implements Table {
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
         return new OptionsTable(fileIO, location);
-    }
-
-    @Override
-    public FileIO fileIO() {
-        return null;
     }
 
     private class OptionsScan implements TableScan {

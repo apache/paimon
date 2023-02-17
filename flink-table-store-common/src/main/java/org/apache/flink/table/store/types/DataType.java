@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.utils.Preconditions;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
@@ -30,7 +31,13 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.Set;
 
-/** Describes the data type in the table store ecosystem. */
+/**
+ * Describes the data type in the table store ecosystem.
+ *
+ * @see DataTypes
+ * @since 0.4.0
+ */
+@Experimental
 public abstract class DataType implements Serializable {
 
     private static final long serialVersionUID = 1L;

@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.catalog;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.TableType;
 
@@ -42,7 +42,7 @@ public class CatalogFactoryTest {
         Path root = new Path(path.toUri().toString());
         Options options = new Options();
         options.set(WAREHOUSE, new Path(root, "warehouse").toString());
-        assertThat(CatalogFactory.createCatalog(CatalogOptions.create(options)).listDatabases())
+        assertThat(CatalogFactory.createCatalog(CatalogContext.create(options)).listDatabases())
                 .isEmpty();
     }
 
@@ -53,7 +53,7 @@ public class CatalogFactoryTest {
         LocalFileIO.create().writeFileUtf8(warehouse, "");
         Options options = new Options();
         options.set(WAREHOUSE, warehouse.toString());
-        assertThatThrownBy(() -> CatalogFactory.createCatalog(CatalogOptions.create(options)))
+        assertThatThrownBy(() -> CatalogFactory.createCatalog(CatalogContext.create(options)))
                 .hasMessageContaining("should be a directory");
     }
 
@@ -63,7 +63,7 @@ public class CatalogFactoryTest {
         Options options = new Options();
         options.set(WAREHOUSE, new Path(root, "warehouse").toString());
         options.set(TABLE_TYPE, TableType.EXTERNAL);
-        assertThatThrownBy(() -> CatalogFactory.createCatalog(CatalogOptions.create(options)))
+        assertThatThrownBy(() -> CatalogFactory.createCatalog(CatalogContext.create(options)))
                 .hasMessageContaining("Only managed table is supported in File system catalog.");
     }
 }

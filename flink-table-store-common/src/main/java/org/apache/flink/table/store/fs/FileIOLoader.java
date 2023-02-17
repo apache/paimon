@@ -18,7 +18,14 @@
 
 package org.apache.flink.table.store.fs;
 
-/** Loader to load {@link FileIO}. */
+import org.apache.flink.table.store.annotation.Experimental;
+
+/**
+ * Loader to load {@link FileIO}.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public interface FileIOLoader {
 
     String getScheme();

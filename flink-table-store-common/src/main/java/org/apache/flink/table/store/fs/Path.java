@@ -22,6 +22,7 @@
 
 package org.apache.flink.table.store.fs;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.utils.StringUtils;
 
 import java.io.Serializable;
@@ -31,7 +32,10 @@ import java.util.regex.Pattern;
 
 /**
  * Names a file or directory in a {@link FileIO}. Path strings use slash as the directory separator.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public class Path implements Comparable<Path>, Serializable {
 
     private static final long serialVersionUID = 1L;

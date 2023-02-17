@@ -19,12 +19,12 @@
 package org.apache.flink.table.store.format.avro;
 
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.utils.IteratorResultIterator;
-import org.apache.flink.table.store.file.utils.RecordReader;
 import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.utils.IOUtils;
+import org.apache.flink.table.store.utils.IteratorResultIterator;
 import org.apache.flink.table.store.utils.Pool;
 
 import org.apache.avro.Schema;

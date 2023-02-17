@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.data;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.types.MapType;
 import org.apache.flink.table.store.types.MultisetType;
 
@@ -29,8 +30,10 @@ import org.apache.flink.table.store.types.MultisetType;
  * must be of the same type; same for values. See {@link InternalRow} for more information about
  * internal data structures.
  *
- * <p>Use {@link GenericMap} to construct instances of this interface from regular Java maps.
+ * @see GenericMap
+ * @since 0.4.0
  */
+@Experimental
 public interface InternalMap {
 
     /** Returns the number of key-value mappings in this map. */
