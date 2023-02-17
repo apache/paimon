@@ -89,7 +89,9 @@ public abstract class AbstractCatalog implements Catalog {
     protected void checkNotSystemTable(Identifier identifier, String method) {
         if (isSystemTable(identifier)) {
             throw new IllegalArgumentException(
-                    String.format("System table '%s' does not support %s.", identifier, method));
+                    String.format(
+                            "Cannot '%s' for system table '%s', please use data table.",
+                            method, identifier));
         }
     }
 
