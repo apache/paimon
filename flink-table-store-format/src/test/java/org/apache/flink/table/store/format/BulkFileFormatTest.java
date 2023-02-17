@@ -72,7 +72,7 @@ public class BulkFileFormatTest {
         expected.add(GenericRow.of(2, 2));
         expected.add(GenericRow.of(3, 3));
         PositionOutputStream out = new LocalFileIO().newOutputStream(path, false);
-        FormatWriter writer = fileFormat.createWriterFactory(rowType).create(out, null);
+        FormatWriter writer = fileFormat.createWriterFactory(rowType).create(out);
         for (InternalRow row : expected) {
             writer.addElement(row);
         }

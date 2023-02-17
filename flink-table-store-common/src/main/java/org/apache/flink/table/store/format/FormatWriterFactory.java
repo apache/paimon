@@ -36,4 +36,8 @@ public interface FormatWriterFactory {
      *     exception.
      */
     FormatWriter create(PositionOutputStream out, @Nullable String compression) throws IOException;
+
+    default FormatWriter create(PositionOutputStream out) throws IOException {
+        return create(out, null);
+    }
 }

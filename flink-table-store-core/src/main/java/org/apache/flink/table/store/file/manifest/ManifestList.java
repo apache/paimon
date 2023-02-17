@@ -86,7 +86,7 @@ public class ManifestList {
     private String write(List<ManifestFileMeta> metas, Path path) throws IOException {
         try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
             // Initialize the bulk writer to accept the ManifestFileMeta.
-            FormatWriter writer = writerFactory.create(out, null);
+            FormatWriter writer = writerFactory.create(out);
             try {
                 for (ManifestFileMeta manifest : metas) {
                     writer.addElement(serializer.toRow(manifest));

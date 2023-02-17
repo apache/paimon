@@ -36,6 +36,7 @@ import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -108,9 +109,12 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Map<String, String>> FILE_COMPRESSION_PER_LEVEL =
             key("file.compression.per.level")
                     .mapType()
-                    .noDefaultValue()
+                    .defaultValue(new HashMap<>())
                     .withDescription(
-                            "Define different compression policies for different level, you can add the conf like this: 'file.compression.per.level' = '0:lz4,1:zlib', for orc file format, the compression value could be NONE, ZLIB, SNAPPY, LZO, LZ4, for parquet file format, the compression value could be UNCOMPRESSED, SNAPPY, GZIP, LZO, BROTLI, LZ4, ZSTD.");
+                            "Define different compression policies for different level, you can add the conf like this:"
+                                    + " 'file.compression.per.level' = '0:lz4,1:zlib', for orc file format, the compression value "
+                                    + "could be NONE, ZLIB, SNAPPY, LZO, LZ4, for parquet file format, the compression value could be "
+                                    + "UNCOMPRESSED, SNAPPY, GZIP, LZO, BROTLI, LZ4, ZSTD.");
 
     public static final ConfigOption<String> MANIFEST_FORMAT =
             key("manifest.format")
@@ -537,13 +541,8 @@ public class CoreOptions implements Serializable {
 
     public Map<Integer, String> fileCompressionPerLevel() {
         Map<String, String> levelCompressions = options.get(FILE_COMPRESSION_PER_LEVEL);
-        if (null != levelCompressions) {
-            return levelCompressions.entrySet().stream()
-                    .collect(
-                            Collectors.toMap(
-                                    e -> Integer.valueOf(e.getKey()), Map.Entry::getValue));
-        }
-        return null;
+        return levelCompressions.entrySet().stream()
+                .collect(Collectors.toMap(e -> Integer.valueOf(e.getKey()), Map.Entry::getValue));
     }
 
     public int snapshotNumRetainMin() {
