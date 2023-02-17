@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.utils;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 import javax.annotation.Nonnull;
 
 import java.util.ArrayDeque;
@@ -37,7 +39,9 @@ import static java.util.Arrays.asList;
  * network, or database connections. Clients must call {@link #close()} after using the iterator.
  *
  * @param <T> the type of iterated elements.
+ * @since 0.4.0
  */
+@Experimental
 public interface CloseableIterator<T> extends Iterator<T>, AutoCloseable {
 
     CloseableIterator<?> EMPTY_INSTANCE =

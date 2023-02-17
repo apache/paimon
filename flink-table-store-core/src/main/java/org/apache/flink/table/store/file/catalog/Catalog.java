@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.file.catalog;
 
+import org.apache.flink.table.store.annotation.Experimental;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaChange;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.table.Table;
 
 import java.util.List;
@@ -28,7 +29,11 @@ import java.util.Optional;
 /**
  * This interface is responsible for reading and writing metadata such as database/table from a
  * table store catalog.
+ *
+ * @see CatalogFactory
+ * @since 0.4.0
  */
+@Experimental
 public interface Catalog extends AutoCloseable {
 
     String DEFAULT_DATABASE = "default";
@@ -83,15 +88,9 @@ public interface Catalog extends AutoCloseable {
             throws DatabaseNotExistException, DatabaseNotEmptyException;
 
     /**
-     * Get names of all tables under this database. An empty list is returned if none exists.
-     *
-     * @return a list of the names of all tables in this database
-     * @throws DatabaseNotExistException if the database does not exist
-     */
-    List<String> listTables(String databaseName) throws DatabaseNotExistException;
-
-    /**
      * Return a {@link Table} identified by the given {@link Identifier}.
+     *
+     * <p>System tables can be got by '$' splitter.
      *
      * @param identifier Path of the table
      * @return The requested table
@@ -100,15 +99,19 @@ public interface Catalog extends AutoCloseable {
     Table getTable(Identifier identifier) throws TableNotExistException;
 
     /**
-     * Check if a table exists in this catalog.
+     * Get names of all tables under this database. An empty list is returned if none exists.
      *
-     * @param identifier Path of the table
-     * @return true if the given table exists in the catalog false otherwise
+     * <p>NOTE: System tables will not be listed.
+     *
+     * @return a list of the names of all tables in this database
+     * @throws DatabaseNotExistException if the database does not exist
      */
-    boolean tableExists(Identifier identifier);
+    List<String> listTables(String databaseName) throws DatabaseNotExistException;
 
     /**
      * Drop a table.
+     *
+     * <p>NOTE: System tables can not be dropped.
      *
      * @param identifier Path of the table to be dropped
      * @param ignoreIfNotExists Flag to specify behavior when the table does not exist: if set to
@@ -120,31 +123,41 @@ public interface Catalog extends AutoCloseable {
     /**
      * Create a new table.
      *
+     * <p>NOTE: System tables can not be created.
+     *
      * @param identifier path of the table to be created
-     * @param tableSchema the table definition
+     * @param schema the table definition
      * @param ignoreIfExists flag to specify behavior when a table already exists at the given path:
      *     if set to false, it throws a TableAlreadyExistException, if set to true, do nothing.
      * @throws TableAlreadyExistException if table already exists and ignoreIfExists is false
      * @throws DatabaseNotExistException if the database in identifier doesn't exist
      */
-    void createTable(Identifier identifier, UpdateSchema tableSchema, boolean ignoreIfExists)
+    void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException;
 
     /**
      * Rename a table.
      *
+     * <p>NOTE: If you use object storage, such as S3 or OSS, please use this syntax carefully,
+     * because the renaming of object storage is not atomic, and only partial files may be moved in
+     * case of failure.
+     *
+     * <p>NOTE: System tables can not be renamed.
+     *
      * @param fromTable the name of the table which need to rename
      * @param toTable the new table
      * @param ignoreIfNotExists Flag to specify behavior when the table does not exist: if set to
      *     false, throw an exception, if set to true, do nothing.
-     * @throws TableNotExistException if the from table does not exist
-     * @throws TableAlreadyExistException if the to table already exists
+     * @throws TableNotExistException if the fromTable does not exist
+     * @throws TableAlreadyExistException if the toTable already exists
      */
     void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
             throws TableNotExistException, TableAlreadyExistException;
 
     /**
      * Modify an existing table from {@link SchemaChange}s.
+     *
+     * <p>NOTE: System tables can not be altered.
      *
      * @param identifier path of the table to be modified
      * @param changes the schema changes

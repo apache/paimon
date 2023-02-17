@@ -18,13 +18,18 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 import java.util.Objects;
 
 /**
  * Data type of a fixed-length character string.
  *
  * <p>A conversion from and to {@code byte[]} assumes UTF-8 encoding.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public class CharType extends DataType {
 
     private static final long serialVersionUID = 1L;

@@ -19,12 +19,12 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.options.Options;
 
 import java.io.IOException;
@@ -35,14 +35,14 @@ import static org.apache.flink.table.store.CoreOptions.PATH;
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {
 
-    public static FileStoreTable create(CatalogOptions options) {
+    public static FileStoreTable create(CatalogContext context) {
         FileIO fileIO;
         try {
-            fileIO = FileIO.get(CoreOptions.path(options.options()), options);
+            fileIO = FileIO.get(CoreOptions.path(context.options()), context);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        return create(fileIO, options.options());
+        return create(fileIO, context.options());
     }
 
     public static FileStoreTable create(FileIO fileIO, Path path) {

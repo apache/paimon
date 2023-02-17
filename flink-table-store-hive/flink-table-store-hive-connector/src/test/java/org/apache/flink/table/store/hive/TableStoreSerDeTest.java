@@ -20,8 +20,8 @@ package org.apache.flink.table.store.hive;
 
 import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.hive.objectinspector.TableStoreRowDataObjectInspector;
@@ -74,9 +74,9 @@ public class TableStoreSerDeTest {
 
     private TableStoreSerDe createInitializedSerDe() throws Exception {
         new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()))
-                .commitNewVersion(
-                        new UpdateSchema(
-                                ROW_TYPE,
+                .createTable(
+                        new Schema(
+                                ROW_TYPE.getFields(),
                                 Collections.emptyList(),
                                 Collections.emptyList(),
                                 new HashMap<>(),

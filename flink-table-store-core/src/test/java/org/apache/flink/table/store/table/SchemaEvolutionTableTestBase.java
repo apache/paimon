@@ -26,17 +26,17 @@ import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
-import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.TraceableFileIO;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileIOFinder;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.Options;
+import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.flink.table.store.reader.RecordReaderIterator;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -511,7 +511,7 @@ public abstract class SchemaEvolutionTableTestBase {
         }
 
         @Override
-        public TableSchema commitNewVersion(UpdateSchema updateSchema) throws Exception {
+        public TableSchema createTable(Schema schema) throws Exception {
             throw new UnsupportedOperationException();
         }
 

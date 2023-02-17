@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.catalog;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.table.TableType;
 
 import static org.apache.flink.table.store.options.CatalogOptions.TABLE_TYPE;
@@ -36,8 +36,8 @@ public class FileSystemCatalogFactory implements CatalogFactory {
     }
 
     @Override
-    public Catalog create(FileIO fileIO, Path warehouse, CatalogOptions options) {
-        if (!TableType.MANAGED.equals(options.get(TABLE_TYPE))) {
+    public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
+        if (!TableType.MANAGED.equals(context.options().get(TABLE_TYPE))) {
             throw new IllegalArgumentException(
                     "Only managed table is supported in File system catalog.");
         }

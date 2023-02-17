@@ -18,10 +18,15 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 /**
  * Implementation of {@link DataTypeVisitor} that redirects all calls to {@link
  * DataTypeDefaultVisitor#defaultMethod(DataType)}.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public abstract class DataTypeDefaultVisitor<R> implements DataTypeVisitor<R> {
 
     @Override

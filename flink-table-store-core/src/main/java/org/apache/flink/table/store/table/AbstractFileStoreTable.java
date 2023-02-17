@@ -22,6 +22,7 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.schema.SchemaValidation;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
@@ -80,7 +81,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         TableSchema newTableSchema = tableSchema.copy(newOptions.toMap());
 
         // validate schema wit new options
-        CoreOptions.validateTableSchema(newTableSchema);
+        SchemaValidation.validateTableSchema(newTableSchema);
 
         return copy(newTableSchema);
     }

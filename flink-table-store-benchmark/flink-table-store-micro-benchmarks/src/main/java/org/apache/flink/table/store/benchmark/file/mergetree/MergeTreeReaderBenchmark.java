@@ -23,9 +23,9 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.mergetree.MergeTreeReaders;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
-import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordReaderIterator;
 import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.flink.table.store.reader.RecordReaderIterator;
 import org.apache.flink.table.store.types.RowKind;
 
 import org.openjdk.jmh.annotations.Benchmark;

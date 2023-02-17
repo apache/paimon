@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 import java.util.Objects;
 
 /**
@@ -33,7 +35,9 @@ import java.util.Objects;
  * and to {@code long} describes the number of milliseconds since epoch.
  *
  * @see TimestampType
+ * @since 0.4.0
  */
+@Experimental
 public final class LocalZonedTimestampType extends DataType {
 
     private static final long serialVersionUID = 1L;

@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.utils.Preconditions;
 import org.apache.flink.table.store.utils.StringUtils;
 
@@ -26,6 +27,7 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -38,7 +40,10 @@ import java.util.stream.Collectors;
  * of the row corresponds to the field of the row type that has the same ordinal position as the
  * column. Compared to the SQL standard, an optional field description simplifies the handling with
  * complex structures.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public final class RowType extends DataType {
 
     private static final long serialVersionUID = 1L;
@@ -170,27 +175,25 @@ public final class RowType extends DataType {
     }
 
     public static RowType of(DataType... types) {
-        return of(true, types);
-    }
-
-    public static RowType of(boolean isNullable, DataType... types) {
         final List<DataField> fields = new ArrayList<>();
         for (int i = 0; i < types.length; i++) {
             fields.add(new DataField(i, "f" + i, types[i]));
         }
-        return new RowType(isNullable, fields);
+        return new RowType(true, fields);
     }
 
     public static RowType of(DataType[] types, String[] names) {
-        return of(true, types, names);
-    }
-
-    public static RowType of(boolean nullable, DataType[] types, String[] names) {
         List<DataField> fields = new ArrayList<>();
         for (int i = 0; i < types.length; i++) {
             fields.add(new DataField(i, names[i], types[i]));
         }
-        return new RowType(nullable, fields);
+        return new RowType(true, fields);
+    }
+
+    public static int currentHighestFieldId(List<DataField> fields) {
+        Set<Integer> fieldIds = new HashSet<>();
+        new RowType(fields).collectFieldIds(fieldIds);
+        return fieldIds.stream().max(Integer::compareTo).orElse(-1);
     }
 
     public static Builder builder() {

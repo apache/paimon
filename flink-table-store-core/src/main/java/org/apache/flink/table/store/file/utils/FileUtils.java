@@ -23,6 +23,7 @@ import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileStatus;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.reader.RecordReader;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -59,9 +60,8 @@ public class FileUtils {
             FormatReaderFactory readerFactory)
             throws IOException {
         List<T> result = new ArrayList<>();
-        RecordReaderUtils.forEachRemaining(
-                createFormatReader(fileIO, readerFactory, path),
-                row -> result.add(serializer.fromRow(row)));
+        createFormatReader(fileIO, readerFactory, path)
+                .forEachRemaining(row -> result.add(serializer.fromRow(row)));
         return result;
     }
 

@@ -21,8 +21,6 @@ package org.apache.flink.table.store.file;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.format.FormatWriter;
 import org.apache.flink.table.store.format.FormatWriterFactory;
@@ -30,6 +28,7 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.PositionOutputStream;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.Options;
+import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
 
@@ -70,8 +69,8 @@ public class FileFormatTest {
         RecordReader<InternalRow> reader =
                 avro.createReaderFactory(rowType).createReader(LocalFileIO.create(), path);
         List<InternalRow> result = new ArrayList<>();
-        RecordReaderUtils.forEachRemaining(
-                reader, rowData -> result.add(GenericRow.of(rowData.getInt(0), rowData.getInt(1))));
+        reader.forEachRemaining(
+                rowData -> result.add(GenericRow.of(rowData.getInt(0), rowData.getInt(1))));
 
         assertThat(result).isEqualTo(expected);
     }

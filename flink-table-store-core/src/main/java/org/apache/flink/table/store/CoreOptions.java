@@ -21,7 +21,6 @@ package org.apache.flink.table.store;
 import org.apache.flink.table.store.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.flink.table.store.annotation.Documentation.Immutable;
 import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.ConfigOption;
@@ -30,7 +29,6 @@ import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.options.description.DescribedEnum;
 import org.apache.flink.table.store.options.description.Description;
 import org.apache.flink.table.store.options.description.InlineElement;
-import org.apache.flink.table.store.utils.Preconditions;
 
 import java.io.Serializable;
 import java.lang.reflect.Field;
@@ -40,17 +38,12 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.file.WriteMode.APPEND_ONLY;
-import static org.apache.flink.table.store.file.schema.TableSchema.KEY_FIELD_PREFIX;
-import static org.apache.flink.table.store.file.schema.TableSchema.SYSTEM_FIELD_NAMES;
 import static org.apache.flink.table.store.options.ConfigOptions.key;
 import static org.apache.flink.table.store.options.description.TextElement.text;
-import static org.apache.flink.table.store.utils.Preconditions.checkState;
 
 /** Core options for table store. */
 public class CoreOptions implements Serializable {
@@ -904,105 +897,6 @@ public class CoreOptions implements Serializable {
         if (options.contains(SCAN_TIMESTAMP_MILLIS) && !options.contains(SCAN_MODE)) {
             options.set(SCAN_MODE, StartupMode.FROM_TIMESTAMP);
         }
-    }
-
-    /**
-     * Validate the {@link TableSchema} and {@link CoreOptions}.
-     *
-     * <p>TODO validate all items in schema and all keys in options.
-     *
-     * @param schema the schema to be validated
-     */
-    public static void validateTableSchema(TableSchema schema) {
-        CoreOptions options = new CoreOptions(schema.options());
-        if (options.startupMode() == StartupMode.FROM_TIMESTAMP) {
-            checkOptionExistInMode(options, SCAN_TIMESTAMP_MILLIS, StartupMode.FROM_TIMESTAMP);
-            checkOptionsConflict(options, SCAN_SNAPSHOT_ID, SCAN_TIMESTAMP_MILLIS);
-        } else if (options.startupMode() == StartupMode.FROM_SNAPSHOT) {
-            checkOptionExistInMode(options, SCAN_SNAPSHOT_ID, StartupMode.FROM_SNAPSHOT);
-            checkOptionsConflict(options, SCAN_TIMESTAMP_MILLIS, SCAN_SNAPSHOT_ID);
-        } else {
-            checkOptionNotExistInMode(options, SCAN_TIMESTAMP_MILLIS, options.startupMode());
-            checkOptionNotExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
-        }
-
-        Preconditions.checkArgument(
-                options.snapshotNumRetainMin() > 0,
-                SNAPSHOT_NUM_RETAINED_MIN.key() + " should be at least 1");
-        Preconditions.checkArgument(
-                options.snapshotNumRetainMin() <= options.snapshotNumRetainMax(),
-                SNAPSHOT_NUM_RETAINED_MIN.key()
-                        + " should not be larger than "
-                        + SNAPSHOT_NUM_RETAINED_MAX.key());
-
-        // Only changelog tables with primary keys support full compaction
-        if (options.changelogProducer() == ChangelogProducer.FULL_COMPACTION
-                && options.writeMode() == WriteMode.CHANGE_LOG
-                && schema.primaryKeys().isEmpty()) {
-            throw new UnsupportedOperationException(
-                    "Changelog table with full compaction must have primary keys");
-        }
-
-        // Check column names in schema
-        schema.fieldNames()
-                .forEach(
-                        f -> {
-                            checkState(
-                                    !SYSTEM_FIELD_NAMES.contains(f),
-                                    String.format(
-                                            "Field name[%s] in schema cannot be exist in [%s]",
-                                            f, SYSTEM_FIELD_NAMES));
-                            checkState(
-                                    !f.startsWith(KEY_FIELD_PREFIX),
-                                    String.format(
-                                            "Field name[%s] in schema cannot start with [%s]",
-                                            f, KEY_FIELD_PREFIX));
-                        });
-
-        // Cannot define any primary key in an append-only table.
-        if (!schema.primaryKeys().isEmpty() && Objects.equals(APPEND_ONLY, options.writeMode())) {
-            throw new RuntimeException(
-                    "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if "
-                            + "still want to keep the primary key definition.");
-        }
-
-        if (schema.primaryKeys().isEmpty() && options.streamingReadOverwrite()) {
-            throw new RuntimeException(
-                    "Doesn't support streaming read the changes from overwrite when the primary keys are not defined.");
-        }
-
-        if (schema.options().containsKey(CoreOptions.PARTITION_EXPIRATION_TIME.key())) {
-            if (schema.partitionKeys().isEmpty()) {
-                throw new IllegalArgumentException(
-                        "Can not set 'partition.expiration-time' for non-partitioned table.");
-            }
-        }
-    }
-
-    private static void checkOptionExistInMode(
-            CoreOptions options, ConfigOption<?> option, StartupMode startupMode) {
-        Preconditions.checkArgument(
-                options.options.contains(option),
-                String.format(
-                        "%s can not be null when you use %s for %s",
-                        option.key(), startupMode, SCAN_MODE.key()));
-    }
-
-    private static void checkOptionNotExistInMode(
-            CoreOptions options, ConfigOption<?> option, StartupMode startupMode) {
-        Preconditions.checkArgument(
-                !options.options.contains(option),
-                String.format(
-                        "%s must be null when you use %s for %s",
-                        option.key(), startupMode, SCAN_MODE.key()));
-    }
-
-    private static void checkOptionsConflict(
-            CoreOptions options, ConfigOption<?> illegalOption, ConfigOption<?> legalOption) {
-        Preconditions.checkArgument(
-                !options.options.contains(illegalOption),
-                String.format(
-                        "%s must be null when you set %s", illegalOption.key(), legalOption.key()));
     }
 
     public static List<ConfigOption<?>> getOptions() {

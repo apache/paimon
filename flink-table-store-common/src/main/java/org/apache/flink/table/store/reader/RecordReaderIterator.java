@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.utils;
+package org.apache.flink.table.store.reader;
 
 import org.apache.flink.table.store.utils.CloseableIterator;
 

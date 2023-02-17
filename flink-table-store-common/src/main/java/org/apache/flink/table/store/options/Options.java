@@ -18,6 +18,10 @@
 
 package org.apache.flink.table.store.options;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
+import javax.annotation.concurrent.ThreadSafe;
+
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
@@ -32,7 +36,13 @@ import static org.apache.flink.table.store.options.OptionsUtils.containsPrefixMa
 import static org.apache.flink.table.store.options.OptionsUtils.convertToPropertiesPrefixed;
 import static org.apache.flink.table.store.options.OptionsUtils.removePrefixMap;
 
-/** Options which stores key/value pairs. */
+/**
+ * Options which stores key/value pairs.
+ *
+ * @since 0.4.0
+ */
+@Experimental
+@ThreadSafe
 public class Options implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -75,22 +85,6 @@ public class Options implements Serializable {
         return this;
     }
 
-    private <T> void setValueInternal(String key, T value, boolean canBePrefixMap) {
-        if (key == null) {
-            throw new NullPointerException("Key must not be null.");
-        }
-        if (value == null) {
-            throw new NullPointerException("Value must not be null.");
-        }
-
-        synchronized (this.data) {
-            if (canBePrefixMap) {
-                removePrefixMap(this.data, key);
-            }
-            this.data.put(key, OptionsUtils.convertToString(value));
-        }
-    }
-
     public synchronized <T> T get(ConfigOption<T> option) {
         return getOptional(option).orElseGet(option::defaultValue);
     }
@@ -118,32 +112,6 @@ public class Options implements Serializable {
         }
     }
 
-    private Optional<Object> getRawValueFromOption(ConfigOption<?> configOption) {
-        return applyWithOption(configOption, this::getRawValue);
-    }
-
-    private Optional<Object> getRawValue(String key) {
-        return getRawValue(key, false);
-    }
-
-    private Optional<Object> getRawValue(String key, boolean canBePrefixMap) {
-        if (key == null) {
-            throw new NullPointerException("Key must not be null.");
-        }
-
-        synchronized (this.data) {
-            final Object valueFromExactKey = this.data.get(key);
-            if (!canBePrefixMap || valueFromExactKey != null) {
-                return Optional.ofNullable(valueFromExactKey);
-            }
-            final Map<String, String> valueFromPrefixMap = convertToPropertiesPrefixed(data, key);
-            if (valueFromPrefixMap.isEmpty()) {
-                return Optional.empty();
-            }
-            return Optional.of(valueFromPrefixMap);
-        }
-    }
-
     /**
      * Checks whether there is an entry for the given config option.
      *
@@ -163,25 +131,6 @@ public class Options implements Serializable {
                     };
             return applyWithOption(configOption, applier).orElse(false);
         }
-    }
-
-    private <T> Optional<T> applyWithOption(
-            ConfigOption<?> option, BiFunction<String, Boolean, Optional<T>> applier) {
-        final boolean canBePrefixMap = canBePrefixMap(option);
-        final Optional<T> valueFromExactKey = applier.apply(option.key(), canBePrefixMap);
-        if (valueFromExactKey.isPresent()) {
-            return valueFromExactKey;
-        } else if (option.hasFallbackKeys()) {
-            // try the fallback keys
-            for (FallbackKey fallbackKey : option.fallbackKeys()) {
-                final Optional<T> valueFromFallbackKey =
-                        applier.apply(fallbackKey.getKey(), canBePrefixMap);
-                if (valueFromFallbackKey.isPresent()) {
-                    return valueFromFallbackKey;
-                }
-            }
-        }
-        return Optional.empty();
     }
 
     public synchronized Set<String> keySet() {
@@ -216,6 +165,26 @@ public class Options implements Serializable {
         return get(option);
     }
 
+    public synchronized boolean getBoolean(String key, boolean defaultValue) {
+        return getRawValue(key).map(OptionsUtils::convertToBoolean).orElse(defaultValue);
+    }
+
+    public synchronized int getInteger(String key, int defaultValue) {
+        return getRawValue(key).map(OptionsUtils::convertToInt).orElse(defaultValue);
+    }
+
+    public synchronized String getString(String key, String defaultValue) {
+        return getRawValue(key).map(OptionsUtils::convertToString).orElse(defaultValue);
+    }
+
+    public synchronized void setInteger(String key, int value) {
+        setValueInternal(key, value);
+    }
+
+    public synchronized long getLong(String key, long defaultValue) {
+        return getRawValue(key).map(OptionsUtils::convertToLong).orElse(defaultValue);
+    }
+
     @Override
     public synchronized boolean equals(Object o) {
         if (this == o) {
@@ -233,27 +202,72 @@ public class Options implements Serializable {
         return Objects.hash(data);
     }
 
-    public synchronized boolean getBoolean(String key, boolean defaultValue) {
-        return getRawValue(key).map(OptionsUtils::convertToBoolean).orElse(defaultValue);
+    // -------------------------------------------------------------------------
+    //                     Internal methods
+    // -------------------------------------------------------------------------
+
+    private <T> void setValueInternal(String key, T value, boolean canBePrefixMap) {
+        if (key == null) {
+            throw new NullPointerException("Key must not be null.");
+        }
+        if (value == null) {
+            throw new NullPointerException("Value must not be null.");
+        }
+
+        synchronized (this.data) {
+            if (canBePrefixMap) {
+                removePrefixMap(this.data, key);
+            }
+            this.data.put(key, OptionsUtils.convertToString(value));
+        }
     }
 
-    public synchronized int getInteger(String key, int defaultValue) {
-        return getRawValue(key).map(OptionsUtils::convertToInt).orElse(defaultValue);
+    private Optional<Object> getRawValueFromOption(ConfigOption<?> configOption) {
+        return applyWithOption(configOption, this::getRawValue);
     }
 
-    public synchronized String getString(String key, String defaultValue) {
-        return getRawValue(key).map(OptionsUtils::convertToString).orElse(defaultValue);
+    private Optional<Object> getRawValue(String key) {
+        return getRawValue(key, false);
     }
 
-    public synchronized void setInteger(String key, int value) {
-        setValueInternal(key, value);
+    private Optional<Object> getRawValue(String key, boolean canBePrefixMap) {
+        if (key == null) {
+            throw new NullPointerException("Key must not be null.");
+        }
+
+        synchronized (this.data) {
+            final Object valueFromExactKey = this.data.get(key);
+            if (!canBePrefixMap || valueFromExactKey != null) {
+                return Optional.ofNullable(valueFromExactKey);
+            }
+            final Map<String, String> valueFromPrefixMap = convertToPropertiesPrefixed(data, key);
+            if (valueFromPrefixMap.isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(valueFromPrefixMap);
+        }
+    }
+
+    private <T> Optional<T> applyWithOption(
+            ConfigOption<?> option, BiFunction<String, Boolean, Optional<T>> applier) {
+        final boolean canBePrefixMap = canBePrefixMap(option);
+        final Optional<T> valueFromExactKey = applier.apply(option.key(), canBePrefixMap);
+        if (valueFromExactKey.isPresent()) {
+            return valueFromExactKey;
+        } else if (option.hasFallbackKeys()) {
+            // try the fallback keys
+            for (FallbackKey fallbackKey : option.fallbackKeys()) {
+                final Optional<T> valueFromFallbackKey =
+                        applier.apply(fallbackKey.getKey(), canBePrefixMap);
+                if (valueFromFallbackKey.isPresent()) {
+                    return valueFromFallbackKey;
+                }
+            }
+        }
+        return Optional.empty();
     }
 
     private <T> void setValueInternal(String key, T value) {
         setValueInternal(key, value, false);
-    }
-
-    public synchronized long getLong(String key, long defaultValue) {
-        return getRawValue(key).map(OptionsUtils::convertToLong).orElse(defaultValue);
     }
 }

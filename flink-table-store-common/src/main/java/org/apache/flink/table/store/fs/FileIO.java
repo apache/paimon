@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.fs;
 
+import org.apache.flink.table.store.annotation.Experimental;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.table.store.options.CatalogOptions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,15 +39,20 @@ import java.util.Map;
 import java.util.ServiceLoader;
 import java.util.UUID;
 
-/** File IO to read and write file. */
+/**
+ * File IO to read and write file.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public interface FileIO extends Serializable {
 
     Logger LOG = LoggerFactory.getLogger(FileIO.class);
 
     boolean isObjectStore();
 
-    /** Configure by {@link CatalogOptions}. */
-    void configure(CatalogOptions config);
+    /** Configure by {@link CatalogContext}. */
+    void configure(CatalogContext context);
 
     /**
      * Opens an SeekableInputStream at the indicated Path.
@@ -200,7 +206,7 @@ public interface FileIO extends Serializable {
      * Returns a reference to the {@link FileIO} instance for accessing the file system identified
      * by the given path.
      */
-    static FileIO get(Path path, CatalogOptions config) throws IOException {
+    static FileIO get(Path path, CatalogContext config) throws IOException {
         URI uri = path.toUri();
         if (uri.getScheme() == null) {
             return new LocalFileIO();

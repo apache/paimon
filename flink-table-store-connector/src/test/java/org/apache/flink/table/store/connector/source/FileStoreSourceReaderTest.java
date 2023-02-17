@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.BigIntType;
@@ -48,13 +48,14 @@ public class FileStoreSourceReaderTest {
     public void beforeEach() throws Exception {
         SchemaManager schemaManager =
                 new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
-        schemaManager.commitNewVersion(
-                new UpdateSchema(
+        schemaManager.createTable(
+                new Schema(
                         new RowType(
-                                Arrays.asList(
-                                        new DataField(0, "k", new BigIntType()),
-                                        new DataField(1, "v", new BigIntType()),
-                                        new DataField(2, "default", new IntType()))),
+                                        Arrays.asList(
+                                                new DataField(0, "k", new BigIntType()),
+                                                new DataField(1, "v", new BigIntType()),
+                                                new DataField(2, "default", new IntType())))
+                                .getFields(),
                         Collections.singletonList("default"),
                         Arrays.asList("k", "default"),
                         Collections.emptyMap(),

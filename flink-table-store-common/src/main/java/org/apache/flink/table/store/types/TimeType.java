@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 import java.util.Objects;
 
 /**
@@ -29,7 +31,10 @@ import java.util.Objects;
  *
  * <p>A conversion from and to {@code int} describes the number of milliseconds of the day. A
  * conversion from and to {@code long} describes the number of nanoseconds of the day.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public final class TimeType extends DataType {
 
     private static final long serialVersionUID = 1L;

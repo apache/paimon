@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.fs;
 
-import org.apache.flink.table.store.options.CatalogOptions;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.options.Options;
 
 import java.io.IOException;
@@ -36,10 +36,10 @@ public abstract class PluginFileIO implements FileIO {
     private transient volatile FileIO lazyFileIO;
 
     @Override
-    public void configure(CatalogOptions config) {
+    public void configure(CatalogContext context) {
         // Do not get Hadoop Configuration in CatalogOptions
         // The class is in different classloader from pluginClassLoader!
-        this.options = config.options();
+        this.options = context.options();
     }
 
     @Override

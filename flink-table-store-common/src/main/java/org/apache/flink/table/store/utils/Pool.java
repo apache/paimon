@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.reader.RecordReader;
 
 import javax.annotation.Nullable;
 

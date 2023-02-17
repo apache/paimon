@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.fs.local;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileStatus;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.PositionOutputStream;
 import org.apache.flink.table.store.fs.SeekableInputStream;
-import org.apache.flink.table.store.options.CatalogOptions;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -62,7 +62,7 @@ public class LocalFileIO implements FileIO {
     }
 
     @Override
-    public void configure(CatalogOptions config) {}
+    public void configure(CatalogContext context) {}
 
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {

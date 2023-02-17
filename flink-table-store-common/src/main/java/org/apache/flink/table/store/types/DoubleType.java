@@ -18,7 +18,14 @@
 
 package org.apache.flink.table.store.types;
 
-/** Data type of an 8-byte double precision floating point number. */
+import org.apache.flink.table.store.annotation.Experimental;
+
+/**
+ * Data type of an 8-byte double precision floating point number.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public class DoubleType extends DataType {
 
     private static final long serialVersionUID = 1L;

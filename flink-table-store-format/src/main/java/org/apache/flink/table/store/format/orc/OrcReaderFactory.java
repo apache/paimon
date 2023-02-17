@@ -23,12 +23,12 @@ import org.apache.flink.table.store.data.columnar.ColumnVector;
 import org.apache.flink.table.store.data.columnar.ColumnarRow;
 import org.apache.flink.table.store.data.columnar.ColumnarRowIterator;
 import org.apache.flink.table.store.data.columnar.VectorizedColumnBatch;
-import org.apache.flink.table.store.file.utils.RecordReader.RecordIterator;
 import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.format.fs.HadoopReadOnlyFileSystem;
 import org.apache.flink.table.store.format.orc.filter.OrcFilters;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.reader.RecordReader.RecordIterator;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Pair;
@@ -202,7 +202,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
      * skipped before.
      */
     private static final class OrcVectorizedReader
-            implements org.apache.flink.table.store.file.utils.RecordReader<InternalRow> {
+            implements org.apache.flink.table.store.reader.RecordReader<InternalRow> {
 
         private final RecordReader orcReader;
         private final Pool<OrcReaderBatch> pool;

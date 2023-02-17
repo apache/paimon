@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.utils.Preconditions;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
@@ -34,7 +35,10 @@ import java.util.Set;
  *
  * <p>A conversion is possible through a map that assigns each value to an integer multiplicity
  * ({@code Map<t, Integer>}).
+ *
+ * @since 0.4.0
  */
+@Experimental
 public class MultisetType extends DataType {
 
     private static final long serialVersionUID = 1L;

@@ -20,7 +20,7 @@ package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.utils.RecordReader;
+import org.apache.flink.table.store.reader.RecordReader;
 
 import java.io.IOException;
 

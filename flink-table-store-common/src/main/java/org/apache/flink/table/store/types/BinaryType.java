@@ -18,9 +18,16 @@
 
 package org.apache.flink.table.store.types;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 import java.util.Objects;
 
-/** Data type of a fixed-length binary string (=a sequence of bytes). */
+/**
+ * Data type of a fixed-length binary string (=a sequence of bytes).
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public class BinaryType extends DataType {
 
     private static final long serialVersionUID = 1L;

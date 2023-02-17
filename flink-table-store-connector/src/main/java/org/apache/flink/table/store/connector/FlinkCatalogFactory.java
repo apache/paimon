@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
-import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.options.ConfigOption;
 import org.apache.flink.table.store.options.ConfigOptions;
 
@@ -56,15 +56,15 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
     public FlinkCatalog createCatalog(Context context) {
         return createCatalog(
                 context.getName(),
-                FlinkUtils.catalogOptions(context.getOptions(), context.getConfiguration()),
+                FlinkUtils.createCatalogContext(context.getOptions(), context.getConfiguration()),
                 context.getClassLoader());
     }
 
     public static FlinkCatalog createCatalog(
-            String catalogName, CatalogOptions options, ClassLoader classLoader) {
+            String catalogName, CatalogContext context, ClassLoader classLoader) {
         return new FlinkCatalog(
-                CatalogFactory.createCatalog(options, classLoader),
+                CatalogFactory.createCatalog(context, classLoader),
                 catalogName,
-                options.get(DEFAULT_DATABASE));
+                context.options().get(DEFAULT_DATABASE));
     }
 }

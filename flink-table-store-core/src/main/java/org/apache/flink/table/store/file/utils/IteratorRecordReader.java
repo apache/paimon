@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.file.utils;
 
+import org.apache.flink.table.store.reader.RecordReader;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;

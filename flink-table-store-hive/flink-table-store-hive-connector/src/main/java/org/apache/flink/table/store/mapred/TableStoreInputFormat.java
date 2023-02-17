@@ -22,9 +22,9 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.SearchArgumentToPredicateConverter;
 import org.apache.flink.table.store.TableStoreJobConf;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
@@ -78,8 +78,8 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
         TableStoreJobConf wrapper = new TableStoreJobConf(jobConf);
         Options options = new Options();
         options.set(CoreOptions.PATH, wrapper.getLocation());
-        CatalogOptions catalogOptions = CatalogOptions.create(options, jobConf);
-        return FileStoreTableFactory.create(catalogOptions);
+        CatalogContext catalogContext = CatalogContext.create(options, jobConf);
+        return FileStoreTableFactory.create(catalogContext);
     }
 
     private Optional<Predicate> createPredicate(TableSchema tableSchema, JobConf jobConf) {

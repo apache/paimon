@@ -19,11 +19,10 @@
 package org.apache.flink.table.store.format.orc;
 
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.utils.RecordReader;
-import org.apache.flink.table.store.file.utils.RecordReaderUtils;
 import org.apache.flink.table.store.format.orc.filter.OrcFilters;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.DecimalType;
@@ -186,7 +185,8 @@ class OrcReaderFactoryTest {
 
     private void forEach(OrcReaderFactory format, Path file, Consumer<InternalRow> action)
             throws IOException {
-        RecordReaderUtils.forEachRemaining(format.createReader(new LocalFileIO(), file), action);
+        RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), file);
+        reader.forEachRemaining(action);
     }
 
     static Path copyFileFromResource(String resourceName, java.nio.file.Path file) {

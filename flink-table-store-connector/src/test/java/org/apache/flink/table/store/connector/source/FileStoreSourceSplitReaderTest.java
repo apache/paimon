@@ -27,8 +27,8 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.UpdateSchema;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
@@ -83,14 +83,16 @@ public class FileStoreSourceSplitReaderTest {
     public void beforeEach() throws Exception {
         SchemaManager schemaManager =
                 new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
-        schemaManager.commitNewVersion(
-                new UpdateSchema(
+        schemaManager.createTable(
+                new Schema(
                         toDataType(
-                                new RowType(
-                                        Arrays.asList(
-                                                new RowType.RowField("k", new BigIntType()),
-                                                new RowType.RowField("v", new BigIntType()),
-                                                new RowType.RowField("default", new IntType())))),
+                                        new RowType(
+                                                Arrays.asList(
+                                                        new RowType.RowField("k", new BigIntType()),
+                                                        new RowType.RowField("v", new BigIntType()),
+                                                        new RowType.RowField(
+                                                                "default", new IntType()))))
+                                .getFields(),
                         Collections.singletonList("default"),
                         Arrays.asList("k", "default"),
                         Collections.emptyMap(),

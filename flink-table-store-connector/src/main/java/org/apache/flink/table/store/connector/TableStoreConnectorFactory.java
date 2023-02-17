@@ -96,9 +96,9 @@ public class TableStoreConnectorFactory extends AbstractTableStoreFactory {
                 Path tablePath = CoreOptions.path(table.getOptions());
                 SchemaManager schemaManager =
                         new SchemaManager(
-                                FileIO.get(tablePath, createCatalogOptions(context)), tablePath);
+                                FileIO.get(tablePath, createCatalogContext(context)), tablePath);
                 if (!schemaManager.latest().isPresent()) {
-                    schemaManager.commitNewVersion(FlinkCatalog.fromCatalogTable(table));
+                    schemaManager.createTable(FlinkCatalog.fromCatalogTable(table));
                 }
             } catch (Exception e) {
                 throw new RuntimeException(e);

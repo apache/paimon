@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.predicate;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.data.Timestamp;
@@ -47,7 +48,12 @@ import java.util.Set;
 
 import static java.util.Collections.singletonList;
 
-/** A utility class to create {@link Predicate} object for common filter conditions. */
+/**
+ * A utility class to create {@link Predicate} object for common filter conditions.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public class PredicateBuilder {
 
     private final RowType rowType;

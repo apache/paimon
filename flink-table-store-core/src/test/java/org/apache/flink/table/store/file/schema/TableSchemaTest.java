@@ -59,7 +59,7 @@ public class TableSchemaTest {
                         new DataField(0, "f0", new IntType()),
                         new DataField(0, "f1", new IntType()));
         Assertions.assertThrows(
-                RuntimeException.class, () -> TableSchema.currentHighestFieldId(fields));
+                RuntimeException.class, () -> RowType.currentHighestFieldId(fields));
     }
 
     @Test
@@ -68,7 +68,7 @@ public class TableSchemaTest {
                 Arrays.asList(
                         new DataField(0, "f0", new IntType()),
                         new DataField(20, "f1", new IntType()));
-        assertThat(TableSchema.currentHighestFieldId(fields)).isEqualTo(20);
+        assertThat(RowType.currentHighestFieldId(fields)).isEqualTo(20);
     }
 
     static RowType newRowType(boolean isNullable, int fieldId) {
