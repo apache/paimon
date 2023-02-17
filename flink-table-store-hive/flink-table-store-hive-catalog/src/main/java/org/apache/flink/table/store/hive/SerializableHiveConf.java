@@ -17,8 +17,8 @@
 
 package org.apache.flink.table.store.hive;
 
-import org.apache.flink.core.memory.DataInputDeserializer;
-import org.apache.flink.core.memory.DataOutputSerializer;
+import org.apache.flink.table.store.io.DataInputDeserializer;
+import org.apache.flink.table.store.io.DataOutputSerializer;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 

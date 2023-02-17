@@ -26,7 +26,7 @@ import org.testcontainers.containers.Container;
 
 import java.util.UUID;
 
-/** Tests for {@link org.apache.flink.table.store.connector.action.FlinkActions}. */
+/** Tests for {@code FlinkActions}. */
 public class FlinkActionsE2eTest extends E2eTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkActionsE2eTest.class);

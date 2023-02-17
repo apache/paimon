@@ -55,7 +55,6 @@ public class SparkS3ITCase {
         spark.conf().set("spark.sql.catalog.tablestore.warehouse", warehousePath.toString());
         MINIO_CONTAINER
                 .getS3ConfigOptions()
-                .toMap()
                 .forEach((k, v) -> spark.conf().set("spark.sql.catalog.tablestore." + k, v));
         spark.sql("CREATE DATABASE tablestore.db");
         spark.sql("USE tablestore.db");
