@@ -18,12 +18,18 @@
 
 package org.apache.flink.table.store.file.disk;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.file.memory.Buffer;
 import org.apache.flink.table.store.memory.MemorySegment;
 
 import java.io.IOException;
 
-/** Write {@link MemorySegment} to file. */
+/**
+ * Write {@link MemorySegment} to file.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public interface BufferFileWriter extends FileIOChannel {
 
     /**

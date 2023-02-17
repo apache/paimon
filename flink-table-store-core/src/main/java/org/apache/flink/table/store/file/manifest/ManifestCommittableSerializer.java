@@ -21,8 +21,8 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.table.store.data.serializer.VersionedSerializer;
 import org.apache.flink.table.store.io.DataInputDeserializer;
 import org.apache.flink.table.store.io.DataOutputViewStreamWrapper;
-import org.apache.flink.table.store.table.sink.FileCommittable;
-import org.apache.flink.table.store.table.sink.FileCommittableSerializer;
+import org.apache.flink.table.store.table.sink.CommitMessage;
+import org.apache.flink.table.store.table.sink.CommitMessageSerializer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -35,10 +35,10 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
 
     private static final int CURRENT_VERSION = 2;
 
-    private final FileCommittableSerializer fileCommittableSerializer;
+    private final CommitMessageSerializer commitMessageSerializer;
 
     public ManifestCommittableSerializer() {
-        this.fileCommittableSerializer = new FileCommittableSerializer();
+        this.commitMessageSerializer = new CommitMessageSerializer();
     }
 
     @Override
@@ -52,8 +52,8 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
         view.writeLong(obj.identifier());
         serializeOffsets(view, obj.logOffsets());
-        view.writeInt(fileCommittableSerializer.getVersion());
-        fileCommittableSerializer.serializeList(obj.fileCommittables(), view);
+        view.writeInt(commitMessageSerializer.getVersion());
+        commitMessageSerializer.serializeList(obj.fileCommittables(), view);
         return out.toByteArray();
     }
 
@@ -82,9 +82,9 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
         long identifier = view.readLong();
         Map<Integer, Long> offsets = deserializeOffsets(view);
         int fileCommittableSerializerVersion = view.readInt();
-        List<FileCommittable> fileCommittables =
-                fileCommittableSerializer.deserializeList(fileCommittableSerializerVersion, view);
-        return new ManifestCommittable(identifier, offsets, fileCommittables);
+        List<CommitMessage> commitMessages =
+                commitMessageSerializer.deserializeList(fileCommittableSerializerVersion, view);
+        return new ManifestCommittable(identifier, offsets, commitMessages);
     }
 
     private Map<Integer, Long> deserializeOffsets(DataInputDeserializer view) throws IOException {

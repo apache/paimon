@@ -99,7 +99,7 @@ public class SparkTable
 
     @Override
     public WriteBuilder newWriteBuilder(LogicalWriteInfo info) {
-        return new SparkWriteBuilder(castToWritable(table), info.queryId(), lockFactory);
+        return new SparkWriteBuilder(table, info.queryId(), lockFactory);
     }
 
     @Override
@@ -115,7 +115,7 @@ public class SparkTable
         }
 
         String commitUser = UUID.randomUUID().toString();
-        castToWritable(table).deleteWhere(commitUser, predicates, lockFactory);
+        table.deleteWhere(commitUser, predicates, lockFactory);
     }
 
     @Override
@@ -125,14 +125,5 @@ public class SparkTable
         } else {
             return Collections.emptyMap();
         }
-    }
-
-    private static org.apache.flink.table.store.table.SupportsWrite castToWritable(Table table) {
-        if (!(table instanceof org.apache.flink.table.store.table.SupportsWrite)) {
-            throw new UnsupportedOperationException(
-                    "Unsupported table for writing: " + table.getClass());
-        }
-
-        return (org.apache.flink.table.store.table.SupportsWrite) table;
     }
 }

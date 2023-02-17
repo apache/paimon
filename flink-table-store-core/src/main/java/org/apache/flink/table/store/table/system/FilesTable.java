@@ -34,6 +34,7 @@ import org.apache.flink.table.store.file.utils.SerializationUtils;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -69,7 +70,7 @@ import java.util.function.Supplier;
 import static org.apache.flink.table.store.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing files of a snapshot in specific table. */
-public class FilesTable implements Table {
+public class FilesTable implements ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 

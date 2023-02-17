@@ -32,6 +32,7 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -54,7 +55,7 @@ import java.util.Map;
  *
  * <p>Only used internally by dedicated compact job sources.
  */
-public class BucketsTable implements DataTable {
+public class BucketsTable implements DataTable, ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 

@@ -67,8 +67,8 @@ public class FileStoreSink extends FlinkSink {
         return user ->
                 new StoreCommitter(
                         table.newCommit(user)
-                                .withOverwritePartition(overwritePartition)
-                                .withCreateEmptyCommit(streamingCheckpointEnabled)
+                                .withOverwritten(overwritePartition)
+                                .ignoreEmptyCommit(!streamingCheckpointEnabled)
                                 .withLock(lockFactory.create()));
     }
 

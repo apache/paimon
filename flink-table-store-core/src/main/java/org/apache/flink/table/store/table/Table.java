@@ -20,13 +20,24 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.flink.table.store.file.predicate.PredicateFilter;
+import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.flink.table.store.table.sink.CommitMessage;
+import org.apache.flink.table.store.table.sink.TableCommit;
+import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
+import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.CloseableIterator;
 
 import java.io.Serializable;
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * A table provides basic abstraction for table type and table scan and table read.
@@ -74,8 +85,10 @@ import java.util.Map;
 @Experimental
 public interface Table extends Serializable {
 
+    /** A name to identify this table. */
     String name();
 
+    /** Returns the row type of this table. */
     RowType rowType();
 
     /** Create a {@link TableScan} to generate {@link Split}s. */
@@ -83,6 +96,58 @@ public interface Table extends Serializable {
 
     /** Create a {@link TableRead} to read {@link Split}s. */
     TableRead newRead();
+
+    /** Create a {@link TableWrite} to write {@link InternalRow}s. */
+    TableWrite newWrite(String commitUser);
+
+    /**
+     * Create a {@link TableWrite} to write {@link InternalRow}s.
+     *
+     * <p>NOTE: This method will generate random commitUser. If you want to generate multiple
+     * commits, please use commitUser that is consistent with {@link #newCommit}.
+     */
+    default TableWrite newWrite() {
+        return newWrite(UUID.randomUUID().toString());
+    }
+
+    /** Create a {@link TableCommit} to commit {@link CommitMessage}s. */
+    TableCommit newCommit(String commitUser);
+
+    /**
+     * Create a {@link TableCommit} to commit {@link CommitMessage}s.
+     *
+     * <p>NOTE: This method will generate random commitUser. If you want to generate multiple
+     * commits, please use commitUser that is consistent with {@link #newWrite}.
+     */
+    default TableCommit newCommit() {
+        return newCommit(UUID.randomUUID().toString());
+    }
+
+    /**
+     * Delete according to filters.
+     *
+     * <p>NOTE: This method is only suitable for deletion of small amount of data.
+     */
+    default void deleteWhere(String commitUser, List<Predicate> filters, Lock.Factory lockFactory) {
+        List<Split> splits = newScan().withFilter(filters).plan().splits();
+        try (RecordReader<InternalRow> reader = newRead().withFilter(filters).createReader(splits);
+                TableWrite write = newWrite(commitUser);
+                TableCommit commit = newCommit(commitUser).withLock(lockFactory.create())) {
+            CloseableIterator<InternalRow> iterator = reader.toCloseableIterator();
+            PredicateFilter filter = new PredicateFilter(rowType(), filters);
+            while (iterator.hasNext()) {
+                InternalRow row = iterator.next();
+                if (filter.test(row)) {
+                    row.setRowKind(RowKind.DELETE);
+                    write.write(row);
+                }
+            }
+
+            commit.commit(0, write.prepareCommit(true, 0));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 
     /** Copy this table with adding dynamic options. */
     Table copy(Map<String, String> dynamicOptions);

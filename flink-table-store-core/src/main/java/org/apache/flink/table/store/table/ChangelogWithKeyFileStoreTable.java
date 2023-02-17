@@ -38,7 +38,6 @@ import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.sink.SequenceGenerator;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
-import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
 import org.apache.flink.table.store.table.source.AbstractDataTableScan;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
@@ -213,7 +212,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableWrite newWrite(String commitUser) {
+    public TableWriteImpl<?> newWrite(String commitUser) {
         final SequenceGenerator sequenceGenerator =
                 store().options()
                         .sequenceField()

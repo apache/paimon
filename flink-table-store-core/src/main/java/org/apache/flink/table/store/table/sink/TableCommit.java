@@ -18,121 +18,47 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.table.store.file.operation.FileStoreCommit;
-import org.apache.flink.table.store.file.operation.FileStoreExpire;
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.file.operation.PartitionExpire;
+import org.apache.flink.table.store.table.Table;
 
 import javax.annotation.Nullable;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
- * An abstraction layer above {@link FileStoreCommit} and {@link FileStoreExpire} to provide
- * snapshot commit and expiration.
+ * Commit of {@link Table} to provide {@link CommitMessage} committing.
+ *
+ * <p>According to the options, the expiration of snapshots and partitions will be completed in
+ * commit.
+ *
+ * @since 0.4.0
  */
-public class TableCommit implements AutoCloseable {
+@Experimental
+public interface TableCommit extends AutoCloseable {
 
-    private final FileStoreCommit commit;
-    @Nullable private final FileStoreExpire expire;
-    @Nullable private final PartitionExpire partitionExpire;
-
-    @Nullable private List<Map<String, String>> overwritePartitions = null;
-    @Nullable private Lock lock;
-
-    public TableCommit(
-            FileStoreCommit commit,
-            @Nullable FileStoreExpire expire,
-            @Nullable PartitionExpire partitionExpire) {
-        this.commit = commit;
-        this.expire = expire;
-        this.partitionExpire = partitionExpire;
+    default TableCommit withOverwritten() {
+        withOverwritten(Collections.emptyMap());
+        return this;
     }
 
-    public TableCommit withOverwritePartition(@Nullable Map<String, String> overwritePartition) {
-        if (overwritePartition != null) {
-            this.overwritePartitions = Collections.singletonList(overwritePartition);
+    default TableCommit withOverwritten(@Nullable Map<String, String> staticPartition) {
+        if (staticPartition != null) {
+            withOverwritten(Collections.singletonList(staticPartition));
         }
         return this;
     }
 
-    public TableCommit withOverwritePartitions(
-            @Nullable List<Map<String, String>> overwritePartitions) {
-        this.overwritePartitions = overwritePartitions;
-        return this;
-    }
+    TableCommit withOverwritten(@Nullable List<Map<String, String>> staticPartitions);
 
-    public TableCommit withLock(Lock lock) {
-        commit.withLock(lock);
+    TableCommit withLock(Lock lock);
 
-        if (expire != null) {
-            expire.withLock(lock);
-        }
+    TableCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
 
-        if (partitionExpire != null) {
-            partitionExpire.withLock(lock);
-        }
+    Set<Long> filterCommitted(Set<Long> commitIdentifiers);
 
-        this.lock = lock;
-        return this;
-    }
-
-    public TableCommit withCreateEmptyCommit(boolean createEmptyCommit) {
-        commit.withCreateEmptyCommit(createEmptyCommit);
-        return this;
-    }
-
-    public List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables) {
-        return commit.filterCommitted(committables);
-    }
-
-    public void commit(long identifier, List<FileCommittable> fileCommittables) {
-        ManifestCommittable committable = new ManifestCommittable(identifier);
-        for (FileCommittable fileCommittable : fileCommittables) {
-            committable.addFileCommittable(fileCommittable);
-        }
-        commit(Collections.singletonList(committable));
-    }
-
-    public void commit(List<ManifestCommittable> committables) {
-        if (overwritePartitions == null) {
-            for (ManifestCommittable committable : committables) {
-                commit.commit(committable, new HashMap<>());
-            }
-        } else {
-            ManifestCommittable committable;
-            if (committables.size() > 1) {
-                throw new RuntimeException(
-                        "Multiple committables appear in overwrite mode, this may be a bug, please report it: "
-                                + committables);
-            } else if (committables.size() == 1) {
-                committable = committables.get(0);
-            } else {
-                // create an empty committable
-                // identifier is Long.MAX_VALUE, come from batch job
-                // TODO maybe it can be produced by CommitterOperator
-                committable = new ManifestCommittable(Long.MAX_VALUE);
-            }
-            commit.overwrite(overwritePartitions, committable, new HashMap<>());
-        }
-
-        if (expire != null) {
-            expire.expire();
-        }
-
-        if (partitionExpire != null) {
-            partitionExpire.expire();
-        }
-    }
-
-    @Override
-    public void close() throws Exception {
-        if (lock != null) {
-            lock.close();
-        }
-    }
+    void commit(long commitIdentifier, List<CommitMessage> commitMessages);
 }

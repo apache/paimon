@@ -205,9 +205,9 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
-    public CommitIncrement prepareCommit(boolean blocking) throws Exception {
+    public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
         flushWriteBuffer(false, false);
-        trySyncLatestCompaction(blocking || commitForceCompact);
+        trySyncLatestCompaction(waitCompaction || commitForceCompact);
         return drainIncrement();
     }
 

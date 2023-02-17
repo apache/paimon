@@ -22,6 +22,7 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.memory.MemoryPoolFactory;
+import org.apache.flink.table.store.file.memory.MemorySegmentPool;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 
@@ -37,7 +38,8 @@ import java.util.Map;
  * @param <T> type of record to write.
  */
 public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> {
-    private final MemoryPoolFactory memoryPoolFactory;
+
+    private MemoryPoolFactory memoryPoolFactory;
 
     public MemoryFileStoreWrite(
             String commitUser,
@@ -48,6 +50,12 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
         HeapMemorySegmentPool memoryPool =
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize());
         this.memoryPoolFactory = new MemoryPoolFactory(memoryPool, this::memoryOwners);
+    }
+
+    @Override
+    public FileStoreWrite<T> withMemoryPool(MemorySegmentPool memoryPool) {
+        this.memoryPoolFactory = new MemoryPoolFactory(memoryPool, this::memoryOwners);
+        return this;
     }
 
     private Iterator<MemoryOwner> memoryOwners() {

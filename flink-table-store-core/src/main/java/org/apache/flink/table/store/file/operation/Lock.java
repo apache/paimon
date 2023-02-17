@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.operation;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.catalog.Identifier;
 
@@ -26,7 +27,12 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.concurrent.Callable;
 
-/** An interface that allows file store to use global lock to some transaction-related things. */
+/**
+ * An interface that allows file store to use global lock to some transaction-related things.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public interface Lock extends AutoCloseable {
 
     /** Run with lock. */

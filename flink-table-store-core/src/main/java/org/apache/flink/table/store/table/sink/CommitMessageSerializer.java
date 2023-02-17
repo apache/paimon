@@ -35,14 +35,14 @@ import java.util.List;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.serializeBinaryRow;
 
-/** {@link VersionedSerializer} for {@link FileCommittable}. */
-public class FileCommittableSerializer implements VersionedSerializer<FileCommittable> {
+/** {@link VersionedSerializer} for {@link CommitMessage}. */
+public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
 
     private static final int CURRENT_VERSION = 2;
 
     private final DataFileMetaSerializer dataFileSerializer;
 
-    public FileCommittableSerializer() {
+    public CommitMessageSerializer() {
         this.dataFileSerializer = new DataFileMetaSerializer();
     }
 
@@ -52,42 +52,42 @@ public class FileCommittableSerializer implements VersionedSerializer<FileCommit
     }
 
     @Override
-    public byte[] serialize(FileCommittable obj) throws IOException {
+    public byte[] serialize(CommitMessage obj) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
         serialize(obj, view);
         return out.toByteArray();
     }
 
-    public void serializeList(List<FileCommittable> list, DataOutputView view) throws IOException {
+    public void serializeList(List<CommitMessage> list, DataOutputView view) throws IOException {
         view.writeInt(list.size());
-        for (FileCommittable fileCommittable : list) {
-            serialize(fileCommittable, view);
+        for (CommitMessage commitMessage : list) {
+            serialize(commitMessage, view);
         }
     }
 
-    private void serialize(FileCommittable obj, DataOutputView view) throws IOException {
+    private void serialize(CommitMessage obj, DataOutputView view) throws IOException {
+        CommitMessageImpl message = (CommitMessageImpl) obj;
         serializeBinaryRow(obj.partition(), view);
         view.writeInt(obj.bucket());
-        dataFileSerializer.serializeList(obj.newFilesIncrement().newFiles(), view);
-        dataFileSerializer.serializeList(obj.newFilesIncrement().changelogFiles(), view);
-        dataFileSerializer.serializeList(obj.compactIncrement().compactBefore(), view);
-        dataFileSerializer.serializeList(obj.compactIncrement().compactAfter(), view);
-        dataFileSerializer.serializeList(obj.compactIncrement().changelogFiles(), view);
+        dataFileSerializer.serializeList(message.newFilesIncrement().newFiles(), view);
+        dataFileSerializer.serializeList(message.newFilesIncrement().changelogFiles(), view);
+        dataFileSerializer.serializeList(message.compactIncrement().compactBefore(), view);
+        dataFileSerializer.serializeList(message.compactIncrement().compactAfter(), view);
+        dataFileSerializer.serializeList(message.compactIncrement().changelogFiles(), view);
     }
 
     @Override
-    public FileCommittable deserialize(int version, byte[] serialized) throws IOException {
+    public CommitMessage deserialize(int version, byte[] serialized) throws IOException {
         checkVersion(version);
         DataInputDeserializer view = new DataInputDeserializer(serialized);
         return deserialize(view);
     }
 
-    public List<FileCommittable> deserializeList(int version, DataInputView view)
-            throws IOException {
+    public List<CommitMessage> deserializeList(int version, DataInputView view) throws IOException {
         checkVersion(version);
         int length = view.readInt();
-        List<FileCommittable> list = new ArrayList<>(length);
+        List<CommitMessage> list = new ArrayList<>(length);
         for (int i = 0; i < length; i++) {
             list.add(deserialize(view));
         }
@@ -106,8 +106,8 @@ public class FileCommittableSerializer implements VersionedSerializer<FileCommit
         }
     }
 
-    private FileCommittable deserialize(DataInputView view) throws IOException {
-        return new FileCommittable(
+    private CommitMessage deserialize(DataInputView view) throws IOException {
+        return new CommitMessageImpl(
                 deserializeBinaryRow(view),
                 view.readInt(),
                 new NewFilesIncrement(

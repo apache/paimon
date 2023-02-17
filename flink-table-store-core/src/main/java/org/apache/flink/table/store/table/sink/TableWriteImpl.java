@@ -22,6 +22,7 @@ import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.memory.MemorySegmentPool;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 
 import java.util.List;
@@ -47,25 +48,44 @@ public class TableWriteImpl<T> implements TableWrite {
     }
 
     @Override
-    public TableWrite withOverwrite(boolean overwrite) {
+    public TableWriteImpl<T> withOverwritten(boolean overwrite) {
         write.withOverwrite(overwrite);
         return this;
     }
 
     @Override
-    public TableWrite withIOManager(IOManager ioManager) {
+    public TableWriteImpl<T> withIOManager(IOManager ioManager) {
         write.withIOManager(ioManager);
         return this;
     }
 
     @Override
-    public SinkRecord write(InternalRow rowData) throws Exception {
-        SinkRecord record = recordConverter.convert(rowData);
+    public TableWriteImpl<T> withMemoryPool(MemorySegmentPool memoryPool) {
+        write.withMemoryPool(memoryPool);
+        return this;
+    }
+
+    @Override
+    public BinaryRow getPartition(InternalRow row) {
+        return recordConverter.partition(row);
+    }
+
+    @Override
+    public int getBucket(InternalRow row) {
+        return recordConverter.bucket(row);
+    }
+
+    @Override
+    public void write(InternalRow row) throws Exception {
+        writeAndReturn(row);
+    }
+
+    public SinkRecord writeAndReturn(InternalRow row) throws Exception {
+        SinkRecord record = recordConverter.convert(row);
         write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
         return record;
     }
 
-    @Override
     public SinkRecord toLogRecord(SinkRecord record) {
         return recordConverter.convertToLogSinkRecord(record);
     }
@@ -75,16 +95,21 @@ public class TableWriteImpl<T> implements TableWrite {
         write.compact(partition, bucket, fullCompaction);
     }
 
-    @Override
+    /**
+     * Notify that some new files are created at given snapshot in given bucket.
+     *
+     * <p>Most probably, these files are created by another job. Currently this method is only used
+     * by the dedicated compact job to see files created by writer jobs.
+     */
     public void notifyNewFiles(
             long snapshotId, BinaryRow partition, int bucket, List<DataFileMeta> files) {
         write.notifyNewFiles(snapshotId, partition, bucket, files);
     }
 
     @Override
-    public List<FileCommittable> prepareCommit(boolean blocking, long commitIdentifier)
+    public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception {
-        return write.prepareCommit(blocking, commitIdentifier);
+        return write.prepareCommit(waitCompaction, commitIdentifier);
     }
 
     @Override

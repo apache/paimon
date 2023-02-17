@@ -18,39 +18,61 @@
 
 package org.apache.flink.table.store.table.sink;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.disk.IOManager;
-import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.memory.MemorySegmentPool;
+import org.apache.flink.table.store.table.Table;
 
 import java.util.List;
 
 /**
- * An abstraction layer above {@link org.apache.flink.table.store.file.operation.FileStoreWrite} to
- * provide {@link InternalRow} writing.
+ * Write of {@link Table} to provide {@link InternalRow} writing.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public interface TableWrite extends AutoCloseable {
 
-    TableWrite withOverwrite(boolean overwrite);
+    /**
+     * Write with overwritten determines whether the writer needs to read old data files to perform
+     * compaction.
+     */
+    TableWrite withOverwritten(boolean overwrite);
 
+    /** With {@link IOManager}, this is needed if 'write-buffer-spillable' is opened. */
     TableWrite withIOManager(IOManager ioManager);
 
-    SinkRecord write(InternalRow rowData) throws Exception;
+    /**
+     * With {@link MemorySegmentPool}, you can set memory pool to allow multiple writers to share
+     * one memory.
+     */
+    TableWrite withMemoryPool(MemorySegmentPool memoryPool);
 
-    /** Log record need to preserve original pk (which includes partition fields). */
-    SinkRecord toLogRecord(SinkRecord record);
+    /** Compute partition by an input row. */
+    BinaryRow getPartition(InternalRow row);
 
-    void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
+    /** Compute bucket by an input row. */
+    int getBucket(InternalRow row);
+
+    /** Write a row to the writer. */
+    void write(InternalRow row) throws Exception;
 
     /**
-     * Notify that some new files are created at given snapshot in given bucket.
+     * Compact a bucket of a partition. By default, it will determine whether to perform the
+     * compaction according to the 'num-sorted-run.compaction-trigger' option. If fullCompaction is
+     * true, it will force a full compaction, which is expensive.
      *
-     * <p>Most probably, these files are created by another job. Currently this method is only used
-     * by the dedicated compact job to see files created by writer jobs.
+     * <p>NOTE: In Java API, full compaction is not automatically executed
+     * ('changelog-producer.compaction-interval' is ignored). If you open 'changelog-producer' of
+     * 'full-compaction', please execute this method regularly to produce changelog.
+     *
+     * <p>NOTE: this method will block until the completion of the compaction execution.
      */
-    void notifyNewFiles(long snapshotId, BinaryRow partition, int bucket, List<DataFileMeta> files);
+    void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
 
-    List<FileCommittable> prepareCommit(boolean blocking, long commitIdentifier) throws Exception;
-
-    void close() throws Exception;
+    /** Prepare commit for {@link TableCommit}. Collect incremental files for this write. */
+    List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
+            throws Exception;
 }

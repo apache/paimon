@@ -19,10 +19,8 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.table.SupportsWrite;
-import org.apache.flink.table.store.table.sink.BucketComputer;
-import org.apache.flink.table.store.table.sink.FileCommittable;
-import org.apache.flink.table.store.table.sink.SerializableCommittable;
+import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.types.RowType;
@@ -35,16 +33,15 @@ import org.apache.spark.sql.sources.InsertableRelation;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /** Spark {@link V1Write}, it is required to use v1 write for grouping by bucket. */
 public class SparkWrite implements V1Write {
 
-    private final SupportsWrite table;
+    private final Table table;
     private final String queryId;
     private final Lock.Factory lockFactory;
 
-    public SparkWrite(SupportsWrite table, String queryId, Lock.Factory lockFactory) {
+    public SparkWrite(Table table, String queryId, Lock.Factory lockFactory) {
         this.table = table;
         this.queryId = queryId;
         this.lockFactory = lockFactory;
@@ -58,7 +55,7 @@ public class SparkWrite implements V1Write {
             }
 
             long identifier = 0;
-            List<SerializableCommittable> committables =
+            List<CommitMessage> committables =
                     data.toJavaRDD()
                             .groupBy(new ComputeBucket(table))
                             .mapValues(new WriteRecords(table, queryId, identifier))
@@ -66,11 +63,7 @@ public class SparkWrite implements V1Write {
                             .reduce(new ListConcat<>());
             try (TableCommit tableCommit =
                     table.newCommit(queryId).withLock(lockFactory.create())) {
-                tableCommit.commit(
-                        identifier,
-                        committables.stream()
-                                .map(SerializableCommittable::delegate)
-                                .collect(Collectors.toList()));
+                tableCommit.commit(identifier, committables);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -79,38 +72,37 @@ public class SparkWrite implements V1Write {
 
     private static class ComputeBucket implements Function<Row, Integer> {
 
-        private final SupportsWrite table;
+        private final Table table;
         private final RowType type;
 
-        private transient BucketComputer lazyComputer;
+        private transient TableWrite lazyWriter;
 
-        private ComputeBucket(SupportsWrite table) {
+        private ComputeBucket(Table table) {
             this.table = table;
             this.type = table.rowType();
         }
 
-        private BucketComputer computer() {
-            if (lazyComputer == null) {
-                lazyComputer = table.bucketComputer();
+        private TableWrite computer() {
+            if (lazyWriter == null) {
+                lazyWriter = table.newWrite();
             }
-            return lazyComputer;
+            return lazyWriter;
         }
 
         @Override
         public Integer call(Row row) {
-            return computer().bucket(new SparkRow(type, row));
+            return computer().getBucket(new SparkRow(type, row));
         }
     }
 
-    private static class WriteRecords
-            implements Function<Iterable<Row>, List<SerializableCommittable>> {
+    private static class WriteRecords implements Function<Iterable<Row>, List<CommitMessage>> {
 
-        private final SupportsWrite table;
+        private final Table table;
         private final RowType type;
         private final String queryId;
         private final long commitIdentifier;
 
-        private WriteRecords(SupportsWrite table, String queryId, long commitIdentifier) {
+        private WriteRecords(Table table, String queryId, long commitIdentifier) {
             this.table = table;
             this.type = table.rowType();
             this.queryId = queryId;
@@ -118,15 +110,12 @@ public class SparkWrite implements V1Write {
         }
 
         @Override
-        public List<SerializableCommittable> call(Iterable<Row> iterables) throws Exception {
+        public List<CommitMessage> call(Iterable<Row> iterables) throws Exception {
             try (TableWrite write = table.newWrite(queryId)) {
                 for (Row row : iterables) {
                     write.write(new SparkRow(type, row));
                 }
-                List<FileCommittable> committables = write.prepareCommit(true, commitIdentifier);
-                return committables.stream()
-                        .map(SerializableCommittable::wrap)
-                        .collect(Collectors.toList());
+                return write.prepareCommit(true, commitIdentifier);
             }
         }
     }

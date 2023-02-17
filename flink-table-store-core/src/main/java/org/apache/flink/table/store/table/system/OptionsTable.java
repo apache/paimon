@@ -27,6 +27,7 @@ import org.apache.flink.table.store.file.utils.IteratorRecordReader;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -48,7 +49,7 @@ import static org.apache.flink.table.store.file.catalog.Catalog.SYSTEM_TABLE_SPL
 import static org.apache.flink.table.store.file.utils.SerializationUtils.newStringType;
 
 /** A {@link Table} for showing options of table. */
-public class OptionsTable implements Table {
+public class OptionsTable implements ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 

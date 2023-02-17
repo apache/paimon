@@ -18,12 +18,19 @@
 
 package org.apache.flink.table.store.file.memory;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentSource;
+import org.apache.flink.table.store.options.MemorySize;
 
 import java.util.List;
 
-/** MemorySegment pool to hold pages in memory. */
+/**
+ * MemorySegment pool to hold pages in memory.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public interface MemorySegmentPool extends MemorySegmentSource {
 
     int DEFAULT_PAGE_SIZE = 32 * 1024;
@@ -44,4 +51,8 @@ public interface MemorySegmentPool extends MemorySegmentSource {
 
     /** @return Free page number. */
     int freePages();
+
+    static MemorySegmentPool createHeapPool(MemorySize maxMemory, MemorySize pageSize) {
+        return new HeapMemorySegmentPool(maxMemory.getBytes(), (int) pageSize.getBytes());
+    }
 }

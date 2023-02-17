@@ -32,7 +32,6 @@ import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
-import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
 import org.apache.flink.table.store.table.source.AbstractDataTableScan;
 import org.apache.flink.table.store.table.source.AppendOnlySplitGenerator;
@@ -131,7 +130,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableWrite newWrite(String commitUser) {
+    public TableWriteImpl<?> newWrite(String commitUser) {
         return new TableWriteImpl<>(
                 store().newWrite(commitUser),
                 new SinkRecordConverter(tableSchema),

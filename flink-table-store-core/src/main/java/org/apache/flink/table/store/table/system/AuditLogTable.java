@@ -32,6 +32,7 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.Split;
@@ -55,7 +56,7 @@ import java.util.stream.Collectors;
 import static org.apache.flink.table.store.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for reading audit log of table. */
-public class AuditLogTable implements DataTable {
+public class AuditLogTable implements DataTable, ReadonlyTable {
 
     public static final String AUDIT_LOG = "audit_log";
 

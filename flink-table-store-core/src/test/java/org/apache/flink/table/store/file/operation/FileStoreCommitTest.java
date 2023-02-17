@@ -506,7 +506,7 @@ public class FileStoreCommitTest {
                 false,
                 null,
                 (commit, committable) -> {
-                    commit.withCreateEmptyCommit(true);
+                    commit.ignoreEmptyCommit(false);
                     commit.commit(committable, Collections.emptyMap());
                 });
         assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(snapshot.id() + 1);

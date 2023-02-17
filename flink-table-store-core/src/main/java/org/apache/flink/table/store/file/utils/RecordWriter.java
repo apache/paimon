@@ -54,10 +54,10 @@ public interface RecordWriter<T> {
     /**
      * Prepare for a commit.
      *
-     * @param blocking if this method need to wait for current compaction to complete
+     * @param waitCompaction if this method need to wait for current compaction to complete
      * @return Incremental files in this snapshot cycle
      */
-    CommitIncrement prepareCommit(boolean blocking) throws Exception;
+    CommitIncrement prepareCommit(boolean waitCompaction) throws Exception;
 
     /**
      * Sync the writer. The structure related to file reading and writing is thread unsafe, there

@@ -33,7 +33,7 @@ import org.apache.flink.table.store.file.schema.SchemaUtils;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.Options;
-import org.apache.flink.table.store.table.sink.FileCommittable;
+import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.DataSplit;
@@ -570,13 +570,13 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
-        List<FileCommittable> committables0 = write.prepareCommit(false, 0);
+        List<CommitMessage> committables0 = write.prepareCommit(false, 0);
 
         write.write(rowData(2, 10, 300L));
-        List<FileCommittable> committables1 = write.prepareCommit(false, 1);
+        List<CommitMessage> committables1 = write.prepareCommit(false, 1);
 
         write.write(rowData(1, 20, 201L));
-        List<FileCommittable> committables2 = write.prepareCommit(true, 2);
+        List<CommitMessage> committables2 = write.prepareCommit(true, 2);
 
         commit.commit(0, committables0);
         commit.commit(1, committables1);
@@ -616,7 +616,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(1, 20, 2000L));
         Map<String, String> overwritePartition = new HashMap<>();
         overwritePartition.put("pt", "1");
-        commit.withOverwritePartition(overwritePartition);
+        commit.withOverwritten(overwritePartition);
         commit.commit(1, write.prepareCommit(true, 1));
 
         List<DataSplit> splits1 = scan.plan().splits;

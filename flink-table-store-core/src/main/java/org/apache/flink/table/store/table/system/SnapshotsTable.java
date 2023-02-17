@@ -30,6 +30,7 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -55,7 +56,7 @@ import java.util.Objects;
 import static org.apache.flink.table.store.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing committing snapshots of table. */
-public class SnapshotsTable implements Table {
+public class SnapshotsTable implements ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 

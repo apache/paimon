@@ -79,6 +79,10 @@ public class SinkRecordConverter {
         return new SinkRecord(record.partition(), record.bucket(), logPrimaryKey, record.row());
     }
 
+    public BinaryRow partition(InternalRow row) {
+        return partProjection.apply(row).copy();
+    }
+
     public int bucket(InternalRow row) {
         return bucketComputer.bucket(row);
     }

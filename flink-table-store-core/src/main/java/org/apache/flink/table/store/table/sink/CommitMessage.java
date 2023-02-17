@@ -16,22 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.disk;
+package org.apache.flink.table.store.table.sink;
 
 import org.apache.flink.table.store.annotation.Experimental;
-import org.apache.flink.table.store.file.memory.Buffer;
+import org.apache.flink.table.store.data.BinaryRow;
 
-import java.io.IOException;
+import java.io.Serializable;
 
 /**
- * Read {@link Buffer} from file.
+ * Commit message for partition and bucket.
  *
  * @since 0.4.0
  */
 @Experimental
-public interface BufferFileReader extends FileIOChannel {
+public interface CommitMessage extends Serializable {
 
-    void readInto(Buffer buffer) throws IOException;
+    BinaryRow partition();
 
-    boolean hasReachedEndOfFile();
+    int bucket();
+
+    boolean isEmpty();
 }

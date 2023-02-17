@@ -68,8 +68,8 @@ public class ContinuousCompactorFollowUpScannerTest extends SnapshotEnumeratorTe
 
         Map<String, String> overwritePartition = new HashMap<>();
         overwritePartition.put("pt", "1");
-        write = table.newWrite(commitUser).withOverwrite(true);
-        commit = table.newCommit(commitUser).withOverwritePartition(overwritePartition);
+        write = table.newWrite(commitUser).withOverwritten(true);
+        commit = table.newCommit(commitUser).withOverwritten(overwritePartition);
         write.write(rowData(1, 10, 101L));
         write.write(rowData(1, 20, 201L));
         commit.commit(2, write.prepareCommit(true, 2));

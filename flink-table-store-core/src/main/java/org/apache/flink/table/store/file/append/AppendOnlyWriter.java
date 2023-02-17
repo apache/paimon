@@ -108,9 +108,9 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
     }
 
     @Override
-    public CommitIncrement prepareCommit(boolean blocking) throws Exception {
+    public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
         flushWriter(false, false);
-        trySyncLatestCompaction(blocking || forceCompact);
+        trySyncLatestCompaction(waitCompaction || forceCompact);
         return drainIncrement();
     }
 
