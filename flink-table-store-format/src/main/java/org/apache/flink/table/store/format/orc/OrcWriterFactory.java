@@ -29,6 +29,7 @@ import org.apache.flink.table.store.fs.PositionOutputStream;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
+import org.apache.orc.OrcConf;
 import org.apache.orc.OrcFile;
 import org.apache.orc.impl.WriterImpl;
 
@@ -96,7 +97,11 @@ public class OrcWriterFactory implements FormatWriterFactory {
     }
 
     @Override
-    public FormatWriter create(PositionOutputStream out) throws IOException {
+    public FormatWriter create(PositionOutputStream out, String compression) throws IOException {
+        if (null != compression) {
+            writerProperties.setProperty(OrcConf.COMPRESS.getAttribute(), compression);
+        }
+
         OrcFile.WriterOptions opts = getWriterOptions();
         opts.physicalWriter(new PhysicalWriterImpl(out, opts));
 

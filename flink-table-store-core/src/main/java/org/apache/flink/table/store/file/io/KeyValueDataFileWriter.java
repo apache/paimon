@@ -75,14 +75,16 @@ public class KeyValueDataFileWriter
             RowType valueType,
             @Nullable FileStatsExtractor fileStatsExtractor,
             long schemaId,
-            int level) {
+            int level,
+            String compression) {
         super(
                 fileIO,
                 factory,
                 path,
                 converter,
                 KeyValue.schema(keyType, valueType),
-                fileStatsExtractor);
+                fileStatsExtractor,
+                compression);
 
         this.keyType = keyType;
         this.valueType = valueType;

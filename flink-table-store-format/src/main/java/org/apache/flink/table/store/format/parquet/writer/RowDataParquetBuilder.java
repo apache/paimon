@@ -42,13 +42,18 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
     }
 
     @Override
-    public ParquetWriter<InternalRow> createWriter(OutputFile out) throws IOException {
+    public ParquetWriter<InternalRow> createWriter(OutputFile out, String compression)
+            throws IOException {
+
+        String compressName = CompressionCodecName.SNAPPY.name();
+        if (null != compression) {
+            compressName = compression;
+        }
+
         return new ParquetRowDataBuilder(out, rowType)
                 .withCompressionCodec(
                         CompressionCodecName.fromConf(
-                                conf.getString(
-                                        ParquetOutputFormat.COMPRESSION,
-                                        CompressionCodecName.SNAPPY.name())))
+                                conf.getString(ParquetOutputFormat.COMPRESSION, compressName)))
                 .withRowGroupSize(
                         conf.getLong(
                                 ParquetOutputFormat.BLOCK_SIZE, ParquetWriter.DEFAULT_BLOCK_SIZE))
