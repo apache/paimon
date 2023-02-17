@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.hive;
 
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.CatalogContext;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.types.DataField;

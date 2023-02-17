@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.catalog;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.table.store.options.CatalogContext;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.TableType;
 
@@ -29,8 +29,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 
-import static org.apache.flink.table.store.options.CatalogContext.TABLE_TYPE;
-import static org.apache.flink.table.store.options.CatalogContext.WAREHOUSE;
+import static org.apache.flink.table.store.options.CatalogOptions.TABLE_TYPE;
+import static org.apache.flink.table.store.options.CatalogOptions.WAREHOUSE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

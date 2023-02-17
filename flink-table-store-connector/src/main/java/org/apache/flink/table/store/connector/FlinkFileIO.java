@@ -23,12 +23,12 @@ import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.FileSystem.WriteMode;
 import org.apache.flink.core.fs.FileSystemKind;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileStatus;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.PositionOutputStream;
 import org.apache.flink.table.store.fs.SeekableInputStream;
-import org.apache.flink.table.store.options.CatalogContext;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

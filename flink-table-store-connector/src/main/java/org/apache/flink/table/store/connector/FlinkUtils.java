@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.table.store.options.CatalogContext;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.options.Options;
 
 import java.util.Map;

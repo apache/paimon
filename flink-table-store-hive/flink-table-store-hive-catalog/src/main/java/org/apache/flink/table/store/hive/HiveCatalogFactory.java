@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.hive;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.CatalogContext;
+import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.options.ConfigOption;
 import org.apache.flink.table.store.options.ConfigOptions;
 import org.apache.flink.table.store.utils.Preconditions;
@@ -56,8 +57,8 @@ public class HiveCatalogFactory implements CatalogFactory {
     public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
         String uri =
                 Preconditions.checkNotNull(
-                        context.options().get(CatalogContext.URI),
-                        CatalogContext.URI.key()
+                        context.options().get(CatalogOptions.URI),
+                        CatalogOptions.URI.key()
                                 + " must be set for table store "
                                 + IDENTIFIER
                                 + " catalog");

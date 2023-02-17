@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.fs;
 
 import org.apache.flink.table.store.annotation.Experimental;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.table.store.options.CatalogContext;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

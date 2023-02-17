@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.fs.local;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileStatus;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.PositionOutputStream;
 import org.apache.flink.table.store.fs.SeekableInputStream;
-import org.apache.flink.table.store.options.CatalogContext;
 
 import java.io.File;
 import java.io.FileInputStream;

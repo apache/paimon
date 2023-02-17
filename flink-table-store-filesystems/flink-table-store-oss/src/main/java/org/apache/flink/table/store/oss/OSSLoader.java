@@ -18,11 +18,11 @@
 
 package org.apache.flink.table.store.oss;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileIOLoader;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.PluginFileIO;
-import org.apache.flink.table.store.options.CatalogContext;
 import org.apache.flink.table.store.plugin.PluginLoader;
 
 /** A {@link PluginLoader} to load oss. */

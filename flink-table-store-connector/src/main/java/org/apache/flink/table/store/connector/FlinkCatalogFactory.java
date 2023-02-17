@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
-import org.apache.flink.table.store.options.CatalogContext;
 import org.apache.flink.table.store.options.ConfigOption;
 import org.apache.flink.table.store.options.ConfigOptions;
 

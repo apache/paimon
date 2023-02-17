@@ -19,12 +19,12 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.CatalogContext;
 import org.apache.flink.table.store.options.Options;
 
 import java.io.IOException;

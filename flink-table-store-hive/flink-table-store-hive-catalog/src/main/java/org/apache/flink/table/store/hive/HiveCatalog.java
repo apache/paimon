@@ -60,8 +60,8 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.flink.table.store.hive.HiveCatalogLock.checkMaxSleep;
-import static org.apache.flink.table.store.options.CatalogContext.LOCK_ENABLED;
-import static org.apache.flink.table.store.options.CatalogContext.TABLE_TYPE;
+import static org.apache.flink.table.store.options.CatalogOptions.LOCK_ENABLED;
+import static org.apache.flink.table.store.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.flink.table.store.utils.Preconditions.checkState;
 
 /** A catalog implementation for Hive. */

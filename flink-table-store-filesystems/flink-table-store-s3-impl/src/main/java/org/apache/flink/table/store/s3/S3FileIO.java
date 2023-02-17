@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.s3;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.options.CatalogContext;
 import org.apache.flink.table.store.options.Options;
 
 import org.apache.hadoop.conf.Configuration;

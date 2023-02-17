@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.fs;
 
-import org.apache.flink.table.store.options.CatalogContext;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.options.Options;
 
 import java.io.IOException;

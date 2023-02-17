@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.store.options.CatalogContext;
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 

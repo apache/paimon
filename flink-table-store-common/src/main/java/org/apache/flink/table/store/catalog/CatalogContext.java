@@ -16,21 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.options;
+package org.apache.flink.table.store.catalog;
 
 import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.fs.FileIOLoader;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.hadoop.HadoopFileIOLoader;
-import org.apache.flink.table.store.table.TableType;
+import org.apache.flink.table.store.options.Options;
 
 import org.apache.hadoop.conf.Configuration;
 
 import javax.annotation.Nullable;
 
-import java.time.Duration;
-
-import static org.apache.flink.table.store.options.ConfigOptions.key;
+import static org.apache.flink.table.store.options.CatalogOptions.FS_ALLOW_HADOOP_FALLBACK;
+import static org.apache.flink.table.store.options.CatalogOptions.WAREHOUSE;
 
 /**
  * Context of catalog.
@@ -39,56 +38,6 @@ import static org.apache.flink.table.store.options.ConfigOptions.key;
  */
 @Experimental
 public class CatalogContext {
-
-    public static final ConfigOption<String> WAREHOUSE =
-            ConfigOptions.key("warehouse")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("The warehouse root path of catalog.");
-
-    public static final ConfigOption<String> METASTORE =
-            ConfigOptions.key("metastore")
-                    .stringType()
-                    .defaultValue("filesystem")
-                    .withDescription(
-                            "Metastore of table store catalog, supports filesystem and hive.");
-
-    public static final ConfigOption<String> URI =
-            ConfigOptions.key("uri")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("Uri of metastore server.");
-
-    public static final ConfigOption<TableType> TABLE_TYPE =
-            ConfigOptions.key("table.type")
-                    .enumType(TableType.class)
-                    .defaultValue(TableType.MANAGED)
-                    .withDescription("Type of table.");
-
-    public static final ConfigOption<Boolean> LOCK_ENABLED =
-            ConfigOptions.key("lock.enabled")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("Enable Catalog Lock.");
-
-    public static final ConfigOption<Duration> LOCK_CHECK_MAX_SLEEP =
-            key("lock-check-max-sleep")
-                    .durationType()
-                    .defaultValue(Duration.ofSeconds(8))
-                    .withDescription("The maximum sleep time when retrying to check the lock.");
-
-    public static final ConfigOption<Duration> LOCK_ACQUIRE_TIMEOUT =
-            key("lock-acquire-timeout")
-                    .durationType()
-                    .defaultValue(Duration.ofMinutes(8))
-                    .withDescription("The maximum time to wait for acquiring the lock.");
-
-    public static final ConfigOption<Boolean> FS_ALLOW_HADOOP_FALLBACK =
-            key("fs.allow-hadoop-fallback")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "Allow to fallback to hadoop File IO when no file io found for the scheme.");
 
     private final Options options;
     private final Configuration hadoopConf;

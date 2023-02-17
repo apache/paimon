@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.file.catalog;
 
+import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.CatalogContext;
 import org.apache.flink.table.store.table.TableType;
 
-import static org.apache.flink.table.store.options.CatalogContext.TABLE_TYPE;
+import static org.apache.flink.table.store.options.CatalogOptions.TABLE_TYPE;
 
 /** Factory to create {@link FileSystemCatalog}. */
 public class FileSystemCatalogFactory implements CatalogFactory {
