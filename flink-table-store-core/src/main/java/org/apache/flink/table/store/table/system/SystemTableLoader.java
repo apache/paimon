@@ -23,9 +23,7 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.Table;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
+import javax.annotation.Nullable;
 
 import static org.apache.flink.table.store.table.system.AuditLogTable.AUDIT_LOG;
 import static org.apache.flink.table.store.table.system.FilesTable.FILES;
@@ -36,10 +34,7 @@ import static org.apache.flink.table.store.table.system.SnapshotsTable.SNAPSHOTS
 /** Loader to load system {@link Table}s. */
 public class SystemTableLoader {
 
-    public static final List<String> SYSTEM_TABLES =
-            Collections.unmodifiableList(
-                    Arrays.asList(SNAPSHOTS, OPTIONS, SCHEMAS, AUDIT_LOG, FILES));
-
+    @Nullable
     public static Table load(String type, FileIO fileIO, FileStoreTable dataTable) {
         Path location = dataTable.location();
         switch (type.toLowerCase()) {
@@ -54,7 +49,7 @@ public class SystemTableLoader {
             case FILES:
                 return new FilesTable(dataTable);
             default:
-                throw new UnsupportedOperationException("Unsupported system table type: " + type);
+                return null;
         }
     }
 }

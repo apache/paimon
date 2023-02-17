@@ -43,11 +43,15 @@ public abstract class AbstractCatalog implements Catalog {
     public Table getTable(Identifier identifier) throws TableNotExistException {
         if (isSystemTable(identifier)) {
             String[] splits = tableAndSystemName(identifier);
-            String table = splits[0];
+            String tableName = splits[0];
             String type = splits[1];
             FileStoreTable originTable =
-                    getDataTable(new Identifier(identifier.getDatabaseName(), table));
-            return SystemTableLoader.load(type, fileIO, originTable);
+                    getDataTable(new Identifier(identifier.getDatabaseName(), tableName));
+            Table table = SystemTableLoader.load(type, fileIO, originTable);
+            if (table == null) {
+                throw new TableNotExistException(identifier);
+            }
+            return table;
         } else {
             return getDataTable(identifier);
         }
