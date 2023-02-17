@@ -100,18 +100,18 @@ SELECT * FROM my_catalog.my_db.`MyTable$snapshots`;
 
 ### Snapshots Table
 
-You can query the snapshot history information of the table through snapshots table.
+You can query the snapshot history information of the table through snapshots table, including the record count occurred in the snapshot.
 
 ```sql
 SELECT * FROM MyTable$snapshots;
 
 /*
-+--------------+------------+-----------------+-------------------+--------------+-------------------------+
-|  snapshot_id |  schema_id |     commit_user | commit_identifier |  commit_kind |             commit_time |
-+--------------+------------+-----------------+-------------------+--------------+-------------------------+
-|            2 |          0 | 7ca4cd28-98e... |                 2 |       APPEND | 2022-10-26 11:44:15.600 |
-|            1 |          0 | 870062aa-3e9... |                 1 |       APPEND | 2022-10-26 11:44:15.148 |
-+--------------+------------+-----------------+-------------------+--------------+-------------------------+
++--------------+------------+-----------------+-------------------+--------------+-------------------------+---------------------+---------------------+-------------------------+
+|  snapshot_id |  schema_id |     commit_user | commit_identifier |  commit_kind |             commit_time |  total_record_count |  delta_record_count |  changelog_record_count |
++--------------+------------+-----------------+-------------------+--------------+-------------------------+---------------------+---------------------+-------------------------+
+|            2 |          0 | 7ca4cd28-98e... |                 2 |       APPEND | 2022-10-26 11:44:15.600 |                   2 |                   2 |                       0 |
+|            1 |          0 | 870062aa-3e9... |                 1 |       APPEND | 2022-10-26 11:44:15.148 |                   1 |                   1 |                       0 |
++--------------+------------+-----------------+-------------------+--------------+-------------------------+---------------------+---------------------+-------------------------+
 2 rows in set
 */
 ```
