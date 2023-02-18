@@ -56,7 +56,7 @@ Build bundled jar with the following command.
 mvn clean install -DskipTests
 ```
 
-You can find the bundled jar in `./flink-table-store-spark2/target/flink-table-store-spark2-{{< version >}}.jar`.
+You can find the bundled jar in `./flink-table-store-spark/flink-table-store-spark2/target/flink-table-store-spark2-{{< version >}}.jar`.
 
 ## Quick Start
 
