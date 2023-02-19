@@ -489,6 +489,19 @@ public class CoreOptions implements Serializable {
                                                     + " By default, streaming read will read the full snapshot first. In order to"
                                                     + " avoid the disorder reading for partitions, you can open this option.")
                                     .build());
+    public static final ConfigOption<String> PRIMARY_KEY =
+            key("primary-key")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Define primary key by table options, cannot define primary key on DDL and table options at the same time.");
+
+    public static final ConfigOption<String> PARTITION =
+            key("partition")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Define partition by table options, cannot define partition on DDL and table options at the same time.");
 
     private final Options options;
 

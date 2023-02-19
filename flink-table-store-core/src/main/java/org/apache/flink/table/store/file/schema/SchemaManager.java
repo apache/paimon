@@ -123,6 +123,40 @@ public class SchemaManager implements Serializable {
             Map<String, String> options = schema.options();
             int highestFieldId = RowType.currentHighestFieldId(fields);
 
+            List<String> columnNames =
+                    schema.fields().stream().map(DataField::name).collect(Collectors.toList());
+            if (options.containsKey(CoreOptions.PRIMARY_KEY.key())) {
+                if (!primaryKeys.isEmpty()) {
+                    throw new Exception(
+                            "Cannot define primary key on DDL and table options at the same time.");
+                }
+                String pk = options.get(CoreOptions.PRIMARY_KEY.key());
+                primaryKeys = Arrays.asList(pk.split(","));
+                boolean exists = primaryKeys.stream().allMatch(columnNames::contains);
+                if (!exists) {
+                    throw new Exception(
+                            String.format(
+                                    "Primary key column '%s' is not defined in the schema.",
+                                    primaryKeys));
+                }
+            }
+
+            if (options.containsKey(CoreOptions.PARTITION.key())) {
+                if (!partitionKeys.isEmpty()) {
+                    throw new Exception(
+                            "Cannot define partition on DDL and table options at the same time.");
+                }
+                String partitions = options.get(CoreOptions.PARTITION.key());
+                partitionKeys = Arrays.asList(partitions.split(","));
+                boolean exists = partitionKeys.stream().allMatch(columnNames::contains);
+                if (!exists) {
+                    throw new Exception(
+                            String.format(
+                                    "Partition column '%s' is not defined in the schema.",
+                                    partitionKeys));
+                }
+            }
+
             TableSchema newSchema =
                     new TableSchema(
                             0,
