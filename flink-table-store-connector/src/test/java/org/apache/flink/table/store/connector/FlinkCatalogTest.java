@@ -40,14 +40,11 @@ import org.apache.flink.table.store.file.catalog.AbstractCatalog;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.Options;
 
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.ClassRule;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.ExpectedException;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
@@ -55,14 +52,17 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Test for {@link FlinkCatalog}. */
 public class FlinkCatalogTest {
-
-    @Rule public ExpectedException exception = ExpectedException.none();
 
     private final ObjectPath path1 = new ObjectPath("db1", "t1");
     private final ObjectPath path3 = new ObjectPath("db1", "t2");
@@ -70,11 +70,11 @@ public class FlinkCatalogTest {
     private final ObjectPath nonExistObjectPath = ObjectPath.fromString("db1.nonexist");
     private Catalog catalog;
 
-    @ClassRule public static final TemporaryFolder TEMPORARY_FOLDER = new TemporaryFolder();
+    @TempDir public static java.nio.file.Path temporaryFolder;
 
-    @Before
+    @BeforeEach
     public void beforeEach() throws IOException {
-        String path = TEMPORARY_FOLDER.newFolder().toURI().toString();
+        String path = new File(temporaryFolder.toFile(), UUID.randomUUID().toString()).toString();
         Options conf = new Options();
         conf.setString("warehouse", path);
         catalog =
@@ -179,7 +179,7 @@ public class FlinkCatalogTest {
         checkEquals(path1, table, (CatalogTable) catalog.getTable(this.path1));
         CatalogTable newTable = this.createAnotherTable();
         catalog.alterTable(this.path1, newTable, false);
-        Assert.assertNotEquals(table, catalog.getTable(this.path1));
+        assertNotEquals(table, catalog.getTable(this.path1));
         checkEquals(path1, newTable, (CatalogTable) catalog.getTable(this.path1));
         catalog.dropTable(this.path1, false);
 
@@ -191,7 +191,7 @@ public class FlinkCatalogTest {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(), false);
         catalog.createTable(this.path3, this.createTable(), false);
-        Assert.assertEquals(2L, catalog.listTables("db1").size());
+        assertEquals(2L, catalog.listTables("db1").size());
 
         // Not support views
     }
@@ -242,10 +242,10 @@ public class FlinkCatalogTest {
         catalog.createTable(this.path1, table, false);
         CatalogBaseTable tableCreated = catalog.getTable(this.path1);
         checkEquals(path1, table, (CatalogTable) tableCreated);
-        Assert.assertEquals("test comment", tableCreated.getDescription().get());
+        assertEquals("test comment", tableCreated.getDescription().get());
         List<String> tables = catalog.listTables("db1");
-        Assert.assertEquals(1L, tables.size());
-        Assert.assertEquals(this.path1.getObjectName(), tables.get(0));
+        assertEquals(1L, tables.size());
+        assertEquals(this.path1.getObjectName(), tables.get(0));
         catalog.dropTable(this.path1, false);
     }
 
@@ -266,32 +266,35 @@ public class FlinkCatalogTest {
         catalog.createTable(this.path1, table, false);
         checkEquals(path1, table, (CatalogTable) catalog.getTable(this.path1));
         List<String> tables = catalog.listTables("db1");
-        Assert.assertEquals(1L, tables.size());
-        Assert.assertEquals(this.path1.getObjectName(), tables.get(0));
+        assertEquals(1L, tables.size());
+        assertEquals(this.path1.getObjectName(), tables.get(0));
     }
 
     @Test
     public void testDropDb_DatabaseNotEmptyException() throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(), false);
-        this.exception.expect(DatabaseNotEmptyException.class);
-        this.exception.expectMessage("Database db1 in catalog test-catalog is not empty");
-        catalog.dropDatabase("db1", true, false);
+        assertThatThrownBy(
+                        () -> {
+                            catalog.dropDatabase("db1", true, false);
+                        })
+                .isInstanceOf(DatabaseNotEmptyException.class)
+                .hasMessage("Database db1 in catalog test-catalog is not empty.");
     }
 
     @Test
     public void testTableExists() throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
-        Assert.assertFalse(catalog.tableExists(this.path1));
+        assertFalse(catalog.tableExists(this.path1));
         catalog.createTable(this.path1, this.createTable(), false);
-        Assert.assertTrue(catalog.tableExists(this.path1));
+        assertTrue(catalog.tableExists(this.path1));
 
         // system tables
-        Assert.assertTrue(
+        assertTrue(
                 catalog.tableExists(
                         new ObjectPath(
                                 path1.getDatabaseName(), path1.getObjectName() + "$snapshots")));
-        Assert.assertFalse(
+        assertFalse(
                 catalog.tableExists(
                         new ObjectPath(
                                 path1.getDatabaseName(), path1.getObjectName() + "$unknown")));
@@ -300,7 +303,7 @@ public class FlinkCatalogTest {
     @Test
     public void testAlterTable_TableNotExist_ignored() throws Exception {
         catalog.alterTable(this.nonExistObjectPath, this.createTable(), true);
-        Assert.assertFalse(catalog.tableExists(this.nonExistObjectPath));
+        assertFalse(catalog.tableExists(this.nonExistObjectPath));
     }
 
     @Test
@@ -312,32 +315,32 @@ public class FlinkCatalogTest {
     public void testCreateTable_TableAlreadyExistException() throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(), false);
-        this.exception.expect(TableAlreadyExistException.class);
-        this.exception.expectMessage("Table (or view) db1.t1 already exists in Catalog");
-        catalog.createTable(this.path1, this.createTable(), false);
+        assertThatThrownBy(() -> catalog.createTable(this.path1, this.createTable(), false))
+                .isInstanceOf(TableAlreadyExistException.class)
+                .hasMessage("Table (or view) db1.t1 already exists in Catalog test-catalog.");
     }
 
     @Test
     public void testDropTable_nonPartitionedTable() throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(), false);
-        Assert.assertTrue(catalog.tableExists(this.path1));
+        assertTrue(catalog.tableExists(this.path1));
         catalog.dropTable(this.path1, false);
-        Assert.assertFalse(catalog.tableExists(this.path1));
+        assertFalse(catalog.tableExists(this.path1));
     }
 
     @Test
     public void testGetTable_TableNotExistException() throws Exception {
-        this.exception.expect(TableNotExistException.class);
-        this.exception.expectMessage("Table (or view) db1.nonexist does not exist in Catalog");
-        catalog.getTable(this.nonExistObjectPath);
+        assertThatThrownBy(() -> catalog.getTable(this.nonExistObjectPath))
+                .isInstanceOf(TableNotExistException.class)
+                .hasMessage("Table (or view) db1.nonexist does not exist in Catalog test-catalog.");
     }
 
     @Test
     public void testDbExists() throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(), false);
-        Assert.assertTrue(catalog.databaseExists("db1"));
+        assertTrue(catalog.databaseExists("db1"));
     }
 
     @Test
@@ -358,16 +361,16 @@ public class FlinkCatalogTest {
 
     @Test
     public void testAlterTable_TableNotExistException() throws Exception {
-        this.exception.expect(TableNotExistException.class);
-        this.exception.expectMessage("Table (or view) non.exist does not exist in Catalog");
-        catalog.alterTable(this.nonExistDbPath, this.createTable(), false);
+        assertThatThrownBy(() -> catalog.alterTable(this.nonExistDbPath, this.createTable(), false))
+                .isInstanceOf(TableNotExistException.class)
+                .hasMessage("Table (or view) non.exist does not exist in Catalog test-catalog.");
     }
 
     @Test
     public void testDropTable_TableNotExistException() throws Exception {
-        this.exception.expect(TableNotExistException.class);
-        this.exception.expectMessage("Table (or view) non.exist does not exist in Catalog");
-        catalog.dropTable(this.nonExistDbPath, false);
+        assertThatThrownBy(() -> catalog.dropTable(this.nonExistDbPath, false))
+                .isInstanceOf(TableNotExistException.class)
+                .hasMessage("Table (or view) non.exist does not exist in Catalog test-catalog.");
     }
 
     @Test

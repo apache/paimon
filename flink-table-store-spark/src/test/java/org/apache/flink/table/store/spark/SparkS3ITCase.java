@@ -19,15 +19,16 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
+import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
-import org.junit.After;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -37,14 +38,15 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for using S3 in Spark. */
-@RunWith(Parameterized.class)
+@ExtendWith(ParameterizedTestExtension.class)
 public class SparkS3ITCase {
 
-    @ClassRule public static final MinioTestContainer MINIO_CONTAINER = new MinioTestContainer();
+    @RegisterExtension
+    public static final MinioTestContainer MINIO_CONTAINER = new MinioTestContainer();
 
     private static SparkSession spark = null;
 
-    @BeforeClass
+    @BeforeAll
     public static void startMetastoreAndSpark() {
         String path = MINIO_CONTAINER.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
         Path warehousePath = new Path(path);
@@ -59,7 +61,7 @@ public class SparkS3ITCase {
         spark.sql("USE tablestore.db");
     }
 
-    @Parameterized.Parameters(name = "{0}")
+    @Parameters(name = "{0}")
     public static Collection<String> parameters() {
         return Arrays.asList("avro", "orc", "parquet");
     }
@@ -70,12 +72,12 @@ public class SparkS3ITCase {
         this.format = format;
     }
 
-    @After
+    @AfterEach
     public void afterEach() {
         spark.sql("DROP TABLE T");
     }
 
-    @Test
+    @TestTemplate
     public void testWriteRead() {
         spark.sql(
                 String.format(

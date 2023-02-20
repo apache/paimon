@@ -21,8 +21,6 @@ package org.apache.flink.table.store.connector;
 import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.runtime.client.JobStatusMessage;
-import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
@@ -30,21 +28,16 @@ import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.store.connector.action.FlinkActions;
+import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.file.utils.FailingFileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.test.util.AbstractTestBase;
-import org.apache.flink.test.util.MiniClusterWithClientResource;
-import org.apache.flink.test.util.TestBaseUtils;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.ClassRule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -57,51 +50,21 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests for changelog table with primary keys. */
-public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
+public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
 
     // ------------------------------------------------------------------------
     //  Test Utilities
     // ------------------------------------------------------------------------
-
-    @ClassRule
-    public static final MiniClusterWithClientResource MINI_CLUSTER_RESOURCE =
-            new MiniClusterWithClientResource(
-                    (new MiniClusterResourceConfiguration.Builder())
-                            .setNumberTaskManagers(2)
-                            .setNumberSlotsPerTaskManager(4)
-                            .build());
-
-    @ClassRule public static final TemporaryFolder TEMPORARY_FOLDER = new TemporaryFolder();
-
     private String path;
 
-    @Before
+    @BeforeEach
     public void before() throws IOException {
-        path = TEMPORARY_FOLDER.newFolder().toPath().toString();
-    }
-
-    /**
-     * Copied from {@link AbstractTestBase}. This test class does not directly extend from {@link
-     * AbstractTestBase} because we need more task managers to run multiple jobs.
-     */
-    @After
-    public final void cleanupRunningJobs() throws Exception {
-        if (!MINI_CLUSTER_RESOURCE.getMiniCluster().isRunning()) {
-            // do nothing if the MiniCluster is not running
-            return;
-        }
-
-        for (JobStatusMessage path : MINI_CLUSTER_RESOURCE.getClusterClient().listJobs().get()) {
-            if (!path.getJobState().isTerminalState()) {
-                try {
-                    MINI_CLUSTER_RESOURCE.getClusterClient().cancel(path.getJobId()).get();
-                } catch (Exception ignored) {
-                    // ignore exceptions when cancelling dangling jobs
-                }
-            }
-        }
+        path = getTempDirPath();
     }
 
     private TableEnvironment createBatchTableEnvironment() {
@@ -177,7 +140,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
         List<String> expected =
                 new ArrayList<>(Arrays.asList("+I[1, A]", "+I[2, B]", "+I[3, C]", "+I[4, D]"));
         expected.sort(String::compareTo);
-        Assert.assertEquals(expected, actual);
+        assertEquals(expected, actual);
 
         // write update data
         sEnv.executeSql(
@@ -204,7 +167,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
                                 "+U[4, C]",
                                 "+I[5, D]"));
         expected.sort(String::compareTo);
-        Assert.assertEquals(expected, actual);
+        assertEquals(expected, actual);
     }
 
     @Test
@@ -261,11 +224,11 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
                     .await();
         }
 
-        Assert.assertEquals(JobStatus.RUNNING, client.getJobStatus().get());
+        assertEquals(JobStatus.RUNNING, client.getJobStatus().get());
 
         for (int i = 1; i <= currentKey; i++) {
-            Assert.assertTrue(it.hasNext());
-            Assert.assertEquals(String.format("+I[%d, %d]", i, i * 100), it.next().toString());
+            assertTrue(it.hasNext());
+            assertEquals(String.format("+I[%d, %d]", i, i * 100), it.next().toString());
         }
         it.close();
     }
@@ -274,33 +237,38 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
     //  Random Tests
     // ------------------------------------------------------------------------
 
-    @Test(timeout = 600000)
+    @Test
+    @Timeout(600000)
     public void testNoChangelogProducerBatchRandom() throws Exception {
         TableEnvironment bEnv = createBatchTableEnvironment();
         testNoChangelogProducerRandom(bEnv, 1, false);
     }
 
-    @Test(timeout = 600000)
+    @Test
+    @Timeout(600000)
     public void testNoChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
         testNoChangelogProducerRandom(sEnv, random.nextInt(1, 3), random.nextBoolean());
     }
 
-    @Test(timeout = 600000)
+    @Test
+    @Timeout(600000)
     public void testFullCompactionChangelogProducerBatchRandom() throws Exception {
         TableEnvironment bEnv = createBatchTableEnvironment();
         testFullCompactionChangelogProducerRandom(bEnv, 1, false);
     }
 
-    @Test(timeout = 600000)
+    @Test
+    @Timeout(600000)
     public void testFullCompactionChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
         testFullCompactionChangelogProducerRandom(sEnv, random.nextInt(1, 3), random.nextBoolean());
     }
 
-    @Test(timeout = 600000)
+    @Test
+    @Timeout(600000)
     public void testStandAloneFullCompactJobRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
@@ -536,20 +504,19 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
             String value = row.getField(2) + "|" + row.getField(3);
             switch (row.getKind()) {
                 case INSERT:
-                    Assert.assertFalse(valueMap.containsKey(key));
-                    Assert.assertTrue(
-                            !kindMap.containsKey(key) || kindMap.get(key) == RowKind.DELETE);
+                    assertFalse(valueMap.containsKey(key));
+                    assertTrue(!kindMap.containsKey(key) || kindMap.get(key) == RowKind.DELETE);
                     valueMap.put(key, value);
                     break;
                 case UPDATE_AFTER:
-                    Assert.assertFalse(valueMap.containsKey(key));
-                    Assert.assertEquals(RowKind.UPDATE_BEFORE, kindMap.get(key));
+                    assertFalse(valueMap.containsKey(key));
+                    assertEquals(RowKind.UPDATE_BEFORE, kindMap.get(key));
                     valueMap.put(key, value);
                     break;
                 case UPDATE_BEFORE:
                 case DELETE:
-                    Assert.assertEquals(value, valueMap.get(key));
-                    Assert.assertTrue(
+                    assertEquals(value, valueMap.get(key));
+                    assertTrue(
                             kindMap.get(key) == RowKind.INSERT
                                     || kindMap.get(key) == RowKind.UPDATE_AFTER);
                     valueMap.remove(key);
@@ -561,13 +528,13 @@ public class ChangelogWithKeyFileStoreTableITCase extends TestBaseUtils {
         }
 
         private void assertResult(int numProducers) {
-            Assert.assertEquals(NUM_PARTS * NUM_KEYS * numProducers, valueMap.size());
+            assertEquals(NUM_PARTS * NUM_KEYS * numProducers, valueMap.size());
             for (int i = 0; i < NUM_PARTS; i++) {
                 for (int j = 0; j < NUM_KEYS * numProducers; j++) {
                     String key = i + "|" + j;
                     int x = LIMIT + i * NUM_KEYS + j % NUM_KEYS;
                     String expectedValue = x + "|" + x + ".str";
-                    Assert.assertEquals(expectedValue, valueMap.get(key));
+                    assertEquals(expectedValue, valueMap.get(key));
                 }
             }
         }
