@@ -204,7 +204,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         // Get files with latest snapshot
         List<Row> rows1 = sql(String.format("SELECT * FROM %s$files", tableName));
         for (Row row : rows1) {
-            assertThat(StringUtils.endsWith((String) row.getField(3), ".orc"))
+            assertThat(StringUtils.endsWith((String) row.getField(3), ".parquet"))
                     .isTrue(); // check file name
             assertThat((long) row.getField(8)).isGreaterThan(0L); // check file size
         }
@@ -249,7 +249,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 "SELECT * FROM %s$files /*+ OPTIONS('scan.snapshot-id'='2') */",
                                 tableName));
         for (Row row : rows2) {
-            assertThat(StringUtils.endsWith((String) row.getField(3), ".orc"))
+            assertThat(StringUtils.endsWith((String) row.getField(3), ".parquet"))
                     .isTrue(); // check file name
             assertThat((long) row.getField(8)).isGreaterThan(0L); // check file size
         }

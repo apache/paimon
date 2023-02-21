@@ -82,7 +82,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<String> FILE_FORMAT =
             key("file.format")
                     .stringType()
-                    .defaultValue("orc")
+                    .defaultValue("parquet")
                     .withDescription("Specify the message format of data files.");
 
     public static final ConfigOption<String> ORC_BLOOM_FILTER_COLUMNS =
