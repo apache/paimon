@@ -61,8 +61,8 @@ public abstract class BinarySection implements Serializable {
     public static final long HIGHEST_SECOND_TO_EIGHTH_BIT = 0x7FL << 56;
 
     protected transient MemorySegment[] segments;
-    protected int offset;
-    protected int sizeInBytes;
+    protected transient int offset;
+    protected transient int sizeInBytes;
 
     public BinarySection() {}
 

@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.data;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentUtils;
 import org.apache.flink.table.store.types.DataType;
@@ -37,7 +38,10 @@ import static org.apache.flink.table.store.memory.MemorySegment.UNSAFE;
  * <pre>
  * [size(int)] + [null bits(4-byte word boundaries)] + [values or offset&length] + [variable length part].
  * </pre>
+ *
+ * @since 0.4.0
  */
+@Experimental
 public final class BinaryArray extends BinarySection implements InternalArray, DataSetters {
 
     private static final long serialVersionUID = 1L;
