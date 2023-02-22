@@ -33,6 +33,8 @@ import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
  */
 public final class NestedRow extends BinarySection implements InternalRow, DataSetters {
 
+    private static final long serialVersionUID = 1L;
+
     private final int arity;
     private final int nullBitsSizeInBytes;
 

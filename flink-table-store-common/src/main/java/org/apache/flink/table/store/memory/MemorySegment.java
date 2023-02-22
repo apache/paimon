@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.memory;
 
+import org.apache.flink.table.store.annotation.Experimental;
+
 import javax.annotation.Nullable;
 
 import java.io.DataInput;
@@ -32,7 +34,12 @@ import java.util.Objects;
 
 import static org.apache.flink.table.store.memory.MemoryUtils.getByteBufferAddress;
 
-/** This class represents a piece of memory. */
+/**
+ * This class represents a piece of memory.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public final class MemorySegment {
 
     public static final sun.misc.Unsafe UNSAFE = MemoryUtils.UNSAFE;

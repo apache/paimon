@@ -22,6 +22,7 @@ import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.types.MapType;
 import org.apache.flink.table.store.types.MultisetType;
 
+import java.io.Serializable;
 import java.util.Map;
 import java.util.Objects;
 
@@ -40,7 +41,9 @@ import java.util.Objects;
  * @since 0.4.0
  */
 @Experimental
-public final class GenericMap implements InternalMap {
+public final class GenericMap implements InternalMap, Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private final Map<?, ?> map;
 

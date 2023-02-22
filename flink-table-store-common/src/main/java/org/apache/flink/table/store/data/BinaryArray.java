@@ -40,6 +40,8 @@ import static org.apache.flink.table.store.memory.MemorySegment.UNSAFE;
  */
 public final class BinaryArray extends BinarySection implements InternalArray, DataSetters {
 
+    private static final long serialVersionUID = 1L;
+
     /** Offset for Arrays. */
     private static final int BYTE_ARRAY_BASE_OFFSET = UNSAFE.arrayBaseOffset(byte[].class);
 
@@ -94,10 +96,10 @@ public final class BinaryArray extends BinarySection implements InternalArray, D
     }
 
     // The number of elements in this array
-    private int size;
+    private transient int size;
 
     /** The position to start storing array elements. */
-    private int elementOffset;
+    private transient int elementOffset;
 
     public BinaryArray() {}
 

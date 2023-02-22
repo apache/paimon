@@ -25,10 +25,12 @@ import org.apache.flink.table.store.data.GenericArray;
 import org.apache.flink.table.store.data.InternalArray;
 import org.apache.flink.table.store.data.columnar.ColumnarArray;
 import org.apache.flink.table.store.data.columnar.heap.HeapBytesVector;
+import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.types.DataTypes;
 
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 /** A test for the {@link InternalArraySerializer}. */
 class InternalArraySerializerTest extends SerializerTestBase<InternalArray> {
@@ -65,12 +67,28 @@ class InternalArraySerializerTest extends SerializerTestBase<InternalArray> {
                         BinaryString.fromString("11"), null, BinaryString.fromString("ke")
                     }),
             createArray("11", "haa"),
+            copyNewOffset(createArray("11", "haa")),
             createArray("11", "haa", "ke"),
             createArray("11", "haa", "ke"),
             createArray("11", "lele", "haa", "ke"),
             createColumnarArray("11", "lele", "haa", "ke"),
             createCustomTypeArray("11", "lele", "haa", "ke"),
         };
+    }
+
+    @Override
+    protected InternalArray[] getSerializableTestData() {
+        InternalArray[] testData = getTestData();
+        return Arrays.copyOfRange(testData, 0, testData.length - 1);
+    }
+
+    static BinaryArray copyNewOffset(BinaryArray array) {
+        BinaryArray newArray = new BinaryArray();
+        byte[] bytes = array.toBytes();
+        byte[] newBytes = new byte[bytes.length + 10];
+        System.arraycopy(bytes, 0, newBytes, 10, bytes.length);
+        newArray.pointTo(MemorySegment.wrap(newBytes), 10, bytes.length);
+        return newArray;
     }
 
     static BinaryArray createArray(String... vs) {

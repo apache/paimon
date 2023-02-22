@@ -41,6 +41,8 @@ import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 @Experimental
 public final class BinaryString extends BinarySection implements Comparable<BinaryString> {
 
+    private static final long serialVersionUID = 1L;
+
     public static final BinaryString EMPTY_UTF8 = BinaryString.fromBytes(encodeUTF8(""));
 
     public BinaryString(MemorySegment[] segments, int offset, int sizeInBytes) {

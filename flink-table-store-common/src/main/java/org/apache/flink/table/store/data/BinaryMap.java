@@ -34,8 +34,10 @@ import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
  */
 public final class BinaryMap extends BinarySection implements InternalMap {
 
-    private final BinaryArray keys;
-    private final BinaryArray values;
+    private static final long serialVersionUID = 1L;
+
+    private transient BinaryArray keys;
+    private transient BinaryArray values;
 
     public BinaryMap() {
         keys = new BinaryArray();
@@ -54,7 +56,13 @@ public final class BinaryMap extends BinarySection implements InternalMap {
         final int valueArrayBytes = sizeInBytes - keyArrayBytes - 4;
         assert valueArrayBytes >= 0 : "valueArraySize (" + valueArrayBytes + ") should >= 0";
 
+        if (keys == null) {
+            keys = new BinaryArray();
+        }
         keys.pointTo(segments, offset + 4, keyArrayBytes);
+        if (values == null) {
+            values = new BinaryArray();
+        }
         values.pointTo(segments, offset + 4 + keyArrayBytes, valueArrayBytes);
 
         assert keys.size() == values.size();
