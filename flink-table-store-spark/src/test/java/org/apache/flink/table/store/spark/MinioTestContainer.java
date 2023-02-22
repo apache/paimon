@@ -28,6 +28,9 @@ import com.amazonaws.client.builder.AwsClientBuilder;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3Client;
 import com.github.dockerjava.api.command.InspectContainerResponse;
+import org.junit.jupiter.api.extension.AfterAllCallback;
+import org.junit.jupiter.api.extension.BeforeAllCallback;
+import org.junit.jupiter.api.extension.ExtensionContext;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.HttpWaitStrategy;
 import org.testcontainers.utility.Base58;
@@ -36,7 +39,8 @@ import java.time.Duration;
 import java.util.Locale;
 
 /** {@code MinioTestContainer} provides a {@code Minio} test instance. */
-public class MinioTestContainer extends GenericContainer<MinioTestContainer> {
+public class MinioTestContainer extends GenericContainer<MinioTestContainer>
+        implements BeforeAllCallback, AfterAllCallback {
 
     private static final String FLINK_CONFIG_S3_ENDPOINT = "s3.endpoint";
 
@@ -122,5 +126,15 @@ public class MinioTestContainer extends GenericContainer<MinioTestContainer> {
      */
     public String getS3UriForDefaultBucket() {
         return "s3://" + defaultBucketName;
+    }
+
+    @Override
+    public void afterAll(ExtensionContext extensionContext) throws Exception {
+        super.close();
+    }
+
+    @Override
+    public void beforeAll(ExtensionContext extensionContext) throws Exception {
+        super.start();
     }
 }
