@@ -36,6 +36,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.connector.FlinkRowWrapper;
 import org.apache.flink.table.store.log.LogWriteCallback;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.sink.FileCommittable;
 import org.apache.flink.table.store.table.sink.LogSinkFunction;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 
@@ -43,6 +44,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /** A {@link PrepareCommitOperator} to write records. */
 public class StoreWriteOperator extends PrepareCommitOperator {
@@ -63,6 +65,8 @@ public class StoreWriteOperator extends PrepareCommitOperator {
     private long currentWatermark = Long.MIN_VALUE;
 
     @Nullable private transient LogWriteCallback logCallback;
+
+    private transient WriterMetrics writerMetrics;
 
     public StoreWriteOperator(
             FileStoreTable table,
@@ -98,7 +102,7 @@ public class StoreWriteOperator extends PrepareCommitOperator {
     @Override
     public void open() throws Exception {
         super.open();
-
+        this.writerMetrics = new WriterMetrics(super.metrics, table.name());
         this.sinkContext = new SimpleContext(getProcessingTimeService());
         if (logSinkFunction != null) {
             FunctionUtils.openFunction(logSinkFunction, new Configuration());
@@ -192,6 +196,16 @@ public class StoreWriteOperator extends PrepareCommitOperator {
     protected List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
             throws IOException {
         List<Committable> committables = write.prepareCommit(doCompaction, checkpointId);
+        List<FileCommittable> fileCommittableList =
+                committables.stream()
+                        .filter(
+                                m ->
+                                        m.kind().equals(Committable.Kind.FILE)
+                                                && m.wrappedCommittable()
+                                                        instanceof FileCommittable)
+                        .map(m -> (FileCommittable) m.wrappedCommittable())
+                        .collect(Collectors.toList());
+        writerMetrics.updateCommitMetrics(fileCommittableList);
 
         if (logCallback != null) {
             try {
