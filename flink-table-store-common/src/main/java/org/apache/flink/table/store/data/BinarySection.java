@@ -19,10 +19,18 @@ package org.apache.flink.table.store.data;
 
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentUtils;
+import org.apache.flink.table.store.utils.IOUtils;
 import org.apache.flink.table.store.utils.Preconditions;
 
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serializable;
+
 /** Describe a section of memory. */
-public abstract class BinarySection {
+public abstract class BinarySection implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     /**
      * It decides whether to put data in FixLenPart or VarLenPart. See more in {@link BinaryRow}.
@@ -52,9 +60,9 @@ public abstract class BinarySection {
      */
     public static final long HIGHEST_SECOND_TO_EIGHTH_BIT = 0x7FL << 56;
 
-    protected MemorySegment[] segments;
-    protected int offset;
-    protected int sizeInBytes;
+    protected transient MemorySegment[] segments;
+    protected transient int offset;
+    protected transient int sizeInBytes;
 
     public BinarySection() {}
 
@@ -90,6 +98,20 @@ public abstract class BinarySection {
 
     public byte[] toBytes() {
         return MemorySegmentUtils.getBytes(segments, offset, sizeInBytes);
+    }
+
+    private void writeObject(ObjectOutputStream out) throws IOException {
+        out.defaultWriteObject();
+        byte[] bytes = toBytes();
+        out.writeInt(bytes.length);
+        out.write(bytes);
+    }
+
+    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+        in.defaultReadObject();
+        byte[] bytes = new byte[in.readInt()];
+        IOUtils.readFully(in, bytes);
+        pointTo(MemorySegment.wrap(bytes), 0, bytes.length);
     }
 
     @Override

@@ -26,10 +26,13 @@ import org.apache.flink.table.store.data.InternalMap;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.data.Timestamp;
 
+import java.io.Serializable;
 import java.util.Arrays;
 
 /** Columnar array to support access to vector column data. */
-public final class ColumnarArray implements InternalArray, DataSetters {
+public final class ColumnarArray implements InternalArray, DataSetters, Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private final ColumnVector data;
     private final int offset;

@@ -18,7 +18,14 @@
 
 package org.apache.flink.table.store.memory;
 
-/** Interface describing entities that can provide memory segments. */
+import org.apache.flink.table.store.annotation.Experimental;
+
+/**
+ * Interface describing entities that can provide memory segments.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public interface MemorySegmentSource {
 
     /**

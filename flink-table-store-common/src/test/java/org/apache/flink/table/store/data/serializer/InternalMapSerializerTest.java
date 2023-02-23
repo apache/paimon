@@ -27,6 +27,7 @@ import org.apache.flink.table.store.data.GenericMap;
 import org.apache.flink.table.store.data.InternalArray;
 import org.apache.flink.table.store.data.InternalMap;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -64,7 +65,6 @@ public class InternalMapSerializerTest extends SerializerTestBase<InternalMap> {
         first.put(1, BinaryString.fromString(""));
         return new InternalMap[] {
             new GenericMap(first),
-            new CustomMapData(first),
             BinaryMap.valueOf(
                     createArray(1, 2), InternalArraySerializerTest.createArray("11", "haa")),
             BinaryMap.valueOf(
@@ -75,8 +75,15 @@ public class InternalMapSerializerTest extends SerializerTestBase<InternalMap> {
                     InternalArraySerializerTest.createArray("11", "haa", "ke")),
             BinaryMap.valueOf(
                     createArray(1, 5, 6, 7),
-                    InternalArraySerializerTest.createArray("11", "lele", "haa", "ke"))
+                    InternalArraySerializerTest.createArray("11", "lele", "haa", "ke")),
+            new CustomMapData(first)
         };
+    }
+
+    @Override
+    protected InternalMap[] getSerializableTestData() {
+        InternalMap[] testData = getTestData();
+        return Arrays.copyOfRange(testData, 0, testData.length - 1);
     }
 
     private static BinaryArray createArray(int... vs) {

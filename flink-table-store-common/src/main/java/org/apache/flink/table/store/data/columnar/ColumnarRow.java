@@ -28,11 +28,15 @@ import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.data.columnar.BytesColumnVector.Bytes;
 import org.apache.flink.table.store.types.RowKind;
 
+import java.io.Serializable;
+
 /**
  * Columnar row to support access to vector column data. It is a row view in {@link
  * VectorizedColumnBatch}.
  */
-public final class ColumnarRow implements InternalRow, DataSetters {
+public final class ColumnarRow implements InternalRow, DataSetters, Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private RowKind rowKind = RowKind.INSERT;
     private VectorizedColumnBatch vectorizedColumnBatch;

@@ -31,6 +31,7 @@ import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.VarCharType;
+import org.apache.flink.table.store.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;
 
@@ -47,6 +48,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import static org.apache.flink.table.store.data.BinaryString.fromBytes;
 import static org.apache.flink.table.store.data.BinaryString.fromString;
@@ -73,10 +75,10 @@ public class BinaryRowTest {
     }
 
     @Test
-    public void testSetAndGet() {
-        MemorySegment segment = MemorySegment.wrap(new byte[80]);
+    public void testSetAndGet() throws IOException, ClassNotFoundException {
+        MemorySegment segment = MemorySegment.wrap(new byte[100]);
         BinaryRow row = new BinaryRow(9);
-        row.pointTo(segment, 0, 80);
+        row.pointTo(segment, 20, 80);
         row.setNullAt(0);
         row.setInt(1, 11);
         row.setLong(2, 22);
@@ -86,14 +88,22 @@ public class BinaryRowTest {
         row.setByte(6, (byte) 66);
         row.setFloat(7, 77f);
 
-        assertThat((long) row.getDouble(3)).isEqualTo(33L);
-        assertThat(row.getInt(1)).isEqualTo(11);
-        assertThat(row.isNullAt(0)).isTrue();
-        assertThat(row.getShort(5)).isEqualTo((short) 55);
-        assertThat(row.getLong(2)).isEqualTo(22L);
-        assertThat(row.getBoolean(4)).isTrue();
-        assertThat(row.getByte(6)).isEqualTo((byte) 66);
-        assertThat(row.getFloat(7)).isEqualTo(77f);
+        Consumer<BinaryRow> assertConsumer =
+                assertRow -> {
+                    assertThat((long) assertRow.getDouble(3)).isEqualTo(33L);
+                    assertThat(assertRow.getInt(1)).isEqualTo(11);
+                    assertThat(assertRow.isNullAt(0)).isTrue();
+                    assertThat(assertRow.getShort(5)).isEqualTo((short) 55);
+                    assertThat(assertRow.getLong(2)).isEqualTo(22L);
+                    assertThat(assertRow.getBoolean(4)).isTrue();
+                    assertThat(assertRow.getByte(6)).isEqualTo((byte) 66);
+                    assertThat(assertRow.getFloat(7)).isEqualTo(77f);
+                };
+
+        assertConsumer.accept(row);
+
+        // test serializable
+        assertConsumer.accept(InstantiationUtil.clone(row));
     }
 
     @Test

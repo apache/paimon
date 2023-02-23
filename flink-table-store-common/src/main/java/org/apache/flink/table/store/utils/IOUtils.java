@@ -90,6 +90,18 @@ public final class IOUtils {
      *
      * @param in The InputStream to read from
      * @param buf The buffer to fill
+     * @throws IOException if it could not read requested number of bytes for any reason (including
+     *     EOF)
+     */
+    public static void readFully(final InputStream in, final byte[] buf) throws IOException {
+        readFully(in, buf, 0, buf.length);
+    }
+
+    /**
+     * Reads len bytes in a loop.
+     *
+     * @param in The InputStream to read from
+     * @param buf The buffer to fill
      * @param off offset from the buffer
      * @param len the length of bytes to read
      * @throws IOException if it could not read requested number of bytes for any reason (including
