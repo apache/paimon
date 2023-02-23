@@ -22,6 +22,7 @@ import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
 
+import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -44,7 +45,9 @@ import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
  * @since 0.4.0
  */
 @Experimental
-public final class GenericRow implements InternalRow {
+public final class GenericRow implements InternalRow, Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     /** The array to store the actual internal format values. */
     private final Object[] fields;

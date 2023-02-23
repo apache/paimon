@@ -22,6 +22,7 @@ import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.utils.ArrayUtils;
 
+import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -37,7 +38,9 @@ import java.util.Objects;
  * @since 0.4.0
  */
 @Experimental
-public final class GenericArray implements InternalArray {
+public final class GenericArray implements InternalArray, Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private final Object array;
     private final int size;

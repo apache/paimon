@@ -24,6 +24,7 @@ import org.apache.flink.table.store.types.DecimalType;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.math.RoundingMode;
@@ -39,7 +40,9 @@ import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
  * @since 0.4.0
  */
 @Experimental
-public final class Decimal implements Comparable<Decimal> {
+public final class Decimal implements Comparable<Decimal>, Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     // member fields and static fields are package-visible,
     // in order to be accessible for DecimalUtils

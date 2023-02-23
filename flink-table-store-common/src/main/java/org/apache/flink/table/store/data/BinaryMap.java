@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.data;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentUtils;
 import org.apache.flink.table.store.types.DataType;
@@ -31,11 +32,16 @@ import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
  * [4 byte(keyArray size in bytes)] + [Key BinaryArray] + [Value BinaryArray].
  *
  * <p>{@code BinaryMap} are influenced by Apache Spark UnsafeMapData.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public final class BinaryMap extends BinarySection implements InternalMap {
 
-    private final BinaryArray keys;
-    private final BinaryArray values;
+    private static final long serialVersionUID = 1L;
+
+    private transient BinaryArray keys;
+    private transient BinaryArray values;
 
     public BinaryMap() {
         keys = new BinaryArray();
@@ -54,7 +60,14 @@ public final class BinaryMap extends BinarySection implements InternalMap {
         final int valueArrayBytes = sizeInBytes - keyArrayBytes - 4;
         assert valueArrayBytes >= 0 : "valueArraySize (" + valueArrayBytes + ") should >= 0";
 
+        // see BinarySection.readObject, on this call stack, keys and values are not initialized
+        if (keys == null) {
+            keys = new BinaryArray();
+        }
         keys.pointTo(segments, offset + 4, keyArrayBytes);
+        if (values == null) {
+            values = new BinaryArray();
+        }
         values.pointTo(segments, offset + 4 + keyArrayBytes, valueArrayBytes);
 
         assert keys.size() == values.size();

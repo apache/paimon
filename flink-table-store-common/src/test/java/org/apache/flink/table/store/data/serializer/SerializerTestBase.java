@@ -51,6 +51,10 @@ public abstract class SerializerTestBase<T> {
 
     protected abstract T[] getTestData();
 
+    protected T[] getSerializableTestData() {
+        return getTestData();
+    }
+
     // --------------------------------------------------------------------------------------------
 
     @Test
@@ -182,6 +186,29 @@ public abstract class SerializerTestBase<T> {
         for (SerializerRunner concurrentRunner : concurrentRunners) {
             concurrentRunner.join();
             concurrentRunner.checkResult();
+        }
+    }
+
+    @Test
+    void testJavaSerializable() {
+        try {
+            T[] testData = getSerializableTestData();
+
+            for (T value : testData) {
+                byte[] bytes = InstantiationUtil.serializeObject(value);
+                assertTrue(bytes.length > 0, "No data available during deserialization.");
+
+                T deserialized =
+                        InstantiationUtil.deserializeObject(
+                                bytes, this.getClass().getClassLoader());
+                checkToString(deserialized);
+
+                deepEquals("Deserialized value if wrong.", value, deserialized);
+            }
+        } catch (Exception e) {
+            System.err.println(e.getMessage());
+            e.printStackTrace();
+            fail("Exception in test: " + e.getMessage());
         }
     }
 

@@ -17,6 +17,7 @@
 
 package org.apache.flink.table.store.data;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentUtils;
 import org.apache.flink.table.store.types.DataType;
@@ -49,8 +50,13 @@ import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
  * bigger pageSize of MemorySegment.
  *
  * <p>Variable-length part may fall into multiple MemorySegments.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public final class BinaryRow extends BinarySection implements InternalRow, DataSetters {
+
+    private static final long serialVersionUID = 1L;
 
     public static final boolean LITTLE_ENDIAN =
             (ByteOrder.nativeOrder() == ByteOrder.LITTLE_ENDIAN);

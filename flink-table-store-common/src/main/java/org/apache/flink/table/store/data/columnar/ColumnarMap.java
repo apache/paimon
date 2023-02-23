@@ -21,8 +21,12 @@ package org.apache.flink.table.store.data.columnar;
 import org.apache.flink.table.store.data.InternalArray;
 import org.apache.flink.table.store.data.InternalMap;
 
+import java.io.Serializable;
+
 /** Columnar map to support access to vector column data. */
-public final class ColumnarMap implements InternalMap {
+public final class ColumnarMap implements InternalMap, Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private final ColumnVector keyColumnVector;
     private final ColumnVector valueColumnVector;
