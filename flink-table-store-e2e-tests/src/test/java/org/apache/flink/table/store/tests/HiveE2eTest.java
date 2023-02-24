@@ -32,7 +32,7 @@ import java.util.UUID;
  * <p>NOTE: This test runs a complete Hadoop cluster in Docker, which requires a lot of memory. If
  * you're running this test locally, make sure that the memory limit of your Docker is at least 8GB.
  */
-@DisabledIfSystemProperty(named = "flink.version", matches = "1.14.*")
+@DisabledIfSystemProperty(named = "test.flink.version", matches = "1.14.*")
 public class HiveE2eTest extends E2eReaderTestBase {
 
     private static final String TABLE_STORE_HIVE_CONNECTOR_JAR_NAME =

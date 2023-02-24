@@ -23,25 +23,25 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-parent</artifactId>
+        <artifactId>flink-table-store-flink</artifactId>
         <groupId>org.apache.flink</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-test-utils</artifactId>
-    <name>Flink Table Store : Test utils</name>
+    <packaging>jar</packaging>
+
+    <artifactId>flink-table-store-flink-1.16</artifactId>
+    <name>Flink Table Store : Flink : 1.16</name>
+
+    <properties>
+        <flink.version>1.16.1</flink.version>
+    </properties>
 
     <dependencies>
         <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>${junit5.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers</artifactId>
-            <version>${testcontainers.version}</version>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-store-flink-common</artifactId>
+            <version>${project.version}</version>
         </dependency>
     </dependencies>
 
@@ -49,12 +49,21 @@ under the License.
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
+                <artifactId>maven-shade-plugin</artifactId>
                 <executions>
                     <execution>
+                        <id>shade-flink</id>
+                        <phase>package</phase>
                         <goals>
-                            <goal>test-jar</goal>
+                            <goal>shade</goal>
                         </goals>
+                        <configuration>
+                            <artifactSet>
+                                <includes combine.children="append">
+                                    <include>org.apache.flink:flink-table-store-flink-common</include>
+                                </includes>
+                            </artifactSet>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

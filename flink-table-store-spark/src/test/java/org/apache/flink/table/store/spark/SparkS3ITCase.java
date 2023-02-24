@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
-import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
+import org.apache.flink.table.store.testutils.junit.parameterized.ParameterizedTestExtension;
+import org.apache.flink.table.store.testutils.junit.parameterized.Parameters;
 
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
@@ -55,7 +55,6 @@ public class SparkS3ITCase {
         spark.conf().set("spark.sql.catalog.tablestore.warehouse", warehousePath.toString());
         MINIO_CONTAINER
                 .getS3ConfigOptions()
-                .toMap()
                 .forEach((k, v) -> spark.conf().set("spark.sql.catalog.tablestore." + k, v));
         spark.sql("CREATE DATABASE tablestore.db");
         spark.sql("USE tablestore.db");

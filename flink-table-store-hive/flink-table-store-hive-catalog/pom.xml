@@ -97,13 +97,6 @@ under the License.
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-common</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <dependency>
             <groupId>org.apache.hive</groupId>
             <artifactId>hive-metastore</artifactId>
             <version>${hive.version}</version>
@@ -181,7 +174,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-connector</artifactId>
+            <artifactId>flink-table-store-flink-common</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
@@ -196,28 +189,28 @@ under the License.
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-table-planner_${scala.binary.version}</artifactId>
-            <version>${flink.version}</version>
+            <version>${test.flink.version}</version>
             <scope>test</scope>
         </dependency>
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>${flink.table.runtime}</artifactId>
-            <version>${flink.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-connector-hive_${scala.binary.version}</artifactId>
-            <version>${flink.version}</version>
+            <artifactId>flink-table-runtime</artifactId>
+            <version>${test.flink.version}</version>
             <scope>test</scope>
         </dependency>
 
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-hive_${scala.binary.version}</artifactId>
-            <version>${flink.version}</version>
+            <version>${test.flink.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-hive_${scala.binary.version}</artifactId>
+            <version>${test.flink.version}</version>
             <scope>test</scope>
             <type>test-jar</type>
         </dependency>
@@ -225,7 +218,7 @@ under the License.
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-test-utils</artifactId>
-            <version>${flink.version}</version>
+            <version>${test.flink.version}</version>
             <scope>test</scope>
             <exclusions>
                 <exclusion>

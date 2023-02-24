@@ -205,7 +205,7 @@ Run the following command to submit a drop-partition job for the table.
 ```bash
 <FLINK_HOME>/bin/flink run \
     -c org.apache.flink.table.store.connector.action.FlinkActions \
-    /path/to/flink-table-store-dist-{{< version >}}.jar \
+    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
     drop-partition \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -222,7 +222,7 @@ For more information of drop-partition, see
 ```bash
 <FLINK_HOME>/bin/flink run \
     -c org.apache.flink.table.store.connector.action.FlinkActions \
-    /path/to/flink-table-store-dist-{{< version >}}.jar \
+    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
     drop-partition --help
 ```
 
@@ -243,7 +243,7 @@ Run the following command to submit a 'delete' job for the table.
 ```bash
 <FLINK_HOME>/bin/flink run \
     -c org.apache.flink.table.store.connector.action.FlinkActions \
-    /path/to/flink-table-store-dist-{{< version >}}.jar \
+    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
     delete \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -261,7 +261,7 @@ For more information of 'delete', see
 ```bash
 <FLINK_HOME>/bin/flink run \
     -c org.apache.flink.table.store.connector.action.FlinkActions \
-    /path/to/flink-table-store-dist-{{< version >}}.jar \
+    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
     delete --help
 ```
 
