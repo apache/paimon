@@ -20,7 +20,10 @@ package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.BinaryRowWriter;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
+
+import java.util.Collections;
 
 /** Utils for {@link DataFileMeta}. */
 public class DataFileTestUtils {
@@ -45,7 +48,9 @@ public class DataFileTestUtils {
                 minSeq,
                 maxSeq,
                 0L,
-                DataFileMeta.DUMMY_LEVEL);
+                DataFileMeta.DUMMY_LEVEL,
+                Collections.emptyList(),
+                Timestamp.fromEpochMillis(100));
     }
 
     public static DataFileMeta newFile() {
