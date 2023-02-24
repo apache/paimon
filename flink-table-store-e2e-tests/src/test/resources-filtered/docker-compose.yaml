@@ -25,7 +25,7 @@ services:
   # ----------------------------------------
 
   jobmanager:
-    image: apache/flink:${flink.version}-java8
+    image: apache/flink:${test.flink.version}-java8
     volumes:
       - testdata:/test-data
       - /tmp/flink-table-store-e2e-tests-jars:/jars
@@ -40,7 +40,7 @@ services:
       - "8081"
 
   taskmanager:
-    image: apache/flink:${flink.version}-java8
+    image: apache/flink:${test.flink.version}-java8
     volumes:
       - testdata:/test-data
       - /tmp/flink-table-store-e2e-tests-jars:/jars

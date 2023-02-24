@@ -73,13 +73,6 @@
             <scope>provided</scope>
         </dependency>
 
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-common</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
         <!-- Hadoop's file system abstraction (bundled) -->
         <dependency>
             <groupId>org.apache.hadoop</groupId>

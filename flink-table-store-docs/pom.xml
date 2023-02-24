@@ -47,7 +47,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-connector</artifactId>
+            <artifactId>flink-table-store-flink-common</artifactId>
             <version>${project.version}</version>
             <scope>provided</scope>
         </dependency>

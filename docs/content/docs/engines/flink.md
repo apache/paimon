@@ -38,9 +38,9 @@ Download the jar file with corresponding version.
 
 | Version | Jar |
 |---|---|
-| Flink 1.16 | [flink-table-store-dist-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-dist-{{< version >}}.jar) |
-| Flink 1.15 | [flink-table-store-dist-{{< version >}}_1.15.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-dist-{{< version >}}_1.15.jar) |
-| Flink 1.14 | [flink-table-store-dist-{{< version >}}_1.14.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-dist-{{< version >}}_1.14.jar) |
+| Flink 1.16 | [flink-table-store-flink-{{< version >}}_1.16.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-flink-{{< version >}}_1.16.jar) |
+| Flink 1.15 | [flink-table-store-flink-{{< version >}}_1.15.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-flink-{{< version >}}_1.15.jar) |
+| Flink 1.14 | [flink-table-store-flink-{{< version >}}_1.14.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-flink-{{< version >}}_1.14.jar) |
 
 You can also manually build bundled jar from the source code.
 
@@ -55,14 +55,9 @@ You are using an unreleased version of Table Store so you need to manually build
 To build from source code, either [download the source of a release](https://flink.apache.org/downloads.html) or [clone the git repository]({{< github_repo >}}).
 
 Build bundled jar with the following command.
+- `mvn clean install -DskipTests`
 
-| Version | Command |
-|---|---|
-| Flink 1.16 | `mvn clean install -DskipTests` |
-| Flink 1.15 | `mvn clean install -Dmaven.test.skip=true -Pflink-1.15` |
-| Flink 1.14 | `mvn clean install -Dmaven.test.skip=true -Pflink-1.14` |
-
-You can find the bundled jar in `./flink-table-store-dist/target/flink-table-store-dist-{{< version >}}.jar`.
+For Flink 1.16, you can find the bundled jar in `./flink-table-store-flink/flink-table-store-flink-1.16/target/flink-table-store-flink-1.16-{{< version >}}.jar`.
 
 ## Quick Start
 
@@ -79,7 +74,7 @@ tar -xzf flink-*.tgz
 Copy table store bundled jar to the `lib` directory of your Flink home.
 
 ```bash
-cp flink-table-store-dist-*.jar <FLINK_HOME>/lib/
+cp flink-table-store-flink-*.jar <FLINK_HOME>/lib/
 ```
 
 **Step 3: Copy Hadoop Bundled Jar**

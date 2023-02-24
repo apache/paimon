@@ -18,9 +18,8 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.table.store.testutils.junit.DockerImageVersions;
 import org.apache.flink.table.store.utils.Preconditions;
-import org.apache.flink.util.DockerImageVersions;
 
 import com.amazonaws.auth.AWSStaticCredentialsProvider;
 import com.amazonaws.auth.BasicAWSCredentials;
@@ -36,7 +35,9 @@ import org.testcontainers.containers.wait.strategy.HttpWaitStrategy;
 import org.testcontainers.utility.Base58;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 
 /** {@code MinioTestContainer} provides a {@code Minio} test instance. */
 public class MinioTestContainer extends GenericContainer<MinioTestContainer>
@@ -107,12 +108,12 @@ public class MinioTestContainer extends GenericContainer<MinioTestContainer>
         return String.format("http://%s:%s", getHost(), getMappedPort(DEFAULT_PORT));
     }
 
-    public Configuration getS3ConfigOptions() {
-        Configuration config = new Configuration();
-        config.setString(FLINK_CONFIG_S3_ENDPOINT, getHttpEndpoint());
-        config.setString("s3.path.style.access", "true");
-        config.setString("s3.access.key", accessKey);
-        config.setString("s3.secret.key", secretKey);
+    public Map<String, String> getS3ConfigOptions() {
+        Map<String, String> config = new HashMap<>();
+        config.put(FLINK_CONFIG_S3_ENDPOINT, getHttpEndpoint());
+        config.put("s3.path.style.access", "true");
+        config.put("s3.access.key", accessKey);
+        config.put("s3.secret.key", secretKey);
         return config;
     }
 

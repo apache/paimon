@@ -20,10 +20,12 @@ package org.apache.flink.table.store.tests;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 
 import java.util.UUID;
 
 /** Tests for reading and writing log store in stream jobs. */
+@DisabledIfSystemProperty(named = "test.flink.version", matches = "1.14.*")
 public class LogStoreE2eTest extends E2eTestBase {
 
     private String topicName;
@@ -39,7 +41,7 @@ public class LogStoreE2eTest extends E2eTestBase {
     public void before() throws Exception {
         super.before();
         topicName = "ts-topic-" + UUID.randomUUID();
-        bucketNum = 3;
+        bucketNum = 2;
         createKafkaTopic(topicName, bucketNum);
     }
 

@@ -97,7 +97,7 @@ public class TypeE2eTest extends E2eTestBase {
                 tableDdl,
                 createResultSink("result1", schema));
 
-        String flinkVersion = System.getProperty("flink.version");
+        String flinkVersion = System.getProperty("test.flink.version");
         String expected =
                 flinkVersion.startsWith("1.14")
                         ? "true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
@@ -189,7 +189,7 @@ public class TypeE2eTest extends E2eTestBase {
                 tableDdl,
                 createResultSink("result1", schema));
 
-        String flinkVersion = System.getProperty("flink.version");
+        String flinkVersion = System.getProperty("test.flink.version");
         String expected =
                 flinkVersion.startsWith("1.14")
                         ? "1, true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "

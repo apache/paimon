@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.tests;
 
-import org.apache.commons.lang3.StringUtils;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 import org.testcontainers.containers.Container;
@@ -26,9 +25,10 @@ import org.testcontainers.containers.ContainerState;
 
 import java.util.Arrays;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /** Tests for reading table store from Spark3. */
-@DisabledIfSystemProperty(named = "flink.version", matches = "1.14.*")
+@DisabledIfSystemProperty(named = "test.flink.version", matches = "1.14.*")
 public class SparkE2eTest extends E2eReaderTestBase {
 
     public SparkE2eTest() {
@@ -65,17 +65,11 @@ public class SparkE2eTest extends E2eReaderTestBase {
                     if (execResult.getExitCode() != 0) {
                         throw new AssertionError("Failed when running spark sql.");
                     }
-
-                    return filterLog(execResult.getStdout());
+                    return Arrays.stream(execResult.getStdout().split("\n"))
+                                    .filter(s -> !s.contains("WARN"))
+                                    .collect(Collectors.joining("\n"))
+                            + "\n";
                 });
-    }
-
-    private String filterLog(String result) {
-        return StringUtils.join(
-                Arrays.stream(StringUtils.splitByWholeSeparator(result, "\n"))
-                        .filter(v -> !StringUtils.contains(v, " WARN "))
-                        .toArray(),
-                "\n");
     }
 
     private ContainerState getSpark() {
