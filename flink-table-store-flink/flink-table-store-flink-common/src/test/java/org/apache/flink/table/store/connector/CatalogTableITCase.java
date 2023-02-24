@@ -252,7 +252,6 @@ public class CatalogTableITCase extends CatalogITCaseBase {
             assertThat(StringUtils.endsWith((String) row.getField(2), ".orc"))
                     .isTrue(); // check file name
             assertThat((long) row.getField(7)).isGreaterThan(0L); // check file size
-            System.out.println(row.getField(13));
         }
         assertThat(getRowStringList(rows2))
                 .containsExactlyInAnyOrder(
