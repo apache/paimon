@@ -23,6 +23,8 @@ import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
+import org.apache.flink.table.store.types.TimestampType;
+
 
 import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.serializeBinaryRow;
@@ -52,7 +54,8 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 meta.maxSequenceNumber(),
                 meta.schemaId(),
                 meta.level(),
-                toStringArrayData(meta.extraFiles()));
+                toStringArrayData(meta.extraFiles()),
+                meta.creationTime());
     }
 
     @Override
@@ -69,6 +72,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.getLong(8),
                 row.getLong(9),
                 row.getInt(10),
-                fromStringArrayData(row.getArray(11)));
+                fromStringArrayData(row.getArray(11)),
+                row.getTimestamp(12, 3));
     }
 }

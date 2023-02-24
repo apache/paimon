@@ -19,6 +19,7 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.FileKind;
@@ -78,7 +79,8 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
                         1,
                         0,
                         0,
-                        extraFiles);
+                        extraFiles,
+                        Timestamp.now());
         ManifestEntry add = new ManifestEntry(FileKind.ADD, partition, 0, 1, dataFile);
         ManifestEntry delete = new ManifestEntry(FileKind.DELETE, partition, 0, 1, dataFile);
 

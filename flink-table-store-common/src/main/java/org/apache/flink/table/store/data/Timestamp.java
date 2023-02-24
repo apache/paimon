@@ -139,6 +139,13 @@ public final class Timestamp implements Comparable<Timestamp>, Serializable {
     // ------------------------------------------------------------------------------------------
 
     /**
+     * Creates an instance of {@link Timestamp} for now.
+     */
+    public static Timestamp now() {
+        return fromLocalDateTime(LocalDateTime.now());
+    }
+
+    /**
      * Creates an instance of {@link Timestamp} from milliseconds.
      *
      * <p>The nanos-of-millisecond field will be set to zero.

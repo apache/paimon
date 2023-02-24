@@ -681,7 +681,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         v ->
                                 StringUtils.join(
                                         new Object[] {
-                                            v.getString(11), v.getString(12), v.getString(13)
+                                            v.getString(10), v.getString(11), v.getString(12)
                                         },
                                         ","))
                 .collect(Collectors.toList());
