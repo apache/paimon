@@ -31,10 +31,10 @@ public abstract class FieldAggregator implements Serializable {
     }
 
     static FieldAggregator createFieldAggregator(
-            DataType fieldType, String strAgg, boolean isPrimaryKey) {
-        final FieldAggregator fieldAggregator;
+            DataType fieldType, String strAgg, boolean ignoreRetract, boolean isPrimaryKey) {
+        FieldAggregator fieldAggregator;
         if (isPrimaryKey) {
-            fieldAggregator = new FieldLastValueAgg(fieldType);
+            fieldAggregator = new FieldPrimaryKeyAgg(fieldType);
         } else {
             // ordered by type root definition
             switch (strAgg) {
@@ -67,8 +67,21 @@ public abstract class FieldAggregator implements Serializable {
                             "Use unsupported aggregation or spell aggregate function incorrectly!");
             }
         }
+
+        if (ignoreRetract) {
+            fieldAggregator = new FieldIgnoreRetractAgg(fieldAggregator);
+        }
         return fieldAggregator;
     }
 
     abstract Object agg(Object accumulator, Object inputField);
+
+    Object retract(Object accumulator, Object retractField) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Aggregate function %s dose not support retraction,"
+                                + " If you allow this function to ignore retraction messages,"
+                                + " you can configure 'fields.${field_name}.ignore-retract'='true'.",
+                        this.getClass().getSimpleName()));
+    }
 }

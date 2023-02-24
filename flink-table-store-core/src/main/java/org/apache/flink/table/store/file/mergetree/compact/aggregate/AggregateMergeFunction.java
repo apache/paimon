@@ -34,7 +34,6 @@ import java.io.Serializable;
 import java.util.List;
 
 import static org.apache.flink.table.store.options.ConfigOptions.key;
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 import static org.apache.flink.table.store.utils.RowDataUtils.createFieldGetters;
 
@@ -65,15 +64,17 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
     @Override
     public void add(KeyValue kv) {
-        checkArgument(
-                kv.valueKind() == RowKind.INSERT || kv.valueKind() == RowKind.UPDATE_AFTER,
-                "Pre-aggregate can not accept delete records!");
         latestKv = kv;
+        boolean isRetract =
+                kv.valueKind() != RowKind.INSERT && kv.valueKind() != RowKind.UPDATE_AFTER;
         for (int i = 0; i < getters.length; i++) {
             FieldAggregator fieldAggregator = rowAggregator.getFieldAggregatorAtPos(i);
             Object accumulator = getters[i].getFieldOrNull(row);
             Object inputField = getters[i].getFieldOrNull(kv.value());
-            Object mergedField = fieldAggregator.agg(accumulator, inputField);
+            Object mergedField =
+                    isRetract
+                            ? fieldAggregator.retract(accumulator, inputField)
+                            : fieldAggregator.agg(accumulator, inputField);
             row.setField(i, mergedField);
         }
     }
@@ -95,6 +96,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     public static class RowAggregator implements Serializable {
         public static final String FIELDS = "fields";
         public static final String AGG_FUNCTION = "aggregate-function";
+        public static final String IGNORE_RETRACT = "ignore-retract";
 
         private final FieldAggregator[] fieldAggregators;
 
@@ -110,14 +112,20 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
                 // aggregate by primary keys, so they do not aggregate
                 boolean isPrimaryKey = primaryKeys.contains(fieldName);
                 String strAggFunc =
-                        sqlConf.getString(
+                        sqlConf.get(
                                 key(FIELDS + "." + fieldName + "." + AGG_FUNCTION)
                                         .stringType()
                                         .noDefaultValue()
                                         .withDescription(
                                                 "Get " + fieldName + "'s aggregate function"));
+                boolean ignoreRetract =
+                        sqlConf.get(
+                                key(FIELDS + "." + fieldName + "." + IGNORE_RETRACT)
+                                        .booleanType()
+                                        .defaultValue(false));
                 fieldAggregators[i] =
-                        FieldAggregator.createFieldAggregator(fieldType, strAggFunc, isPrimaryKey);
+                        FieldAggregator.createFieldAggregator(
+                                fieldType, strAggFunc, ignoreRetract, isPrimaryKey);
             }
         }
 

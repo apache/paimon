@@ -27,6 +27,7 @@ import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
+import org.apache.flink.table.store.CoreOptions.MergeEngine;
 import org.apache.flink.table.store.connector.FlinkCatalog;
 import org.apache.flink.table.store.connector.FlinkConnectorOptions;
 import org.apache.flink.table.store.connector.TableStoreDataStreamSinkProvider;
@@ -49,6 +50,7 @@ import java.util.Map;
 
 import static org.apache.flink.table.store.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
+import static org.apache.flink.table.store.CoreOptions.MERGE_ENGINE;
 
 /** Table sink to create sink. */
 public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning {
@@ -85,6 +87,10 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
             Options options = Options.fromMap(table.schema().options());
             if (options.get(CHANGELOG_PRODUCER) == ChangelogProducer.INPUT) {
+                return requestedMode;
+            }
+
+            if (options.get(MERGE_ENGINE) == MergeEngine.AGGREGATE) {
                 return requestedMode;
             }
 
