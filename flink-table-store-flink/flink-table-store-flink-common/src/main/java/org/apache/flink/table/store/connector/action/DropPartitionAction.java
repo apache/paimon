@@ -48,7 +48,7 @@ public class DropPartitionAction extends ActionBase {
             List<Map<String, String>> partitions) {
         super(warehouse, databaseName, tableName);
 
-        this.commit = table.newCommit(UUID.randomUUID().toString()).withOverwritten(partitions);
+        this.commit = table.newCommit(UUID.randomUUID().toString()).withOverwrite(partitions);
     }
 
     public static Optional<Action> create(String[] args) {

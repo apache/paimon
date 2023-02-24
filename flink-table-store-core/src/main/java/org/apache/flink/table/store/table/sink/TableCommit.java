@@ -40,19 +40,19 @@ import java.util.Set;
 @Experimental
 public interface TableCommit extends AutoCloseable {
 
-    default TableCommit withOverwritten() {
-        withOverwritten(Collections.emptyMap());
+    default TableCommit withOverwrite() {
+        withOverwrite(Collections.emptyMap());
         return this;
     }
 
-    default TableCommit withOverwritten(@Nullable Map<String, String> staticPartition) {
+    default TableCommit withOverwrite(@Nullable Map<String, String> staticPartition) {
         if (staticPartition != null) {
-            withOverwritten(Collections.singletonList(staticPartition));
+            withOverwrite(Collections.singletonList(staticPartition));
         }
         return this;
     }
 
-    TableCommit withOverwritten(@Nullable List<Map<String, String>> staticPartitions);
+    TableCommit withOverwrite(@Nullable List<Map<String, String>> staticPartitions);
 
     TableCommit withLock(Lock lock);
 

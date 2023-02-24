@@ -27,6 +27,7 @@ import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.WriteBuilder;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
@@ -122,6 +123,10 @@ public interface Table extends Serializable {
     default TableCommit newCommit() {
         return newCommit(UUID.randomUUID().toString());
     }
+
+    WriteBuilder newWriteBuilder(String user);
+
+    WriteBuilder newWriteBuilder();
 
     /**
      * Delete according to filters.

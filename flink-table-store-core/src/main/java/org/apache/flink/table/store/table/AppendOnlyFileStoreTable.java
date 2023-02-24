@@ -130,7 +130,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableWriteImpl<?> newWrite(String commitUser) {
+    public TableWriteImpl<InternalRow> newWrite(String commitUser) {
         return new TableWriteImpl<>(
                 store().newWrite(commitUser),
                 new SinkRecordConverter(tableSchema),

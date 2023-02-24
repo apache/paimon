@@ -148,7 +148,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableWriteImpl<?> newWrite(String commitUser) {
+    public TableWriteImpl<KeyValue> newWrite(String commitUser) {
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store().newWrite(commitUser),

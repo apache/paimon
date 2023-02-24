@@ -55,8 +55,7 @@ public class TableCommitImpl implements TableCommit {
     }
 
     @Override
-    public TableCommitImpl withOverwritten(
-            @Nullable List<Map<String, String>> overwritePartitions) {
+    public TableCommitImpl withOverwrite(@Nullable List<Map<String, String>> overwritePartitions) {
         this.overwritePartitions = overwritePartitions;
         return this;
     }

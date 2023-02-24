@@ -616,7 +616,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(1, 20, 2000L));
         Map<String, String> overwritePartition = new HashMap<>();
         overwritePartition.put("pt", "1");
-        commit.withOverwritten(overwritePartition);
+        commit.withOverwrite(overwritePartition);
         commit.commit(1, write.prepareCommit(true, 1));
 
         List<DataSplit> splits1 = scan.plan().splits;

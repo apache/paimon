@@ -22,7 +22,6 @@ import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.disk.IOManager;
-import org.apache.flink.table.store.file.memory.MemorySegmentPool;
 import org.apache.flink.table.store.table.Table;
 
 import java.util.List;
@@ -37,18 +36,12 @@ public interface TableWrite extends AutoCloseable {
 
     /**
      * Write with overwritten determines whether the writer needs to read old data files to perform
-     * compaction.
+     * compaction. This is the same as insert overwrite in SQL.
      */
-    TableWrite withOverwritten(boolean overwrite);
+    TableWrite withOverwrite(boolean overwrite);
 
     /** With {@link IOManager}, this is needed if 'write-buffer-spillable' is opened. */
     TableWrite withIOManager(IOManager ioManager);
-
-    /**
-     * With {@link MemorySegmentPool}, you can set memory pool to allow multiple writers to share
-     * one memory.
-     */
-    TableWrite withMemoryPool(MemorySegmentPool memoryPool);
 
     /** Compute partition by an input row. */
     BinaryRow getPartition(InternalRow row);

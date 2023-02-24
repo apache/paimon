@@ -75,7 +75,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                     table.newWrite(commitUser)
                             .withIOManager(
                                     new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()))
-                            .withOverwritten(isOverwrite);
+                            .withOverwrite(isOverwrite);
         }
     }
 

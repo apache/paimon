@@ -187,12 +187,12 @@ public abstract class FileStoreTableTestBase {
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
 
-        write = table.newWrite(commitUser).withOverwritten(true);
+        write = table.newWrite(commitUser).withOverwrite(true);
         commit = table.newCommit(commitUser);
         write.write(rowData(2, 21, 201L));
         Map<String, String> overwritePartition = new HashMap<>();
         overwritePartition.put("pt", "2");
-        commit.withOverwritten(overwritePartition).commit(1, write.prepareCommit(true, 1));
+        commit.withOverwrite(overwritePartition).commit(1, write.prepareCommit(true, 1));
         write.close();
 
         List<Split> splits = table.newScan().plan().splits();

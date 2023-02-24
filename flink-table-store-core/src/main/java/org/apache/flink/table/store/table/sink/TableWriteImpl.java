@@ -22,7 +22,6 @@ import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.memory.MemorySegmentPool;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 
 import java.util.List;
@@ -48,7 +47,7 @@ public class TableWriteImpl<T> implements TableWrite {
     }
 
     @Override
-    public TableWriteImpl<T> withOverwritten(boolean overwrite) {
+    public TableWriteImpl<T> withOverwrite(boolean overwrite) {
         write.withOverwrite(overwrite);
         return this;
     }
@@ -56,12 +55,6 @@ public class TableWriteImpl<T> implements TableWrite {
     @Override
     public TableWriteImpl<T> withIOManager(IOManager ioManager) {
         write.withIOManager(ioManager);
-        return this;
-    }
-
-    @Override
-    public TableWriteImpl<T> withMemoryPool(MemorySegmentPool memoryPool) {
-        write.withMemoryPool(memoryPool);
         return this;
     }
 

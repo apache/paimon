@@ -22,7 +22,6 @@ import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.memory.MemorySegmentPool;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.SinkRecord;
@@ -38,8 +37,6 @@ import java.util.List;
 public interface FileStoreWrite<T> {
 
     FileStoreWrite<T> withIOManager(IOManager ioManager);
-
-    FileStoreWrite<T> withMemoryPool(MemorySegmentPool memoryPool);
 
     /**
      * If overwrite is true, the writer will overwrite the store, otherwise it won't.

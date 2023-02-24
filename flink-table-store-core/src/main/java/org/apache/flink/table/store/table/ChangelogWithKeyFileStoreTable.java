@@ -212,7 +212,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableWriteImpl<?> newWrite(String commitUser) {
+    public TableWriteImpl<KeyValue> newWrite(String commitUser) {
         final SequenceGenerator sequenceGenerator =
                 store().options()
                         .sequenceField()
