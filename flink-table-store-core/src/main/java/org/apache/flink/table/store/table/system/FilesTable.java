@@ -94,9 +94,7 @@ public class FilesTable implements Table {
                             new DataField(
                                     11, "min_value_stats", SerializationUtils.newStringType(false)),
                             new DataField(
-                                    12,
-                                    "max_value_stats",
-                                    SerializationUtils.newStringType(false)),
+                                    12, "max_value_stats", SerializationUtils.newStringType(false)),
                             new DataField(13, "creation_time", DataTypes.TIMESTAMP_MILLIS())));
 
     private final FileStoreTable storeTable;
