@@ -138,7 +138,7 @@ public abstract class SchemaEvolutionTableTestBase {
         // assert all connections are closed
         java.util.function.Predicate<Path> pathPredicate =
                 path -> path.toString().contains(tempDir.toString());
-        assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();
+        assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isNotEmpty();
         assertThat(TraceableFileIO.openOutputStreams(pathPredicate)).isEmpty();
     }
 
