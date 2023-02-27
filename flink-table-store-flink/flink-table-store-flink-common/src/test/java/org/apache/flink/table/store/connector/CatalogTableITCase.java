@@ -58,6 +58,19 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testSnapshotsTableWithRecordCount() throws Exception {
+        sql("CREATE TABLE T (a INT, b INT)");
+        sql("INSERT INTO T VALUES (1, 2)");
+        sql("INSERT INTO T VALUES (3, 4)");
+
+        List<Row> result =
+                sql(
+                        "SELECT snapshot_id, total_record_count, delta_record_count, changelog_record_count FROM T$snapshots");
+        assertThat(result)
+                .containsExactlyInAnyOrder(Row.of(1L, 1L, 1L, 0L), Row.of(2L, 2L, 1L, 0L));
+    }
+
+    @Test
     public void testOptionsTable() throws Exception {
         sql("CREATE TABLE T (a INT, b INT)");
         sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");

@@ -418,7 +418,7 @@ public class FileStoreCommitTest {
         offsets.put(1, 3L);
         Snapshot snapshot =
                 store.commitData(generateDataList(10), gen::getPartition, kv -> 0, offsets).get(0);
-        assertThat(snapshot.getLogOffsets()).isEqualTo(offsets);
+        assertThat(snapshot.logOffsets()).isEqualTo(offsets);
 
         // commit 2
         offsets = new HashMap<>();
@@ -428,7 +428,53 @@ public class FileStoreCommitTest {
         Map<Integer, Long> expected = new HashMap<>();
         expected.put(0, 1L);
         expected.put(1, 8L);
-        assertThat(snapshot.getLogOffsets()).isEqualTo(expected);
+        assertThat(snapshot.logOffsets()).isEqualTo(expected);
+    }
+
+    @Test
+    public void testSnapshotRecordCount() throws Exception {
+        TestFileStore store = createStore(false);
+
+        // commit 1
+        Snapshot snapshot1 =
+                store.commitData(
+                                generateDataList(10),
+                                gen::getPartition,
+                                kv -> 0,
+                                Collections.emptyMap())
+                        .get(0);
+        long deltaRecordCount1 = snapshot1.deltaRecordCount();
+        assertThat(deltaRecordCount1).isNotEqualTo(0L);
+        assertThat(snapshot1.totalRecordCount()).isEqualTo(deltaRecordCount1);
+        assertThat(snapshot1.changelogRecordCount()).isEqualTo(0L);
+
+        // commit 2
+        Snapshot snapshot2 =
+                store.commitData(
+                                generateDataList(20),
+                                gen::getPartition,
+                                kv -> 0,
+                                Collections.emptyMap())
+                        .get(0);
+        long deltaRecordCount2 = snapshot2.deltaRecordCount();
+        assertThat(deltaRecordCount2).isNotEqualTo(0L);
+        assertThat(snapshot2.totalRecordCount())
+                .isEqualTo(snapshot1.totalRecordCount() + deltaRecordCount2);
+        assertThat(snapshot2.changelogRecordCount()).isEqualTo(0L);
+
+        // commit 3
+        Snapshot snapshot3 =
+                store.commitData(
+                                generateDataList(30),
+                                gen::getPartition,
+                                kv -> 0,
+                                Collections.emptyMap())
+                        .get(0);
+        long deltaRecordCount3 = snapshot3.deltaRecordCount();
+        assertThat(deltaRecordCount3).isNotEqualTo(0L);
+        assertThat(snapshot3.totalRecordCount())
+                .isEqualTo(snapshot2.totalRecordCount() + deltaRecordCount3);
+        assertThat(snapshot3.changelogRecordCount()).isEqualTo(0L);
     }
 
     @Test

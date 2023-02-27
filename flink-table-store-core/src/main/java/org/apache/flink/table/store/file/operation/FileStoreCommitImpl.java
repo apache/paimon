@@ -477,12 +477,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestFileMeta> newMetas = new ArrayList<>();
         List<ManifestFileMeta> changelogMetas = new ArrayList<>();
         try {
+            long previousTotalRecordCount = 0L;
             if (latestSnapshot != null) {
+                previousTotalRecordCount = latestSnapshot.totalRecordCount(scan);
+                List<ManifestFileMeta> previousManifests =
+                        latestSnapshot.dataManifests(manifestList);
                 // read all previous manifest files
-                oldMetas.addAll(latestSnapshot.readAllDataManifests(manifestList));
+                oldMetas.addAll(previousManifests);
                 // read the last snapshot to complete the bucket's offsets when logOffsets does not
                 // contain all buckets
-                latestSnapshot.getLogOffsets().forEach(logOffsets::putIfAbsent);
+                latestSnapshot.logOffsets().forEach(logOffsets::putIfAbsent);
             }
             // merge manifest files with changes
             newMetas.addAll(
@@ -494,6 +498,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             previousChangesListName = manifestList.write(newMetas);
 
             // write new changes into manifest files
+            long deltaRecordCount = Snapshot.recordCount(tableFiles);
             List<ManifestFileMeta> newChangesManifests = manifestFile.write(tableFiles);
             newMetas.addAll(newChangesManifests);
             newChangesListName = manifestList.write(newChangesManifests);
@@ -516,7 +521,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             identifier,
                             commitKind,
                             System.currentTimeMillis(),
-                            logOffsets);
+                            logOffsets,
+                            previousTotalRecordCount + deltaRecordCount,
+                            deltaRecordCount,
+                            Snapshot.recordCount(changelogFiles));
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
             cleanUpTmpManifests(

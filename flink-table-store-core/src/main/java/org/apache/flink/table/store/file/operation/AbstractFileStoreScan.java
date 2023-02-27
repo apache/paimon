@@ -252,22 +252,18 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private List<ManifestFileMeta> readManifests(Snapshot snapshot) {
         switch (scanKind) {
             case ALL:
-                return snapshot.readAllDataManifests(manifestList);
+                return snapshot.dataManifests(manifestList);
             case DELTA:
-                return manifestList.read(snapshot.deltaManifestList());
+                return snapshot.deltaManifests(manifestList);
             case CHANGELOG:
-                if (snapshot.version() >= 2) {
-                    if (snapshot.changelogManifestList() == null) {
-                        return Collections.emptyList();
-                    } else {
-                        return manifestList.read(snapshot.changelogManifestList());
-                    }
+                if (snapshot.version() > Snapshot.TABLE_STORE_02_VERSION) {
+                    return snapshot.changelogManifests(manifestList);
                 }
 
                 // compatible with Table Store 0.2, we'll read extraFiles in DataFileMeta
                 // see comments on DataFileMeta#extraFiles
                 if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
-                    return manifestList.read(snapshot.deltaManifestList());
+                    return snapshot.deltaManifests(manifestList);
                 }
                 throw new IllegalStateException(
                         String.format(

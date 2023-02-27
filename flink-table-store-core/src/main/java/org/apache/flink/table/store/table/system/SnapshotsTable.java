@@ -71,7 +71,10 @@ public class SnapshotsTable implements Table {
                             new DataField(3, "commit_identifier", new BigIntType(false)),
                             new DataField(
                                     4, "commit_kind", SerializationUtils.newStringType(false)),
-                            new DataField(5, "commit_time", new TimestampType(false, 3))));
+                            new DataField(5, "commit_time", new TimestampType(false, 3)),
+                            new DataField(6, "total_record_count", new BigIntType(true)),
+                            new DataField(7, "delta_record_count", new BigIntType(true)),
+                            new DataField(8, "changelog_record_count", new BigIntType(true))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -206,7 +209,10 @@ public class SnapshotsTable implements Table {
                     Timestamp.fromLocalDateTime(
                             LocalDateTime.ofInstant(
                                     Instant.ofEpochMilli(snapshot.timeMillis()),
-                                    ZoneId.systemDefault())));
+                                    ZoneId.systemDefault())),
+                    snapshot.totalRecordCount(),
+                    snapshot.deltaRecordCount(),
+                    snapshot.changelogRecordCount());
         }
     }
 }
