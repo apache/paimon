@@ -64,6 +64,7 @@ import java.util.function.Function;
 
 import static org.apache.flink.table.store.data.DataFormatTestUtil.rowDataToString;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link ChangelogWithKeyFileStoreTable}. */
 public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
@@ -742,6 +743,32 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         result = getResult(read, scan.plan().splits(), rowToString);
         assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 3]");
+    }
+
+    @Test
+    public void testAggMergeFuncNotAllowRetract() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set("merge-engine", "aggregation");
+                            options.set("fields.b.aggregate-function", "sum");
+                            options.set("fields.c.aggregate-function", "max");
+                        },
+                        rowType);
+        TableWrite write = table.newWrite("");
+        write.write(GenericRow.of(1, 1, 3, 3));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 3, 3));
+        assertThatThrownBy(() -> write.prepareCommit(true, 0))
+                .hasMessageContaining(
+                        "Aggregate function FieldMaxAgg dose not support retraction,"
+                                + " If you allow this function to ignore retraction messages,"
+                                + " you can configure 'fields.${field_name}.ignore-retract'='true'");
     }
 
     @Override

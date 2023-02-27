@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-/** An aggregate which ignores retraction messages. */
+/** An aggregator which ignores retraction messages. */
 public class FieldIgnoreRetractAgg extends FieldAggregator {
 
     private final FieldAggregator aggregator;
