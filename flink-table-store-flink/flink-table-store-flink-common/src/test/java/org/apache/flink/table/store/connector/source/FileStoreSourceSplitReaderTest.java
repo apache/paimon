@@ -56,6 +56,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.connector.LogicalTypeConversion.toDataType;
+import static org.apache.flink.table.store.connector.source.FileStoreSourceSplitSerializerTest.newFile;
 import static org.apache.flink.table.store.connector.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
 import static org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -377,6 +378,13 @@ public class FileStoreSourceSplitReaderTest {
 
         records = reader.fetch();
         assertRecords(records, "id1", null, 0, Collections.emptyList());
+
+        // test limit without opening reader
+        // create a new fake new file, throw exception if open it
+        assignSplit(
+                reader, newSourceSplit("id2", row(1), 0, Collections.singletonList(newFile(0)), 0));
+        records = reader.fetch();
+        assertRecords(records, "id2", null, 0, null);
 
         reader.close();
     }
