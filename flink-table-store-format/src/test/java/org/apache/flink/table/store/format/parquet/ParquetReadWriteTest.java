@@ -40,6 +40,7 @@ import org.apache.flink.table.store.types.DoubleType;
 import org.apache.flink.table.store.types.FloatType;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.MultisetType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.SmallIntType;
 import org.apache.flink.table.store.types.TimestampType;
@@ -111,6 +112,7 @@ public class ParquetReadWriteTest {
                                     new VarCharType(VarCharType.MAX_LENGTH),
                                     new VarCharType(VarCharType.MAX_LENGTH)),
                             new MapType(new IntType(), new BooleanType()),
+                            new MultisetType(new VarCharType(VarCharType.MAX_LENGTH)),
                             RowType.builder()
                                     .fields(new VarCharType(VarCharType.MAX_LENGTH), new IntType())
                                     .build())
@@ -415,8 +417,9 @@ public class ParquetReadWriteTest {
                                 .isEqualTo(Decimal.fromBigDecimal(BigDecimal.valueOf(v), 20, 0));
                         assertThat(row.getMap(30).valueArray().getString(0)).hasToString("" + v);
                         assertThat(row.getMap(31).valueArray().getBoolean(0)).isEqualTo(v % 2 == 0);
-                        assertThat(row.getRow(32, 2).getString(0)).hasToString("" + v);
-                        assertThat(row.getRow(32, 2).getInt(1)).isEqualTo(v.intValue());
+                        assertThat(row.getMap(32).keyArray().getString(0)).hasToString("" + v);
+                        assertThat(row.getRow(33, 2).getString(0)).hasToString("" + v);
+                        assertThat(row.getRow(33, 2).getInt(1)).isEqualTo(v.intValue());
                     }
                     cnt.incrementAndGet();
                 });
@@ -434,6 +437,9 @@ public class ParquetReadWriteTest {
 
         Map<Integer, Boolean> f31 = new HashMap<>();
         f31.put(v, v % 2 == 0);
+
+        Map<BinaryString, Integer> f32 = new HashMap<>();
+        f32.put(BinaryString.fromString("" + v), v);
 
         return GenericRow.of(
                 BinaryString.fromString("" + v),
@@ -482,6 +488,7 @@ public class ParquetReadWriteTest {
                         new Object[] {Decimal.fromBigDecimal(BigDecimal.valueOf(v), 20, 0), null}),
                 new GenericMap(f30),
                 new GenericMap(f31),
+                new GenericMap(f32),
                 GenericRow.of(BinaryString.fromString("" + v), v));
     }
 
