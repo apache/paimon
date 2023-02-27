@@ -52,7 +52,8 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 meta.maxSequenceNumber(),
                 meta.schemaId(),
                 meta.level(),
-                toStringArrayData(meta.extraFiles()));
+                toStringArrayData(meta.extraFiles()),
+                meta.creationTime());
     }
 
     @Override
@@ -69,6 +70,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.getLong(8),
                 row.getLong(9),
                 row.getInt(10),
-                fromStringArrayData(row.getArray(11)));
+                fromStringArrayData(row.getArray(11)),
+                row.getTimestamp(12, 3));
     }
 }

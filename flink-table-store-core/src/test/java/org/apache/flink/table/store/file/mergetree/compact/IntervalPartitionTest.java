@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.mergetree.compact;
 import org.apache.flink.table.store.codegen.RecordComparator;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.BinaryRowWriter;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -177,7 +179,9 @@ public class IntervalPartitionTest {
                 0,
                 24,
                 0,
-                0);
+                0,
+                Collections.emptyList(),
+                Timestamp.fromEpochMillis(100000));
     }
 
     private List<Map<SortedRun, Integer>> toMultiset(List<List<SortedRun>> sections) {
