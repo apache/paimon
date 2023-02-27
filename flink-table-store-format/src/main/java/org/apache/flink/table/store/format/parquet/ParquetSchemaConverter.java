@@ -21,7 +21,9 @@ package org.apache.flink.table.store.format.parquet;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.MultisetType;
 import org.apache.flink.table.store.types.RowType;
 
 import org.apache.parquet.schema.ConversionPatterns;
@@ -125,6 +127,14 @@ public class ParquetSchemaConverter {
                         MAP_REPEATED_NAME,
                         convertToParquetType("key", mapType.getKeyType()),
                         convertToParquetType("value", mapType.getValueType()));
+            case MULTISET:
+                MultisetType multisetType = (MultisetType) type;
+                return ConversionPatterns.mapType(
+                        repetition,
+                        name,
+                        MAP_REPEATED_NAME,
+                        convertToParquetType("key", multisetType.getElementType()),
+                        convertToParquetType("value", new IntType(false)));
             case ROW:
                 RowType rowType = (RowType) type;
                 return new GroupType(repetition, name, convertToParquetTypes(rowType));

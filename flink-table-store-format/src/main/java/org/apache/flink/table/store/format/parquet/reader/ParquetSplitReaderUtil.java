@@ -35,7 +35,9 @@ import org.apache.flink.table.store.format.parquet.ParquetSchemaConverter;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.MultisetType;
 import org.apache.flink.table.store.types.RowType;
 
 import org.apache.parquet.ParquetRuntimeException;
@@ -126,21 +128,38 @@ public class ParquetSplitReaderUtil {
                         fieldType);
             case MAP:
                 MapType mapType = (MapType) fieldType;
-                ArrayColumnReader keyReader =
+                ArrayColumnReader mapKeyReader =
                         new ArrayColumnReader(
                                 descriptors.get(0),
                                 pages.getPageReader(descriptors.get(0)),
                                 true,
                                 descriptors.get(0).getPrimitiveType(),
                                 new ArrayType(mapType.getKeyType()));
-                ArrayColumnReader valueReader =
+                ArrayColumnReader mapValueReader =
                         new ArrayColumnReader(
                                 descriptors.get(1),
                                 pages.getPageReader(descriptors.get(1)),
                                 true,
                                 descriptors.get(1).getPrimitiveType(),
                                 new ArrayType(mapType.getValueType()));
-                return new MapColumnReader(keyReader, valueReader);
+                return new MapColumnReader(mapKeyReader, mapValueReader);
+            case MULTISET:
+                MultisetType multisetType = (MultisetType) fieldType;
+                ArrayColumnReader multisetKeyReader =
+                        new ArrayColumnReader(
+                                descriptors.get(0),
+                                pages.getPageReader(descriptors.get(0)),
+                                true,
+                                descriptors.get(0).getPrimitiveType(),
+                                new ArrayType(multisetType.getElementType()));
+                ArrayColumnReader multisetValueReader =
+                        new ArrayColumnReader(
+                                descriptors.get(1),
+                                pages.getPageReader(descriptors.get(1)),
+                                true,
+                                descriptors.get(1).getPrimitiveType(),
+                                new ArrayType(new IntType(false)));
+                return new MapColumnReader(multisetKeyReader, multisetValueReader);
             case ROW:
                 RowType rowType = (RowType) fieldType;
                 GroupType groupType = type.asGroupType();
@@ -270,19 +289,36 @@ public class ParquetSplitReaderUtil {
                                 depth));
             case MAP:
                 MapType mapType = (MapType) fieldType;
-                GroupType repeatedType = type.asGroupType().getType(0).asGroupType();
+                GroupType mapRepeatedType = type.asGroupType().getType(0).asGroupType();
                 return new HeapMapVector(
                         batchSize,
                         createWritableColumnVector(
                                 batchSize,
                                 mapType.getKeyType(),
-                                repeatedType.getType(0),
+                                mapRepeatedType.getType(0),
                                 descriptors,
                                 depth + 2),
                         createWritableColumnVector(
                                 batchSize,
                                 mapType.getValueType(),
-                                repeatedType.getType(1),
+                                mapRepeatedType.getType(1),
+                                descriptors,
+                                depth + 2));
+            case MULTISET:
+                MultisetType multisetType = (MultisetType) fieldType;
+                GroupType multisetRepeatedType = type.asGroupType().getType(0).asGroupType();
+                return new HeapMapVector(
+                        batchSize,
+                        createWritableColumnVector(
+                                batchSize,
+                                multisetType.getElementType(),
+                                multisetRepeatedType.getType(0),
+                                descriptors,
+                                depth + 2),
+                        createWritableColumnVector(
+                                batchSize,
+                                new IntType(false),
+                                multisetRepeatedType.getType(1),
                                 descriptors,
                                 depth + 2));
             case ROW:
