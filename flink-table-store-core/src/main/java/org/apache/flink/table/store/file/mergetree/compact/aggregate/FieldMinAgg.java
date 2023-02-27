@@ -24,8 +24,16 @@ import org.apache.flink.table.store.utils.RowDataUtils;
 
 /** min aggregate a field of a row. */
 public class FieldMinAgg extends FieldAggregator {
+
+    public static final String NAME = "min";
+
     public FieldMinAgg(DataType dataType) {
         super(dataType);
+    }
+
+    @Override
+    String name() {
+        return NAME;
     }
 
     @Override

@@ -24,8 +24,16 @@ import org.apache.flink.table.store.utils.DecimalUtils;
 
 /** sum aggregate a field of a row. */
 public class FieldSumAgg extends FieldAggregator {
+
+    public static final String NAME = "sum";
+
     public FieldSumAgg(DataType dataType) {
         super(dataType);
+    }
+
+    @Override
+    String name() {
+        return NAME;
     }
 
     @Override
@@ -74,5 +82,78 @@ public class FieldSumAgg extends FieldAggregator {
             }
         }
         return sum;
+    }
+
+    @Override
+    Object retract(Object accumulator, Object inputField) {
+        Object sum;
+
+        if (accumulator == null || inputField == null) {
+            sum = (accumulator == null ? negative(inputField) : accumulator);
+        } else {
+            switch (fieldType.getTypeRoot()) {
+                case DECIMAL:
+                    Decimal mergeFieldDD = (Decimal) accumulator;
+                    Decimal inFieldDD = (Decimal) inputField;
+                    assert mergeFieldDD.scale() == inFieldDD.scale()
+                            : "Inconsistent scale of aggregate Decimal!";
+                    assert mergeFieldDD.precision() == inFieldDD.precision()
+                            : "Inconsistent precision of aggregate Decimal!";
+                    sum =
+                            DecimalUtils.subtract(
+                                    mergeFieldDD,
+                                    inFieldDD,
+                                    mergeFieldDD.precision(),
+                                    mergeFieldDD.scale());
+                    break;
+                case TINYINT:
+                    sum = (byte) ((byte) accumulator - (byte) inputField);
+                    break;
+                case SMALLINT:
+                    sum = (short) ((short) accumulator - (short) inputField);
+                    break;
+                case INTEGER:
+                    sum = (int) accumulator - (int) inputField;
+                    break;
+                case BIGINT:
+                    sum = (long) accumulator - (long) inputField;
+                    break;
+                case FLOAT:
+                    sum = (float) accumulator - (float) inputField;
+                    break;
+                case DOUBLE:
+                    sum = (double) accumulator - (double) inputField;
+                    break;
+                default:
+                    throw new IllegalArgumentException();
+            }
+        }
+        return sum;
+    }
+
+    private Object negative(Object value) {
+        if (value == null) {
+            return null;
+        }
+        switch (fieldType.getTypeRoot()) {
+            case DECIMAL:
+                Decimal decimal = (Decimal) value;
+                return Decimal.fromBigDecimal(
+                        decimal.toBigDecimal().negate(), decimal.precision(), decimal.scale());
+            case TINYINT:
+                return (byte) -((byte) value);
+            case SMALLINT:
+                return (short) -((short) value);
+            case INTEGER:
+                return -((int) value);
+            case BIGINT:
+                return -((long) value);
+            case FLOAT:
+                return -((float) value);
+            case DOUBLE:
+                return -((double) value);
+            default:
+                throw new IllegalArgumentException();
+        }
     }
 }

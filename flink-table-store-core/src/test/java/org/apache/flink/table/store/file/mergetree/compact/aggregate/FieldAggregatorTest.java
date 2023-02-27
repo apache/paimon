@@ -19,11 +19,20 @@
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
 import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.BooleanType;
+import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.DoubleType;
+import org.apache.flink.table.store.types.FloatType;
 import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.SmallIntType;
+import org.apache.flink.table.store.types.TinyIntType;
 import org.apache.flink.table.store.types.VarCharType;
 
 import org.junit.jupiter.api.Test;
+
+import java.math.BigDecimal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -105,10 +114,70 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldSumAgg() {
+    public void testFieldSumIntAgg() {
         FieldSumAgg fieldSumAgg = new FieldSumAgg(new IntType());
-        Integer accumulator = 1;
-        Integer inputField = 10;
-        assertThat(fieldSumAgg.agg(accumulator, inputField)).isEqualTo(11);
+        assertThat(fieldSumAgg.agg(null, 10)).isEqualTo(10);
+        assertThat(fieldSumAgg.agg(1, 10)).isEqualTo(11);
+        assertThat(fieldSumAgg.retract(10, 5)).isEqualTo(5);
+        assertThat(fieldSumAgg.retract(null, 5)).isEqualTo(-5);
+    }
+
+    @Test
+    public void testFieldSumByteAgg() {
+        FieldSumAgg fieldSumAgg = new FieldSumAgg(new TinyIntType());
+        assertThat(fieldSumAgg.agg(null, (byte) 10)).isEqualTo((byte) 10);
+        assertThat(fieldSumAgg.agg((byte) 1, (byte) 10)).isEqualTo((byte) 11);
+        assertThat(fieldSumAgg.retract((byte) 10, (byte) 5)).isEqualTo((byte) 5);
+        assertThat(fieldSumAgg.retract(null, (byte) 5)).isEqualTo((byte) -5);
+    }
+
+    @Test
+    public void testFieldSumShortAgg() {
+        FieldSumAgg fieldSumAgg = new FieldSumAgg(new SmallIntType());
+        assertThat(fieldSumAgg.agg(null, (short) 10)).isEqualTo((short) 10);
+        assertThat(fieldSumAgg.agg((short) 1, (short) 10)).isEqualTo((short) 11);
+        assertThat(fieldSumAgg.retract((short) 10, (short) 5)).isEqualTo((short) 5);
+        assertThat(fieldSumAgg.retract(null, (short) 5)).isEqualTo((short) -5);
+    }
+
+    @Test
+    public void testFieldSumLongAgg() {
+        FieldSumAgg fieldSumAgg = new FieldSumAgg(new BigIntType());
+        assertThat(fieldSumAgg.agg(null, 10L)).isEqualTo(10L);
+        assertThat(fieldSumAgg.agg(1L, 10L)).isEqualTo(11L);
+        assertThat(fieldSumAgg.retract(10L, 5L)).isEqualTo(5L);
+        assertThat(fieldSumAgg.retract(null, 5L)).isEqualTo(-5L);
+    }
+
+    @Test
+    public void testFieldSumFloatAgg() {
+        FieldSumAgg fieldSumAgg = new FieldSumAgg(new FloatType());
+        assertThat(fieldSumAgg.agg(null, (float) 10)).isEqualTo((float) 10);
+        assertThat(fieldSumAgg.agg((float) 1, (float) 10)).isEqualTo((float) 11);
+        assertThat(fieldSumAgg.retract((float) 10, (float) 5)).isEqualTo((float) 5);
+        assertThat(fieldSumAgg.retract(null, (float) 5)).isEqualTo((float) -5);
+    }
+
+    @Test
+    public void testFieldSumDoubleAgg() {
+        FieldSumAgg fieldSumAgg = new FieldSumAgg(new DoubleType());
+        assertThat(fieldSumAgg.agg(null, (double) 10)).isEqualTo((double) 10);
+        assertThat(fieldSumAgg.agg((double) 1, (double) 10)).isEqualTo((double) 11);
+        assertThat(fieldSumAgg.retract((double) 10, (double) 5)).isEqualTo((double) 5);
+        assertThat(fieldSumAgg.retract(null, (double) 5)).isEqualTo((double) -5);
+    }
+
+    @Test
+    public void testFieldSumDecimalAgg() {
+        FieldSumAgg fieldSumAgg = new FieldSumAgg(new DecimalType());
+        assertThat(fieldSumAgg.agg(null, toDecimal(10))).isEqualTo(toDecimal(10));
+        assertThat(fieldSumAgg.agg(toDecimal(1), toDecimal(10))).isEqualTo(toDecimal(11));
+        assertThat(fieldSumAgg.retract(toDecimal(10), toDecimal(5))).isEqualTo(toDecimal(5));
+        assertThat(fieldSumAgg.retract(null, toDecimal(5))).isEqualTo(toDecimal(-5));
+    }
+
+    private static Decimal toDecimal(int i) {
+        return Decimal.fromBigDecimal(
+                new BigDecimal(i), DecimalType.DEFAULT_PRECISION, DecimalType.DEFAULT_SCALE);
     }
 }

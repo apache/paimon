@@ -22,8 +22,16 @@ import org.apache.flink.table.store.types.DataType;
 
 /** bool_or aggregate a field of a row. */
 public class FieldBoolOrAgg extends FieldAggregator {
+
+    public static final String NAME = "bool_or";
+
     public FieldBoolOrAgg(DataType dataType) {
         super(dataType);
+    }
+
+    @Override
+    String name() {
+        return NAME;
     }
 
     @Override

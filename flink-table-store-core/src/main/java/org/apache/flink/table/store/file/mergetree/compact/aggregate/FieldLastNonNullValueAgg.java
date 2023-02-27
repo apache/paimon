@@ -23,8 +23,15 @@ import org.apache.flink.table.store.types.DataType;
 /** last non-null value aggregate a field of a row. */
 public class FieldLastNonNullValueAgg extends FieldAggregator {
 
+    public static final String NAME = "last_non_null_value";
+
     public FieldLastNonNullValueAgg(DataType dataType) {
         super(dataType);
+    }
+
+    @Override
+    String name() {
+        return NAME;
     }
 
     @Override
