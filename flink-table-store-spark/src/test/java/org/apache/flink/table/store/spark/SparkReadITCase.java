@@ -100,6 +100,19 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testSnapshotsTableWithRecordCount() {
+        List<Row> rows =
+                spark.table("tablestore.default.`t1$snapshots`")
+                        .select(
+                                "snapshot_id",
+                                "total_record_count",
+                                "delta_record_count",
+                                "changelog_record_count")
+                        .collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1,2,2,0]]");
+    }
+
+    @Test
     public void testCatalogFilterPushDown() {
         innerTestSimpleTypeFilterPushDown(spark.table("tablestore.default.t1"));
 

@@ -457,10 +457,7 @@ public class TestFileStore extends KeyValueFileStore {
         }
 
         // manifests
-        List<ManifestFileMeta> manifests = snapshot.readAllDataManifests(manifestList);
-        if (snapshot.changelogManifestList() != null) {
-            manifests.addAll(manifestList.read(snapshot.changelogManifestList()));
-        }
+        List<ManifestFileMeta> manifests = snapshot.allManifests(manifestList);
         manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
 
         // data file

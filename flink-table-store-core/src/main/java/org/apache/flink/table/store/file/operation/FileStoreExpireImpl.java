@@ -184,7 +184,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         // delete manifests
         Snapshot exclusiveSnapshot = snapshotManager.snapshot(endExclusiveId);
         Set<ManifestFileMeta> manifestsInUse =
-                new HashSet<>(exclusiveSnapshot.readAllDataManifests(manifestList));
+                new HashSet<>(exclusiveSnapshot.dataManifests(manifestList));
         // to avoid deleting twice
         Set<ManifestFileMeta> deletedManifests = new HashSet<>();
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {
@@ -193,7 +193,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
 
             Snapshot toExpire = snapshotManager.snapshot(id);
-            // cannot call `toExpire.readAllDataManifests` directly, it is possible that a job is
+            // cannot call `toExpire.dataManifests` directly, it is possible that a job is
             // killed during expiration, so some manifest files may have been deleted
             List<ManifestFileMeta> toExpireManifests = new ArrayList<>();
             toExpireManifests.addAll(tryReadManifestList(toExpire.baseManifestList()));

@@ -18,8 +18,10 @@
 
 package org.apache.flink.table.store.file;
 
+import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
+import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
@@ -32,6 +34,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -45,6 +48,8 @@ import java.util.Map;
  *       file.
  *   <li>Version 2: Introduced in table store 0.3. Add "version" field and "changelogManifestList"
  *       field.
+ *   <li>Version 3: Introduced in table store 0.4. Add "baseRecordCount" field, "deltaRecordCount"
+ *       field and "changelogRecordCount" field.
  * </ul>
  *
  * <p>Unversioned change list:
@@ -60,8 +65,8 @@ public class Snapshot {
 
     public static final long FIRST_SNAPSHOT_ID = 1;
 
-    private static final int TABLE_STORE_02_VERSION = 1;
-    private static final int CURRENT_VERSION = 2;
+    public static final int TABLE_STORE_02_VERSION = 1;
+    private static final int CURRENT_VERSION = 3;
 
     private static final String FIELD_VERSION = "version";
     private static final String FIELD_ID = "id";
@@ -74,6 +79,9 @@ public class Snapshot {
     private static final String FIELD_COMMIT_KIND = "commitKind";
     private static final String FIELD_TIME_MILLIS = "timeMillis";
     private static final String FIELD_LOG_OFFSETS = "logOffsets";
+    private static final String FIELD_TOTAL_RECORD_COUNT = "totalRecordCount";
+    private static final String FIELD_DELTA_RECORD_COUNT = "deltaRecordCount";
+    private static final String FIELD_CHANGELOG_RECORD_COUNT = "changelogRecordCount";
 
     // version of snapshot
     // null for table store <= 0.2
@@ -124,6 +132,24 @@ public class Snapshot {
     @JsonProperty(FIELD_LOG_OFFSETS)
     private final Map<Integer, Long> logOffsets;
 
+    // record count of all changes occurred in this snapshot
+    // null for table store <= 0.3
+    @JsonProperty(FIELD_TOTAL_RECORD_COUNT)
+    @Nullable
+    private final Long totalRecordCount;
+
+    // record count of all new changes occurred in this snapshot
+    // null for table store <= 0.3
+    @JsonProperty(FIELD_DELTA_RECORD_COUNT)
+    @Nullable
+    private final Long deltaRecordCount;
+
+    // record count of all changelog produced in this snapshot
+    // null for table store <= 0.3
+    @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT)
+    @Nullable
+    private final Long changelogRecordCount;
+
     public Snapshot(
             long id,
             long schemaId,
@@ -134,7 +160,10 @@ public class Snapshot {
             long commitIdentifier,
             CommitKind commitKind,
             long timeMillis,
-            Map<Integer, Long> logOffsets) {
+            Map<Integer, Long> logOffsets,
+            @Nullable Long totalRecordCount,
+            @Nullable Long deltaRecordCount,
+            @Nullable Long changelogRecordCount) {
         this(
                 CURRENT_VERSION,
                 id,
@@ -146,7 +175,10 @@ public class Snapshot {
                 commitIdentifier,
                 commitKind,
                 timeMillis,
-                logOffsets);
+                logOffsets,
+                totalRecordCount,
+                deltaRecordCount,
+                changelogRecordCount);
     }
 
     @JsonCreator
@@ -161,7 +193,10 @@ public class Snapshot {
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) long commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis,
-            @JsonProperty(FIELD_LOG_OFFSETS) Map<Integer, Long> logOffsets) {
+            @JsonProperty(FIELD_LOG_OFFSETS) Map<Integer, Long> logOffsets,
+            @JsonProperty(FIELD_TOTAL_RECORD_COUNT) Long totalRecordCount,
+            @JsonProperty(FIELD_DELTA_RECORD_COUNT) Long deltaRecordCount,
+            @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT) Long changelogRecordCount) {
         this.version = version;
         this.id = id;
         this.schemaId = schemaId;
@@ -173,6 +208,9 @@ public class Snapshot {
         this.commitKind = commitKind;
         this.timeMillis = timeMillis;
         this.logOffsets = logOffsets;
+        this.totalRecordCount = totalRecordCount;
+        this.deltaRecordCount = deltaRecordCount;
+        this.changelogRecordCount = changelogRecordCount;
     }
 
     @JsonGetter(FIELD_VERSION)
@@ -228,19 +266,95 @@ public class Snapshot {
     }
 
     @JsonGetter(FIELD_LOG_OFFSETS)
-    public Map<Integer, Long> getLogOffsets() {
+    public Map<Integer, Long> logOffsets() {
         return logOffsets;
+    }
+
+    @JsonGetter(FIELD_TOTAL_RECORD_COUNT)
+    @Nullable
+    public Long totalRecordCount() {
+        return totalRecordCount;
+    }
+
+    @JsonGetter(FIELD_DELTA_RECORD_COUNT)
+    @Nullable
+    public Long deltaRecordCount() {
+        return deltaRecordCount;
+    }
+
+    @JsonGetter(FIELD_CHANGELOG_RECORD_COUNT)
+    @Nullable
+    public Long changelogRecordCount() {
+        return changelogRecordCount;
+    }
+
+    /**
+     * Return all {@link ManifestFileMeta} instances for either data or changelog manifests in this
+     * snapshot.
+     *
+     * @param manifestList a {@link ManifestList} instance used for reading files at snapshot.
+     * @return a list of ManifestFileMeta.
+     */
+    public List<ManifestFileMeta> allManifests(ManifestList manifestList) {
+        List<ManifestFileMeta> result = new ArrayList<>();
+        result.addAll(dataManifests(manifestList));
+        result.addAll(changelogManifests(manifestList));
+        return result;
+    }
+
+    /**
+     * Return a {@link ManifestFileMeta} for each data manifest in this snapshot.
+     *
+     * @param manifestList a {@link ManifestList} instance used for reading files at snapshot.
+     * @return a list of ManifestFileMeta.
+     */
+    public List<ManifestFileMeta> dataManifests(ManifestList manifestList) {
+        List<ManifestFileMeta> result = new ArrayList<>();
+        result.addAll(manifestList.read(baseManifestList));
+        result.addAll(deltaManifests(manifestList));
+        return result;
+    }
+
+    /**
+     * Return a {@link ManifestFileMeta} for each delta manifest in this snapshot.
+     *
+     * @param manifestList a {@link ManifestList} instance used for reading files at snapshot.
+     * @return a list of ManifestFileMeta.
+     */
+    public List<ManifestFileMeta> deltaManifests(ManifestList manifestList) {
+        return manifestList.read(deltaManifestList);
+    }
+
+    /**
+     * Return a {@link ManifestFileMeta} for each changelog manifest in this snapshot.
+     *
+     * @param manifestList a {@link ManifestList} instance used for reading files at snapshot.
+     * @return a list of ManifestFileMeta.
+     */
+    public List<ManifestFileMeta> changelogManifests(ManifestList manifestList) {
+        return changelogManifestList == null
+                ? Collections.emptyList()
+                : manifestList.read(changelogManifestList);
+    }
+
+    /**
+     * Return record count of all changes occurred in this snapshot given the scan.
+     *
+     * @param scan a {@link FileStoreScan} instance used for count of reading files at snapshot.
+     * @return total record count of Snapshot.
+     */
+    public Long totalRecordCount(FileStoreScan scan) {
+        return totalRecordCount == null
+                ? recordCount(scan.withSnapshot(id).plan().files())
+                : totalRecordCount;
+    }
+
+    public static long recordCount(List<ManifestEntry> manifestEntries) {
+        return manifestEntries.stream().mapToLong(manifest -> manifest.file().rowCount()).sum();
     }
 
     public String toJson() {
         return JsonSerdeUtil.toJson(this);
-    }
-
-    public List<ManifestFileMeta> readAllDataManifests(ManifestList manifestList) {
-        List<ManifestFileMeta> result = new ArrayList<>();
-        result.addAll(manifestList.read(baseManifestList));
-        result.addAll(manifestList.read(deltaManifestList));
-        return result;
     }
 
     public static Snapshot fromJson(String json) {
