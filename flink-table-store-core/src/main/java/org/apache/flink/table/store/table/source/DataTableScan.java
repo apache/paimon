@@ -35,7 +35,6 @@ public interface DataTableScan extends TableScan {
 
     DataTableScan withLevel(int level);
 
-    @Override
     DataTableScan withFilter(Predicate predicate);
 
     DataTableScan.DataFilePlan plan();

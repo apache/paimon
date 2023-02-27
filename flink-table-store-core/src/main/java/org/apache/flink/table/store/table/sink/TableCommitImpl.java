@@ -54,13 +54,15 @@ public class TableCommitImpl implements TableCommit {
         this.partitionExpire = partitionExpire;
     }
 
-    @Override
+    /** @deprecated lock should pass from {@link WriteBuilder}. */
+    @Deprecated
     public TableCommitImpl withOverwrite(@Nullable List<Map<String, String>> overwritePartitions) {
         this.overwritePartitions = overwritePartitions;
         return this;
     }
 
-    @Override
+    /** @deprecated lock should pass from table. */
+    @Deprecated
     public TableCommitImpl withLock(Lock lock) {
         commit.withLock(lock);
 

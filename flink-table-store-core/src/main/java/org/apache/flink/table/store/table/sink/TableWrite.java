@@ -34,12 +34,6 @@ import java.util.List;
 @Experimental
 public interface TableWrite extends AutoCloseable {
 
-    /**
-     * Write with overwritten determines whether the writer needs to read old data files to perform
-     * compaction. This is the same as insert overwrite in SQL.
-     */
-    TableWrite withOverwrite(boolean overwrite);
-
     /** With {@link IOManager}, this is needed if 'write-buffer-spillable' is opened. */
     TableWrite withIOManager(IOManager ioManager);
 

@@ -106,11 +106,6 @@ public class SchemasTable implements ReadonlyTable {
     private class SchemasScan implements TableScan {
 
         @Override
-        public TableScan withFilter(Predicate predicate) {
-            return this;
-        }
-
-        @Override
         public Plan plan() {
             return () -> Collections.singletonList(new SchemasSplit(fileIO, location));
         }

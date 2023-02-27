@@ -140,12 +140,6 @@ public class FilesTable implements ReadonlyTable {
         }
 
         @Override
-        public TableScan withFilter(Predicate predicate) {
-            // TODO
-            return this;
-        }
-
-        @Override
         public Plan plan() {
             return () -> Collections.singletonList(new FilesSplit(storeTable));
         }

@@ -113,12 +113,6 @@ public class SnapshotsTable implements ReadonlyTable {
     private class SnapshotsScan implements TableScan {
 
         @Override
-        public TableScan withFilter(Predicate predicate) {
-            // TODO
-            return this;
-        }
-
-        @Override
         public Plan plan() {
             return () -> Collections.singletonList(new SnapshotsSplit(fileIO, location));
         }

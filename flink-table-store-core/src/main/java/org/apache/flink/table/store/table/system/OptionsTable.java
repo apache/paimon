@@ -97,11 +97,6 @@ public class OptionsTable implements ReadonlyTable {
     private class OptionsScan implements TableScan {
 
         @Override
-        public TableScan withFilter(Predicate predicate) {
-            return this;
-        }
-
-        @Override
         public Plan plan() {
             return () -> Collections.singletonList(new OptionsSplit(fileIO, location));
         }

@@ -23,6 +23,7 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.SupportsPartition;
 import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.TableUtils;
 
 import org.apache.spark.sql.connector.catalog.SupportsDelete;
 import org.apache.spark.sql.connector.catalog.SupportsRead;
@@ -115,7 +116,7 @@ public class SparkTable
         }
 
         String commitUser = UUID.randomUUID().toString();
-        table.deleteWhere(commitUser, predicates, lockFactory);
+        TableUtils.deleteWhere(table, commitUser, predicates, lockFactory);
     }
 
     @Override

@@ -19,18 +19,25 @@
 package org.apache.flink.table.store.table.sink;
 
 import org.apache.flink.table.store.annotation.Experimental;
-import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.table.Table;
 
-import javax.annotation.Nullable;
-
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
  * Commit of {@link Table} to provide {@link CommitMessage} committing.
+ *
+ * <ol>
+ *   <li>Before calling {@link TableCommit#commit}, if user cannot determine if this commit is done
+ *       before, user should first call {@link TableCommit#filterCommitted}.
+ *   <li>Before committing, it will first check for conflicts by checking if all files to be removed
+ *       currently exists, and if modified files have overlapping key ranges with existing files.
+ *   <li>After that it use the external {@link CatalogLock} (if provided) or the atomic rename of
+ *       the file system to ensure atomicity.
+ *   <li>If commit fails due to conflicts or exception it tries its best to clean up and aborts.
+ *   <li>If atomic rename fails it tries again after reading the latest snapshot from step 2.
+ * </ol>
  *
  * <p>According to the options, the expiration of snapshots and partitions will be completed in
  * commit.
@@ -40,25 +47,21 @@ import java.util.Set;
 @Experimental
 public interface TableCommit extends AutoCloseable {
 
-    default TableCommit withOverwrite() {
-        withOverwrite(Collections.emptyMap());
-        return this;
-    }
-
-    default TableCommit withOverwrite(@Nullable Map<String, String> staticPartition) {
-        if (staticPartition != null) {
-            withOverwrite(Collections.singletonList(staticPartition));
-        }
-        return this;
-    }
-
-    TableCommit withOverwrite(@Nullable List<Map<String, String>> staticPartitions);
-
-    TableCommit withLock(Lock lock);
-
+    /**
+     * Default ignore empty commit, if this is set to false, when there is no new data, an empty
+     * commit will also be created.
+     *
+     * <p>NOTE: It is recommended to set 'ignoreEmptyCommit' to false in streaming write, in order
+     * to better remove duplicate commits (See {@link #filterCommitted}).
+     */
     TableCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
 
+    /** Filter committed commits. This method is used for failover cases. */
     Set<Long> filterCommitted(Set<Long> commitIdentifiers);
 
+    /**
+     * Create a new commit. One commit may generate two snapshots, one for adding new files and the
+     * other for compaction.
+     */
     void commit(long commitIdentifier, List<CommitMessage> commitMessages);
 }

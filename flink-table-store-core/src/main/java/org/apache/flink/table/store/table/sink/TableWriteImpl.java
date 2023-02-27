@@ -46,7 +46,8 @@ public class TableWriteImpl<T> implements TableWrite {
         this.recordExtractor = recordExtractor;
     }
 
-    @Override
+    /** @deprecated lock should pass from {@link WriteBuilder}. */
+    @Deprecated
     public TableWriteImpl<T> withOverwrite(boolean overwrite) {
         write.withOverwrite(overwrite);
         return this;
