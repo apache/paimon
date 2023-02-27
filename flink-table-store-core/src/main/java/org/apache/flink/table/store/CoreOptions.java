@@ -456,6 +456,14 @@ public class CoreOptions implements Serializable {
                                                             + "$hour:00:00'."))
                                     .build());
 
+    public static final ConfigOption<Boolean> SCAN_PLAN_SORT_PARTITION =
+            ConfigOptions.key("scan.plan-sort-partition")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to sort plan files by partition fields, this allows you to read "
+                                    + "according to the partition order, even if your partition writes are out of order.");
+
     private final Configuration options;
 
     public CoreOptions(Map<String, String> options) {
@@ -604,6 +612,10 @@ public class CoreOptions implements Serializable {
 
     public ChangelogProducer changelogProducer() {
         return options.get(CHANGELOG_PRODUCER);
+    }
+
+    public boolean scanPlanSortPartition() {
+        return options.get(SCAN_PLAN_SORT_PARTITION);
     }
 
     public StartupMode startupMode() {

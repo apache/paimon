@@ -139,6 +139,35 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
+    public void testBatchPlanOrderByPartition() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> options.set(CoreOptions.SCAN_PLAN_SORT_PARTITION, true));
+
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(3, 33, 303L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 10, 100L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.write(rowData(2, 22, 202L));
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        write.close();
+
+        List<Split> splits = table.newScan().plan().splits();
+        int[] partitions =
+                splits.stream()
+                        .map(split -> ((DataSplit) split).partition().getInt(0))
+                        .mapToInt(Integer::intValue)
+                        .toArray();
+        assertThat(partitions).containsExactly(1, 2, 3);
+    }
+
+    @Test
     public void testStreamingProjection() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
