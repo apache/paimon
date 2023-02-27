@@ -81,7 +81,7 @@ public abstract class FieldAggregator implements Serializable {
     Object retract(Object accumulator, Object retractField) {
         throw new UnsupportedOperationException(
                 String.format(
-                        "Aggregate function '%s' dose not support retraction,"
+                        "Aggregate function '%s' does not support retraction,"
                                 + " If you allow this function to ignore retraction messages,"
                                 + " you can configure 'fields.${field_name}.ignore-retract'='true'.",
                         name()));
