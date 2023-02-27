@@ -24,8 +24,16 @@ import org.apache.flink.table.types.logical.LogicalTypeRoot;
 
 /** min aggregate a field of a row. */
 public class FieldMinAgg extends FieldAggregator {
-    public FieldMinAgg(LogicalType logicalType) {
-        super(logicalType);
+
+    public static final String NAME = "min";
+
+    public FieldMinAgg(LogicalType dataType) {
+        super(dataType);
+    }
+
+    @Override
+    String name() {
+        return NAME;
     }
 
     @Override

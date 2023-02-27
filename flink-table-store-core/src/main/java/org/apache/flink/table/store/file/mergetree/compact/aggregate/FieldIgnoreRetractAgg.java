@@ -18,24 +18,28 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-import org.apache.flink.table.types.logical.LogicalType;
+/** An aggregator which ignores retraction messages. */
+public class FieldIgnoreRetractAgg extends FieldAggregator {
 
-/** last value aggregate a field of a row. */
-public class FieldLastValueAgg extends FieldAggregator {
+    private final FieldAggregator aggregator;
 
-    public static final String NAME = "last_value";
-
-    public FieldLastValueAgg(LogicalType dataType) {
-        super(dataType);
+    public FieldIgnoreRetractAgg(FieldAggregator aggregator) {
+        super(aggregator.fieldType);
+        this.aggregator = aggregator;
     }
 
     @Override
     String name() {
-        return NAME;
+        return aggregator.name();
     }
 
     @Override
     Object agg(Object accumulator, Object inputField) {
-        return inputField;
+        return aggregator.agg(accumulator, inputField);
+    }
+
+    @Override
+    Object retract(Object accumulator, Object retractField) {
+        return accumulator;
     }
 }

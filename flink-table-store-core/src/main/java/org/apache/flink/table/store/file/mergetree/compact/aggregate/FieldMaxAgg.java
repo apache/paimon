@@ -24,8 +24,16 @@ import org.apache.flink.table.types.logical.LogicalTypeRoot;
 
 /** max aggregate a field of a row. */
 public class FieldMaxAgg extends FieldAggregator {
-    public FieldMaxAgg(LogicalType logicalType) {
-        super(logicalType);
+
+    public static final String NAME = "max";
+
+    public FieldMaxAgg(LogicalType dataType) {
+        super(dataType);
+    }
+
+    @Override
+    String name() {
+        return NAME;
     }
 
     @Override

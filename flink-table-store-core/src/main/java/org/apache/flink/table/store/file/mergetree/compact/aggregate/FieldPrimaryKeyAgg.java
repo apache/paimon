@@ -20,12 +20,12 @@ package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
 import org.apache.flink.table.types.logical.LogicalType;
 
-/** last value aggregate a field of a row. */
-public class FieldLastValueAgg extends FieldAggregator {
+/** primary key aggregate a field of a row. */
+public class FieldPrimaryKeyAgg extends FieldAggregator {
 
-    public static final String NAME = "last_value";
+    public static final String NAME = "primary-key";
 
-    public FieldLastValueAgg(LogicalType dataType) {
+    public FieldPrimaryKeyAgg(LogicalType dataType) {
         super(dataType);
     }
 
@@ -36,6 +36,11 @@ public class FieldLastValueAgg extends FieldAggregator {
 
     @Override
     Object agg(Object accumulator, Object inputField) {
+        return inputField;
+    }
+
+    @Override
+    Object retract(Object accumulator, Object inputField) {
         return inputField;
     }
 }

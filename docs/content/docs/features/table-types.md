@@ -102,6 +102,10 @@ Current supported aggregate functions and data types are:
 * `listagg`: supports STRING data type.
 * `bool_and` / `bool_or`: support BOOLEAN data type.
 
+Only `sum` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
+If you allow some functions to ignore retraction messages, you can configure:
+`'fields.${field_name}.ignore-retract'='true'`.
+
 {{< hint info >}}
 For streaming queries, `aggregation` merge engine must be used together with `full-compaction` [changelog producer]({{< ref "docs/features/table-types#changelog-producers" >}}).
 {{< /hint >}}

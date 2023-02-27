@@ -22,8 +22,16 @@ import org.apache.flink.table.types.logical.LogicalType;
 
 /** bool_and aggregate a field of a row. */
 public class FieldBoolAndAgg extends FieldAggregator {
+
+    public static final String NAME = "bool_and";
+
     public FieldBoolAndAgg(LogicalType logicalType) {
         super(logicalType);
+    }
+
+    @Override
+    String name() {
+        return NAME;
     }
 
     @Override

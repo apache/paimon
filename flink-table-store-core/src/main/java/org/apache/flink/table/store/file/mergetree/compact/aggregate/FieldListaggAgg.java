@@ -25,11 +25,19 @@ import org.apache.flink.table.types.logical.LogicalType;
 
 /** listagg aggregate a field of a row. */
 public class FieldListaggAgg extends FieldAggregator {
+
+    public static final String NAME = "listagg";
+
     // TODO: make it configurable by with clause
     public static final String DELIMITER = ",";
 
     public FieldListaggAgg(LogicalType logicalType) {
         super(logicalType);
+    }
+
+    @Override
+    String name() {
+        return NAME;
     }
 
     @Override
