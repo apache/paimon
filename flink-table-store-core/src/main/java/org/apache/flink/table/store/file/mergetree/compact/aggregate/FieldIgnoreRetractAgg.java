@@ -29,6 +29,11 @@ public class FieldIgnoreRetractAgg extends FieldAggregator {
     }
 
     @Override
+    String name() {
+        return aggregator.name();
+    }
+
+    @Override
     Object agg(Object accumulator, Object inputField) {
         return aggregator.agg(accumulator, inputField);
     }

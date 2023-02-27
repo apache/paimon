@@ -24,8 +24,16 @@ import org.apache.flink.table.store.utils.DecimalUtils;
 
 /** sum aggregate a field of a row. */
 public class FieldSumAgg extends FieldAggregator {
+
+    public static final String NAME = "sum";
+
     public FieldSumAgg(DataType dataType) {
         super(dataType);
+    }
+
+    @Override
+    String name() {
+        return NAME;
     }
 
     @Override

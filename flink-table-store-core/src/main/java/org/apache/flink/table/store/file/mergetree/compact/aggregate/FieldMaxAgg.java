@@ -24,8 +24,16 @@ import org.apache.flink.table.store.utils.RowDataUtils;
 
 /** max aggregate a field of a row. */
 public class FieldMaxAgg extends FieldAggregator {
+
+    public static final String NAME = "max";
+
     public FieldMaxAgg(DataType dataType) {
         super(dataType);
+    }
+
+    @Override
+    String name() {
+        return NAME;
     }
 
     @Override

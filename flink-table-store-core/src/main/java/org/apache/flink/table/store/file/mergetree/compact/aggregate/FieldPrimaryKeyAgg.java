@@ -23,8 +23,15 @@ import org.apache.flink.table.store.types.DataType;
 /** primary key aggregate a field of a row. */
 public class FieldPrimaryKeyAgg extends FieldAggregator {
 
+    public static final String NAME = "primary-key";
+
     public FieldPrimaryKeyAgg(DataType dataType) {
         super(dataType);
+    }
+
+    @Override
+    String name() {
+        return NAME;
     }
 
     @Override

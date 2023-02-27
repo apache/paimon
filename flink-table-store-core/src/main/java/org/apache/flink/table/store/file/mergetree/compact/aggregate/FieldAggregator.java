@@ -38,28 +38,28 @@ public abstract class FieldAggregator implements Serializable {
         } else {
             // ordered by type root definition
             switch (strAgg) {
-                case "sum":
+                case FieldSumAgg.NAME:
                     fieldAggregator = new FieldSumAgg(fieldType);
                     break;
-                case "max":
+                case FieldMaxAgg.NAME:
                     fieldAggregator = new FieldMaxAgg(fieldType);
                     break;
-                case "min":
+                case FieldMinAgg.NAME:
                     fieldAggregator = new FieldMinAgg(fieldType);
                     break;
-                case "last_non_null_value":
+                case FieldLastNonNullValueAgg.NAME:
                     fieldAggregator = new FieldLastNonNullValueAgg(fieldType);
                     break;
-                case "last_value":
+                case FieldLastValueAgg.NAME:
                     fieldAggregator = new FieldLastValueAgg(fieldType);
                     break;
-                case "listagg":
+                case FieldListaggAgg.NAME:
                     fieldAggregator = new FieldListaggAgg(fieldType);
                     break;
-                case "bool_or":
+                case FieldBoolOrAgg.NAME:
                     fieldAggregator = new FieldBoolOrAgg(fieldType);
                     break;
-                case "bool_and":
+                case FieldBoolAndAgg.NAME:
                     fieldAggregator = new FieldBoolAndAgg(fieldType);
                     break;
                 default:
@@ -74,14 +74,16 @@ public abstract class FieldAggregator implements Serializable {
         return fieldAggregator;
     }
 
+    abstract String name();
+
     abstract Object agg(Object accumulator, Object inputField);
 
     Object retract(Object accumulator, Object retractField) {
         throw new UnsupportedOperationException(
                 String.format(
-                        "Aggregate function %s dose not support retraction,"
+                        "Aggregate function '%s' dose not support retraction,"
                                 + " If you allow this function to ignore retraction messages,"
                                 + " you can configure 'fields.${field_name}.ignore-retract'='true'.",
-                        this.getClass().getSimpleName()));
+                        name()));
     }
 }
