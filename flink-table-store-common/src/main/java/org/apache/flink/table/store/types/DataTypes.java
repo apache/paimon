@@ -78,6 +78,10 @@ public class DataTypes {
         return new TimestampType();
     }
 
+    public static TimestampType TIMESTAMP_MILLIS() {
+        return new TimestampType(3);
+    }
+
     public static TimestampType TIMESTAMP(int precision) {
         return new TimestampType(precision);
     }

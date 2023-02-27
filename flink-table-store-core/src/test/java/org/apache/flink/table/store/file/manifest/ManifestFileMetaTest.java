@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.BinaryRowWriter;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
@@ -44,6 +45,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -248,7 +250,8 @@ public class ManifestFileMetaTest {
                         0, // not used
                         0, // not used
                         0, // not used
-                        0 // not used
-                        ));
+                        0, // not used
+                        Collections.emptyList(),
+                        Timestamp.fromEpochMillis(200000)));
     }
 }
