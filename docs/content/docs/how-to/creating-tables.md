@@ -120,6 +120,8 @@ Table can be created and populated by the results of a query, for example, we ha
 The resulting table `table_b` will be equivalent to create the table and insert the data with the following statement:
 `CREATE TABLE table_b (id INT, name STRING); INSERT INTO table_b SELECT id, name FROM table_a;`
 
+We can specify the primary key or partition when use `CREATE TABLE AS SELECT`, for syntax, please refer to the following sql.
+
 {{< tabs "create-table-as" >}}
 
 {{< tab "Flink" >}}
