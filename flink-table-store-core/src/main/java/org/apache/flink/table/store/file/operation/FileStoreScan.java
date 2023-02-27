@@ -28,7 +28,7 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -74,9 +74,9 @@ public interface FileStoreScan {
         /** Return a map group by partition and bucket. */
         static Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupByPartFiles(
                 List<ManifestEntry> files) {
-            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupBy = new HashMap<>();
+            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupBy = new LinkedHashMap<>();
             for (ManifestEntry entry : files) {
-                groupBy.computeIfAbsent(entry.partition(), k -> new HashMap<>())
+                groupBy.computeIfAbsent(entry.partition(), k -> new LinkedHashMap<>())
                         .computeIfAbsent(entry.bucket(), k -> new ArrayList<>())
                         .add(entry.file());
             }

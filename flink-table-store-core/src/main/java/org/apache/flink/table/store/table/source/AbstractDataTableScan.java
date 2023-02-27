@@ -20,6 +20,8 @@ package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.annotation.VisibleForTesting;
+import org.apache.flink.table.store.codegen.CodeGenUtils;
+import org.apache.flink.table.store.codegen.RecordComparator;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.io.DataFileMeta;
@@ -34,6 +36,7 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -50,6 +53,8 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     private final CoreOptions options;
 
     private ScanKind scanKind = ScanKind.ALL;
+
+    private RecordComparator lazyPartitionComparator;
 
     protected AbstractDataTableScan(
             FileIO fileIO,
@@ -117,18 +122,37 @@ public abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
+    private RecordComparator partitionComparator() {
+        if (lazyPartitionComparator == null) {
+            lazyPartitionComparator =
+                    CodeGenUtils.newRecordComparator(
+                            tableSchema.logicalPartitionType().getFieldTypes(),
+                            "PartitionComparator");
+        }
+        return lazyPartitionComparator;
+    }
+
     @Override
     public DataFilePlan plan() {
         FileStoreScan.Plan plan = scan.plan();
         Long snapshotId = plan.snapshotId();
 
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> files =
+                FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.ADD));
+        if (options.scanPlanSortPartition()) {
+            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> newFiles = new LinkedHashMap<>();
+            files.entrySet().stream()
+                    .sorted((o1, o2) -> partitionComparator().compare(o1.getKey(), o2.getKey()))
+                    .forEach(entry -> newFiles.put(entry.getKey(), entry.getValue()));
+            files = newFiles;
+        }
         List<DataSplit> splits =
                 generateSplits(
                         snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
                         scanKind != ScanKind.ALL,
                         false,
                         splitGenerator(pathFactory),
-                        FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.ADD)));
+                        files);
         return new DataFilePlan(snapshotId, splits);
     }
 
@@ -162,7 +186,6 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                         false,
                         splitGenerator(pathFactory),
                         FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.ADD))));
-
         return new DataFilePlan(snapshotId, splits);
     }
 
