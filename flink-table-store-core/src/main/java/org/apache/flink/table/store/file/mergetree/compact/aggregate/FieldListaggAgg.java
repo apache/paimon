@@ -24,11 +24,19 @@ import org.apache.flink.table.store.utils.StringUtils;
 
 /** listagg aggregate a field of a row. */
 public class FieldListaggAgg extends FieldAggregator {
+
+    public static final String NAME = "listagg";
+
     // TODO: make it configurable by with clause
     public static final String DELIMITER = ",";
 
     public FieldListaggAgg(DataType dataType) {
         super(dataType);
+    }
+
+    @Override
+    String name() {
+        return NAME;
     }
 
     @Override

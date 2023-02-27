@@ -25,6 +25,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 
 import static org.apache.flink.table.store.data.Decimal.fromBigDecimal;
+import static org.apache.flink.table.store.data.Decimal.fromUnscaledLong;
 
 /** Utilities for {@link Decimal}. */
 public class DecimalUtils {
@@ -63,6 +64,25 @@ public class DecimalUtils {
             }
         }
         BigDecimal bd = v1.toBigDecimal().add(v2.toBigDecimal());
+        return fromBigDecimal(bd, precision, scale);
+    }
+
+    public static Decimal subtract(Decimal v1, Decimal v2, int precision, int scale) {
+        if (v1.isCompact()
+                && v2.isCompact()
+                && v1.scale() == v2.scale()
+                && Decimal.isCompact(precision)) {
+            assert scale == v1.scale(); // no need to rescale
+            try {
+                long ls =
+                        Math.subtractExact(
+                                v1.toUnscaledLong(), v2.toUnscaledLong()); // checks overflow
+                return fromUnscaledLong(ls, precision, scale);
+            } catch (ArithmeticException e) {
+                // overflow, fall through
+            }
+        }
+        BigDecimal bd = v1.toBigDecimal().subtract(v2.toBigDecimal());
         return fromBigDecimal(bd, precision, scale);
     }
 

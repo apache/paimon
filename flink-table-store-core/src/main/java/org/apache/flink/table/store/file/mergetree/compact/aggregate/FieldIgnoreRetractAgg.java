@@ -18,38 +18,28 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DataTypeRoot;
-import org.apache.flink.table.store.utils.RowDataUtils;
+/** An aggregator which ignores retraction messages. */
+public class FieldIgnoreRetractAgg extends FieldAggregator {
 
-/** max aggregate a field of a row. */
-public class FieldMaxAgg extends FieldAggregator {
+    private final FieldAggregator aggregator;
 
-    public static final String NAME = "max";
-
-    public FieldMaxAgg(DataType dataType) {
-        super(dataType);
+    public FieldIgnoreRetractAgg(FieldAggregator aggregator) {
+        super(aggregator.fieldType);
+        this.aggregator = aggregator;
     }
 
     @Override
     String name() {
-        return NAME;
+        return aggregator.name();
     }
 
     @Override
     Object agg(Object accumulator, Object inputField) {
-        Object max;
+        return aggregator.agg(accumulator, inputField);
+    }
 
-        if (accumulator == null || inputField == null) {
-            max = (accumulator == null ? inputField : accumulator);
-        } else {
-            DataTypeRoot type = fieldType.getTypeRoot();
-            if (RowDataUtils.compare(accumulator, inputField, type) < 0) {
-                max = inputField;
-            } else {
-                max = accumulator;
-            }
-        }
-        return max;
+    @Override
+    Object retract(Object accumulator, Object retractField) {
+        return accumulator;
     }
 }

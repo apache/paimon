@@ -21,6 +21,7 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.data.BinaryString;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.ScanKind;
@@ -63,6 +64,7 @@ import java.util.function.Function;
 
 import static org.apache.flink.table.store.data.DataFormatTestUtil.rowDataToString;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link ChangelogWithKeyFileStoreTable}. */
 public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
@@ -699,6 +701,74 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                 row -> rowDataToString(row, DataTypes.ROW(DataTypes.INT(), DataTypes.INT()));
         result = getResult(read, scan.plan().splits(), projectToString2);
         assertThat(result).containsExactlyInAnyOrder("+I[20, 2]", "+I[30, 1]", "+I[10, 1]");
+    }
+
+    @Test
+    public void testAggMergeFunc() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set("merge-engine", "aggregation");
+                            options.set("fields.b.aggregate-function", "sum");
+                            options.set("fields.c.aggregate-function", "max");
+                            options.set("fields.c.ignore-retract", "true");
+                        },
+                        rowType);
+        Function<InternalRow, String> rowToString = row -> rowDataToString(row, rowType);
+        DataTableScan scan = table.newScan();
+        TableRead read = table.newRead();
+        TableWrite write = table.newWrite("");
+        TableCommit commit = table.newCommit("");
+
+        // 1. inserts
+        write.write(GenericRow.of(1, 1, 3, 3));
+        write.write(GenericRow.of(1, 1, 1, 1));
+        write.write(GenericRow.of(1, 1, 2, 2));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        List<String> result = getResult(read, scan.plan().splits(), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 6, 3]");
+
+        // 2. Retracts
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 1, 1));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 2, 2));
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 1, 1));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        result = getResult(read, scan.plan().splits(), rowToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 3]");
+    }
+
+    @Test
+    public void testAggMergeFuncNotAllowRetract() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set("merge-engine", "aggregation");
+                            options.set("fields.b.aggregate-function", "sum");
+                            options.set("fields.c.aggregate-function", "max");
+                        },
+                        rowType);
+        TableWrite write = table.newWrite("");
+        write.write(GenericRow.of(1, 1, 3, 3));
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 3, 3));
+        assertThatThrownBy(() -> write.prepareCommit(true, 0))
+                .hasMessageContaining(
+                        "Aggregate function 'max' does not support retraction,"
+                                + " If you allow this function to ignore retraction messages,"
+                                + " you can configure 'fields.${field_name}.ignore-retract'='true'");
     }
 
     @Override
