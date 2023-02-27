@@ -21,6 +21,8 @@ package org.apache.flink.table.store.table.source;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.codegen.CodeGenUtils;
+import org.apache.flink.table.store.codegen.RecordComparator;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.FileKind;
@@ -33,6 +35,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -48,6 +51,8 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     private final CoreOptions options;
 
     private ScanKind scanKind = ScanKind.ALL;
+
+    private RecordComparator lazyPartitionComparator;
 
     protected AbstractDataTableScan(
             FileStoreScan scan,
@@ -113,17 +118,36 @@ public abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
+    private RecordComparator partitionComparator() {
+        if (lazyPartitionComparator == null) {
+            lazyPartitionComparator =
+                    CodeGenUtils.newRecordComparator(
+                            tableSchema.logicalPartitionType().getChildren(),
+                            "PartitionComparator");
+        }
+        return lazyPartitionComparator;
+    }
+
     @Override
     public DataFilePlan plan() {
         FileStoreScan.Plan plan = scan.plan();
         Long snapshotId = plan.snapshotId();
 
+        Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> files =
+                plan.groupByPartFiles(plan.files(FileKind.ADD));
+        if (options.scanPlanSortPartition()) {
+            Map<BinaryRowData, Map<Integer, List<DataFileMeta>>> newFiles = new LinkedHashMap<>();
+            files.entrySet().stream()
+                    .sorted((o1, o2) -> partitionComparator().compare(o1.getKey(), o2.getKey()))
+                    .forEach(entry -> newFiles.put(entry.getKey(), entry.getValue()));
+            files = newFiles;
+        }
         List<DataSplit> splits =
                 generateSplits(
                         snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
                         scanKind != ScanKind.ALL,
                         splitGenerator(pathFactory),
-                        plan.groupByPartFiles(plan.files(FileKind.ADD)));
+                        files);
         return new DataFilePlan(snapshotId, splits);
     }
 
