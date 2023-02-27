@@ -71,6 +71,20 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testReadPartitionOrder() {
+        setParallelism(1);
+        batchSql("INSERT INTO part_table VALUES (1, 'AAA', 'part-1')");
+        batchSql("INSERT INTO part_table VALUES (2, 'BBB', 'part-2')");
+        batchSql("INSERT INTO part_table VALUES (3, 'CCC', 'part-3')");
+
+        assertThat(batchSql("SELECT * FROM part_table"))
+                .containsExactly(
+                        Row.of(1, "AAA", "part-1"),
+                        Row.of(2, "BBB", "part-2"),
+                        Row.of(3, "CCC", "part-3"));
+    }
+
+    @Test
     public void testSkipDedup() {
         batchSql("INSERT INTO append_table VALUES (1, 'AAA'), (1, 'AAA'), (2, 'BBB'), (3, 'BBB')");
 
@@ -205,6 +219,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     protected List<String> ddl() {
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('write-mode'='append-only')",
+                "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('write-mode'='append-only')",
                 "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('write-mode'='append-only')");
     }
 

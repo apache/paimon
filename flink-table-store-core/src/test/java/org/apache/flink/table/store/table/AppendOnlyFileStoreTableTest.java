@@ -35,6 +35,7 @@ import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.AbstractDataTableScan;
+import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 
@@ -114,21 +115,58 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
-    public void testStreamingReadWrite() throws Exception {
-        writeData();
+    public void testBatchPlanOrder() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
-        TableRead read = table.newRead();
-        assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
-                .isEqualTo(
-                        Arrays.asList(
-                                "+1|11|101|binary|varbinary|mapKey:mapVal|multiset",
-                                "+1|12|102|binary|varbinary|mapKey:mapVal|multiset"));
-        assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
-                .isEqualTo(
-                        Collections.singletonList(
-                                "+2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(2, 22, 202L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.write(rowData(3, 33, 303L));
+        commit.commit(2, write.prepareCommit(true, 2));
+        write.close();
+
+        List<Split> splits = table.newScan().plan().splits();
+        int[] partitions =
+                splits.stream()
+                        .map(split -> ((DataSplit) split).partition().getInt(0))
+                        .mapToInt(Integer::intValue)
+                        .toArray();
+        assertThat(partitions).containsExactly(1, 2, 3);
+    }
+
+    @Test
+    public void testBatchPlanOrderByPartition() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> options.set(CoreOptions.SCAN_PLAN_SORT_PARTITION, true));
+
+        TableWrite write = table.newWrite(commitUser);
+        TableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(3, 33, 303L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 10, 100L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.write(rowData(2, 22, 202L));
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        write.close();
+
+        List<Split> splits = table.newScan().plan().splits();
+        int[] partitions =
+                splits.stream()
+                        .map(split -> ((DataSplit) split).partition().getInt(0))
+                        .mapToInt(Integer::intValue)
+                        .toArray();
+        assertThat(partitions).containsExactly(1, 2, 3);
     }
 
     @Test
