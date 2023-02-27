@@ -27,8 +27,10 @@ import org.apache.flink.table.store.format.parquet.ParquetSchemaConverter;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.LocalZonedTimestampType;
 import org.apache.flink.table.store.types.MapType;
+import org.apache.flink.table.store.types.MultisetType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.TimestampType;
 import org.apache.flink.table.store.utils.Preconditions;
@@ -120,6 +122,10 @@ public class ParquetRowDataWriter {
                     && annotation instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
                 return new MapWriter(
                         ((MapType) t).getKeyType(), ((MapType) t).getValueType(), groupType);
+            } else if (t instanceof MultisetType
+                    && annotation instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
+                return new MapWriter(
+                        ((MultisetType) t).getElementType(), new IntType(false), groupType);
             } else if (t instanceof RowType && type instanceof GroupType) {
                 return new RowWriter((RowType) t, groupType);
             } else {
