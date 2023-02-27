@@ -31,6 +31,7 @@ import org.apache.flink.table.store.connector.FlinkRowData;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.reader.RecordReader.RecordIterator;
+import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 
 import javax.annotation.Nullable;
@@ -52,8 +53,9 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
 
     private final Pool<FileStoreRecordIterator> pool;
 
-    @Nullable private RecordReader<InternalRow> currentReader;
+    @Nullable private LazyRecordReader currentReader;
     @Nullable private String currentSplitId;
+    private long totalNumRead;
     private long currentNumRead;
     private RecordIterator<InternalRow> currentFirstBatch;
 
@@ -80,7 +82,7 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
             nextBatch = currentFirstBatch;
             currentFirstBatch = null;
         } else {
-            nextBatch = reachLimit() ? null : currentReader.readBatch();
+            nextBatch = reachLimit() ? null : currentReader.recordReader().readBatch();
         }
         if (nextBatch == null) {
             pool.recycler().recycle(iterator);
@@ -90,7 +92,7 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
     }
 
     private boolean reachLimit() {
-        return limit != null && currentNumRead >= limit;
+        return limit != null && totalNumRead >= limit;
     }
 
     private FileStoreRecordIterator pool() throws IOException {
@@ -120,7 +122,9 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
     @Override
     public void close() throws Exception {
         if (currentReader != null) {
-            currentReader.close();
+            if (currentReader.lazyRecordReader != null) {
+                currentReader.lazyRecordReader.close();
+            }
         }
     }
 
@@ -135,8 +139,9 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
         }
 
         currentSplitId = nextSplit.splitId();
-        currentReader = tableRead.createReader(nextSplit.split());
+        currentReader = new LazyRecordReader(nextSplit.split());
         currentNumRead = nextSplit.recordsToSkip();
+        totalNumRead += currentNumRead;
         if (currentNumRead > 0) {
             seek(currentNumRead);
         }
@@ -144,7 +149,7 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
 
     private void seek(long toSkip) throws IOException {
         while (true) {
-            RecordIterator<InternalRow> nextBatch = currentReader.readBatch();
+            RecordIterator<InternalRow> nextBatch = currentReader.recordReader().readBatch();
             if (nextBatch == null) {
                 throw new RuntimeException(
                         String.format(
@@ -163,7 +168,9 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
 
     private RecordsWithSplitIds<T> finishSplit() throws IOException {
         if (currentReader != null) {
-            currentReader.close();
+            if (currentReader.lazyRecordReader != null) {
+                currentReader.lazyRecordReader.close();
+            }
             currentReader = null;
         }
 
@@ -204,6 +211,7 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
 
             recordAndPosition.setNext(new FlinkRowData(row));
             currentNumRead++;
+            totalNumRead++;
             return recordAndPosition;
         }
 
@@ -211,6 +219,25 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
         public void releaseBatch() {
             this.iterator.releaseBatch();
             pool.recycler().recycle(this);
+        }
+    }
+
+    /** Lazy to create {@link RecordReader} to improve performance for limit. */
+    private class LazyRecordReader {
+
+        private final Split split;
+
+        private RecordReader<InternalRow> lazyRecordReader;
+
+        private LazyRecordReader(Split split) {
+            this.split = split;
+        }
+
+        public RecordReader<InternalRow> recordReader() throws IOException {
+            if (lazyRecordReader == null) {
+                lazyRecordReader = tableRead.createReader(split);
+            }
+            return lazyRecordReader;
         }
     }
 }
