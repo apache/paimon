@@ -766,7 +766,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 3, 3));
         assertThatThrownBy(() -> write.prepareCommit(true, 0))
                 .hasMessageContaining(
-                        "Aggregate function 'max' dose not support retraction,"
+                        "Aggregate function 'max' does not support retraction,"
                                 + " If you allow this function to ignore retraction messages,"
                                 + " you can configure 'fields.${field_name}.ignore-retract'='true'");
     }
