@@ -179,7 +179,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 .isEqualTo(
                         "[+I[0, [{\"id\":0,\"name\":\"user_id\",\"type\":\"BIGINT\"},{\"id\":1,\"name\":\"item_id\",\"type\":\"BIGINT\"},"
                                 + "{\"id\":2,\"name\":\"behavior\",\"type\":\"STRING\"},{\"id\":3,\"name\":\"dt\",\"type\":\"STRING\"},"
-                                + "{\"id\":4,\"name\":\"hh\",\"type\":\"STRING\"}], [\"dt\"], [], {\"partition\":\"dt\"}, ]]");
+                                + "{\"id\":4,\"name\":\"hh\",\"type\":\"STRING\"}], [\"dt\"], [], {}, ]]");
         List<Row> dataPartition = sql("SELECT * FROM t1_p");
         assertThat(dataPartition.toString()).isEqualTo("[+I[1, 2, a, 2023-02-19, 12]]");
 
@@ -227,6 +227,68 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(resultAll.toString()).contains("PARTITIONED BY (`dt`)");
         List<Row> dataAll = sql("SELECT * FROM t_all_as");
         assertThat(dataAll.toString()).isEqualTo("[+I[1, 2, login, 2020-01-02, 09]]");
+
+        // primary key do not exist.
+        sql(
+                "CREATE TABLE t_pk_not_exist (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ")");
+
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CREATE TABLE t_pk_not_exist_as WITH ('primary-key' = 'aaa') AS SELECT * FROM t_pk_not_exist"))
+                .hasRootCauseMessage("Primary key column '[aaa]' is not defined in the schema.");
+
+        // primary key in option and DDL.
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CREATE TABLE t_pk_ddl_option ("
+                                                + "user_id BIGINT,"
+                                                + "item_id BIGINT,"
+                                                + "behavior STRING,"
+                                                + "dt STRING,"
+                                                + "hh STRING,"
+                                                + "PRIMARY KEY (dt, hh, user_id) NOT ENFORCED"
+                                                + ") WITH ('primary-key' = 'dt')"))
+                .hasRootCauseMessage(
+                        "Cannot define primary key on DDL and table options at the same time.");
+
+        // partition do not exist.
+        sql(
+                "CREATE TABLE t_partition_not_exist (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING\n"
+                        + ") PARTITIONED BY (dt, hh) ");
+
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CREATE TABLE t_partition_not_exist_as WITH ('partition' = 'aaa') AS SELECT * FROM t_partition_not_exist"))
+                .hasRootCauseMessage("Partition column '[aaa]' is not defined in the schema.");
+
+        // partition in option and DDL.
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CREATE TABLE t_partition_ddl_option ("
+                                                + "user_id BIGINT,"
+                                                + "item_id BIGINT,"
+                                                + "behavior STRING,"
+                                                + "dt STRING,"
+                                                + "hh STRING"
+                                                + ") PARTITIONED BY (dt, hh)  WITH ('partition' = 'dt')"))
+                .hasRootCauseMessage(
+                        "Cannot define partition on DDL and table options at the same time.");
     }
 
     @Test

@@ -139,6 +139,7 @@ public class SchemaManager implements Serializable {
                                     "Primary key column '%s' is not defined in the schema.",
                                     primaryKeys));
                 }
+                options.remove(CoreOptions.PRIMARY_KEY.key());
             }
 
             if (options.containsKey(CoreOptions.PARTITION.key())) {
@@ -155,6 +156,7 @@ public class SchemaManager implements Serializable {
                                     "Partition column '%s' is not defined in the schema.",
                                     partitionKeys));
                 }
+                options.remove(CoreOptions.PARTITION.key());
             }
 
             TableSchema newSchema =
