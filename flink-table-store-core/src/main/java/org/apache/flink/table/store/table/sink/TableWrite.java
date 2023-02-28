@@ -40,7 +40,7 @@ public interface TableWrite extends AutoCloseable {
     /** Calculate which partition {@code row} belongs to. */
     BinaryRow getPartition(InternalRow row);
 
-    /** Compute bucket by an input row. */
+    /** Calculate which bucket {@code row} belongs to. */
     int getBucket(InternalRow row);
 
     /** Write a row to the writer. */
