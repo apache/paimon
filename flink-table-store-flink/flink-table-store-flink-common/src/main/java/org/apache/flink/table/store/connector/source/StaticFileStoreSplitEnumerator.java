@@ -49,21 +49,19 @@ public class StaticFileStoreSplitEnumerator
             Collection<FileStoreSourceSplit> splits) {
         this.context = context;
         this.snapshot = snapshot;
-        this.pendingSplitAssignment = new HashMap<>();
-        assignSplits(pendingSplitAssignment, splits, context.currentParallelism());
+        this.pendingSplitAssignment = createSplitAssignment(splits, context.currentParallelism());
     }
 
-    @VisibleForTesting
-    static void assignSplits(
-            Map<Integer, List<FileStoreSourceSplit>> assignment,
-            Collection<FileStoreSourceSplit> splits,
-            int numReaders) {
+    private static Map<Integer, List<FileStoreSourceSplit>> createSplitAssignment(
+            Collection<FileStoreSourceSplit> splits, int numReaders) {
+        Map<Integer, List<FileStoreSourceSplit>> assignment = new HashMap<>();
         int i = 0;
         for (FileStoreSourceSplit split : splits) {
             int task = i % numReaders;
             assignment.computeIfAbsent(task, k -> new ArrayList<>()).add(split);
             i++;
         }
+        return assignment;
     }
 
     @Override
@@ -96,7 +94,9 @@ public class StaticFileStoreSplitEnumerator
 
     @Override
     public void addSplitsBack(List<FileStoreSourceSplit> backSplits, int subtaskId) {
-        assignSplits(pendingSplitAssignment, backSplits, context.currentParallelism());
+        pendingSplitAssignment
+                .computeIfAbsent(subtaskId, k -> new ArrayList<>())
+                .addAll(backSplits);
     }
 
     @Override
