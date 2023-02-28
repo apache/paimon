@@ -20,6 +20,7 @@ package org.apache.flink.table.store.spark;
 
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.source.ReadBuilder;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.TypeUtils;
@@ -120,16 +121,20 @@ public class SparkDataSourceReader
                 projectedFields == null ? rowType : TypeUtils.project(rowType, projectedFields));
     }
 
+    private ReadBuilder readBuilder() {
+        return table.newReadBuilder().withFilter(predicates).withProjection(projectedFields);
+    }
+
     @Override
     public List<InputPartition<InternalRow>> planInputPartitions() {
         return splits().stream()
-                .map(split -> new SparkInputPartition(table, projectedFields, predicates, split))
+                .map(split -> new SparkInputPartition(readBuilder(), split))
                 .collect(Collectors.toList());
     }
 
     protected List<Split> splits() {
         if (splits == null) {
-            this.splits = table.newScan().withFilter(predicates).plan().splits();
+            this.splits = readBuilder().newScan().plan().splits();
         }
         return splits;
     }
