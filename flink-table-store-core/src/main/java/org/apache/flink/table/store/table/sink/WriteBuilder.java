@@ -20,6 +20,7 @@ package org.apache.flink.table.store.table.sink;
 
 import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.types.RowType;
 
 import javax.annotation.Nullable;
 
@@ -35,6 +36,12 @@ import java.util.Map;
  */
 @Experimental
 public interface WriteBuilder extends Serializable {
+
+    /** A name to identify this table. */
+    String tableName();
+
+    /** Returns the row type of this table. */
+    RowType rowType();
 
     /** Get commit user, set by {@link #withCommitUser}. */
     String commitUser();

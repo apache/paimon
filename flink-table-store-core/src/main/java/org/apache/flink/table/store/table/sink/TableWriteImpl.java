@@ -31,7 +31,7 @@ import java.util.List;
  *
  * @param <T> type of record to write into {@link org.apache.flink.table.store.file.FileStore}.
  */
-public class TableWriteImpl<T> implements TableWrite {
+public class TableWriteImpl<T> implements InnerTableWrite {
 
     private final FileStoreWrite<T> write;
     private final SinkRecordConverter recordConverter;
@@ -46,8 +46,7 @@ public class TableWriteImpl<T> implements TableWrite {
         this.recordExtractor = recordExtractor;
     }
 
-    /** @deprecated lock should pass from {@link WriteBuilder}. */
-    @Deprecated
+    @Override
     public TableWriteImpl<T> withOverwrite(boolean overwrite) {
         write.withOverwrite(overwrite);
         return this;

@@ -23,12 +23,10 @@ import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.utils.Preconditions;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.Iterator;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
@@ -37,9 +35,9 @@ import java.util.function.BinaryOperator;
 import static org.apache.flink.table.store.file.utils.FileUtils.listVersionedFiles;
 
 /** Manager for {@link Snapshot}, providing utility methods related to paths and snapshot hints. */
-public class SnapshotManager {
+public class SnapshotManager implements Serializable {
 
-    private static final Logger LOG = LoggerFactory.getLogger(SnapshotManager.class);
+    private static final long serialVersionUID = 1L;
 
     private static final String SNAPSHOT_PREFIX = "snapshot-";
     public static final String EARLIEST = "EARLIEST";

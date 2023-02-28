@@ -24,8 +24,7 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.source.ReadBuilder;
 import org.apache.flink.table.store.table.source.TableRead;
 
 import javax.annotation.Nullable;
@@ -36,36 +35,18 @@ public abstract class FlinkSource
 
     private static final long serialVersionUID = 1L;
 
-    protected final Table table;
-
-    @Nullable protected final int[][] projectedFields;
-
-    @Nullable protected final Predicate predicate;
+    protected final ReadBuilder readBuilder;
 
     @Nullable protected final Long limit;
 
-    public FlinkSource(
-            Table table,
-            @Nullable int[][] projectedFields,
-            @Nullable Predicate predicate,
-            @Nullable Long limit) {
-        this.table = table;
-        this.projectedFields = projectedFields;
-        this.predicate = predicate;
+    public FlinkSource(ReadBuilder readBuilder, @Nullable Long limit) {
+        this.readBuilder = readBuilder;
         this.limit = limit;
     }
 
     @Override
     public SourceReader<RowData, FileStoreSourceSplit> createReader(SourceReaderContext context) {
-        TableRead read = table.newRead();
-        if (projectedFields != null) {
-            read.withProjection(projectedFields);
-        }
-        if (predicate != null) {
-            read.withFilter(predicate);
-        }
-
-        return createSourceReader(context, read, limit);
+        return createSourceReader(context, readBuilder.newRead(), limit);
     }
 
     public FileStoreSourceReader<?> createSourceReader(

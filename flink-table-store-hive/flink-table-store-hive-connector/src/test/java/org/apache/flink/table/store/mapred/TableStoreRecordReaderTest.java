@@ -188,7 +188,7 @@ public class TableStoreRecordReaderTest {
         for (DataSplit split : table.newScan().plan().splits) {
             if (split.partition().equals(partition) && split.bucket() == bucket) {
                 return new TableStoreRecordReader(
-                        table.newRead(),
+                        table.newReadBuilder(),
                         new TableStoreInputSplit(tempDir.toString(), split),
                         table.schema().fieldNames(),
                         selectedColumns);

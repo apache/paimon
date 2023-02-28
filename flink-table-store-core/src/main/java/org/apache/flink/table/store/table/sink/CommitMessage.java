@@ -31,9 +31,9 @@ import java.io.Serializable;
 @Experimental
 public interface CommitMessage extends Serializable {
 
+    /** Partition of this commit message. */
     BinaryRow partition();
 
+    /** Bucket of this commit message. */
     int bucket();
-
-    boolean isEmpty();
 }

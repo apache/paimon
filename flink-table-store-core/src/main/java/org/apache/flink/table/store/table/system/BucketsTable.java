@@ -36,8 +36,8 @@ import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.Split;
-import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.IntType;
@@ -113,7 +113,7 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public TableRead newRead() {
+    public InnerTableRead newRead() {
         return new BucketsRead();
     }
 
@@ -127,18 +127,18 @@ public class BucketsTable implements DataTable, ReadonlyTable {
         return wrapped.fileIO();
     }
 
-    private class BucketsRead implements TableRead {
+    private class BucketsRead implements InnerTableRead {
 
         private final DataFileMetaSerializer dataFileMetaSerializer = new DataFileMetaSerializer();
 
         @Override
-        public TableRead withFilter(Predicate predicate) {
+        public InnerTableRead withFilter(Predicate predicate) {
             // filter is done by scan
             return this;
         }
 
         @Override
-        public TableRead withProjection(int[][] projection) {
+        public InnerTableRead withProjection(int[][] projection) {
             throw new UnsupportedOperationException("BucketsRead does not support projection");
         }
 

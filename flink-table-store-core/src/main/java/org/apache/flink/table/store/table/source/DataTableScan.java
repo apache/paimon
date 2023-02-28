@@ -27,7 +27,7 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 /** A {@link TableScan} for reading data. */
-public interface DataTableScan extends TableScan {
+public interface DataTableScan extends InnerTableScan {
 
     DataTableScan withKind(ScanKind kind);
 

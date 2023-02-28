@@ -36,7 +36,7 @@ import java.util.Set;
  * An abstraction layer above {@link FileStoreCommit} and {@link FileStoreExpire} to provide
  * snapshot commit and expiration.
  */
-public class TableCommitImpl implements TableCommit {
+public class TableCommitImpl implements InnerTableCommit {
 
     private final FileStoreCommit commit;
     @Nullable private final FileStoreExpire expire;
@@ -54,15 +54,13 @@ public class TableCommitImpl implements TableCommit {
         this.partitionExpire = partitionExpire;
     }
 
-    /** @deprecated lock should pass from {@link WriteBuilder}. */
-    @Deprecated
+    @Override
     public TableCommitImpl withOverwrite(@Nullable List<Map<String, String>> overwritePartitions) {
         this.overwritePartitions = overwritePartitions;
         return this;
     }
 
-    /** @deprecated lock should pass from table. */
-    @Deprecated
+    @Override
     public TableCommitImpl withLock(Lock lock) {
         commit.withLock(lock);
 

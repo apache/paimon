@@ -23,6 +23,7 @@ import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.flink.table.store.table.sink.InnerTableCommit;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.WriteBuilder;
@@ -48,7 +49,9 @@ public class TableUtils {
         List<Split> splits = readBuilder.newScan().plan().splits();
         try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(splits);
                 TableWrite write = writeBuilder.newWrite();
-                TableCommit commit = writeBuilder.newCommit().withLock(lockFactory.create())) {
+                TableCommit commit =
+                        ((InnerTableCommit) writeBuilder.newCommit())
+                                .withLock(lockFactory.create())) {
             CloseableIterator<InternalRow> iterator = reader.toCloseableIterator();
             PredicateFilter filter = new PredicateFilter(table.rowType(), filters);
             while (iterator.hasNext()) {

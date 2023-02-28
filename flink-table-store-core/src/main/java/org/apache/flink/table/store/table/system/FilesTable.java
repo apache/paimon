@@ -38,9 +38,9 @@ import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.InnerTableRead;
+import org.apache.flink.table.store.table.source.InnerTableScan;
 import org.apache.flink.table.store.table.source.Split;
-import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.table.source.snapshot.StaticDataFileSnapshotEnumerator;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
@@ -117,12 +117,12 @@ public class FilesTable implements ReadonlyTable {
     }
 
     @Override
-    public TableScan newScan() {
+    public InnerTableScan newScan() {
         return new FilesScan(storeTable);
     }
 
     @Override
-    public TableRead newRead() {
+    public InnerTableRead newRead() {
         return new FilesRead(new SchemaManager(storeTable.fileIO(), storeTable.location()));
     }
 
@@ -131,12 +131,18 @@ public class FilesTable implements ReadonlyTable {
         return new FilesTable(storeTable.copy(dynamicOptions));
     }
 
-    private static class FilesScan implements TableScan {
+    private static class FilesScan implements InnerTableScan {
 
         private final FileStoreTable storeTable;
 
         private FilesScan(FileStoreTable storeTable) {
             this.storeTable = storeTable;
+        }
+
+        @Override
+        public InnerTableScan withFilter(Predicate predicate) {
+            // TODO
+            return this;
         }
 
         @Override
@@ -188,7 +194,7 @@ public class FilesTable implements ReadonlyTable {
         }
     }
 
-    private static class FilesRead implements TableRead {
+    private static class FilesRead implements InnerTableRead {
 
         private final SchemaManager schemaManager;
 
@@ -199,13 +205,13 @@ public class FilesTable implements ReadonlyTable {
         }
 
         @Override
-        public TableRead withFilter(Predicate predicate) {
+        public InnerTableRead withFilter(Predicate predicate) {
             // TODO
             return this;
         }
 
         @Override
-        public TableRead withProjection(int[][] projection) {
+        public InnerTableRead withProjection(int[][] projection) {
             this.projection = projection;
             return this;
         }

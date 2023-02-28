@@ -32,9 +32,9 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.source.InnerTableRead;
+import org.apache.flink.table.store.table.source.InnerTableScan;
 import org.apache.flink.table.store.table.source.Split;
-import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowType;
@@ -96,12 +96,12 @@ public class SnapshotsTable implements ReadonlyTable {
     }
 
     @Override
-    public TableScan newScan() {
+    public InnerTableScan newScan() {
         return new SnapshotsScan();
     }
 
     @Override
-    public TableRead newRead() {
+    public InnerTableRead newRead() {
         return new SnapshotsRead(fileIO);
     }
 
@@ -110,7 +110,13 @@ public class SnapshotsTable implements ReadonlyTable {
         return new SnapshotsTable(fileIO, location);
     }
 
-    private class SnapshotsScan implements TableScan {
+    private class SnapshotsScan implements InnerTableScan {
+
+        @Override
+        public InnerTableScan withFilter(Predicate predicate) {
+            // TODO
+            return this;
+        }
 
         @Override
         public Plan plan() {
@@ -157,7 +163,7 @@ public class SnapshotsTable implements ReadonlyTable {
         }
     }
 
-    private static class SnapshotsRead implements TableRead {
+    private static class SnapshotsRead implements InnerTableRead {
 
         private final FileIO fileIO;
         private int[][] projection;
@@ -167,13 +173,13 @@ public class SnapshotsTable implements ReadonlyTable {
         }
 
         @Override
-        public TableRead withFilter(Predicate predicate) {
+        public InnerTableRead withFilter(Predicate predicate) {
             // TODO
             return this;
         }
 
         @Override
-        public TableRead withProjection(int[][] projection) {
+        public InnerTableRead withProjection(int[][] projection) {
             this.projection = projection;
             return this;
         }

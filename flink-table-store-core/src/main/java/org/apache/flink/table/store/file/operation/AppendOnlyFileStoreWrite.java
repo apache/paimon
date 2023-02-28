@@ -28,7 +28,6 @@ import org.apache.flink.table.store.file.compact.NoopCompactManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.io.RowDataRollingFileWriter;
-import org.apache.flink.table.store.file.memory.MemorySegmentPool;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -167,11 +166,5 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
             rewriter.close();
             return rewriter.result();
         };
-    }
-
-    @Override
-    public FileStoreWrite<InternalRow> withMemoryPool(MemorySegmentPool memoryPool) {
-        // this does not need memory pool
-        return this;
     }
 }

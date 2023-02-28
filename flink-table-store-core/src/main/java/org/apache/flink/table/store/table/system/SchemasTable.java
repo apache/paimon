@@ -32,9 +32,10 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.source.InnerTableRead;
+import org.apache.flink.table.store.table.source.InnerTableScan;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowType;
@@ -89,12 +90,12 @@ public class SchemasTable implements ReadonlyTable {
     }
 
     @Override
-    public TableScan newScan() {
+    public InnerTableScan newScan() {
         return new SchemasScan();
     }
 
     @Override
-    public TableRead newRead() {
+    public InnerTableRead newRead() {
         return new SchemasRead(fileIO);
     }
 
@@ -103,7 +104,12 @@ public class SchemasTable implements ReadonlyTable {
         return new SchemasTable(fileIO, location);
     }
 
-    private class SchemasScan implements TableScan {
+    private class SchemasScan implements InnerTableScan {
+
+        @Override
+        public InnerTableScan withFilter(Predicate predicate) {
+            return this;
+        }
 
         @Override
         public Plan plan() {
@@ -148,7 +154,7 @@ public class SchemasTable implements ReadonlyTable {
     }
 
     /** {@link TableRead} implementation for {@link SchemasTable}. */
-    private static class SchemasRead implements TableRead {
+    private static class SchemasRead implements InnerTableRead {
 
         private final FileIO fileIO;
         private int[][] projection;
@@ -158,12 +164,12 @@ public class SchemasTable implements ReadonlyTable {
         }
 
         @Override
-        public TableRead withFilter(Predicate predicate) {
+        public InnerTableRead withFilter(Predicate predicate) {
             return this;
         }
 
         @Override
-        public TableRead withProjection(int[][] projection) {
+        public InnerTableRead withProjection(int[][] projection) {
             this.projection = projection;
             return this;
         }

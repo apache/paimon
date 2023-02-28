@@ -18,13 +18,9 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.reader.RecordReaderIterator;
-import org.apache.flink.table.store.table.Table;
-import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.TypeUtils;
+import org.apache.flink.table.store.table.source.ReadBuilder;
 
 import org.apache.spark.sql.connector.read.InputPartition;
 import org.apache.spark.sql.connector.read.PartitionReader;
@@ -32,44 +28,29 @@ import org.apache.spark.sql.connector.read.PartitionReaderFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.List;
-
-import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
 
 /** A Spark {@link PartitionReaderFactory} for table store. */
 public class SparkReaderFactory implements PartitionReaderFactory {
 
     private static final long serialVersionUID = 1L;
 
-    private final Table table;
-    private final int[] projectedFields;
-    private final List<Predicate> predicates;
+    private final ReadBuilder readBuilder;
 
-    public SparkReaderFactory(Table table, int[] projectedFields, List<Predicate> predicates) {
-        this.table = table;
-        this.projectedFields = projectedFields;
-        this.predicates = predicates;
-    }
-
-    private RowType readRowType() {
-        return TypeUtils.project(table.rowType(), projectedFields);
+    public SparkReaderFactory(ReadBuilder readBuilder) {
+        this.readBuilder = readBuilder;
     }
 
     @Override
     public PartitionReader<org.apache.spark.sql.catalyst.InternalRow> createReader(
             InputPartition partition) {
         RecordReader<InternalRow> reader;
-        TableRead read = table.newRead().withProjection(projectedFields);
-        if (predicates.size() > 0) {
-            read.withFilter(and(predicates));
-        }
         try {
-            reader = read.createReader(((SparkInputPartition) partition).split());
+            reader = readBuilder.newRead().createReader(((SparkInputPartition) partition).split());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
         RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader);
-        SparkInternalRow row = new SparkInternalRow(readRowType());
+        SparkInternalRow row = new SparkInternalRow(readBuilder.readType());
         return new PartitionReader<org.apache.spark.sql.catalyst.InternalRow>() {
 
             @Override

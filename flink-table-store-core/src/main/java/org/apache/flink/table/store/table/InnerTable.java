@@ -21,31 +21,30 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.table.store.table.sink.InnerTableCommit;
 import org.apache.flink.table.store.table.sink.InnerTableWrite;
 import org.apache.flink.table.store.table.sink.WriteBuilder;
+import org.apache.flink.table.store.table.sink.WriteBuilderImpl;
+import org.apache.flink.table.store.table.source.InnerTableRead;
+import org.apache.flink.table.store.table.source.InnerTableScan;
+import org.apache.flink.table.store.table.source.ReadBuilder;
+import org.apache.flink.table.store.table.source.ReadBuilderImpl;
 
-/** Readonly table which only provide implementation for scan and read. */
-public interface ReadonlyTable extends InnerTable {
+/** Inner table for implementation, provide newScan, newRead ... directly. */
+public interface InnerTable extends Table {
+
+    InnerTableScan newScan();
+
+    InnerTableRead newRead();
+
+    InnerTableWrite newWrite(String commitUser);
+
+    InnerTableCommit newCommit(String commitUser);
+
+    @Override
+    default ReadBuilder newReadBuilder() {
+        return new ReadBuilderImpl(this);
+    }
 
     @Override
     default WriteBuilder newWriteBuilder() {
-        throw new UnsupportedOperationException(
-                String.format(
-                        "Readonly Table %s does not support newWriteBuilder.",
-                        this.getClass().getSimpleName()));
-    }
-
-    @Override
-    default InnerTableWrite newWrite(String commitUser) {
-        throw new UnsupportedOperationException(
-                String.format(
-                        "Readonly Table %s does not support newWrite.",
-                        this.getClass().getSimpleName()));
-    }
-
-    @Override
-    default InnerTableCommit newCommit(String commitUser) {
-        throw new UnsupportedOperationException(
-                String.format(
-                        "Readonly Table %s does not support newCommit.",
-                        this.getClass().getSimpleName()));
+        return new WriteBuilderImpl(this);
     }
 }

@@ -62,7 +62,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
             @Nullable Predicate predicate,
             @Nullable Long limit,
             ContinuousDataFileSnapshotEnumerator.Factory enumeratorFactory) {
-        super(table, projectedFields, predicate, limit);
+        super(table.newReadBuilder().withProjection(projectedFields).withFilter(predicate), limit);
         this.table = table;
         this.enumeratorFactory = enumeratorFactory;
     }
@@ -76,11 +76,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
     public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> restoreEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
-        DataTableScan scan = table.newScan();
-        if (predicate != null) {
-            scan.withFilter(predicate);
-        }
-
+        DataTableScan scan = (DataTableScan) readBuilder.newScan();
         Long nextSnapshotId = null;
         Collection<FileStoreSourceSplit> splits = new ArrayList<>();
         if (checkpoint != null) {

@@ -74,7 +74,6 @@ public class CommitMessageImpl implements CommitMessage {
         return compactIncrement;
     }
 
-    @Override
     public boolean isEmpty() {
         return newFilesIncrement.isEmpty() && compactIncrement.isEmpty();
     }

@@ -179,7 +179,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
                 RecordWriter.CommitIncrement increment =
                         writerContainer.writer.prepareCommit(waitCompaction);
-                CommitMessage committable =
+                CommitMessageImpl committable =
                         new CommitMessageImpl(
                                 partition,
                                 bucket,

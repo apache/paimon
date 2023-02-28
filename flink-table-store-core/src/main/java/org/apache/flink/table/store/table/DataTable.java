@@ -25,7 +25,7 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.table.source.DataTableScan;
 
 /** A {@link Table} for data. */
-public interface DataTable extends Table {
+public interface DataTable extends InnerTable {
 
     @Override
     DataTableScan newScan();

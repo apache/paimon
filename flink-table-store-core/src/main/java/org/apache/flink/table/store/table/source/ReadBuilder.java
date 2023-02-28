@@ -22,6 +22,7 @@ import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
+import org.apache.flink.table.store.types.RowType;
 
 import java.io.Serializable;
 import java.util.Arrays;
@@ -58,6 +59,12 @@ import java.util.List;
  */
 @Experimental
 public interface ReadBuilder extends Serializable {
+
+    /** A name to identify the table. */
+    String tableName();
+
+    /** Returns read row type, projected by {@link #withProjection}. */
+    RowType readType();
 
     /**
      * Push filters, the relationship between predicates is 'AND'. It will filter the data as much

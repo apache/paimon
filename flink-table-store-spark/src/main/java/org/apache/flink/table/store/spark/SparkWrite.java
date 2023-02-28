@@ -23,7 +23,7 @@ import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.table.sink.WriteBuilder;
 
 import org.apache.spark.api.java.function.Function;
 import org.apache.spark.api.java.function.Function2;
@@ -55,14 +55,15 @@ public class SparkWrite implements V1Write {
             }
 
             long identifier = 0;
+            WriteBuilder writeBuilder = table.newWriteBuilder().withCommitUser(queryId);
             List<CommitMessage> committables =
                     data.toJavaRDD()
-                            .groupBy(new ComputeBucket(table))
-                            .mapValues(new WriteRecords(table, queryId, identifier))
+                            .groupBy(new ComputeBucket(writeBuilder))
+                            .mapValues(new WriteRecords(writeBuilder, identifier))
                             .values()
                             .reduce(new ListConcat<>());
             try (TableCommit tableCommit =
-                    table.newCommit(queryId).withLock(lockFactory.create())) {
+                    writeBuilder.newCommit().withLock(lockFactory.create())) {
                 tableCommit.commit(identifier, committables);
             } catch (Exception e) {
                 throw new RuntimeException(e);
@@ -72,48 +73,42 @@ public class SparkWrite implements V1Write {
 
     private static class ComputeBucket implements Function<Row, Integer> {
 
-        private final Table table;
-        private final RowType type;
+        private final WriteBuilder writeBuilder;
 
         private transient TableWrite lazyWriter;
 
-        private ComputeBucket(Table table) {
-            this.table = table;
-            this.type = table.rowType();
+        private ComputeBucket(WriteBuilder writeBuilder) {
+            this.writeBuilder = writeBuilder;
         }
 
         private TableWrite computer() {
             if (lazyWriter == null) {
-                lazyWriter = table.newWrite();
+                lazyWriter = writeBuilder.newWrite();
             }
             return lazyWriter;
         }
 
         @Override
         public Integer call(Row row) {
-            return computer().getBucket(new SparkRow(type, row));
+            return computer().getBucket(new SparkRow(writeBuilder.rowType(), row));
         }
     }
 
     private static class WriteRecords implements Function<Iterable<Row>, List<CommitMessage>> {
 
-        private final Table table;
-        private final RowType type;
-        private final String queryId;
+        private final WriteBuilder writeBuilder;
         private final long commitIdentifier;
 
-        private WriteRecords(Table table, String queryId, long commitIdentifier) {
-            this.table = table;
-            this.type = table.rowType();
-            this.queryId = queryId;
+        private WriteRecords(WriteBuilder writeBuilder, long commitIdentifier) {
+            this.writeBuilder = writeBuilder;
             this.commitIdentifier = commitIdentifier;
         }
 
         @Override
         public List<CommitMessage> call(Iterable<Row> iterables) throws Exception {
-            try (TableWrite write = table.newWrite(queryId)) {
+            try (TableWrite write = writeBuilder.newWrite()) {
                 for (Row row : iterables) {
-                    write.write(new SparkRow(type, row));
+                    write.write(new SparkRow(writeBuilder.rowType(), row));
                 }
                 return write.prepareCommit(true, commitIdentifier);
             }

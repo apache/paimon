@@ -141,12 +141,12 @@ public class TestChangelogDataReadWrite {
                         EXTRACTOR);
         return new KeyValueTableRead(read) {
             @Override
-            public TableRead withFilter(Predicate predicate) {
+            public KeyValueTableRead withFilter(Predicate predicate) {
                 throw new UnsupportedOperationException();
             }
 
             @Override
-            public TableRead withProjection(int[][] projection) {
+            public KeyValueTableRead withProjection(int[][] projection) {
                 throw new UnsupportedOperationException();
             }
 

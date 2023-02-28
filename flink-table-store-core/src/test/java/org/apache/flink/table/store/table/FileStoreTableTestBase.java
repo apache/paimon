@@ -38,6 +38,7 @@ import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.reader.RecordReaderIterator;
 import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.CommitMessageImpl;
+import org.apache.flink.table.store.table.sink.InnerTableCommit;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.source.DataSplit;
@@ -181,7 +182,7 @@ public abstract class FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
 
         TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        InnerTableCommit commit = table.newCommit(commitUser);
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
         commit.commit(0, write.prepareCommit(true, 0));

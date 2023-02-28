@@ -20,6 +20,7 @@ package org.apache.flink.table.store.table.sink;
 
 import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
+import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.Table;
 
 import java.util.List;
@@ -58,6 +59,10 @@ public interface TableCommit extends AutoCloseable {
 
     /** Filter committed commits. This method is used for failover cases. */
     Set<Long> filterCommitted(Set<Long> commitIdentifiers);
+
+    /** @deprecated lock should pass from table. */
+    @Deprecated
+    TableCommit withLock(Lock lock);
 
     /**
      * Create a new commit. One commit may generate two snapshots, one for adding new files and the

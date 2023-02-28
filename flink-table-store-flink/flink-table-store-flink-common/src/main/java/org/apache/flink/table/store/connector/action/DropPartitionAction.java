@@ -29,7 +29,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 
 import static org.apache.flink.table.store.connector.action.Action.getPartitions;
 import static org.apache.flink.table.store.connector.action.Action.getTablePath;
@@ -48,7 +47,7 @@ public class DropPartitionAction extends ActionBase {
             List<Map<String, String>> partitions) {
         super(warehouse, databaseName, tableName);
 
-        this.commit = table.newCommit(UUID.randomUUID().toString()).withOverwrite(partitions);
+        this.commit = table.newWriteBuilder().withOverwrite(partitions).newCommit();
     }
 
     public static Optional<Action> create(String[] args) {
