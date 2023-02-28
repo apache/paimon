@@ -34,7 +34,7 @@ import java.util.List;
 @Experimental
 public interface TableWrite extends AutoCloseable {
 
-    /** With {@link IOManager}, this is needed if 'write-buffer-spillable' is opened. */
+    /** With {@link IOManager}, this is needed if 'write-buffer-spillable' is set to true. */
     TableWrite withIOManager(IOManager ioManager);
 
     /** Compute partition by an input row. */
