@@ -32,6 +32,37 @@ import java.util.Map;
 /**
  * An interface for building the {@link TableWrite} and {@link TableCommit}.
  *
+ * <p>Example of distributed batch writing:
+ *
+ * <pre>{@code
+ * // 1. Create a WriteBuilder (Serializable)
+ * Table table = catalog.getTable(...);
+ * WriteBuilder builder = table.newWriteBuilder();
+ *
+ * // 2. Write records in distributed tasks
+ * TableWrite write = builder.newWrite();
+ * write.write(...);
+ * write.write(...);
+ * write.write(...);
+ * List<CommitMessage> messages = write.prepareCommit(true, 0);
+ *
+ * // 3. Collect all CommitMessages to a global node
+ *
+ * // 3.1 commit
+ * TableCommit commit = builder.newCommit();
+ * if (commit.filterCommitted(0)) {
+ *     // It has already been committed. In order to avoid
+ *     // repeated committing, return directly.
+ *     return;
+ * }
+ * commit.commit(0, allCommitMessages());
+ *
+ * // 3.2. Expire snapshots and partitions
+ * commit.expireSnapshots();
+ * commit.expirePartitions();
+ *
+ * }</pre>
+ *
  * @since 0.4.0
  */
 @Experimental

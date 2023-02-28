@@ -40,6 +40,8 @@ import org.apache.flink.util.function.SerializableFunction;
 import java.io.Serializable;
 import java.util.UUID;
 
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
+
 /** Abstract sink of table store. */
 public abstract class FlinkSink implements Serializable {
 
@@ -60,7 +62,10 @@ public abstract class FlinkSink implements Serializable {
         if (table.options().changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION
                 && !table.options().writeOnly()) {
             long fullCompactionThresholdMs =
-                    table.options().changelogProducerFullCompactionTriggerInterval().toMillis();
+                    table.options()
+                            .toConfiguration()
+                            .get(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL)
+                            .toMillis();
             return (table, context, ioManager) ->
                     new FullChangelogStoreSinkWrite(
                             table,

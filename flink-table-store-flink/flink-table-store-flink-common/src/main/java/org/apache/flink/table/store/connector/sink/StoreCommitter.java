@@ -73,6 +73,8 @@ public class StoreCommitter implements Committer {
     public void commit(List<ManifestCommittable> committables)
             throws IOException, InterruptedException {
         commit.commit(committables);
+        commit.expireSnapshots();
+        commit.expirePartitions();
     }
 
     @Override

@@ -21,6 +21,7 @@ package org.apache.flink.table.store.spark;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.sink.CommitMessage;
+import org.apache.flink.table.store.table.sink.InnerTableCommit;
 import org.apache.flink.table.store.table.sink.TableCommit;
 import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.WriteBuilder;
@@ -63,8 +64,10 @@ public class SparkWrite implements V1Write {
                             .values()
                             .reduce(new ListConcat<>());
             try (TableCommit tableCommit =
-                    writeBuilder.newCommit().withLock(lockFactory.create())) {
+                    ((InnerTableCommit) writeBuilder.newCommit()).withLock(lockFactory.create())) {
                 tableCommit.commit(identifier, committables);
+                tableCommit.expireSnapshots();
+                tableCommit.expirePartitions();
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }

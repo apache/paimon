@@ -69,7 +69,8 @@ public interface ReadBuilder extends Serializable {
     /**
      * Apply filters to the readers to decrease the number of produced records.
      *
-     * <p>This interface filters records as much as possible, however some produced records may not satisfy all predicates. Users need to recheck all records.
+     * <p>This interface filters records as much as possible, however some produced records may not
+     * satisfy all predicates. Users need to recheck all records.
      */
     default ReadBuilder withFilter(List<Predicate> predicates) {
         if (predicates == null || predicates.isEmpty()) {

@@ -39,6 +39,7 @@ public interface InnerTableCommit extends TableCommit {
 
     InnerTableCommit withOverwrite(@Nullable List<Map<String, String>> overwritePartitions);
 
-    @Override
+    /** @deprecated lock should pass from table. */
+    @Deprecated
     InnerTableCommit withLock(Lock lock);
 }
