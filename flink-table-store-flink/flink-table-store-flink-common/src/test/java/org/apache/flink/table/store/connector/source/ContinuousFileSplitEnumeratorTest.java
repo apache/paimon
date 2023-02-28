@@ -136,7 +136,7 @@ public class ContinuousFileSplitEnumeratorTest {
         assertThat(assignedSplits).hasSameElementsAs(expectedSplits.subList(2, 4));
     }
 
-    private static FileStoreSourceSplit createSnapshotSplit(
+    public static FileStoreSourceSplit createSnapshotSplit(
             int snapshotId, int bucket, List<DataFileMeta> files) {
         return new FileStoreSourceSplit(
                 UUID.randomUUID().toString(),
