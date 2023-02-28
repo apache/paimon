@@ -20,12 +20,14 @@ package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
+import org.apache.flink.api.connector.source.SplitsAssignment;
 import org.apache.flink.table.store.file.Snapshot;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
@@ -39,6 +41,7 @@ public class StaticFileStoreSplitEnumerator
     @Nullable private final Snapshot snapshot;
 
     private final Queue<FileStoreSourceSplit> splits;
+    private final int splitNumber;
 
     public StaticFileStoreSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
@@ -47,6 +50,7 @@ public class StaticFileStoreSplitEnumerator
         this.context = context;
         this.snapshot = snapshot;
         this.splits = new LinkedList<>(splits);
+        this.splitNumber = splits.size();
     }
 
     @Override
@@ -61,12 +65,25 @@ public class StaticFileStoreSplitEnumerator
             return;
         }
 
-        FileStoreSourceSplit split = splits.poll();
-        if (split != null) {
-            context.assignSplit(split, subtask);
+        List<FileStoreSourceSplit> polled = poll(splitNumber / context.currentParallelism() + 1);
+        if (polled.size() > 0) {
+            context.assignSplits(new SplitsAssignment<>(Collections.singletonMap(subtask, polled)));
         } else {
             context.signalNoMoreSplits(subtask);
         }
+    }
+
+    private List<FileStoreSourceSplit> poll(int number) {
+        List<FileStoreSourceSplit> polled = new ArrayList<>();
+        for (int i = 0; i < number; i++) {
+            FileStoreSourceSplit split = splits.poll();
+            if (split != null) {
+                polled.add(split);
+            } else {
+                break;
+            }
+        }
+        return polled;
     }
 
     @Override
