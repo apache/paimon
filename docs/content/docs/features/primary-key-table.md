@@ -1,9 +1,9 @@
 ---
-title: "Table Types"
+title: "Primary Key Table"
 weight: 1
 type: docs
 aliases:
-- /features/table-types.html
+- /features/primary-key-table.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,11 +24,7 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Table Types
-
-Table Store supports various types of tables. Users can specify `write-mode` table property to specify table types when creating tables.
-
-## Changelog Tables with Primary Keys
+# Primary Key Table
 
 Changelog table is the default table type when creating a table. Users can insert, update or delete records in the table.
 
@@ -36,17 +32,17 @@ Primary keys are a set of columns that are unique for each record. Table Store i
 
 By [defining primary keys]({{< ref "docs/how-to/creating-tables#tables-with-primary-keys" >}}) on a changelog table, users can access the following features.
 
-### Merge Engines
+## Merge Engines
 
 When Table Store sink receives two or more records with the same primary keys, it will merge them into one record to keep primary keys unique. By specifying the `merge-engine` table property, users can choose how records are merged together.
 
-#### Deduplicate
+### Deduplicate
 
 `deduplicate` merge engine is the default merge engine. Table Store will only keep the latest record and throw away other records with the same primary keys.
 
 Specifically, if the latest record is a `DELETE` record, all records with the same primary keys will be deleted.
 
-#### Partial Update
+### Partial Update
 
 By specifying `'merge-engine' = 'partial-update'`, users can set columns of a record across multiple updates and finally get a complete record. Specifically, value fields are updated to the latest data one by one under the same primary key, but null values are not overwritten.
 
@@ -58,14 +54,14 @@ For example, let's say Table Store receives three records:
 If the first column is the primary key. The final result will be `<1, 25.2, 10, 'This is a book'>`.
 
 {{< hint info >}}
-For streaming queries, `partial-update` merge engine must be used together with `full-compaction` [changelog producer]({{< ref "docs/features/table-types#changelog-producers" >}}).
+For streaming queries, `partial-update` merge engine must be used together with `full-compaction` [changelog producer]({{< ref "docs/features/primary-key-table#changelog-producers" >}}).
 {{< /hint >}}
 
 {{< hint info >}}
 Partial cannot receive `DELETE` messages because the behavior cannot be defined. You can configure `partial-update.ignore-delete` to ignore `DELETE` messages.
 {{< /hint >}}
 
-#### Aggregation
+### Aggregation
 
 Sometimes users only care about aggregated results. The `aggregation` merge engine aggregates each value field with the latest data one by one under the same primary key according to the aggregate function.
 
@@ -107,10 +103,10 @@ If you allow some functions to ignore retraction messages, you can configure:
 `'fields.${field_name}.ignore-retract'='true'`.
 
 {{< hint info >}}
-For streaming queries, `aggregation` merge engine must be used together with `full-compaction` [changelog producer]({{< ref "docs/features/table-types#changelog-producers" >}}).
+For streaming queries, `aggregation` merge engine must be used together with `full-compaction` [changelog producer]({{< ref "docs/features/primary-key-table#changelog-producers" >}}).
 {{< /hint >}}
 
-### Changelog Producers
+## Changelog Producers
 
 Streaming queries will continuously produce latest changes. These changes can come from the underlying table files or from an [external log system]({{< ref "docs/features/external-log-systems" >}}) like Kafka. Compared to the external log system, changes from table files have lower cost but higher latency (depending on how often snapshots are created).
 
@@ -122,7 +118,7 @@ The `changelog-producer` table property only affects changelog from files. It do
 
 {{< /hint >}}
 
-#### None
+### None
 
 By default, no extra changelog producer will be applied to the writer of table. Table Store source can only see the merged changes across snapshots, like what keys are removed and what are the new values of some keys.
 
@@ -134,7 +130,7 @@ To conclude, `none` changelog producers are best suited for consumers such as a 
 
 {{< img src="/img/changelog-producer-none.png">}}
 
-#### Input
+### Input
 
 By specifying `'changelog-producer' = 'input'`, Table Store writers rely on their inputs as a source of complete changelog. All input records will be saved in separated [changelog files]({{< ref "docs/concepts/file-layouts" >}}) and will be given to the consumers by Table Store sources.
 
@@ -142,7 +138,7 @@ By specifying `'changelog-producer' = 'input'`, Table Store writers rely on thei
 
 {{< img src="/img/changelog-producer-input.png">}}
 
-#### Full Compaction
+### Full Compaction
 
 If your input can’t produce a complete changelog but you still want to get rid of the costly normalized operator, you may consider using the full compaction changelog producer.
 
@@ -158,12 +154,20 @@ Full compaction changelog producer can produce complete changelog for any type o
 
 {{< /hint >}}
 
-## Changelog Tables without Primary Keys
+## Sequence Field
 
-Changelog tables can also be used without primary keys. Users can only insert or delete a whole record from the table. No update is supported.
+By default, the primary key table determines the merge order according to the input order. However, in distributed computing,
+there will be some cases that lead to data disorder. At this time, you can use a time field as `sequence.field`, for example:
 
-## Append-only Tables
+```sql
+CREATE TABLE MyTable (
+    pk BIGINT PRIMARY KEY NOT ENFORCED,
+    v1 DOUBLE,
+    v2 BIGINT,
+    dt TIMESTAMP
+) WITH (
+    'sequence.field' = 'dt'
+);
+```
 
-By specifying `'write-mode' = 'append-only'` when creating the table, user creates an append-only table.
-
-You can only insert a whole record into the table. No delete or update is supported and you cannot define primary keys. This type of table is suitable for use cases that do not require updates (such as log data synchronization).
+Regardless of the sequence of data input, the final correct result will always be obtained.
