@@ -70,7 +70,11 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public TableRead newRead() {
-        return table.newRead().withFilter(filter).withProjection(projection);
+        InnerTableRead read = table.newRead().withFilter(filter);
+        if (projection != null) {
+            read.withProjection(projection);
+        }
+        return read;
     }
 
     @Override
