@@ -84,7 +84,11 @@ public interface ReadBuilder extends Serializable {
      */
     ReadBuilder withFilter(Predicate predicate);
 
-    /** Push top-level projection. */
+    /**
+     * Apply projection to the reader.
+     *
+     * <p>NOTE: Nested row projection is currently not supported.
+     */
     default ReadBuilder withProjection(int[] projection) {
         if (projection == null) {
             return this;
