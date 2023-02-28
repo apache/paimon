@@ -48,6 +48,9 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public RowType readType() {
+        if (projection == null) {
+            return table.rowType();
+        }
         return TypeUtils.project(table.rowType(), Projection.of(projection).toTopLevelIndexes());
     }
 
