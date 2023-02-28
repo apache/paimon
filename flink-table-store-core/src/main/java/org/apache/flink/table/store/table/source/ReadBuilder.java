@@ -67,8 +67,9 @@ public interface ReadBuilder extends Serializable {
     RowType readType();
 
     /**
-     * Push filters, the relationship between predicates is 'AND'. It will filter the data as much
-     * as possible, but it is not guaranteed that it is a complete filter.
+     * Apply filters to the readers to decrease the number of produced records.
+     *
+     * <p>This interface filters records as much as possible, however some produced records may not satisfy all predicates. Users need to recheck all records.
      */
     default ReadBuilder withFilter(List<Predicate> predicates) {
         if (predicates == null || predicates.isEmpty()) {
