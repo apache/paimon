@@ -21,6 +21,7 @@ package org.apache.flink.table.store.connector.source;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.SplitsAssignment;
+import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.Snapshot;
 
 import javax.annotation.Nullable;
@@ -28,9 +29,9 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.LinkedList;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Queue;
+import java.util.Map;
 
 /** A {@link SplitEnumerator} implementation for {@link StaticFileStoreSource} input. */
 public class StaticFileStoreSplitEnumerator
@@ -40,8 +41,7 @@ public class StaticFileStoreSplitEnumerator
 
     @Nullable private final Snapshot snapshot;
 
-    private final Queue<FileStoreSourceSplit> splits;
-    private final int splitNumber;
+    private final Map<Integer, List<FileStoreSourceSplit>> pendingSplitAssignment;
 
     public StaticFileStoreSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
@@ -49,8 +49,21 @@ public class StaticFileStoreSplitEnumerator
             Collection<FileStoreSourceSplit> splits) {
         this.context = context;
         this.snapshot = snapshot;
-        this.splits = new LinkedList<>(splits);
-        this.splitNumber = splits.size();
+        this.pendingSplitAssignment = new HashMap<>();
+        assignSplits(pendingSplitAssignment, splits, context.currentParallelism());
+    }
+
+    @VisibleForTesting
+    static void assignSplits(
+            Map<Integer, List<FileStoreSourceSplit>> assignment,
+            Collection<FileStoreSourceSplit> splits,
+            int numReaders) {
+        int i = 0;
+        for (FileStoreSourceSplit split : splits) {
+            int task = i % numReaders;
+            assignment.computeIfAbsent(task, k -> new ArrayList<>()).add(split);
+            i++;
+        }
     }
 
     @Override
@@ -65,30 +78,25 @@ public class StaticFileStoreSplitEnumerator
             return;
         }
 
-        List<FileStoreSourceSplit> polled = poll(splitNumber / context.currentParallelism() + 1);
-        if (polled.size() > 0) {
-            context.assignSplits(new SplitsAssignment<>(Collections.singletonMap(subtask, polled)));
+        // The following batch assignment operation is for two things:
+        // 1. It can be evenly distributed during batch reading to avoid scheduling problems (for
+        // example, the current resource can only schedule part of the tasks) that cause some tasks
+        // to fail to read data.
+        // 2. Read with limit, if split is assigned one by one, it may cause the task to repeatedly
+        // create SplitFetchers. After the task is created, it is found that it is idle and then
+        // closed. Then, new split coming, it will create SplitFetcher and repeatedly read the data
+        // of the limit number (the limit status is in the SplitFetcher).
+        List<FileStoreSourceSplit> splits = pendingSplitAssignment.remove(subtask);
+        if (splits != null && splits.size() > 0) {
+            context.assignSplits(new SplitsAssignment<>(Collections.singletonMap(subtask, splits)));
         } else {
             context.signalNoMoreSplits(subtask);
         }
     }
 
-    private List<FileStoreSourceSplit> poll(int number) {
-        List<FileStoreSourceSplit> polled = new ArrayList<>();
-        for (int i = 0; i < number; i++) {
-            FileStoreSourceSplit split = splits.poll();
-            if (split != null) {
-                polled.add(split);
-            } else {
-                break;
-            }
-        }
-        return polled;
-    }
-
     @Override
     public void addSplitsBack(List<FileStoreSourceSplit> backSplits, int subtaskId) {
-        splits.addAll(backSplits);
+        assignSplits(pendingSplitAssignment, backSplits, context.currentParallelism());
     }
 
     @Override
@@ -98,8 +106,9 @@ public class StaticFileStoreSplitEnumerator
 
     @Override
     public PendingSplitsCheckpoint snapshotState(long checkpointId) {
-        return new PendingSplitsCheckpoint(
-                new ArrayList<>(splits), snapshot == null ? null : snapshot.id());
+        List<FileStoreSourceSplit> splits = new ArrayList<>();
+        pendingSplitAssignment.values().forEach(splits::addAll);
+        return new PendingSplitsCheckpoint(splits, snapshot == null ? null : snapshot.id());
     }
 
     @Override
