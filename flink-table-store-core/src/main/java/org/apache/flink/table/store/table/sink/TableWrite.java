@@ -37,7 +37,7 @@ public interface TableWrite extends AutoCloseable {
     /** With {@link IOManager}, this is needed if 'write-buffer-spillable' is set to true. */
     TableWrite withIOManager(IOManager ioManager);
 
-    /** Compute partition by an input row. */
+    /** Calculate which partition {@code row} belongs to. */
     BinaryRow getPartition(InternalRow row);
 
     /** Compute bucket by an input row. */
