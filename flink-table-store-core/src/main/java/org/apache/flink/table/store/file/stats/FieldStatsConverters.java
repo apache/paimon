@@ -33,12 +33,14 @@ import java.util.function.Function;
 public class FieldStatsConverters {
     private final Function<Long, List<DataField>> schemaFields;
     private final long tableSchemaId;
+    private final List<DataField> tableDataFields;
     private final ConcurrentMap<Long, FieldStatsArraySerializer> serializers;
     private final AtomicReference<List<DataField>> tableFields;
 
     public FieldStatsConverters(Function<Long, List<DataField>> schemaFields, long tableSchemaId) {
         this.schemaFields = schemaFields;
         this.tableSchemaId = tableSchemaId;
+        this.tableDataFields = schemaFields.apply(tableSchemaId);
         this.serializers = new ConcurrentHashMap<>();
         this.tableFields = new AtomicReference<>();
     }
@@ -53,8 +55,7 @@ public class FieldStatsConverters {
 
                     // Get atomic schema fields.
                     List<DataField> schemaTableFields =
-                            tableFields.updateAndGet(
-                                    v -> v == null ? schemaFields.apply(tableSchemaId) : v);
+                            tableFields.updateAndGet(v -> v == null ? tableDataFields : v);
                     List<DataField> dataFields = schemaFields.apply(id);
                     int[] indexMapping =
                             SchemaEvolutionUtil.createIndexMapping(schemaTableFields, dataFields);
@@ -66,5 +67,9 @@ public class FieldStatsConverters {
                     return new FieldStatsArraySerializer(
                             new RowType(dataFields), indexMapping, castExecutors);
                 });
+    }
+
+    public List<DataField> tableDataFields() {
+        return tableDataFields;
     }
 }
