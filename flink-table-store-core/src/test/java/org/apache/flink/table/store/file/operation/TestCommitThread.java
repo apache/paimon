@@ -49,6 +49,7 @@ import java.util.stream.Collectors;
 import static org.apache.flink.table.store.file.TestFileStore.PAGE_SIZE;
 import static org.apache.flink.table.store.file.TestFileStore.WRITE_BUFFER_SIZE;
 import static org.apache.flink.table.store.file.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
+import static org.apache.flink.table.store.file.utils.FailingFileIO.retryArtificialException;
 
 /** Testing {@link Thread}s to perform concurrent commits. */
 public class TestCommitThread extends Thread {
@@ -74,7 +75,8 @@ public class TestCommitThread extends Thread {
             boolean enableOverwrite,
             Map<BinaryRow, List<KeyValue>> data,
             TestFileStore testStore,
-            TestFileStore safeStore) {
+            TestFileStore safeStore)
+            throws Exception {
         this.keyType = keyType;
         this.valueType = valueType;
         this.enableOverwrite = enableOverwrite;
@@ -94,7 +96,9 @@ public class TestCommitThread extends Thread {
 
         String commitUser = UUID.randomUUID().toString();
         this.write = safeStore.newWrite(commitUser);
-        this.commit = testStore.newCommit(commitUser).withCreateEmptyCommit(true);
+        this.commit =
+                retryArtificialException(
+                        () -> testStore.newCommit(commitUser).withCreateEmptyCommit(true));
 
         this.commitIdentifier = 0;
     }
