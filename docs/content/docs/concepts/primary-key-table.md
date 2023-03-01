@@ -156,7 +156,7 @@ Full compaction changelog producer can produce complete changelog for any type o
 
 ## Sequence Field
 
-By default, the primary key table determines the merge order according to the input order. However, in distributed computing,
+By default, the primary key table determines the merge order according to the input order (the last input record will be the last to merge). However, in distributed computing,
 there will be some cases that lead to data disorder. At this time, you can use a time field as `sequence.field`, for example:
 
 {{< tabs "sequence.field" >}}
