@@ -114,6 +114,128 @@ Partition keys must be a subset of primary keys if primary keys are defined.
 By configuring [partition.expiration-time]({{< ref "docs/maintenance/manage-partition" >}}), expired partitions can be automatically deleted.
 {{< /hint >}}
 
+## Create Table As
+
+Table can be created and populated by the results of a query, for example, we have a sql like this: `CREATE TABLE table_b AS SELECT id, name FORM table_a`,
+The resulting table `table_b` will be equivalent to create the table and insert the data with the following statement:
+`CREATE TABLE table_b (id INT, name STRING); INSERT INTO table_b SELECT id, name FROM table_a;`
+
+We can specify the primary key or partition when use `CREATE TABLE AS SELECT`, for syntax, please refer to the following sql.
+
+{{< tabs "create-table-as" >}}
+
+{{< tab "Flink" >}}
+
+```sql
+
+/* For streaming mode, you need to enable the checkpoint. */
+
+CREATE TABLE MyTable (
+    user_id BIGINT,
+    item_id BIGINT
+);
+CREATE TABLE MyTableAs AS SELECT * FROM MyTable;
+
+/* partitioned table */
+CREATE TABLE MyTablePartition (
+     user_id BIGINT,
+     item_id BIGINT,
+     behavior STRING,
+     dt STRING,
+     hh STRING
+) PARTITIONED BY (dt, hh);
+CREATE TABLE MyTablePartitionAs WITH ('partition' = 'dt') AS SELECT * FROM MyTablePartition;
+    
+/* change options */
+CREATE TABLE MyTableOptions (
+       user_id BIGINT,
+       item_id BIGINT
+) WITH ('file.format' = 'orc');
+CREATE TABLE MyTableOptionsAs WITH ('file.format' = 'parquet') AS SELECT * FROM MyTableOptions;
+
+/* primary key */
+CREATE TABLE MyTablePk (
+      user_id BIGINT,
+      item_id BIGINT,
+      behavior STRING,
+      dt STRING,
+      hh STRING,
+      PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
+) ;
+CREATE TABLE MyTablePkAs WITH ('primary-key' = 'dt,hh') AS SELECT * FROM MyTablePk;
+
+
+/* primary key + partition */
+CREATE TABLE MyTableAll (
+      user_id BIGINT,
+      item_id BIGINT,
+      behavior STRING,
+      dt STRING,
+      hh STRING,
+      PRIMARY KEY (dt, hh, user_id) NOT ENFORCED 
+) PARTITIONED BY (dt, hh);
+CREATE TABLE MyTableAllAs WITH ('primary-key' = 'dt,hh', 'partition' = 'dt') AS SELECT * FROM MyTableAll;
+```
+
+{{< /tab >}}
+
+{{< tab "Spark3" >}}
+
+```sql
+CREATE TABLE MyTable (
+     user_id BIGINT,
+     item_id BIGINT
+);
+CREATE TABLE MyTableAs AS SELECT * FROM MyTable;
+
+/* partitioned table*/
+CREATE TABLE MyTablePartition (
+      user_id BIGINT,
+      item_id BIGINT,
+      behavior STRING,
+      dt STRING,
+      hh STRING
+) PARTITIONED BY (dt, hh);
+CREATE TABLE MyTablePartitionAs PARTITIONED BY (dt) AS SELECT * FROM MyTablePartition;
+
+/* change TBLPROPERTIES */
+CREATE TABLE MyTableOptions (
+       user_id BIGINT,
+       item_id BIGINT
+) TBLPROPERTIES ('file.format' = 'orc');
+CREATE TABLE MyTableOptionsAs TBLPROPERTIES ('file.format' = 'parquet') AS SELECT * FROM MyTableOptions;
+
+
+/* primary key */
+CREATE TABLE MyTablePk (
+     user_id BIGINT,
+     item_id BIGINT,
+     behavior STRING,
+     dt STRING,
+     hh STRING
+) TBLPROPERTIES (
+    'primary-key' = 'dt,hh,user_id'
+);
+CREATE TABLE MyTablePkAs TBLPROPERTIES ('primary-key' = 'dt') AS SELECT * FROM MyTablePk;
+
+/* primary key + partition */
+CREATE TABLE MyTableAll (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior STRING,
+    dt STRING,
+    hh STRING
+) PARTITIONED BY (dt, hh) TBLPROPERTIES (
+    'primary-key' = 'dt,hh,user_id'
+);
+CREATE TABLE MyTableAllAs PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM MyTableAll;
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+
 ### Create Table Like
 
 {{< tabs "create-table-like" >}}
