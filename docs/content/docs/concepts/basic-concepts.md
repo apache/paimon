@@ -53,3 +53,9 @@ The range for a bucket is determined by the hash value of one or more columns in
 A bucket is the smallest storage unit for reads and writes, so the number of buckets limits the maximum processing parallelism. This number should not be too big, though, as it will result in lots of small files and low read performance. In general, the recommended data size in each bucket is about 1GB.
 
 See [file layouts]({{< ref "docs/concepts/file-layouts" >}}) for how files are divided into buckets. Also, see [rescale bucket]({{< ref "docs/maintenance/rescale-bucket" >}}) if you want to adjust the number of buckets after a table is created.
+
+## Consistency Guarantees
+
+Table Store writers uses two-phase commit protocol to atomically commit a batch of records to the table. Each commit produces at most two [snapshots]({{< ref "docs/concepts/basic-concepts#snapshot" >}}) at commit time.
+
+For any two writers modifying a table at the same time, as long as they do not modify the same bucket, their commits are serializable. If they modify the same bucket, only snapshot isolation is guaranteed. That is, the final table state may be a mix of the two commits, but no changes are lost.

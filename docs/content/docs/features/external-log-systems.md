@@ -1,6 +1,6 @@
 ---
 title: "External Log Systems"
-weight: 2
+weight: 4
 type: docs
 aliases:
 - /features/external-log-systems.html
@@ -26,7 +26,7 @@ under the License.
 
 # External Log Systems
 
-Aside from [underlying table files]({{< ref "docs/features/table-types#changelog-producers" >}}), changelog of Table Store can also be stored into or consumed from an external log system, such as Kafka. By specifying `log.system` table property, users can choose which external log system to use.
+Aside from [underlying table files]({{< ref "docs/concepts/primary-key-table#changelog-producers" >}}), changelog of Table Store can also be stored into or consumed from an external log system, such as Kafka. By specifying `log.system` table property, users can choose which external log system to use.
 
 If an external log system is used, all records written into table files will also be written into the log system. Changes produced by the streaming queries will thus come from the log system instead of table files.
 
