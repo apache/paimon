@@ -145,6 +145,140 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testCreateTableAs() {
+        spark.sql(
+                "CREATE TABLE default.testCreateTable(\n"
+                        + "a BIGINT,\n"
+                        + "b VARCHAR(10),\n"
+                        + "c CHAR(10))");
+        spark.sql("INSERT INTO default.testCreateTable VALUES(1,'a','b')");
+        spark.sql(
+                "CREATE TABLE default.testCreateTableAs AS SELECT * FROM default.testCreateTable");
+        List<Row> result = spark.sql("SELECT * FROM default.testCreateTableAs").collectAsList();
+
+        assertThat(result.stream().map(Row::toString)).containsExactlyInAnyOrder("[1,a,b]");
+
+        // partitioned table
+        spark.sql(
+                "CREATE TABLE default.partitionedTable (\n"
+                        + "a BIGINT,\n"
+                        + "b STRING,"
+                        + "c STRING) USING tablestore\n"
+                        + "COMMENT 'table comment'\n"
+                        + "PARTITIONED BY (a,b)");
+        spark.sql("INSERT INTO default.partitionedTable VALUES(1,'aaa','bbb')");
+        spark.sql(
+                "CREATE TABLE default.partitionedTableAs PARTITIONED BY (a) AS SELECT * FROM default.partitionedTable");
+        assertThat(
+                        spark.sql("SHOW CREATE TABLE default.partitionedTableAs")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo(
+                        String.format(
+                                "[[CREATE TABLE partitionedTableAs (\n"
+                                        + "  `a` BIGINT,\n"
+                                        + "  `b` STRING,\n"
+                                        + "  `c` STRING)\n"
+                                        + "PARTITIONED BY (a)\n"
+                                        + "TBLPROPERTIES(\n"
+                                        + "  'path' = '%s')\n"
+                                        + "]]",
+                                new Path(warehousePath, "default.db/partitionedTableAs")));
+        List<Row> resultPartition =
+                spark.sql("SELECT * FROM default.partitionedTableAs").collectAsList();
+        assertThat(resultPartition.stream().map(Row::toString))
+                .containsExactlyInAnyOrder("[1,aaa,bbb]");
+
+        // change TBLPROPERTIES
+        spark.sql(
+                "CREATE TABLE default.testTable(\n"
+                        + "a BIGINT,\n"
+                        + "b VARCHAR(10),\n"
+                        + "c CHAR(10))"
+                        + " TBLPROPERTIES("
+                        + " 'file.format' = 'orc'"
+                        + ")");
+        spark.sql("INSERT INTO default.testTable VALUES(1,'a','b')");
+        spark.sql(
+                "CREATE TABLE default.testTableAs TBLPROPERTIES ('file.format' = 'parquet') AS SELECT * FROM default.testTable");
+        assertThat(spark.sql("SHOW CREATE TABLE default.testTableAs").collectAsList().toString())
+                .isEqualTo(
+                        String.format(
+                                "[[CREATE TABLE testTableAs (\n"
+                                        + "  `a` BIGINT,\n"
+                                        + "  `b` STRING,\n"
+                                        + "  `c` STRING)\n"
+                                        + "TBLPROPERTIES(\n"
+                                        + "  'file.format' = 'parquet',\n"
+                                        + "  'path' = '%s')\n"
+                                        + "]]",
+                                new Path(warehousePath, "default.db/testTableAs")));
+        List<Row> resultProp = spark.sql("SELECT * FROM default.testTableAs").collectAsList();
+
+        assertThat(resultProp.stream().map(Row::toString)).containsExactlyInAnyOrder("[1,a,b]");
+
+        // primary key
+        spark.sql(
+                "CREATE TABLE default.t_pk (\n"
+                        + "a BIGINT,\n"
+                        + "b STRING,\n"
+                        + "c STRING\n"
+                        + ") TBLPROPERTIES ("
+                        + "  'primary-key' = 'a,b'"
+                        + ")\n"
+                        + "COMMENT 'table comment'");
+        spark.sql("INSERT INTO default.t_pk VALUES(1,'aaa','bbb')");
+        spark.sql(
+                "CREATE TABLE default.t_pk_as TBLPROPERTIES ('primary-key' = 'a') AS SELECT * FROM default.t_pk");
+        assertThat(spark.sql("SHOW CREATE TABLE  default.t_pk_as").collectAsList().toString())
+                .isEqualTo(
+                        String.format(
+                                "[[CREATE TABLE t_pk_as (\n"
+                                        + "  `a` BIGINT NOT NULL,\n"
+                                        + "  `b` STRING,\n"
+                                        + "  `c` STRING)\n"
+                                        + "TBLPROPERTIES(\n"
+                                        + "  'path' = '%s')\n"
+                                        + "]]",
+                                new Path(warehousePath, "default.db/t_pk_as")));
+        List<Row> resultPk = spark.sql("SELECT * FROM default.t_pk_as").collectAsList();
+
+        assertThat(resultPk.stream().map(Row::toString)).containsExactlyInAnyOrder("[1,aaa,bbb]");
+
+        // primary key + partition
+        spark.sql(
+                "CREATE TABLE t_all (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING\n"
+                        + ") PARTITIONED BY (dt, hh) TBLPROPERTIES (\n"
+                        + "    'primary-key' = 'dt,hh,user_id'\n"
+                        + ")");
+        spark.sql("INSERT INTO t_all VALUES(1,2,'bbb','2020-01-01','12')");
+        spark.sql(
+                "CREATE TABLE default.t_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM default.t_all");
+        assertThat(spark.sql("SHOW CREATE TABLE default.t_all_as").collectAsList().toString())
+                .isEqualTo(
+                        String.format(
+                                "[[CREATE TABLE t_all_as (\n"
+                                        + "  `user_id` BIGINT,\n"
+                                        + "  `item_id` BIGINT,\n"
+                                        + "  `behavior` STRING,\n"
+                                        + "  `dt` STRING NOT NULL,\n"
+                                        + "  `hh` STRING NOT NULL)\n"
+                                        + "PARTITIONED BY (dt)\n"
+                                        + "TBLPROPERTIES(\n"
+                                        + "  'path' = '%s')\n"
+                                        + "]]",
+                                new Path(warehousePath, "default.db/t_all_as")));
+        List<Row> resultAll = spark.sql("SELECT * FROM default.t_all_as").collectAsList();
+        assertThat(resultAll.stream().map(Row::toString))
+                .containsExactlyInAnyOrder("[1,2,bbb,2020-01-01,12]");
+    }
+
+    @Test
     public void testCreateTableWithNullablePk() {
         spark.sql("USE tablestore");
         spark.sql(

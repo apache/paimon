@@ -490,6 +490,22 @@ public class CoreOptions implements Serializable {
                                                     + " avoid the disorder reading for partitions, you can open this option.")
                                     .build());
 
+    @Immutable
+    public static final ConfigOption<String> PRIMARY_KEY =
+            key("primary-key")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Define primary key by table options, cannot define primary key on DDL and table options at the same time.");
+
+    @Immutable
+    public static final ConfigOption<String> PARTITION =
+            key("partition")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Define partition by table options, cannot define partition on DDL and table options at the same time.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {

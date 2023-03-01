@@ -153,6 +153,145 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testCreateTableAs() throws Exception {
+        sql("CREATE TABLE t (a INT)");
+        sql("INSERT INTO t VALUES(1),(2)");
+        sql("CREATE TABLE t1 AS SELECT * FROM t");
+        List<Row> result = sql("SELECT * FROM t1$schemas s");
+        assertThat(result.toString())
+                .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, ]]");
+        List<Row> data = sql("SELECT * FROM t1");
+        assertThat(data).containsExactlyInAnyOrder(Row.of(1), Row.of(2));
+
+        // partition table
+        sql(
+                "CREATE TABLE t_p (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING\n"
+                        + ") PARTITIONED BY (dt, hh)");
+        sql("INSERT INTO t_p SELECT 1,2,'a','2023-02-19','12'");
+        sql("CREATE TABLE t1_p WITH ('partition' = 'dt' ) AS SELECT * FROM t_p");
+        List<Row> resultPartition = sql("SELECT * FROM t1_p$schemas s");
+        assertThat(resultPartition.toString())
+                .isEqualTo(
+                        "[+I[0, [{\"id\":0,\"name\":\"user_id\",\"type\":\"BIGINT\"},{\"id\":1,\"name\":\"item_id\",\"type\":\"BIGINT\"},"
+                                + "{\"id\":2,\"name\":\"behavior\",\"type\":\"STRING\"},{\"id\":3,\"name\":\"dt\",\"type\":\"STRING\"},"
+                                + "{\"id\":4,\"name\":\"hh\",\"type\":\"STRING\"}], [\"dt\"], [], {}, ]]");
+        List<Row> dataPartition = sql("SELECT * FROM t1_p");
+        assertThat(dataPartition.toString()).isEqualTo("[+I[1, 2, a, 2023-02-19, 12]]");
+
+        // change options
+        sql("CREATE TABLE t_option (a INT) WITH ('file.format' = 'orc')");
+        sql("INSERT INTO t_option VALUES(1),(2)");
+        sql("CREATE TABLE t1_option WITH ('file.format' = 'parquet') AS SELECT * FROM t_option");
+        List<Row> resultOption = sql("SELECT * FROM t1_option$options");
+        assertThat(resultOption).containsExactly(Row.of("file.format", "parquet"));
+        List<Row> dataOption = sql("SELECT * FROM t1_option");
+        assertThat(dataOption).containsExactlyInAnyOrder(Row.of(1), Row.of(2));
+
+        // primary key
+        sql(
+                "CREATE TABLE t_pk (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ")");
+        sql("INSERT INTO t_pk VALUES(1,2,'aaa','2020-01-02','09')");
+        sql("CREATE TABLE t_pk_as WITH ('primary-key' = 'dt') AS SELECT * FROM t_pk");
+        List<Row> resultPk = sql("SHOW CREATE TABLE t_pk_as");
+        assertThat(resultPk.toString()).contains("PRIMARY KEY (`dt`)");
+        List<Row> dataPk = sql("SELECT * FROM t_pk_as");
+        assertThat(dataPk.toString()).isEqualTo("[+I[1, 2, aaa, 2020-01-02, 09]]");
+
+        // primary key + partition
+        sql(
+                "CREATE TABLE t_all (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (dt, hh)");
+        sql("INSERT INTO t_all VALUES(1,2,'login','2020-01-02','09')");
+        sql(
+                "CREATE TABLE t_all_as WITH ('primary-key' = 'dt,hh' , 'partition' = 'dt' ) AS SELECT * FROM t_all");
+        List<Row> resultAll = sql("SHOW CREATE TABLE t_all_as");
+        assertThat(resultAll.toString()).contains("PRIMARY KEY (`dt`, `hh`)");
+        assertThat(resultAll.toString()).contains("PARTITIONED BY (`dt`)");
+        List<Row> dataAll = sql("SELECT * FROM t_all_as");
+        assertThat(dataAll.toString()).isEqualTo("[+I[1, 2, login, 2020-01-02, 09]]");
+
+        // primary key do not exist.
+        sql(
+                "CREATE TABLE t_pk_not_exist (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ")");
+
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CREATE TABLE t_pk_not_exist_as WITH ('primary-key' = 'aaa') AS SELECT * FROM t_pk_not_exist"))
+                .hasRootCauseMessage("Primary key column '[aaa]' is not defined in the schema.");
+
+        // primary key in option and DDL.
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CREATE TABLE t_pk_ddl_option ("
+                                                + "user_id BIGINT,"
+                                                + "item_id BIGINT,"
+                                                + "behavior STRING,"
+                                                + "dt STRING,"
+                                                + "hh STRING,"
+                                                + "PRIMARY KEY (dt, hh, user_id) NOT ENFORCED"
+                                                + ") WITH ('primary-key' = 'dt')"))
+                .hasRootCauseMessage(
+                        "Cannot define primary key on DDL and table options at the same time.");
+
+        // partition do not exist.
+        sql(
+                "CREATE TABLE t_partition_not_exist (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING\n"
+                        + ") PARTITIONED BY (dt, hh) ");
+
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CREATE TABLE t_partition_not_exist_as WITH ('partition' = 'aaa') AS SELECT * FROM t_partition_not_exist"))
+                .hasRootCauseMessage("Partition column '[aaa]' is not defined in the schema.");
+
+        // partition in option and DDL.
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CREATE TABLE t_partition_ddl_option ("
+                                                + "user_id BIGINT,"
+                                                + "item_id BIGINT,"
+                                                + "behavior STRING,"
+                                                + "dt STRING,"
+                                                + "hh STRING"
+                                                + ") PARTITIONED BY (dt, hh)  WITH ('partition' = 'dt')"))
+                .hasRootCauseMessage(
+                        "Cannot define partition on DDL and table options at the same time.");
+    }
+
+    @Test
     public void testFilesTable() throws Exception {
         sql(
                 "CREATE TABLE T_VALUE_COUNT (a INT, p INT, b BIGINT, c STRING) "
