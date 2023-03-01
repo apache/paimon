@@ -178,4 +178,4 @@ CREATE TABLE MyTable (
 
 {{< /tabs >}}
 
-Regardless of the order of data input, the final correct result will always be obtained.
+The record with the largest `sequence.field` value will be the last to merge, regardless of the input order.
