@@ -49,4 +49,30 @@ A manifest file is a file containing changes about LSM data files and changelog 
 
 ## Data Files
 
-Data files are grouped by partitions and buckets. Each bucket directory contains an [LSM tree]({{< ref "docs/concepts/lsm-trees" >}}) and its [changelog files]({{< ref "docs/features/table-types#changelog-producers" >}}).
+Data files are grouped by partitions and buckets. Each bucket directory contains an [LSM tree]({{< ref "docs/concepts/file-layouts#lsm-trees" >}}) and its [changelog files]({{< ref "docs/concepts/primary-key-table#changelog-producers" >}}).
+
+## LSM Trees
+
+Table Store adapts the LSM tree (log-structured merge-tree) as the data structure for file storage. This documentation briefly introduces the concepts about LSM trees.
+
+### Sorted Runs
+
+LSM tree organizes files into several sorted runs. A sorted run consists of one or multiple [data file]({{< ref "docs/concepts/file-layouts#data-files" >}})s and each data file belongs to exactly one sorted run.
+
+Records within a data file are sorted by their primary keys. WIthin a sorted run, ranges of primary keys of data files never overlap.
+
+{{< img src="/img/sorted-runs.png">}}
+
+As you can see, different sorted runs may have overlapping primary key ranges, and may even contain the same primary key. When querying the LSM tree, all sorted runs must be combined and all records with the same primary key must be merged according to the user-specified [merge engine]({{< ref "docs/concepts/primary-key-table#merge-engines" >}}) and the timestamp of each record.
+
+New records written into the LSM tree will be first buffered in memory. When the memory buffer is full, all records in memory will be sorted and flushed to disk. A new sorted run is now created.
+
+### Compaction
+
+When more and more records are written into the LSM tree, the number of sorted runs will increase. Because querying an LSM tree requires all sorted runs to be combined, too many sorted runs will result in a poor query performance, or even out of memory.
+
+To limit the number of sorted runs, we have to merge several sorted runs into one big sorted run once in a while. This procedure is called compaction.
+
+However, compaction is a resource intensive procedure which consumes a certain amount of CPU time and disk IO, so too frequent compaction may in turn result in slower writes. It is a trade-off between query and write performance. Table Store currently adapts a compaction strategy similar to Rocksdb's [universal compaction](https://github.com/facebook/rocksdb/wiki/Universal-Compaction).
+
+By default, when Table Store writers append records to the LSM tree, they'll also perform compactions as needed. Users can also choose to perform all compactions in a dedicated compaction job. See [dedicated compaction job]({{< ref "docs/maintenance/write-performance#dedicated-compaction-job" >}}) for more info.

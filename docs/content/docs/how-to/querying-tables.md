@@ -59,7 +59,7 @@ Produces the latest snapshot on the table upon first startup, and continues to r
 <tr>
 <td>compacted-full</td>
 <td>
-Produces the snapshot after the latest <a href="{{< ref "docs/concepts/lsm-trees#compactions" >}}">compaction</a>.
+Produces the snapshot after the latest <a href="{{< ref "docs/concepts/file-layouts#lsm-trees#compactions" >}}">compaction</a>.
 </td>
 <td>
 Produces the snapshot after the latest compaction on the table upon first startup, and continues to read the following changes.
@@ -83,7 +83,7 @@ Produces the snapshot after the latest compaction on the table upon first startu
 </tbody>
 </table>
 
-Users can also adjust `changelog-producer` table property to specify the pattern of produced changes. See [changelog producer]({{< ref "docs/features/table-types#changelog-producers" >}}) for details.
+Users can also adjust `changelog-producer` table property to specify the pattern of produced changes. See [changelog producer]({{< ref "docs/concepts/primary-key-table#changelog-producers" >}}) for details.
 
 {{< img src="/img/scan-mode.png">}}
 
