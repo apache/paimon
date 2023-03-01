@@ -18,8 +18,15 @@
 
 package org.apache.flink.table.store.table.sink;
 
+import java.util.List;
+
 /** Inner {@link TableWrite} contains overwrite setter. */
-public interface InnerTableWrite extends TableWrite {
+public interface InnerTableWrite extends StreamTableWrite, BatchTableWrite {
 
     InnerTableWrite withOverwrite(boolean overwrite);
+
+    @Override
+    default List<CommitMessage> prepareCommit() throws Exception {
+        return prepareCommit(true, BatchWriteBuilder.COMMIT_IDENTIFIER);
+    }
 }

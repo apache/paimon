@@ -18,18 +18,27 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.table.store.table.sink.BatchWriteBuilder;
 import org.apache.flink.table.store.table.sink.InnerTableCommit;
 import org.apache.flink.table.store.table.sink.InnerTableWrite;
-import org.apache.flink.table.store.table.sink.WriteBuilder;
+import org.apache.flink.table.store.table.sink.StreamWriteBuilder;
 
 /** Readonly table which only provide implementation for scan and read. */
 public interface ReadonlyTable extends InnerTable {
 
     @Override
-    default WriteBuilder newWriteBuilder() {
+    default BatchWriteBuilder newBatchWriteBuilder() {
         throw new UnsupportedOperationException(
                 String.format(
-                        "Readonly Table %s does not support newWriteBuilder.",
+                        "Readonly Table %s does not support newBatchWriteBuilder.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default StreamWriteBuilder newStreamWriteBuilder() {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support newStreamWriteBuilder.",
                         this.getClass().getSimpleName()));
     }
 

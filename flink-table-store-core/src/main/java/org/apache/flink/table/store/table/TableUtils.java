@@ -23,10 +23,10 @@ import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.flink.table.store.table.sink.BatchTableCommit;
+import org.apache.flink.table.store.table.sink.BatchTableWrite;
+import org.apache.flink.table.store.table.sink.BatchWriteBuilder;
 import org.apache.flink.table.store.table.sink.InnerTableCommit;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
-import org.apache.flink.table.store.table.sink.WriteBuilder;
 import org.apache.flink.table.store.table.source.ReadBuilder;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.types.RowKind;
@@ -42,14 +42,13 @@ public class TableUtils {
      *
      * <p>NOTE: This method is only suitable for deletion of small amount of data.
      */
-    public static void deleteWhere(
-            Table table, String commitUser, List<Predicate> filters, Lock.Factory lockFactory) {
+    public static void deleteWhere(Table table, List<Predicate> filters, Lock.Factory lockFactory) {
         ReadBuilder readBuilder = table.newReadBuilder().withFilter(filters);
-        WriteBuilder writeBuilder = table.newWriteBuilder().withCommitUser(commitUser);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         List<Split> splits = readBuilder.newScan().plan().splits();
         try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(splits);
-                TableWrite write = writeBuilder.newWrite();
-                TableCommit commit =
+                BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit =
                         ((InnerTableCommit) writeBuilder.newCommit())
                                 .withLock(lockFactory.create())) {
             CloseableIterator<InternalRow> iterator = reader.toCloseableIterator();
@@ -62,7 +61,7 @@ public class TableUtils {
                 }
             }
 
-            commit.commit(0, write.prepareCommit(true, 0));
+            commit.commit(write.prepareCommit());
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

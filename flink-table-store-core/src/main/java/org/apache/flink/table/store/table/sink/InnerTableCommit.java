@@ -27,7 +27,7 @@ import java.util.List;
 import java.util.Map;
 
 /** Inner {@link TableCommit} contains overwrite setter. */
-public interface InnerTableCommit extends TableCommit {
+public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
 
     /** Overwrite writing, same as the 'INSERT OVERWRITE T PARTITION (...)' semantics of SQL. */
     default InnerTableCommit withOverwrite(@Nullable Map<String, String> staticPartition) {
@@ -42,4 +42,9 @@ public interface InnerTableCommit extends TableCommit {
     /** @deprecated lock should pass from table. */
     @Deprecated
     InnerTableCommit withLock(Lock lock);
+
+    @Override
+    default void commit(List<CommitMessage> commitMessages) {
+        commit(BatchWriteBuilder.COMMIT_IDENTIFIER, commitMessages);
+    }
 }

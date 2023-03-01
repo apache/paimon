@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,31 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.spark;
+package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.annotation.Experimental;
 
-import org.apache.spark.sql.connector.write.Write;
-import org.apache.spark.sql.connector.write.WriteBuilder;
+import java.util.List;
 
 /**
- * Spark {@link WriteBuilder}.
+ * A {@link TableWrite} for batch processing. Recommended for one-time committing.
  *
- * <p>TODO: Support overwrite.
+ * @since 0.4.0
  */
-public class SparkWriteBuilder implements WriteBuilder {
+@Experimental
+public interface BatchTableWrite extends TableWrite {
 
-    private final Table table;
-    private final Lock.Factory lockFactory;
-
-    public SparkWriteBuilder(Table table, Lock.Factory lockFactory) {
-        this.table = table;
-        this.lockFactory = lockFactory;
-    }
-
-    @Override
-    public Write build() {
-        return new SparkWrite(table, lockFactory);
-    }
+    /**
+     * Prepare commit for {@link TableCommit}. Collect incremental files for this write.
+     *
+     * @see BatchTableCommit#commit
+     */
+    List<CommitMessage> prepareCommit() throws Exception;
 }

@@ -20,11 +20,11 @@ package org.apache.flink.table.store.spark;
 
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.sink.BatchTableCommit;
+import org.apache.flink.table.store.table.sink.BatchTableWrite;
+import org.apache.flink.table.store.table.sink.BatchWriteBuilder;
 import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.InnerTableCommit;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
-import org.apache.flink.table.store.table.sink.WriteBuilder;
 
 import org.apache.spark.api.java.function.Function;
 import org.apache.spark.api.java.function.Function2;
@@ -39,12 +39,10 @@ import java.util.List;
 public class SparkWrite implements V1Write {
 
     private final Table table;
-    private final String queryId;
     private final Lock.Factory lockFactory;
 
-    public SparkWrite(Table table, String queryId, Lock.Factory lockFactory) {
+    public SparkWrite(Table table, Lock.Factory lockFactory) {
         this.table = table;
-        this.queryId = queryId;
         this.lockFactory = lockFactory;
     }
 
@@ -55,17 +53,16 @@ public class SparkWrite implements V1Write {
                 throw new UnsupportedOperationException("Overwrite is unsupported.");
             }
 
-            long identifier = 0;
-            WriteBuilder writeBuilder = table.newWriteBuilder().withCommitUser(queryId);
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
             List<CommitMessage> committables =
                     data.toJavaRDD()
                             .groupBy(new ComputeBucket(writeBuilder))
-                            .mapValues(new WriteRecords(writeBuilder, identifier))
+                            .mapValues(new WriteRecords(writeBuilder))
                             .values()
                             .reduce(new ListConcat<>());
-            try (TableCommit tableCommit =
+            try (BatchTableCommit tableCommit =
                     ((InnerTableCommit) writeBuilder.newCommit()).withLock(lockFactory.create())) {
-                tableCommit.commit(identifier, committables);
+                tableCommit.commit(committables);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -74,15 +71,15 @@ public class SparkWrite implements V1Write {
 
     private static class ComputeBucket implements Function<Row, Integer> {
 
-        private final WriteBuilder writeBuilder;
+        private final BatchWriteBuilder writeBuilder;
 
-        private transient TableWrite lazyWriter;
+        private transient BatchTableWrite lazyWriter;
 
-        private ComputeBucket(WriteBuilder writeBuilder) {
+        private ComputeBucket(BatchWriteBuilder writeBuilder) {
             this.writeBuilder = writeBuilder;
         }
 
-        private TableWrite computer() {
+        private BatchTableWrite computer() {
             if (lazyWriter == null) {
                 lazyWriter = writeBuilder.newWrite();
             }
@@ -97,21 +94,19 @@ public class SparkWrite implements V1Write {
 
     private static class WriteRecords implements Function<Iterable<Row>, List<CommitMessage>> {
 
-        private final WriteBuilder writeBuilder;
-        private final long commitIdentifier;
+        private final BatchWriteBuilder writeBuilder;
 
-        private WriteRecords(WriteBuilder writeBuilder, long commitIdentifier) {
+        private WriteRecords(BatchWriteBuilder writeBuilder) {
             this.writeBuilder = writeBuilder;
-            this.commitIdentifier = commitIdentifier;
         }
 
         @Override
         public List<CommitMessage> call(Iterable<Row> iterables) throws Exception {
-            try (TableWrite write = writeBuilder.newWrite()) {
+            try (BatchTableWrite write = writeBuilder.newWrite()) {
                 for (Row row : iterables) {
                     write.write(new SparkRow(writeBuilder.rowType(), row));
                 }
-                return write.prepareCommit(true, commitIdentifier);
+                return write.prepareCommit();
             }
         }
     }

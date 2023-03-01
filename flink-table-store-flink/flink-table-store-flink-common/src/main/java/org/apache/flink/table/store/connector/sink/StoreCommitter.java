@@ -72,7 +72,7 @@ public class StoreCommitter implements Committer {
     @Override
     public void commit(List<ManifestCommittable> committables)
             throws IOException, InterruptedException {
-        commit.commit(committables);
+        commit.commitMultiple(committables);
     }
 
     @Override

@@ -45,7 +45,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /** A spark {@link org.apache.spark.sql.connector.catalog.Table} for table store. */
 public class SparkTable
@@ -100,7 +99,7 @@ public class SparkTable
 
     @Override
     public WriteBuilder newWriteBuilder(LogicalWriteInfo info) {
-        return new SparkWriteBuilder(table, info.queryId(), lockFactory);
+        return new SparkWriteBuilder(table, lockFactory);
     }
 
     @Override
@@ -115,8 +114,7 @@ public class SparkTable
             predicates.add(converter.convert(filter));
         }
 
-        String commitUser = UUID.randomUUID().toString();
-        TableUtils.deleteWhere(table, commitUser, predicates, lockFactory);
+        TableUtils.deleteWhere(table, predicates, lockFactory);
     }
 
     @Override

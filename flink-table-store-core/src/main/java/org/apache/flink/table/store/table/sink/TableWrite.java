@@ -24,8 +24,6 @@ import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.table.Table;
 
-import java.util.List;
-
 /**
  * Write of {@link Table} to provide {@link InternalRow} writing.
  *
@@ -58,15 +56,4 @@ public interface TableWrite extends AutoCloseable {
      * <p>NOTE: this method will block until the completion of the compaction execution.
      */
     void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
-
-    /**
-     * Prepare commit for {@link TableCommit}. Collect incremental files for this write.
-     *
-     * @param waitCompaction whether to wait for the end of the background compaction.
-     * @param commitIdentifier Committed transaction ID, can start from 0. If there are multiple
-     *     commits, please increment this ID.
-     * @see TableCommit#commit
-     */
-    List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
-            throws Exception;
 }

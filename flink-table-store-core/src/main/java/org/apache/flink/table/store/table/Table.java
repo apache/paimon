@@ -19,7 +19,8 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.annotation.Experimental;
-import org.apache.flink.table.store.table.sink.WriteBuilder;
+import org.apache.flink.table.store.table.sink.BatchWriteBuilder;
+import org.apache.flink.table.store.table.sink.StreamWriteBuilder;
 import org.apache.flink.table.store.table.source.ReadBuilder;
 import org.apache.flink.table.store.types.RowType;
 
@@ -46,6 +47,9 @@ public interface Table extends Serializable {
     /** Returns a new read builder. */
     ReadBuilder newReadBuilder();
 
-    /** Returns a new write builder. */
-    WriteBuilder newWriteBuilder();
+    /** Returns a new batch write builder. */
+    BatchWriteBuilder newBatchWriteBuilder();
+
+    /** Returns a new stream write builder. */
+    StreamWriteBuilder newStreamWriteBuilder();
 }

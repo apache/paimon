@@ -29,7 +29,7 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.CommitMessage;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.StreamTableWrite;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -62,7 +62,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 createRecoverableTestHarness(table);
         testHarness.open();
 
-        TableWrite write = table.newWrite(initialCommitUser);
+        StreamTableWrite write = table.newWrite(initialCommitUser);
         write.write(GenericRow.of(1, 10L));
         write.write(GenericRow.of(2, 20L));
 
@@ -110,7 +110,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         long cpId = 0;
         for (int i = 0; i < 10; i++) {
             cpId++;
-            TableWrite write = table.newWrite(initialCommitUser);
+            StreamTableWrite write = table.newWrite(initialCommitUser);
             write.write(GenericRow.of(1, 10L));
             write.write(GenericRow.of(2, 20L));
             for (CommitMessage committable : write.prepareCommit(false, cpId)) {
@@ -144,7 +144,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         long timestamp = 1;
 
         // this checkpoint is notified, should be committed
-        TableWrite write = table.newWrite(initialCommitUser);
+        StreamTableWrite write = table.newWrite(initialCommitUser);
         write.write(GenericRow.of(1, 10L));
         write.write(GenericRow.of(2, 20L));
         for (CommitMessage committable : write.prepareCommit(false, 1)) {

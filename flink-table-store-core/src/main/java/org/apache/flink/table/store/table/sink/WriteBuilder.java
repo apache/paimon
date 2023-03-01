@@ -22,35 +22,10 @@ import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.types.RowType;
 
-import javax.annotation.Nullable;
-
 import java.io.Serializable;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
 
 /**
  * An interface for building the {@link TableWrite} and {@link TableCommit}.
- *
- * <p>Example of distributed batch writing:
- *
- * <pre>{@code
- * // 1. Create a WriteBuilder (Serializable)
- * Table table = catalog.getTable(...);
- * WriteBuilder builder = table.newWriteBuilder();
- *
- * // 2. Write records in distributed tasks
- * TableWrite write = builder.newWrite();
- * write.write(...);
- * write.write(...);
- * write.write(...);
- * List<CommitMessage> messages = write.prepareCommit(true, 0);
- *
- * // 3. Collect all CommitMessages to a global node and commit
- * TableCommit commit = builder.newCommit();
- * // commit transaction ID starts with zero, if you have further commits, please increment it.
- * commit.commit(0, allCommitMessages());
- * }</pre>
  *
  * @since 0.4.0
  */
@@ -62,32 +37,6 @@ public interface WriteBuilder extends Serializable {
 
     /** Returns the row type of this table. */
     RowType rowType();
-
-    /** Get commit user, set by {@link #withCommitUser}. */
-    String commitUser();
-
-    /**
-     * Set commit user, the default value is a random UUID. The commit user used by {@link
-     * TableWrite} and {@link TableCommit} must be the same, otherwise there will be some conflicts.
-     */
-    WriteBuilder withCommitUser(String commitUser);
-
-    /** Overwrite writing, same as the 'INSERT OVERWRITE' semantics of SQL. */
-    default WriteBuilder withOverwrite() {
-        withOverwrite(Collections.emptyMap());
-        return this;
-    }
-
-    /** Overwrite writing, same as the 'INSERT OVERWRITE T PARTITION (...)' semantics of SQL. */
-    default WriteBuilder withOverwrite(@Nullable Map<String, String> staticPartition) {
-        if (staticPartition != null) {
-            withOverwrite(Collections.singletonList(staticPartition));
-        }
-        return this;
-    }
-
-    /** Overwrite writing, multiple static partitions can be specified. */
-    WriteBuilder withOverwrite(@Nullable List<Map<String, String>> staticPartitions);
 
     /** Create a {@link TableWrite} to write {@link InternalRow}s. */
     TableWrite newWrite();

@@ -37,8 +37,8 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.reader.RecordReaderIterator;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.StreamTableCommit;
+import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -168,8 +168,8 @@ public abstract class SchemaEvolutionTableTestBase {
                         tableConfig.toMap(),
                         ""));
         FileStoreTable table = createFileStoreTable.apply(tableSchemas);
-        TableWrite write = table.newWrite("user");
-        TableCommit commit = table.newCommit("user");
+        StreamTableWrite write = table.newWrite("user");
+        StreamTableCommit commit = table.newCommit("user");
 
         write.write(rowData("S001", 1, 11, "S11", 111L, "S111"));
         write.write(rowData("S002", 2, 12, "S12", 112L, "S112"));
@@ -243,8 +243,8 @@ public abstract class SchemaEvolutionTableTestBase {
                         tableConfig.toMap(),
                         ""));
         FileStoreTable table = createFileStoreTable.apply(tableSchemas);
-        TableWrite write = table.newWrite("user");
-        TableCommit commit = table.newCommit("user");
+        StreamTableWrite write = table.newWrite("user");
+        StreamTableCommit commit = table.newCommit("user");
 
         /**
          * Generate two files:

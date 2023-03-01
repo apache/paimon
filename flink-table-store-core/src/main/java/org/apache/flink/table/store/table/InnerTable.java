@@ -18,10 +18,12 @@
 
 package org.apache.flink.table.store.table;
 
+import org.apache.flink.table.store.table.sink.BatchWriteBuilder;
+import org.apache.flink.table.store.table.sink.BatchWriteBuilderImpl;
 import org.apache.flink.table.store.table.sink.InnerTableCommit;
 import org.apache.flink.table.store.table.sink.InnerTableWrite;
-import org.apache.flink.table.store.table.sink.WriteBuilder;
-import org.apache.flink.table.store.table.sink.WriteBuilderImpl;
+import org.apache.flink.table.store.table.sink.StreamWriteBuilder;
+import org.apache.flink.table.store.table.sink.StreamWriteBuilderImpl;
 import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.InnerTableScan;
 import org.apache.flink.table.store.table.source.ReadBuilder;
@@ -44,7 +46,12 @@ public interface InnerTable extends Table {
     }
 
     @Override
-    default WriteBuilder newWriteBuilder() {
-        return new WriteBuilderImpl(this);
+    default BatchWriteBuilder newBatchWriteBuilder() {
+        return new BatchWriteBuilderImpl(this);
+    }
+
+    @Override
+    default StreamWriteBuilder newStreamWriteBuilder() {
+        return new StreamWriteBuilderImpl(this);
     }
 }

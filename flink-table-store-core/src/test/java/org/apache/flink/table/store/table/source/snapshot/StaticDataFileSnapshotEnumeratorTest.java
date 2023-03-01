@@ -20,8 +20,8 @@ package org.apache.flink.table.store.table.source.snapshot;
 
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.StreamTableCommit;
+import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.types.RowKind;
 
@@ -38,8 +38,8 @@ public class StaticDataFileSnapshotEnumeratorTest extends SnapshotEnumeratorTest
     public void testEnumerate() throws Exception {
         FileStoreTable table = createFileStoreTable();
         SnapshotManager snapshotManager = table.snapshotManager();
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         SnapshotEnumerator enumerator =
                 StaticDataFileSnapshotEnumerator.create(table, table.newScan());
 

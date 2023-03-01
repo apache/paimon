@@ -21,23 +21,18 @@ package org.apache.flink.table.store.table.sink;
 import org.apache.flink.table.store.table.InnerTable;
 import org.apache.flink.table.store.types.RowType;
 
-import javax.annotation.Nullable;
-
-import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /** Implementation for {@link WriteBuilder}. */
-public class WriteBuilderImpl implements WriteBuilder {
+public class StreamWriteBuilderImpl implements StreamWriteBuilder {
 
     private static final long serialVersionUID = 1L;
 
     private final InnerTable table;
 
     private String commitUser = UUID.randomUUID().toString();
-    private List<Map<String, String>> staticPartitions;
 
-    public WriteBuilderImpl(InnerTable table) {
+    public StreamWriteBuilderImpl(InnerTable table) {
         this.table = table;
     }
 
@@ -57,24 +52,18 @@ public class WriteBuilderImpl implements WriteBuilder {
     }
 
     @Override
-    public WriteBuilder withCommitUser(String commitUser) {
+    public StreamWriteBuilder withCommitUser(String commitUser) {
         this.commitUser = commitUser;
         return this;
     }
 
     @Override
-    public WriteBuilder withOverwrite(@Nullable List<Map<String, String>> staticPartitions) {
-        this.staticPartitions = staticPartitions;
-        return this;
+    public StreamTableWrite newWrite() {
+        return table.newWrite(commitUser);
     }
 
     @Override
-    public TableWrite newWrite() {
-        return table.newWrite(commitUser).withOverwrite(staticPartitions != null);
-    }
-
-    @Override
-    public TableCommit newCommit() {
-        return table.newCommit(commitUser).withOverwrite(staticPartitions);
+    public StreamTableCommit newCommit() {
+        return table.newCommit(commitUser).ignoreEmptyCommit(false);
     }
 }
