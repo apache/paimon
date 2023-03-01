@@ -50,7 +50,7 @@ For streaming reads, records are produced in the following order:
 
 ## Compaction
 
-By default, the sink node will automatically perform compaction to solve the small file problem. The following options
+By default, the sink node will automatically perform compaction to control the number of files. The following options
 control the strategy of compaction:
 
 <table class="configuration table table-bordered">
