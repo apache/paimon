@@ -36,11 +36,11 @@ Table Store currently supports Flink 1.16, 1.15 and 1.14. We recommend the lates
 
 Download the jar file with corresponding version.
 
-| Version | Jar |
-|---|---|
-| Flink 1.16 | [flink-table-store-flink-{{< version >}}_1.16.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-flink-{{< version >}}_1.16.jar) |
-| Flink 1.15 | [flink-table-store-flink-{{< version >}}_1.15.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-flink-{{< version >}}_1.15.jar) |
-| Flink 1.14 | [flink-table-store-flink-{{< version >}}_1.14.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-flink-{{< version >}}_1.14.jar) |
+| Version | Jar                                                                                                                                                                                |
+|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 1.16 | [flink-table-store-flink-1.16-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-flink-1.16-{{< version >}}.jar) |
+| Flink 1.15 | [flink-table-store-flink-1.15-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-flink-1.15-{{< version >}}.jar) |
+| Flink 1.14 | [flink-table-store-flink-1.14-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-flink-1.14-{{< version >}}.jar) |
 
 You can also manually build bundled jar from the source code.
 
