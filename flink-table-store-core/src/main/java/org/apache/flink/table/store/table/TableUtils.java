@@ -63,8 +63,6 @@ public class TableUtils {
             }
 
             commit.commit(0, write.prepareCommit(true, 0));
-            commit.expireSnapshots();
-            commit.expirePartitions();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

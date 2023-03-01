@@ -46,21 +46,10 @@ import java.util.Map;
  * write.write(...);
  * List<CommitMessage> messages = write.prepareCommit(true, 0);
  *
- * // 3. Collect all CommitMessages to a global node
- *
- * // 3.1 commit
+ * // 3. Collect all CommitMessages to a global node and commit
  * TableCommit commit = builder.newCommit();
- * if (commit.filterCommitted(0)) {
- *     // It has already been committed. In order to avoid
- *     // repeated committing, return directly.
- *     return;
- * }
+ * // commit transaction ID starts with zero, if you have further commits, please increment it.
  * commit.commit(0, allCommitMessages());
- *
- * // 3.2. Expire snapshots and partitions
- * commit.expireSnapshots();
- * commit.expirePartitions();
- *
  * }</pre>
  *
  * @since 0.4.0
@@ -78,8 +67,8 @@ public interface WriteBuilder extends Serializable {
     String commitUser();
 
     /**
-     * Set commit user, the default value is UUID. The commit user used by {@link TableWrite} and
-     * {@link TableCommit} must be the same, otherwise there will be some conflicts.
+     * Set commit user, the default value is a random UUID. The commit user used by {@link
+     * TableWrite} and {@link TableCommit} must be the same, otherwise there will be some conflicts.
      */
     WriteBuilder withCommitUser(String commitUser);
 

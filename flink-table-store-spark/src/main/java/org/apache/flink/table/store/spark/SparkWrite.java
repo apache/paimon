@@ -66,8 +66,6 @@ public class SparkWrite implements V1Write {
             try (TableCommit tableCommit =
                     ((InnerTableCommit) writeBuilder.newCommit()).withLock(lockFactory.create())) {
                 tableCommit.commit(identifier, committables);
-                tableCommit.expireSnapshots();
-                tableCommit.expirePartitions();
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }

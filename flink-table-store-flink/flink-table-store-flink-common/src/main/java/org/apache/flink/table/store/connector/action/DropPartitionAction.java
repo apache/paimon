@@ -112,9 +112,6 @@ public class DropPartitionAction extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        TableCommit commit = this.commit.ignoreEmptyCommit(false);
-        commit.commit(Long.MAX_VALUE, Collections.emptyList());
-        commit.expireSnapshots();
-        commit.expirePartitions();
+        this.commit.ignoreEmptyCommit(false).commit(Long.MAX_VALUE, Collections.emptyList());
     }
 }

@@ -117,17 +117,11 @@ public class TableCommitImpl implements InnerTableCommit {
             }
             commit.overwrite(overwritePartitions, committable, new HashMap<>());
         }
-    }
 
-    @Override
-    public void expireSnapshots() {
         if (expire != null) {
             expire.expire();
         }
-    }
 
-    @Override
-    public void expirePartitions() {
         if (partitionExpire != null) {
             partitionExpire.expire();
         }
