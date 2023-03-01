@@ -49,4 +49,4 @@ A manifest file is a file containing changes about LSM data files and changelog 
 
 ## Data Files
 
-Data files are grouped by partitions and buckets. Each bucket directory contains an [LSM tree]({{< ref "docs/concepts/lsm-trees" >}}) and its [changelog files]({{< ref "docs/features/primary-key-table#changelog-producers" >}}).
+Data files are grouped by partitions and buckets. Each bucket directory contains an [LSM tree]({{< ref "docs/concepts/lsm-trees" >}}) and its [changelog files]({{< ref "docs/concepts/primary-key-table#changelog-producers" >}}).

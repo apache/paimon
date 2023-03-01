@@ -83,7 +83,7 @@ Produces the snapshot after the latest compaction on the table upon first startu
 </tbody>
 </table>
 
-Users can also adjust `changelog-producer` table property to specify the pattern of produced changes. See [changelog producer]({{< ref "docs/features/primary-key-table#changelog-producers" >}}) for details.
+Users can also adjust `changelog-producer` table property to specify the pattern of produced changes. See [changelog producer]({{< ref "docs/concepts/primary-key-table#changelog-producers" >}}) for details.
 
 {{< img src="/img/scan-mode.png">}}
 

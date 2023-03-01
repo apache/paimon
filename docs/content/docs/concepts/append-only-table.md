@@ -1,9 +1,9 @@
 ---
 title: "Append Only Table"
-weight: 2
+weight: 7
 type: docs
 aliases:
-- /features/append-only-table.html
+- /concepts/append-only-table.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -30,18 +30,6 @@ By specifying `'write-mode' = 'append-only'` when creating the table, user creat
 
 You can only insert a complete record into the table. No delete or update is supported and you cannot define primary keys.
 This type of table is suitable for use cases that do not require updates (such as log data synchronization).
-
-```sql
-CREATE TABLE MyTable (
-    product_id BIGINT,
-    price DOUBLE,
-    sales BIGINT
-) WITH (
-    'write-mode' = 'append-only',
-    'bucket' = '8',
-    'bucket-key' = 'product_id'
-);
-```
 
 ## Bucketing
 
@@ -95,3 +83,25 @@ control the strategy of compaction:
         </tr>
     </tbody>
 </table>
+
+## Example
+
+The following is an example of creating the Append-Only table and specifying the bucket key.
+
+{{< tabs "create-append-only-table" >}}
+
+{{< tab "Flink" >}}
+
+```sql
+CREATE TABLE MyTable (
+    product_id BIGINT,
+    price DOUBLE,
+    sales BIGINT
+) WITH (
+    'write-mode' = 'append-only',
+    'bucket' = '8',
+    'bucket-key' = 'product_id'
+);
+```
+
+{{< /tab >}}

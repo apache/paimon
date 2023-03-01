@@ -1,9 +1,9 @@
 ---
 title: "Primary Key Table"
-weight: 1
+weight: 6
 type: docs
 aliases:
-- /features/primary-key-table.html
+- /concepts/primary-key-table.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -54,7 +54,7 @@ For example, let's say Table Store receives three records:
 If the first column is the primary key. The final result will be `<1, 25.2, 10, 'This is a book'>`.
 
 {{< hint info >}}
-For streaming queries, `partial-update` merge engine must be used together with `full-compaction` [changelog producer]({{< ref "docs/features/primary-key-table#changelog-producers" >}}).
+For streaming queries, `partial-update` merge engine must be used together with `full-compaction` [changelog producer]({{< ref "docs/concepts/primary-key-table#changelog-producers" >}}).
 {{< /hint >}}
 
 {{< hint info >}}
@@ -103,7 +103,7 @@ If you allow some functions to ignore retraction messages, you can configure:
 `'fields.${field_name}.ignore-retract'='true'`.
 
 {{< hint info >}}
-For streaming queries, `aggregation` merge engine must be used together with `full-compaction` [changelog producer]({{< ref "docs/features/primary-key-table#changelog-producers" >}}).
+For streaming queries, `aggregation` merge engine must be used together with `full-compaction` [changelog producer]({{< ref "docs/concepts/primary-key-table#changelog-producers" >}}).
 {{< /hint >}}
 
 ## Changelog Producers
@@ -170,4 +170,4 @@ CREATE TABLE MyTable (
 );
 ```
 
-Regardless of the sequence of data input, the final correct result will always be obtained.
+Regardless of the order of data input, the final correct result will always be obtained.
