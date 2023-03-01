@@ -159,6 +159,10 @@ Full compaction changelog producer can produce complete changelog for any type o
 By default, the primary key table determines the merge order according to the input order. However, in distributed computing,
 there will be some cases that lead to data disorder. At this time, you can use a time field as `sequence.field`, for example:
 
+{{< tabs "sequence.field" >}}
+
+{{< tab "Flink" >}}
+
 ```sql
 CREATE TABLE MyTable (
     pk BIGINT PRIMARY KEY NOT ENFORCED,
@@ -169,5 +173,9 @@ CREATE TABLE MyTable (
     'sequence.field' = 'dt'
 );
 ```
+
+{{< /tab >}}
+
+{{< /tabs >}}
 
 Regardless of the order of data input, the final correct result will always be obtained.

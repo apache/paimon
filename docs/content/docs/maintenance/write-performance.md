@@ -57,9 +57,9 @@ It is recommended that the parallelism of sink should be less than or equal to t
 
 ### Number of Sorted Runs to Trigger Compaction
 
-Table Store uses [LSM tree]({{< ref "docs/concepts/lsm-trees" >}}) which supports a large number of updates. LSM organizes files in several [sorted runs]({{< ref "docs/concepts/lsm-trees#sorted-runs" >}}). When querying records from an LSM tree, all sorted runs must be combined to produce a complete view of all records.
+Table Store uses [LSM tree]({{< ref "docs/concepts/file-layouts#lsm-trees" >}}) which supports a large number of updates. LSM organizes files in several [sorted runs]({{< ref "docs/concepts/file-layouts#lsm-trees#sorted-runs" >}}). When querying records from an LSM tree, all sorted runs must be combined to produce a complete view of all records.
 
-One can easily see that too many sorted runs will result in poor query performance. To keep the number of sorted runs in a reasonable range, Table Store writers will automatically perform [compactions]({{< ref "docs/concepts/lsm-trees#compactions" >}}). The following table property determines the minimum number of sorted runs to trigger a compaction.
+One can easily see that too many sorted runs will result in poor query performance. To keep the number of sorted runs in a reasonable range, Table Store writers will automatically perform [compactions]({{< ref "docs/concepts/file-layouts#lsm-trees#compactions" >}}). The following table property determines the minimum number of sorted runs to trigger a compaction.
 
 <table class="table table-bordered">
     <thead>
