@@ -37,6 +37,12 @@ under the License.
 
     <dependencies>
         <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-store-spark-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-sql_2.12</artifactId>
             <version>${spark.version}</version>

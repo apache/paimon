@@ -31,7 +31,6 @@ import org.apache.flink.table.store.types.MapType;
 import org.apache.flink.table.store.types.MultisetType;
 import org.apache.flink.table.store.types.RowType;
 
-import org.apache.spark.sql.catalyst.expressions.SpecializedGettersReader;
 import org.apache.spark.sql.catalyst.util.ArrayBasedMapData;
 import org.apache.spark.sql.catalyst.util.ArrayData;
 import org.apache.spark.sql.catalyst.util.DateTimeUtils;
@@ -167,7 +166,7 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
 
     @Override
     public Object get(int ordinal, org.apache.spark.sql.types.DataType dataType) {
-        return SpecializedGettersReader.read(this, ordinal, dataType, true, true);
+        return SpecializedGettersReader.read(this, ordinal, dataType);
     }
 
     public static Object fromFlink(Object o, DataType type) {
