@@ -23,6 +23,7 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.SupportsPartition;
 import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.TableUtils;
 
 import org.apache.spark.sql.connector.catalog.SupportsDelete;
 import org.apache.spark.sql.connector.catalog.SupportsRead;
@@ -44,7 +45,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /** A spark {@link org.apache.spark.sql.connector.catalog.Table} for table store. */
 public class SparkTable
@@ -99,7 +99,7 @@ public class SparkTable
 
     @Override
     public WriteBuilder newWriteBuilder(LogicalWriteInfo info) {
-        return new SparkWriteBuilder(castToWritable(table), info.queryId(), lockFactory);
+        return new SparkWriteBuilder(table, lockFactory);
     }
 
     @Override
@@ -114,8 +114,7 @@ public class SparkTable
             predicates.add(converter.convert(filter));
         }
 
-        String commitUser = UUID.randomUUID().toString();
-        castToWritable(table).deleteWhere(commitUser, predicates, lockFactory);
+        TableUtils.deleteWhere(table, predicates, lockFactory);
     }
 
     @Override
@@ -125,14 +124,5 @@ public class SparkTable
         } else {
             return Collections.emptyMap();
         }
-    }
-
-    private static org.apache.flink.table.store.table.SupportsWrite castToWritable(Table table) {
-        if (!(table instanceof org.apache.flink.table.store.table.SupportsWrite)) {
-            throw new UnsupportedOperationException(
-                    "Unsupported table for writing: " + table.getClass());
-        }
-
-        return (org.apache.flink.table.store.table.SupportsWrite) table;
     }
 }

@@ -33,11 +33,16 @@ import org.apache.flink.table.store.file.schema.SchemaUtils;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.Options;
-import org.apache.flink.table.store.table.sink.FileCommittable;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.BatchTableCommit;
+import org.apache.flink.table.store.table.sink.BatchTableWrite;
+import org.apache.flink.table.store.table.sink.BatchWriteBuilder;
+import org.apache.flink.table.store.table.sink.CommitMessage;
+import org.apache.flink.table.store.table.sink.InnerTableCommit;
+import org.apache.flink.table.store.table.sink.StreamTableCommit;
+import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.ReadBuilder;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
@@ -99,11 +104,39 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                             + COMPATIBILITY_BATCH_ROW_TO_STRING.apply(rowData);
 
     @Test
+    public void testBatchWriteBuilder() throws Exception {
+        Table table = createFileStoreTable();
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(1, 11, 101L));
+        commit.commit(write.prepareCommit());
+
+        assertThatThrownBy(write::prepareCommit)
+                .hasMessageContaining("BatchTableWrite only support one-time committing");
+        assertThatThrownBy(() -> commit.commit(Collections.emptyList()))
+                .hasMessageContaining("BatchTableCommit only support one-time committing");
+
+        write.close();
+        commit.close();
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
+                .isEqualTo(
+                        Arrays.asList(
+                                "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|11|101|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
     public void testSequenceNumber() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(conf -> conf.set(CoreOptions.SEQUENCE_FIELD, "b"));
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         write.write(rowData(1, 10, 200L));
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 11, 101L));
@@ -230,8 +263,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
         write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 100L));
@@ -265,8 +298,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 conf.set(
                                         CoreOptions.CHANGELOG_PRODUCER,
                                         ChangelogProducer.FULL_COMPACTION));
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 110L));
         write.write(rowData(1, 20, 120L));
@@ -422,8 +455,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(enumerator.enumerate()).isNull();
 
         // write another commit
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 10, 102L));
         write.write(rowDataWithKind(RowKind.UPDATE_AFTER, 1, 10, 103L));
         write.write(rowDataWithKind(RowKind.INSERT, 1, 20, 201L));
@@ -439,8 +472,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     private void writeData() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
@@ -467,8 +500,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     public void testReadFilter() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
@@ -545,8 +578,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                     CoreOptions.MergeEngine.PARTIAL_UPDATE);
                             conf.set(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE, true);
                         });
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         write.write(rowData(1, 10, 200L));
         write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 100L));
         write.write(rowDataWithKind(RowKind.UPDATE_BEFORE, 1, 10, 100L));
@@ -565,18 +598,18 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testSlowCommit() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
-        List<FileCommittable> committables0 = write.prepareCommit(false, 0);
+        List<CommitMessage> committables0 = write.prepareCommit(false, 0);
 
         write.write(rowData(2, 10, 300L));
-        List<FileCommittable> committables1 = write.prepareCommit(false, 1);
+        List<CommitMessage> committables1 = write.prepareCommit(false, 1);
 
         write.write(rowData(1, 20, 201L));
-        List<FileCommittable> committables2 = write.prepareCommit(true, 2);
+        List<CommitMessage> committables2 = write.prepareCommit(true, 2);
 
         commit.commit(0, committables0);
         commit.commit(1, committables1);
@@ -600,8 +633,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testIncrementalScanOverwrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        InnerTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
@@ -616,7 +649,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(1, 20, 2000L));
         Map<String, String> overwritePartition = new HashMap<>();
         overwritePartition.put("pt", "1");
-        commit.withOverwritePartition(overwritePartition);
+        commit.withOverwrite(overwritePartition);
         commit.commit(1, write.prepareCommit(true, 1));
 
         List<DataSplit> splits1 = scan.plan().splits;
@@ -631,8 +664,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
 
         // first commit
         write.write(rowDataWithKind(RowKind.INSERT, 1, 10, 100L));
@@ -723,8 +756,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         Function<InternalRow, String> rowToString = row -> rowDataToString(row, rowType);
         DataTableScan scan = table.newScan();
         TableRead read = table.newRead();
-        TableWrite write = table.newWrite("");
-        TableCommit commit = table.newCommit("");
+        StreamTableWrite write = table.newWrite("");
+        StreamTableCommit commit = table.newCommit("");
 
         // 1. inserts
         write.write(GenericRow.of(1, 1, 3, 3));
@@ -761,7 +794,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                             options.set("fields.c.aggregate-function", "max");
                         },
                         rowType);
-        TableWrite write = table.newWrite("");
+        StreamTableWrite write = table.newWrite("");
         write.write(GenericRow.of(1, 1, 3, 3));
         write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 3, 3));
         assertThatThrownBy(() -> write.prepareCommit(true, 0))

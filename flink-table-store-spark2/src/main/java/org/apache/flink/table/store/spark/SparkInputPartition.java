@@ -19,23 +19,16 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.reader.RecordReaderIterator;
-import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.source.ReadBuilder;
 import org.apache.flink.table.store.table.source.Split;
-import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.TypeUtils;
 
 import org.apache.spark.sql.sources.v2.reader.InputPartition;
 import org.apache.spark.sql.sources.v2.reader.InputPartitionReader;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.List;
-
-import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
 
 /** A Spark {@link InputPartition} for table store. */
 public class SparkInputPartition
@@ -43,16 +36,11 @@ public class SparkInputPartition
 
     private static final long serialVersionUID = 1L;
 
-    private final Table table;
-    private final int[] projectedFields;
-    private final List<Predicate> predicates;
+    private final ReadBuilder readBuilder;
     private final Split split;
 
-    public SparkInputPartition(
-            Table table, int[] projectedFields, List<Predicate> predicates, Split split) {
-        this.table = table;
-        this.projectedFields = projectedFields;
-        this.predicates = predicates;
+    public SparkInputPartition(ReadBuilder readBuilder, Split split) {
+        this.readBuilder = readBuilder;
         this.split = split;
     }
 
@@ -60,19 +48,12 @@ public class SparkInputPartition
     public InputPartitionReader<org.apache.spark.sql.catalyst.InternalRow> createPartitionReader() {
         RecordReader<InternalRow> recordReader;
         try {
-            TableRead tableRead = table.newRead();
-            if (projectedFields != null) {
-                tableRead.withProjection(projectedFields);
-            }
-            if (predicates.size() > 0) {
-                tableRead.withFilter(and(predicates));
-            }
-            recordReader = tableRead.createReader(split);
+            recordReader = readBuilder.newRead().createReader(split);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
         RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(recordReader);
-        SparkInternalRow row = new SparkInternalRow(readRowType());
+        SparkInternalRow row = new SparkInternalRow(readBuilder.readType());
         return new InputPartitionReader<org.apache.spark.sql.catalyst.InternalRow>() {
 
             @Override
@@ -103,10 +84,5 @@ public class SparkInputPartition
     @Override
     public String[] preferredLocations() {
         return new String[0];
-    }
-
-    private RowType readRowType() {
-        RowType rowType = table.rowType();
-        return projectedFields == null ? rowType : TypeUtils.project(rowType, projectedFields);
     }
 }

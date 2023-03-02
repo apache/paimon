@@ -20,17 +20,15 @@ package org.apache.flink.table.store.connector.action;
 
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.flink.table.store.table.SupportsWrite;
-import org.apache.flink.table.store.table.sink.TableCommit;
+import org.apache.flink.table.store.table.sink.BatchTableCommit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 
 import static org.apache.flink.table.store.connector.action.Action.getPartitions;
 import static org.apache.flink.table.store.connector.action.Action.getTablePath;
@@ -40,7 +38,7 @@ public class DropPartitionAction extends ActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(DropPartitionAction.class);
 
-    private final TableCommit commit;
+    private final BatchTableCommit commit;
 
     DropPartitionAction(
             String warehouse,
@@ -49,10 +47,7 @@ public class DropPartitionAction extends ActionBase {
             List<Map<String, String>> partitions) {
         super(warehouse, databaseName, tableName);
 
-        this.commit =
-                ((SupportsWrite) table)
-                        .newCommit(UUID.randomUUID().toString())
-                        .withOverwritePartitions(partitions);
+        this.commit = table.newBatchWriteBuilder().withOverwrite(partitions).newCommit();
     }
 
     public static Optional<Action> create(String[] args) {
@@ -117,6 +112,6 @@ public class DropPartitionAction extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        commit.commit(new ArrayList<>());
+        this.commit.commit(Collections.emptyList());
     }
 }

@@ -34,12 +34,13 @@ import org.apache.flink.table.store.file.utils.SerializationUtils;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.InnerTableRead;
+import org.apache.flink.table.store.table.source.InnerTableScan;
 import org.apache.flink.table.store.table.source.Split;
-import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.table.source.snapshot.StaticDataFileSnapshotEnumerator;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
@@ -69,7 +70,7 @@ import java.util.function.Supplier;
 import static org.apache.flink.table.store.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing files of a snapshot in specific table. */
-public class FilesTable implements Table {
+public class FilesTable implements ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -116,12 +117,12 @@ public class FilesTable implements Table {
     }
 
     @Override
-    public TableScan newScan() {
+    public InnerTableScan newScan() {
         return new FilesScan(storeTable);
     }
 
     @Override
-    public TableRead newRead() {
+    public InnerTableRead newRead() {
         return new FilesRead(new SchemaManager(storeTable.fileIO(), storeTable.location()));
     }
 
@@ -130,7 +131,7 @@ public class FilesTable implements Table {
         return new FilesTable(storeTable.copy(dynamicOptions));
     }
 
-    private static class FilesScan implements TableScan {
+    private static class FilesScan implements InnerTableScan {
 
         private final FileStoreTable storeTable;
 
@@ -139,7 +140,7 @@ public class FilesTable implements Table {
         }
 
         @Override
-        public TableScan withFilter(Predicate predicate) {
+        public InnerTableScan withFilter(Predicate predicate) {
             // TODO
             return this;
         }
@@ -193,7 +194,7 @@ public class FilesTable implements Table {
         }
     }
 
-    private static class FilesRead implements TableRead {
+    private static class FilesRead implements InnerTableRead {
 
         private final SchemaManager schemaManager;
 
@@ -204,13 +205,13 @@ public class FilesTable implements Table {
         }
 
         @Override
-        public TableRead withFilter(Predicate predicate) {
+        public InnerTableRead withFilter(Predicate predicate) {
             // TODO
             return this;
         }
 
         @Override
-        public TableRead withProjection(int[][] projection) {
+        public InnerTableRead withProjection(int[][] projection) {
             this.projection = projection;
             return this;
         }

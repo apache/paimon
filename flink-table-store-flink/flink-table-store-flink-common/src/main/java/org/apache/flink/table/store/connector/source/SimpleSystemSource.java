@@ -21,9 +21,7 @@ package org.apache.flink.table.store.connector.source;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.table.Table;
-import org.apache.flink.table.store.table.source.TableScan;
+import org.apache.flink.table.store.table.source.ReadBuilder;
 
 import javax.annotation.Nullable;
 
@@ -34,12 +32,8 @@ public class SimpleSystemSource extends FlinkSource {
 
     private static final long serialVersionUID = 2L;
 
-    public SimpleSystemSource(
-            Table table,
-            @Nullable int[][] projectedFields,
-            @Nullable Predicate predicate,
-            @Nullable Long limit) {
-        super(table, projectedFields, predicate, limit);
+    public SimpleSystemSource(ReadBuilder readBuilder, @Nullable Long limit) {
+        super(readBuilder, limit);
     }
 
     @Override
@@ -51,14 +45,10 @@ public class SimpleSystemSource extends FlinkSource {
     public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> restoreEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
-        TableScan scan = table.newScan();
-        if (predicate != null) {
-            scan.withFilter(predicate);
-        }
-
         Collection<FileStoreSourceSplit> splits =
                 checkpoint == null
-                        ? new FileStoreSourceSplitGenerator().createSplits(scan.plan())
+                        ? new FileStoreSourceSplitGenerator()
+                                .createSplits(readBuilder.newScan().plan())
                         : checkpoint.splits();
 
         return new StaticFileStoreSplitEnumerator(context, null, splits);

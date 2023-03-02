@@ -18,10 +18,8 @@
 
 package org.apache.flink.table.store.spark;
 
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.source.ReadBuilder;
 import org.apache.flink.table.store.table.source.Split;
-import org.apache.flink.table.store.utils.TypeUtils;
 
 import org.apache.spark.sql.connector.read.Batch;
 import org.apache.spark.sql.connector.read.InputPartition;
@@ -32,7 +30,6 @@ import org.apache.spark.sql.connector.read.SupportsReportStatistics;
 import org.apache.spark.sql.types.StructType;
 
 import java.util.List;
-import java.util.Objects;
 import java.util.OptionalLong;
 
 /**
@@ -42,27 +39,23 @@ import java.util.OptionalLong;
  */
 public class SparkScan implements Scan, SupportsReportStatistics {
 
-    protected final Table table;
-    private final List<Predicate> predicates;
-    private final int[] projectedFields;
+    private final ReadBuilder readBuilder;
 
     private List<Split> splits;
 
-    public SparkScan(Table table, List<Predicate> predicates, int[] projectedFields) {
-        this.table = table;
-        this.predicates = predicates;
-        this.projectedFields = projectedFields;
+    public SparkScan(ReadBuilder readBuilder) {
+        this.readBuilder = readBuilder;
     }
 
     @Override
     public String description() {
         // TODO add filters
-        return String.format("tablestore(%s)", table.name());
+        return String.format("tablestore(%s)", readBuilder.tableName());
     }
 
     @Override
     public StructType readSchema() {
-        return SparkTypeUtils.fromFlinkRowType(TypeUtils.project(table.rowType(), projectedFields));
+        return SparkTypeUtils.fromFlinkRowType(readBuilder.readType());
     }
 
     @Override
@@ -77,14 +70,14 @@ public class SparkScan implements Scan, SupportsReportStatistics {
 
             @Override
             public PartitionReaderFactory createReaderFactory() {
-                return new SparkReaderFactory(table, projectedFields, predicates);
+                return new SparkReaderFactory(readBuilder);
             }
         };
     }
 
     protected List<Split> splits() {
         if (splits == null) {
-            this.splits = table.newScan().withFilter(predicates).plan().splits();
+            this.splits = readBuilder.newScan().plan().splits();
         }
         return splits;
     }
@@ -124,13 +117,11 @@ public class SparkScan implements Scan, SupportsReportStatistics {
         }
 
         SparkScan that = (SparkScan) o;
-        return table.name().equals(that.table.name())
-                && readSchema().equals(that.readSchema())
-                && predicates.equals(that.predicates);
+        return readBuilder.equals(that.readBuilder);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(table.name(), readSchema(), predicates);
+        return readBuilder.hashCode();
     }
 }

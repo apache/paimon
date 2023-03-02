@@ -18,14 +18,18 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.options.ConfigOption;
 import org.apache.flink.table.store.options.ConfigOptions;
 import org.apache.flink.table.store.options.description.Description;
 import org.apache.flink.table.store.options.description.TextElement;
 
 import java.lang.reflect.Field;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+
+import static org.apache.flink.table.store.options.ConfigOptions.key;
 
 /** Options for flink connector. */
 public class FlinkConnectorOptions {
@@ -94,6 +98,17 @@ public class FlinkConnectorOptions {
                                                     + " this means 'UPDATE_BEFORE' and 'UPDATE_AFTER' can be split into two checkpoint."
                                                     + " Downstream can see intermediate state.")
                                     .build());
+
+    public static final ConfigOption<Duration> CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL =
+            key("changelog-producer.compaction-interval")
+                    .durationType()
+                    .defaultValue(Duration.ofMinutes(30))
+                    .withDescription(
+                            "When "
+                                    + CoreOptions.CHANGELOG_PRODUCER.key()
+                                    + " is set to "
+                                    + CoreOptions.ChangelogProducer.FULL_COMPACTION.name()
+                                    + ", full compaction will be constantly triggered after this interval.");
 
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();

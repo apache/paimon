@@ -96,7 +96,7 @@ public class TableStreamingReader {
     }
 
     private Iterator<InternalRow> read(DataTableScan.DataFilePlan plan) throws IOException {
-        TableRead read = table.newRead().withProjection(projection);
+        InnerTableRead read = table.newRead().withProjection(projection);
         if (predicate != null) {
             read.withFilter(predicate);
         }

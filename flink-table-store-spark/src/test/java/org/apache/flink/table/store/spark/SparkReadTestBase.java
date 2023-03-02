@@ -25,8 +25,8 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.StreamTableCommit;
+import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowKind;
 
@@ -183,8 +183,8 @@ public abstract class SparkReadTestBase {
                 FileStoreTableFactory.create(
                         LocalFileIO.create(),
                         new Path(warehousePath, String.format("default.db/%s", tableName)));
-        TableWrite writer = fileStoreTable.newWrite(COMMIT_USER);
-        TableCommit commit = fileStoreTable.newCommit(COMMIT_USER);
+        StreamTableWrite writer = fileStoreTable.newWrite(COMMIT_USER);
+        StreamTableCommit commit = fileStoreTable.newCommit(COMMIT_USER);
         for (GenericRow row : rows) {
             writer.write(row);
         }

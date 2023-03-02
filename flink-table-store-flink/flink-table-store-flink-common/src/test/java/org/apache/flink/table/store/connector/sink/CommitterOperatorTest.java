@@ -28,8 +28,8 @@ import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.sink.FileCommittable;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.CommitMessage;
+import org.apache.flink.table.store.table.sink.StreamTableWrite;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -62,12 +62,12 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 createRecoverableTestHarness(table);
         testHarness.open();
 
-        TableWrite write = table.newWrite(initialCommitUser);
+        StreamTableWrite write = table.newWrite(initialCommitUser);
         write.write(GenericRow.of(1, 10L));
         write.write(GenericRow.of(2, 20L));
 
         long timestamp = 1;
-        for (FileCommittable committable : write.prepareCommit(false, 8)) {
+        for (CommitMessage committable : write.prepareCommit(false, 8)) {
             testHarness.processElement(
                     new Committable(8, Committable.Kind.FILE, committable), timestamp++);
         }
@@ -110,10 +110,10 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         long cpId = 0;
         for (int i = 0; i < 10; i++) {
             cpId++;
-            TableWrite write = table.newWrite(initialCommitUser);
+            StreamTableWrite write = table.newWrite(initialCommitUser);
             write.write(GenericRow.of(1, 10L));
             write.write(GenericRow.of(2, 20L));
-            for (FileCommittable committable : write.prepareCommit(false, cpId)) {
+            for (CommitMessage committable : write.prepareCommit(false, cpId)) {
                 testHarness.processElement(
                         new Committable(cpId, Committable.Kind.FILE, committable), 1);
             }
@@ -144,10 +144,10 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         long timestamp = 1;
 
         // this checkpoint is notified, should be committed
-        TableWrite write = table.newWrite(initialCommitUser);
+        StreamTableWrite write = table.newWrite(initialCommitUser);
         write.write(GenericRow.of(1, 10L));
         write.write(GenericRow.of(2, 20L));
-        for (FileCommittable committable : write.prepareCommit(false, 1)) {
+        for (CommitMessage committable : write.prepareCommit(false, 1)) {
             testHarness.processElement(
                     new Committable(1, Committable.Kind.FILE, committable), timestamp++);
         }
@@ -157,7 +157,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         // this checkpoint is not notified, should not be committed
         write.write(GenericRow.of(3, 30L));
         write.write(GenericRow.of(4, 40L));
-        for (FileCommittable committable : write.prepareCommit(false, 2)) {
+        for (CommitMessage committable : write.prepareCommit(false, 2)) {
             testHarness.processElement(
                     new Committable(2, Committable.Kind.FILE, committable), timestamp++);
         }
@@ -175,7 +175,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         write = table.newWrite(initialCommitUser);
         write.write(GenericRow.of(5, 50L));
         write.write(GenericRow.of(6, 60L));
-        for (FileCommittable committable : write.prepareCommit(false, 3)) {
+        for (CommitMessage committable : write.prepareCommit(false, 3)) {
             testHarness.processElement(
                     new Committable(3, Committable.Kind.FILE, committable), timestamp++);
         }

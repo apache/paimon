@@ -21,18 +21,31 @@ package org.apache.flink.table.store.table.sink;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.NewFilesIncrement;
+import org.apache.flink.table.store.io.DataInputViewStreamWrapper;
+import org.apache.flink.table.store.io.DataOutputViewStreamWrapper;
 
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.Objects;
 
+import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializedBytes;
+import static org.apache.flink.table.store.file.utils.SerializationUtils.serializeBytes;
+
 /** File committable for sink. */
-public class FileCommittable {
+public class CommitMessageImpl implements CommitMessage {
 
-    private final BinaryRow partition;
-    private final int bucket;
-    private final NewFilesIncrement newFilesIncrement;
-    private final CompactIncrement compactIncrement;
+    private static final long serialVersionUID = 1L;
 
-    public FileCommittable(
+    private static final ThreadLocal<CommitMessageSerializer> CACHE =
+            ThreadLocal.withInitial(CommitMessageSerializer::new);
+
+    private transient BinaryRow partition;
+    private transient int bucket;
+    private transient NewFilesIncrement newFilesIncrement;
+    private transient CompactIncrement compactIncrement;
+
+    public CommitMessageImpl(
             BinaryRow partition,
             int bucket,
             NewFilesIncrement newFilesIncrement,
@@ -43,10 +56,12 @@ public class FileCommittable {
         this.compactIncrement = compactIncrement;
     }
 
+    @Override
     public BinaryRow partition() {
         return partition;
     }
 
+    @Override
     public int bucket() {
         return bucket;
     }
@@ -63,6 +78,24 @@ public class FileCommittable {
         return newFilesIncrement.isEmpty() && compactIncrement.isEmpty();
     }
 
+    private void writeObject(ObjectOutputStream out) throws IOException {
+        out.defaultWriteObject();
+        CommitMessageSerializer serializer = CACHE.get();
+        out.writeInt(serializer.getVersion());
+        serializeBytes(new DataOutputViewStreamWrapper(out), serializer.serialize(this));
+    }
+
+    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+        in.defaultReadObject();
+        int version = in.readInt();
+        byte[] bytes = deserializedBytes(new DataInputViewStreamWrapper(in));
+        CommitMessageImpl message = (CommitMessageImpl) CACHE.get().deserialize(version, bytes);
+        this.partition = message.partition;
+        this.bucket = message.bucket;
+        this.newFilesIncrement = message.newFilesIncrement;
+        this.compactIncrement = message.compactIncrement;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -72,7 +105,7 @@ public class FileCommittable {
             return false;
         }
 
-        FileCommittable that = (FileCommittable) o;
+        CommitMessageImpl that = (CommitMessageImpl) o;
         return bucket == that.bucket
                 && Objects.equals(partition, that.partition)
                 && Objects.equals(newFilesIncrement, that.newFilesIncrement)

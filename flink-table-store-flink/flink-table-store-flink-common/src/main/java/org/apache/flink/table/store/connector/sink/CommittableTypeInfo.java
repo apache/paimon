@@ -22,7 +22,7 @@ import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
-import org.apache.flink.table.store.table.sink.FileCommittableSerializer;
+import org.apache.flink.table.store.table.sink.CommitMessageSerializer;
 
 /** Type information of {@link Committable}. */
 public class CommittableTypeInfo extends TypeInformation<Committable> {
@@ -61,7 +61,7 @@ public class CommittableTypeInfo extends TypeInformation<Committable> {
     public TypeSerializer<Committable> createSerializer(ExecutionConfig config) {
         // no copy, so that data from writer is directly going into committer while chaining
         return new SimpleVersionedSerializerTypeSerializerProxy<Committable>(
-                () -> new CommittableSerializer(new FileCommittableSerializer())) {
+                () -> new CommittableSerializer(new CommitMessageSerializer())) {
             @Override
             public Committable copy(Committable from) {
                 return from;

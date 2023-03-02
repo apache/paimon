@@ -26,9 +26,9 @@ import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.disk.IOManagerImpl;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.sink.FileCommittable;
+import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.SinkRecord;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.TableWriteImpl;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,7 +44,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     protected final FileStoreTable table;
     protected final String commitUser;
-    protected final TableWrite write;
+    protected final TableWriteImpl<?> write;
 
     public StoreSinkWriteImpl(
             FileStoreTable table,
@@ -81,7 +81,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     @Override
     public SinkRecord write(InternalRow rowData) throws Exception {
-        return write.write(rowData);
+        return write.writeAndReturn(rowData);
     }
 
     @Override
@@ -114,8 +114,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         List<Committable> committables = new ArrayList<>();
         if (write != null) {
             try {
-                for (FileCommittable committable :
-                        write.prepareCommit(doCompaction, checkpointId)) {
+                for (CommitMessage committable : write.prepareCommit(doCompaction, checkpointId)) {
                     committables.add(
                             new Committable(checkpointId, Committable.Kind.FILE, committable));
                 }

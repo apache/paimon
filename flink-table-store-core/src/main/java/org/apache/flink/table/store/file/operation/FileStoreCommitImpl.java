@@ -35,7 +35,8 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.MemorySize;
-import org.apache.flink.table.store.table.sink.FileCommittable;
+import org.apache.flink.table.store.table.sink.CommitMessage;
+import org.apache.flink.table.store.table.sink.CommitMessageImpl;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
 
@@ -99,7 +100,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Nullable private final Comparator<InternalRow> keyComparator;
 
     @Nullable private Lock lock;
-    private boolean createEmptyCommit;
+    private boolean ignoreEmptyCommit;
 
     public FileStoreCommitImpl(
             FileIO fileIO,
@@ -131,7 +132,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.keyComparator = keyComparator;
 
         this.lock = null;
-        this.createEmptyCommit = false;
+        this.ignoreEmptyCommit = true;
     }
 
     @Override
@@ -141,31 +142,31 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public FileStoreCommit withCreateEmptyCommit(boolean createEmptyCommit) {
-        this.createEmptyCommit = createEmptyCommit;
+    public FileStoreCommit ignoreEmptyCommit(boolean ignoreEmptyCommit) {
+        this.ignoreEmptyCommit = ignoreEmptyCommit;
         return this;
     }
 
     @Override
-    public List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committableList) {
+    public Set<Long> filterCommitted(Set<Long> commitIdentifiers) {
         // nothing to filter, fast exit
-        if (committableList.isEmpty()) {
-            return committableList;
+        if (commitIdentifiers.isEmpty()) {
+            return commitIdentifiers;
         }
 
         Optional<Snapshot> latestSnapshot = snapshotManager.latestSnapshotOfUser(commitUser);
         if (latestSnapshot.isPresent()) {
-            List<ManifestCommittable> result = new ArrayList<>();
-            for (ManifestCommittable committable : committableList) {
+            Set<Long> result = new HashSet<>();
+            for (Long identifier : commitIdentifiers) {
                 // if committable is newer than latest snapshot, then it hasn't been committed
-                if (committable.identifier() > latestSnapshot.get().commitIdentifier()) {
-                    result.add(committable);
+                if (identifier > latestSnapshot.get().commitIdentifier()) {
+                    result.add(identifier);
                 }
             }
             return result;
         } else {
             // if there is no previous snapshots then nothing should be filtered
-            return committableList;
+            return commitIdentifiers;
         }
     }
 
@@ -189,7 +190,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 compactTableFiles,
                 compactChangelog);
 
-        if (createEmptyCommit || !appendTableFiles.isEmpty() || !appendChangelog.isEmpty()) {
+        if (!ignoreEmptyCommit || !appendTableFiles.isEmpty() || !appendChangelog.isEmpty()) {
             // Optimization for common path.
             // Step 1:
             // Read manifest entries from changed partitions here and check for conflicts.
@@ -331,47 +332,42 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     private void collectChanges(
-            List<FileCommittable> fileCommittables,
+            List<CommitMessage> commitMessages,
             List<ManifestEntry> appendTableFiles,
             List<ManifestEntry> appendChangelog,
             List<ManifestEntry> compactTableFiles,
             List<ManifestEntry> compactChangelog) {
-        for (FileCommittable fileCommittable : fileCommittables) {
-            fileCommittable
+        for (CommitMessage message : commitMessages) {
+            CommitMessageImpl commitMessage = (CommitMessageImpl) message;
+            commitMessage
                     .newFilesIncrement()
                     .newFiles()
-                    .forEach(
-                            m -> appendTableFiles.add(makeEntry(FileKind.ADD, fileCommittable, m)));
-            fileCommittable
+                    .forEach(m -> appendTableFiles.add(makeEntry(FileKind.ADD, commitMessage, m)));
+            commitMessage
                     .newFilesIncrement()
                     .changelogFiles()
-                    .forEach(m -> appendChangelog.add(makeEntry(FileKind.ADD, fileCommittable, m)));
-            fileCommittable
+                    .forEach(m -> appendChangelog.add(makeEntry(FileKind.ADD, commitMessage, m)));
+            commitMessage
                     .compactIncrement()
                     .compactBefore()
                     .forEach(
                             m ->
                                     compactTableFiles.add(
-                                            makeEntry(FileKind.DELETE, fileCommittable, m)));
-            fileCommittable
+                                            makeEntry(FileKind.DELETE, commitMessage, m)));
+            commitMessage
                     .compactIncrement()
                     .compactAfter()
-                    .forEach(
-                            m ->
-                                    compactTableFiles.add(
-                                            makeEntry(FileKind.ADD, fileCommittable, m)));
-            fileCommittable
+                    .forEach(m -> compactTableFiles.add(makeEntry(FileKind.ADD, commitMessage, m)));
+            commitMessage
                     .compactIncrement()
                     .changelogFiles()
-                    .forEach(
-                            m -> compactChangelog.add(makeEntry(FileKind.ADD, fileCommittable, m)));
+                    .forEach(m -> compactChangelog.add(makeEntry(FileKind.ADD, commitMessage, m)));
         }
     }
 
-    private ManifestEntry makeEntry(
-            FileKind kind, FileCommittable fileCommittable, DataFileMeta file) {
+    private ManifestEntry makeEntry(FileKind kind, CommitMessage commitMessage, DataFileMeta file) {
         return new ManifestEntry(
-                kind, fileCommittable.partition(), fileCommittable.bucket(), numBucket, file);
+                kind, commitMessage.partition(), commitMessage.bucket(), numBucket, file);
     }
 
     private void tryCommit(

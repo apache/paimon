@@ -29,7 +29,7 @@ import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.source.DataTableScan;
-import org.apache.flink.table.store.table.source.TableRead;
+import org.apache.flink.table.store.table.source.ReadBuilder;
 
 import org.apache.hadoop.hive.ql.io.sarg.ConvertAstToSearchArg;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
@@ -65,10 +65,10 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
             InputSplit inputSplit, JobConf jobConf, Reporter reporter) throws IOException {
         FileStoreTable table = createFileStoreTable(jobConf);
         TableStoreInputSplit split = (TableStoreInputSplit) inputSplit;
-        TableRead read = table.newRead();
-        createPredicate(table.schema(), jobConf).ifPresent(read::withFilter);
+        ReadBuilder readBuilder = table.newReadBuilder();
+        createPredicate(table.schema(), jobConf).ifPresent(readBuilder::withFilter);
         return new TableStoreRecordReader(
-                read,
+                readBuilder,
                 split,
                 table.schema().fieldNames(),
                 Arrays.asList(getSelectedColumns(jobConf)));

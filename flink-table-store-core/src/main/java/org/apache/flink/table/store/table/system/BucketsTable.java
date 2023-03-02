@@ -32,11 +32,12 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.Split;
-import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.IntType;
@@ -54,7 +55,7 @@ import java.util.Map;
  *
  * <p>Only used internally by dedicated compact job sources.
  */
-public class BucketsTable implements DataTable {
+public class BucketsTable implements DataTable, ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -112,7 +113,7 @@ public class BucketsTable implements DataTable {
     }
 
     @Override
-    public TableRead newRead() {
+    public InnerTableRead newRead() {
         return new BucketsRead();
     }
 
@@ -126,18 +127,18 @@ public class BucketsTable implements DataTable {
         return wrapped.fileIO();
     }
 
-    private class BucketsRead implements TableRead {
+    private class BucketsRead implements InnerTableRead {
 
         private final DataFileMetaSerializer dataFileMetaSerializer = new DataFileMetaSerializer();
 
         @Override
-        public TableRead withFilter(Predicate predicate) {
+        public InnerTableRead withFilter(Predicate predicate) {
             // filter is done by scan
             return this;
         }
 
         @Override
-        public TableRead withProjection(int[][] projection) {
+        public InnerTableRead withProjection(int[][] projection) {
             throw new UnsupportedOperationException("BucketsRead does not support projection");
         }
 

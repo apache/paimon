@@ -32,10 +32,11 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.Split;
-import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
@@ -55,7 +56,7 @@ import java.util.stream.Collectors;
 import static org.apache.flink.table.store.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for reading audit log of table. */
-public class AuditLogTable implements DataTable {
+public class AuditLogTable implements DataTable, ReadonlyTable {
 
     public static final String AUDIT_LOG = "audit_log";
 
@@ -115,7 +116,7 @@ public class AuditLogTable implements DataTable {
     }
 
     @Override
-    public TableRead newRead() {
+    public InnerTableRead newRead() {
         return new AuditLogRead(dataTable.newRead());
     }
 
@@ -191,13 +192,13 @@ public class AuditLogTable implements DataTable {
         }
     }
 
-    private class AuditLogRead implements TableRead {
+    private class AuditLogRead implements InnerTableRead {
 
-        private final TableRead dataRead;
+        private final InnerTableRead dataRead;
 
         private int[] readProjection;
 
-        private AuditLogRead(TableRead dataRead) {
+        private AuditLogRead(InnerTableRead dataRead) {
             this.dataRead = dataRead;
             this.readProjection = defaultProjection();
         }
@@ -214,13 +215,13 @@ public class AuditLogTable implements DataTable {
         }
 
         @Override
-        public TableRead withFilter(Predicate predicate) {
+        public InnerTableRead withFilter(Predicate predicate) {
             convert(predicate).ifPresent(dataRead::withFilter);
             return this;
         }
 
         @Override
-        public TableRead withProjection(int[][] projection) {
+        public InnerTableRead withProjection(int[][] projection) {
             // data projection to push down to dataRead
             List<int[]> dataProjection = new ArrayList<>();
             // read projection to handle record returned by dataRead

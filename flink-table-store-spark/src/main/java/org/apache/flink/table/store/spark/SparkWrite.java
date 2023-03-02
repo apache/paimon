@@ -19,13 +19,12 @@
 package org.apache.flink.table.store.spark;
 
 import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.table.SupportsWrite;
-import org.apache.flink.table.store.table.sink.BucketComputer;
-import org.apache.flink.table.store.table.sink.FileCommittable;
-import org.apache.flink.table.store.table.sink.SerializableCommittable;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.sink.BatchTableCommit;
+import org.apache.flink.table.store.table.sink.BatchTableWrite;
+import org.apache.flink.table.store.table.sink.BatchWriteBuilder;
+import org.apache.flink.table.store.table.sink.CommitMessage;
+import org.apache.flink.table.store.table.sink.InnerTableCommit;
 
 import org.apache.spark.api.java.function.Function;
 import org.apache.spark.api.java.function.Function2;
@@ -35,18 +34,15 @@ import org.apache.spark.sql.sources.InsertableRelation;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /** Spark {@link V1Write}, it is required to use v1 write for grouping by bucket. */
 public class SparkWrite implements V1Write {
 
-    private final SupportsWrite table;
-    private final String queryId;
+    private final Table table;
     private final Lock.Factory lockFactory;
 
-    public SparkWrite(SupportsWrite table, String queryId, Lock.Factory lockFactory) {
+    public SparkWrite(Table table, Lock.Factory lockFactory) {
         this.table = table;
-        this.queryId = queryId;
         this.lockFactory = lockFactory;
     }
 
@@ -57,20 +53,16 @@ public class SparkWrite implements V1Write {
                 throw new UnsupportedOperationException("Overwrite is unsupported.");
             }
 
-            long identifier = 0;
-            List<SerializableCommittable> committables =
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            List<CommitMessage> committables =
                     data.toJavaRDD()
-                            .groupBy(new ComputeBucket(table))
-                            .mapValues(new WriteRecords(table, queryId, identifier))
+                            .groupBy(new ComputeBucket(writeBuilder))
+                            .mapValues(new WriteRecords(writeBuilder))
                             .values()
                             .reduce(new ListConcat<>());
-            try (TableCommit tableCommit =
-                    table.newCommit(queryId).withLock(lockFactory.create())) {
-                tableCommit.commit(
-                        identifier,
-                        committables.stream()
-                                .map(SerializableCommittable::delegate)
-                                .collect(Collectors.toList()));
+            try (BatchTableCommit tableCommit =
+                    ((InnerTableCommit) writeBuilder.newCommit()).withLock(lockFactory.create())) {
+                tableCommit.commit(committables);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -79,54 +71,42 @@ public class SparkWrite implements V1Write {
 
     private static class ComputeBucket implements Function<Row, Integer> {
 
-        private final SupportsWrite table;
-        private final RowType type;
+        private final BatchWriteBuilder writeBuilder;
 
-        private transient BucketComputer lazyComputer;
+        private transient BatchTableWrite lazyWriter;
 
-        private ComputeBucket(SupportsWrite table) {
-            this.table = table;
-            this.type = table.rowType();
+        private ComputeBucket(BatchWriteBuilder writeBuilder) {
+            this.writeBuilder = writeBuilder;
         }
 
-        private BucketComputer computer() {
-            if (lazyComputer == null) {
-                lazyComputer = table.bucketComputer();
+        private BatchTableWrite computer() {
+            if (lazyWriter == null) {
+                lazyWriter = writeBuilder.newWrite();
             }
-            return lazyComputer;
+            return lazyWriter;
         }
 
         @Override
         public Integer call(Row row) {
-            return computer().bucket(new SparkRow(type, row));
+            return computer().getBucket(new SparkRow(writeBuilder.rowType(), row));
         }
     }
 
-    private static class WriteRecords
-            implements Function<Iterable<Row>, List<SerializableCommittable>> {
+    private static class WriteRecords implements Function<Iterable<Row>, List<CommitMessage>> {
 
-        private final SupportsWrite table;
-        private final RowType type;
-        private final String queryId;
-        private final long commitIdentifier;
+        private final BatchWriteBuilder writeBuilder;
 
-        private WriteRecords(SupportsWrite table, String queryId, long commitIdentifier) {
-            this.table = table;
-            this.type = table.rowType();
-            this.queryId = queryId;
-            this.commitIdentifier = commitIdentifier;
+        private WriteRecords(BatchWriteBuilder writeBuilder) {
+            this.writeBuilder = writeBuilder;
         }
 
         @Override
-        public List<SerializableCommittable> call(Iterable<Row> iterables) throws Exception {
-            try (TableWrite write = table.newWrite(queryId)) {
+        public List<CommitMessage> call(Iterable<Row> iterables) throws Exception {
+            try (BatchTableWrite write = writeBuilder.newWrite()) {
                 for (Row row : iterables) {
-                    write.write(new SparkRow(type, row));
+                    write.write(new SparkRow(writeBuilder.rowType(), row));
                 }
-                List<FileCommittable> committables = write.prepareCommit(true, commitIdentifier);
-                return committables.stream()
-                        .map(SerializableCommittable::wrap)
-                        .collect(Collectors.toList());
+                return write.prepareCommit();
             }
         }
     }

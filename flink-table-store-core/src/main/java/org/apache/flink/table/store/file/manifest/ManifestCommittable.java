@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.table.store.table.sink.FileCommittable;
+import org.apache.flink.table.store.table.sink.CommitMessage;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -31,25 +31,23 @@ public class ManifestCommittable {
 
     private final long identifier;
     private final Map<Integer, Long> logOffsets;
-    private final List<FileCommittable> fileCommittables;
+    private final List<CommitMessage> commitMessages;
 
     public ManifestCommittable(long identifier) {
         this.identifier = identifier;
         this.logOffsets = new HashMap<>();
-        this.fileCommittables = new ArrayList<>();
+        this.commitMessages = new ArrayList<>();
     }
 
     public ManifestCommittable(
-            long identifier,
-            Map<Integer, Long> logOffsets,
-            List<FileCommittable> fileCommittables) {
+            long identifier, Map<Integer, Long> logOffsets, List<CommitMessage> commitMessages) {
         this.identifier = identifier;
         this.logOffsets = logOffsets;
-        this.fileCommittables = fileCommittables;
+        this.commitMessages = commitMessages;
     }
 
-    public void addFileCommittable(FileCommittable fileCommittable) {
-        fileCommittables.add(fileCommittable);
+    public void addFileCommittable(CommitMessage commitMessage) {
+        commitMessages.add(commitMessage);
     }
 
     public void addLogOffset(int bucket, long offset) {
@@ -69,8 +67,8 @@ public class ManifestCommittable {
         return logOffsets;
     }
 
-    public List<FileCommittable> fileCommittables() {
-        return fileCommittables;
+    public List<CommitMessage> fileCommittables() {
+        return commitMessages;
     }
 
     @Override
@@ -84,12 +82,12 @@ public class ManifestCommittable {
         ManifestCommittable that = (ManifestCommittable) o;
         return Objects.equals(identifier, that.identifier)
                 && Objects.equals(logOffsets, that.logOffsets)
-                && Objects.equals(fileCommittables, that.fileCommittables);
+                && Objects.equals(commitMessages, that.commitMessages);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(identifier, logOffsets, fileCommittables);
+        return Objects.hash(identifier, logOffsets, commitMessages);
     }
 
     @Override
@@ -99,6 +97,6 @@ public class ManifestCommittable {
                         + "identifier = %s, "
                         + "logOffsets = %s, "
                         + "fileCommittables = %s",
-                identifier, logOffsets, fileCommittables);
+                identifier, logOffsets, commitMessages);
     }
 }

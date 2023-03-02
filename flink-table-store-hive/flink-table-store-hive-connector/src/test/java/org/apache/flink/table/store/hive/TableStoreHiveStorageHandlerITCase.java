@@ -29,8 +29,8 @@ import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.hive.objectinspector.TableStoreObjectInspectorFactory;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.StreamTableCommit;
+import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowKind;
@@ -627,8 +627,8 @@ public class TableStoreHiveStorageHandlerITCase {
 
     private String writeData(FileStoreTable table, String path, List<InternalRow> data)
             throws Exception {
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         for (InternalRow rowData : data) {
             write.write(rowData);
             if (ThreadLocalRandom.current().nextInt(5) == 0) {
@@ -677,8 +677,8 @@ public class TableStoreHiveStorageHandlerITCase {
             }
         }
 
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         for (GenericRow rowData : input) {
             write.write(rowData);
         }
@@ -782,8 +782,8 @@ public class TableStoreHiveStorageHandlerITCase {
 
         // TODO add NaN related tests after FLINK-27627 and FLINK-27628 are fixed
 
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         write.write(GenericRow.of(1));
         commit.commit(0, write.prepareCommit(true, 0));
         write.write(GenericRow.of((Object) null));
@@ -871,8 +871,8 @@ public class TableStoreHiveStorageHandlerITCase {
                         Collections.emptyList(),
                         Collections.emptyList());
 
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         write.write(
                 GenericRow.of(
                         375, /* 1971-01-11 */

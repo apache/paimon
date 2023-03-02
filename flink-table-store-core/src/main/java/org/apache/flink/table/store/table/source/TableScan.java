@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.store.annotation.Experimental;
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.table.Table;
 
 import java.util.List;
@@ -32,15 +30,6 @@ import java.util.List;
  */
 @Experimental
 public interface TableScan {
-
-    default TableScan withFilter(List<Predicate> predicates) {
-        if (predicates == null || predicates.isEmpty()) {
-            return this;
-        }
-        return withFilter(PredicateBuilder.and(predicates));
-    }
-
-    TableScan withFilter(Predicate predicate);
 
     Plan plan();
 

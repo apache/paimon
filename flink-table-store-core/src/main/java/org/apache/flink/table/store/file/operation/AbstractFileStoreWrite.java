@@ -27,7 +27,8 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.utils.ExecutorThreadFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.sink.FileCommittable;
+import org.apache.flink.table.store.table.sink.CommitMessage;
+import org.apache.flink.table.store.table.sink.CommitMessageImpl;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,8 +61,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     @Nullable protected IOManager ioManager;
 
     protected final Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers;
-    private final ExecutorService compactExecutor;
 
+    private ExecutorService lazyCompactExecutor;
     private boolean overwrite = false;
 
     protected AbstractFileStoreWrite(
@@ -71,10 +72,16 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         this.scan = scan;
 
         this.writers = new HashMap<>();
-        this.compactExecutor =
-                Executors.newSingleThreadScheduledExecutor(
-                        new ExecutorThreadFactory(
-                                Thread.currentThread().getName() + "-compaction"));
+    }
+
+    private ExecutorService compactExecutor() {
+        if (lazyCompactExecutor == null) {
+            lazyCompactExecutor =
+                    Executors.newSingleThreadScheduledExecutor(
+                            new ExecutorThreadFactory(
+                                    Thread.currentThread().getName() + "-compaction"));
+        }
+        return lazyCompactExecutor;
     }
 
     @Override
@@ -130,7 +137,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     @Override
-    public List<FileCommittable> prepareCommit(boolean blocking, long commitIdentifier)
+    public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception {
         long latestCommittedIdentifier;
         if (writers.values().stream()
@@ -156,7 +163,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                             .orElse(Long.MIN_VALUE);
         }
 
-        List<FileCommittable> result = new ArrayList<>();
+        List<CommitMessage> result = new ArrayList<>();
 
         Iterator<Map.Entry<BinaryRow, Map<Integer, WriterContainer<T>>>> partIter =
                 writers.entrySet().iterator();
@@ -171,9 +178,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 WriterContainer<T> writerContainer = entry.getValue();
 
                 RecordWriter.CommitIncrement increment =
-                        writerContainer.writer.prepareCommit(blocking);
-                FileCommittable committable =
-                        new FileCommittable(
+                        writerContainer.writer.prepareCommit(waitCompaction);
+                CommitMessageImpl committable =
+                        new CommitMessageImpl(
                                 partition,
                                 bucket,
                                 increment.newFilesIncrement(),
@@ -220,7 +227,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             }
         }
         writers.clear();
-        compactExecutor.shutdownNow();
+        if (lazyCompactExecutor != null) {
+            lazyCompactExecutor.shutdownNow();
+        }
     }
 
     private WriterContainer<T> getWriterWrapper(BinaryRow partition, int bucket) {
@@ -239,8 +248,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         }
         WriterContainer<T> writerContainer =
                 overwrite
-                        ? createEmptyWriterContainer(partition.copy(), bucket, compactExecutor)
-                        : createWriterContainer(partition.copy(), bucket, compactExecutor);
+                        ? createEmptyWriterContainer(partition.copy(), bucket, compactExecutor())
+                        : createWriterContainer(partition.copy(), bucket, compactExecutor());
         notifyNewWriter(writerContainer.writer);
         return writerContainer;
     }

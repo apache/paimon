@@ -28,7 +28,7 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.Options;
-import org.apache.flink.table.store.table.sink.TableCommit;
+import org.apache.flink.table.store.table.sink.TableCommitImpl;
 
 import java.util.Map;
 import java.util.Objects;
@@ -116,8 +116,8 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public TableCommit newCommit(String commitUser) {
-        return new TableCommit(
+    public TableCommitImpl newCommit(String commitUser) {
+        return new TableCommitImpl(
                 store().newCommit(commitUser),
                 options().writeOnly() ? null : store().newExpire(),
                 options().writeOnly() ? null : store().newPartitionExpire(commitUser));

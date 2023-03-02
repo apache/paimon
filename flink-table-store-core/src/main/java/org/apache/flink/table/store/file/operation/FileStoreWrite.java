@@ -23,7 +23,7 @@ import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.utils.RecordWriter;
-import org.apache.flink.table.store.table.sink.FileCommittable;
+import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.SinkRecord;
 
 import java.util.List;
@@ -82,12 +82,13 @@ public interface FileStoreWrite<T> {
     /**
      * Prepare commit in the write.
      *
-     * @param blocking if this method need to wait for current compaction to complete
+     * @param waitCompaction if this method need to wait for current compaction to complete
      * @param commitIdentifier identifier of the commit being prepared
      * @return the file committable list
      * @throws Exception the thrown exception
      */
-    List<FileCommittable> prepareCommit(boolean blocking, long commitIdentifier) throws Exception;
+    List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
+            throws Exception;
 
     /**
      * Close the writer.

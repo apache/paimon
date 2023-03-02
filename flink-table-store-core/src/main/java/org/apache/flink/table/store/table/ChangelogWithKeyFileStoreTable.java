@@ -38,13 +38,12 @@ import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.sink.SequenceGenerator;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
-import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
 import org.apache.flink.table.store.table.source.AbstractDataTableScan;
+import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
 import org.apache.flink.table.store.table.source.SplitGenerator;
-import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowType;
@@ -189,17 +188,17 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableRead newRead() {
+    public InnerTableRead newRead() {
         return new KeyValueTableRead(store().newRead()) {
 
             @Override
-            public TableRead withFilter(Predicate predicate) {
+            public InnerTableRead withFilter(Predicate predicate) {
                 read.withFilter(predicate);
                 return this;
             }
 
             @Override
-            public TableRead withProjection(int[][] projection) {
+            public InnerTableRead withProjection(int[][] projection) {
                 read.withValueProjection(projection);
                 return this;
             }
@@ -213,7 +212,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableWrite newWrite(String commitUser) {
+    public TableWriteImpl<KeyValue> newWrite(String commitUser) {
         final SequenceGenerator sequenceGenerator =
                 store().options()
                         .sequenceField()

@@ -18,39 +18,42 @@
 
 package org.apache.flink.table.store.table.sink;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.disk.IOManager;
-import org.apache.flink.table.store.file.io.DataFileMeta;
-
-import java.util.List;
+import org.apache.flink.table.store.table.Table;
 
 /**
- * An abstraction layer above {@link org.apache.flink.table.store.file.operation.FileStoreWrite} to
- * provide {@link InternalRow} writing.
+ * Write of {@link Table} to provide {@link InternalRow} writing.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public interface TableWrite extends AutoCloseable {
 
-    TableWrite withOverwrite(boolean overwrite);
-
+    /** With {@link IOManager}, this is needed if 'write-buffer-spillable' is set to true. */
     TableWrite withIOManager(IOManager ioManager);
 
-    SinkRecord write(InternalRow rowData) throws Exception;
+    /** Calculate which partition {@code row} belongs to. */
+    BinaryRow getPartition(InternalRow row);
 
-    /** Log record need to preserve original pk (which includes partition fields). */
-    SinkRecord toLogRecord(SinkRecord record);
+    /** Calculate which bucket {@code row} belongs to. */
+    int getBucket(InternalRow row);
 
-    void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
+    /** Write a row to the writer. */
+    void write(InternalRow row) throws Exception;
 
     /**
-     * Notify that some new files are created at given snapshot in given bucket.
+     * Compact a bucket of a partition. By default, it will determine whether to perform the
+     * compaction according to the 'num-sorted-run.compaction-trigger' option. If fullCompaction is
+     * true, it will force a full compaction, which is expensive.
      *
-     * <p>Most probably, these files are created by another job. Currently this method is only used
-     * by the dedicated compact job to see files created by writer jobs.
+     * <p>NOTE: In Java API, full compaction is not automatically executed. If you set
+     * 'changelog-producer' to 'full-compaction', please execute this method regularly to produce
+     * changelog.
+     *
+     * <p>NOTE: this method will block until the completion of the compaction execution.
      */
-    void notifyNewFiles(long snapshotId, BinaryRow partition, int bucket, List<DataFileMeta> files);
-
-    List<FileCommittable> prepareCommit(boolean blocking, long commitIdentifier) throws Exception;
-
-    void close() throws Exception;
+    void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
 }

@@ -30,10 +30,12 @@ import org.apache.flink.table.store.file.utils.SerializationUtils;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.source.InnerTableRead;
+import org.apache.flink.table.store.table.source.InnerTableScan;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowType;
@@ -51,7 +53,7 @@ import java.util.Objects;
 import static org.apache.flink.table.store.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing schemas of table. */
-public class SchemasTable implements Table {
+public class SchemasTable implements ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -88,12 +90,12 @@ public class SchemasTable implements Table {
     }
 
     @Override
-    public TableScan newScan() {
+    public InnerTableScan newScan() {
         return new SchemasScan();
     }
 
     @Override
-    public TableRead newRead() {
+    public InnerTableRead newRead() {
         return new SchemasRead(fileIO);
     }
 
@@ -102,10 +104,10 @@ public class SchemasTable implements Table {
         return new SchemasTable(fileIO, location);
     }
 
-    private class SchemasScan implements TableScan {
+    private class SchemasScan implements InnerTableScan {
 
         @Override
-        public TableScan withFilter(Predicate predicate) {
+        public InnerTableScan withFilter(Predicate predicate) {
             return this;
         }
 
@@ -152,7 +154,7 @@ public class SchemasTable implements Table {
     }
 
     /** {@link TableRead} implementation for {@link SchemasTable}. */
-    private static class SchemasRead implements TableRead {
+    private static class SchemasRead implements InnerTableRead {
 
         private final FileIO fileIO;
         private int[][] projection;
@@ -162,12 +164,12 @@ public class SchemasTable implements Table {
         }
 
         @Override
-        public TableRead withFilter(Predicate predicate) {
+        public InnerTableRead withFilter(Predicate predicate) {
             return this;
         }
 
         @Override
-        public TableRead withProjection(int[][] projection) {
+        public InnerTableRead withProjection(int[][] projection) {
             this.projection = projection;
             return this;
         }

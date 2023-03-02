@@ -31,8 +31,8 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.StreamTableCommit;
+import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.types.RowType;
@@ -55,8 +55,8 @@ public class ActionITCaseBase extends AbstractTestBase {
     protected String commitUser;
 
     protected SnapshotManager snapshotManager;
-    protected TableWrite write;
-    protected TableCommit commit;
+    protected StreamTableWrite write;
+    protected StreamTableCommit commit;
 
     private long incrementalIdentifier;
 
