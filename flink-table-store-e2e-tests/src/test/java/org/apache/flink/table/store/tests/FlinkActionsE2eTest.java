@@ -256,6 +256,115 @@ public class FlinkActionsE2eTest extends E2eTestBase {
                 "2023-01-21, 1, 31");
     }
 
+    @Test
+    public void testMergeInto() throws Exception {
+        String tableTDdl =
+                "CREATE TABLE IF NOT EXISTS T (\n"
+                        + "    k INT,\n"
+                        + "    v STRING,\n"
+                        + "    last_action STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    PRIMARY KEY (k, dt) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (dt);";
+
+        String insertToT =
+                "INSERT INTO T VALUES"
+                        + "(1, 'v_1', 'creation', '02-27'),"
+                        + "(2, 'v_2', 'creation', '02-27'),"
+                        + "(3, 'v_3', 'creation', '02-27'),"
+                        + "(4, 'v_4', 'creation', '02-27'),"
+                        + "(5, 'v_5', 'creation', '02-28'),"
+                        + "(6, 'v_6', 'creation', '02-28'),"
+                        + "(7, 'v_7', 'creation', '02-28'),"
+                        + "(8, 'v_8', 'creation', '02-28'),"
+                        + "(9, 'v_9', 'creation', '02-28'),"
+                        + "(10, 'v_10', 'creation', '02-28');\n";
+
+        String tableSDdl =
+                "CREATE TABLE IF NOT EXISTS S (\n"
+                        + "    k INT,\n"
+                        + "    v STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    PRIMARY KEY (k, dt) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (dt);";
+
+        String insertToS =
+                "INSERT INTO S VALUES"
+                        + "(1, 'v_1', '02-27'),"
+                        + "(4, CAST (NULL AS STRING), '02-27'),"
+                        + "(7, 'Seven', '02-28'),"
+                        + "(8, CAST (NULL AS STRING), '02-28'),"
+                        + "(8, 'v_8', '02-29'),"
+                        + "(11, 'v_11', '02-29'),"
+                        + "(12, 'v_12', '02-29');\n";
+
+        runSql(
+                "SET 'table.dml-sync' = 'true';\n" + insertToT + insertToS,
+                catalogDdl,
+                useCatalogCmd,
+                tableTDdl,
+                tableSDdl);
+
+        // run merge-into job
+        Container.ExecResult execResult =
+                jobManager.execInContainer(
+                        "bin/flink",
+                        "run",
+                        "-p",
+                        "1",
+                        "-c",
+                        "org.apache.flink.table.store.connector.action.FlinkActions",
+                        "--detached",
+                        "lib/flink-table-store.jar",
+                        "merge-into",
+                        "--warehouse",
+                        warehousePath,
+                        "--database",
+                        "default",
+                        "--table",
+                        "T",
+                        "--using-table",
+                        "S",
+                        "--on",
+                        "T.k=S.k AND T.dt=S.dt",
+                        "--merge-actions",
+                        "matched-upsert,matched-delete,not-matched-insert",
+                        "--matched-upsert-condition",
+                        "T.v <> S.v AND S.v IS NOT NULL",
+                        "--matched-upsert-set",
+                        "v = S.v, last_action = 'matched_upsert'",
+                        "--matched-delete-condition",
+                        "S.v IS NULL",
+                        "--not-matched-insert-condition",
+                        "S.k < 12",
+                        "--not-matched-insert-values",
+                        "S.k, S.v, 'insert', S.dt");
+
+        LOG.info(execResult.getStdout());
+        LOG.info(execResult.getStderr());
+
+        // read all data from table store
+        runSql(
+                "INSERT INTO result1 SELECT * FROM T;",
+                catalogDdl,
+                useCatalogCmd,
+                tableTDdl,
+                createResultSink("result1", "k INT, v STRING, last_action STRING, dt STRING"));
+
+        // check the left data
+        checkResult(
+                "1, v_1, creation, 02-27",
+                "2, v_2, creation, 02-27",
+                "3, v_3, creation, 02-27",
+                "5, v_5, creation, 02-28",
+                "6, v_6, creation, 02-28",
+                "7, Seven, matched_upsert, 02-28",
+                "8, v_8, insert, 02-29",
+                "9, v_9, creation, 02-28",
+                "10, v_10, creation, 02-28",
+                "11, v_11, insert, 02-29");
+    }
+
     private void runSql(String sql, String... ddls) throws Exception {
         runSql(String.join("\n", ddls) + "\n" + sql);
     }

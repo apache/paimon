@@ -268,3 +268,146 @@ For more information of 'delete', see
 {{< /tab >}}
 
 {{< /tabs >}}
+
+## Merging into table
+
+Table Store supports "MERGE INTO" via submitting the 'merge-into' job through `flink run`. The design referenced such syntax:
+```sql
+MERGE INTO target-table
+  USING source-table | source-expr AS source-alias
+  ON merge-condition
+  WHEN MATCHED [AND matched-condition]
+    THEN UPDATE SET xxx
+  WHEN MATCHED [AND matched-condition]
+    THEN DELETE
+  WHEN NOT MATCHED [AND not-matched-condition]
+    THEN INSERT VALUES (xxx)
+  WHEN NOT MATCHED BY SOURCE [AND not-matched-by-source-condition]
+    THEN UPDATE SET xxx
+  WHEN NOT MATCHED BY SOURCE [AND not-matched-by-source-condition]
+    THEN DELETE
+```
+
+{{< tabs "merge-into" >}}
+
+{{< tab "Flink Job" >}}
+
+Run the following command to submit a 'merge-into' job for the table.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    -c org.apache.flink.table.store.connector.action.FlinkActions \
+    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    merge-into \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <target-table>
+    --using-table <source-table>
+    --on <merge-condition>
+    --merge-actions <matched-upsert,matched-delete,not-matched-insert,not-matched-by-source-upsert,not-matched-by-source-delete>
+    --matched-upsert-condition <matched-condition>
+    --matched-upsert-set <upsert-changes>
+    --matched-delete-condition <matched-condition>
+    --not-matched-insert-condition <not-matched-condition>
+    --not-matched-insert-values <insert-values>
+    --not-matched-by-source-upsert-condition <not-matched-by-source-condition>
+    --not-matched-by-source-upsert-set <not-matched-upsert-changes>
+    --not-matched-by-source-delete-condition <not-matched-by-source-condition>
+    
+An example:
+-- Target table T (pk (k, dt)) is:
++----+------+-------------+-------+
+|  k |    v | last_action |    dt |
++----+------+-------------+-------+
+|  1 |  v_1 |    creation | 02-27 |
+|  2 |  v_2 |    creation | 02-27 |
+|  3 |  v_3 |    creation | 02-27 |
+|  4 |  v_4 |    creation | 02-27 |
+|  5 |  v_5 |    creation | 02-28 |
+|  6 |  v_6 |    creation | 02-28 |
+|  7 |  v_7 |    creation | 02-28 |
+|  8 |  v_8 |    creation | 02-28 |
+|  9 |  v_9 |    creation | 02-28 |
+| 10 | v_10 |    creation | 02-28 |
++----+------+-------------+-------+
+
+-- Source table S is:
++----+--------+-------+
+|  k |      v |    dt |
++----+--------+-------+
+|  1 |    v_1 | 02-27 |
+|  4 | <NULL> | 02-27 |
+|  7 |  Seven | 02-28 |
+|  8 | <NULL> | 02-28 |
+|  8 |    v_8 | 02-29 |
+| 11 |   v_11 | 02-29 |
+| 12 |   v_12 | 02-29 |
++----+--------+-------+
+
+-- Supposed SQL is:
+MERGE INTO T
+USING S
+ON T.k = S.k AND T.dt = S.dt
+WHEN MATCHED AND (T.v <> S.v AND S.v IS NOT NULL) THEN UPDATE 
+  SET v = S.v, last_action = 'matched_upsert'
+WHEN MATCHED AND S.v IS NULL THEN DELETE
+WHEN NOT MATCHED AND S.k < 12 THEN INSERT 
+  VALUES (S.k, S.v, 'insert', S.dt)
+WHEN NOT MATCHED BY SOURCE AND (T.dt < '02-28') THEN UPDATE
+  SET v = v || '_nmu', last_action = 'not_matched_upsert'
+WHEN NOT MATCHED BY SOURCE AND (T.dt >= '02-28') THEN DELETE
+
+-- Matched part: T [(1, 02-27), (4, 02-27), (7, 02-28), (8, 02-28)]
+-- Not-matched part: S [(8, 02-29), (11, 02-29), (12, 02-29)]
+-- Not-matched-by-source part: T [(2, 02-27), (3, 02-27), (5, 02-28), (6, 02-28) (9, 02-28), (10, 02-28)]
+
+-- equal flink run command is: 
+./flink run \
+    -c org.apache.flink.table.store.connector.action.FlinkActions \
+    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    merge-into \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table T \
+    --using-table S \
+    --on "T.k = S.k AND T.dt = S.dt" \
+    --merge-actions \
+    matched-upsert,matched-delete,not-matched-insert,not-matched-by-source-upsert,not-matched-by-source-delete \
+    --matched-upsert-condition "T.v <> S.v AND S.v IS NOT NULL" \
+    --matched-upsert-set "v = S.v, last_action = 'matched_upsert'" \
+    --matched-delete-condition "S.v IS NULL" \
+    --not-matched-insert-condition "S.k < 12" \
+    --not-matched-insert-values "S.k, S.v, 'insert', S.dt" \
+    --not-matched-by-source-upsert-condition "T.dt < '02-28'" \
+    --not-matched-by-source-upsert-set "v = v || '_nmu', last_action = 'not_matched_upsert'" \
+    --not-matched-by-source-delete-condition "T.dt >= '02-28'"
+
+-- streaming changes of T after action run:
++----+----+---------+--------------------+-------+
+| op |  k |       v |        last_action |    dt |
++----+----+---------+--------------------+-------+
+| -U |  7 |     v_7 |           creation | 02-28 | 
+| +U |  7 |   Seven |     matched_upsert | 02-28 |
+| -D |  4 |     v_4 |           creation | 02-27 |
+| -D |  8 |     v_8 |           creation | 02-28 |
+| +I |  8 |     v_8 |             insert | 02-29 |
+| +I | 11 |    v_11 |             insert | 02-29 |
+| -U |  2 |     v_2 |           creation | 02-27 |
+| +U |  2 | v_2_nmu | not_matched_upsert | 02-27 |
+| -U |  3 |     v_3 |           creation | 02-27 |
+| +U |  3 | v_3_nmu | not_matched_upsert | 02-27 |
+| -D |  5 |     v_5 |           creation | 02-28 |
+| -D |  6 |     v_6 |           creation | 02-28 |
+| -D |  9 |     v_9 |           creation | 02-28 |
+| -D | 10 |    v_10 |           creation | 02-28 |
++----+----+---------+--------------------+-------+
+```
+
+For more information of 'merge-into', see
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    -c org.apache.flink.table.store.connector.action.FlinkActions \
+    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    merge-into --help
+```

@@ -79,23 +79,32 @@ public interface Action {
     static List<Map<String, String>> getPartitions(MultipleParameterTool params) {
         List<Map<String, String>> partitions = new ArrayList<>();
         for (String partition : params.getMultiParameter("partition")) {
-            Map<String, String> kvs = new HashMap<>();
-            for (String kvString : partition.split(",")) {
-                String[] kv = kvString.split("=");
-                if (kv.length != 2) {
-                    System.err.print(
-                            "Invalid key-value pair \""
-                                    + kvString
-                                    + "\".\n"
-                                    + "Run <action> --help for help.");
-                    return null;
-                }
-                kvs.put(kv[0], kv[1]);
+            Map<String, String> kvs = parseKeyValues(partition);
+            if (kvs == null) {
+                return null;
             }
             partitions.add(kvs);
         }
 
         return partitions;
+    }
+
+    static Map<String, String> parseKeyValues(String keyValues) {
+        Map<String, String> kvs = new HashMap<>();
+        for (String kvString : keyValues.split(",")) {
+            String[] kv = kvString.split("=");
+            if (kv.length != 2) {
+                System.err.print(
+                        "Invalid key-value pair \""
+                                + kvString
+                                + "\".\n"
+                                + "Run <action> --help for help.");
+                return null;
+            }
+            kvs.put(kv[0].trim(), kv[1].trim());
+        }
+
+        return kvs;
     }
 
     /** Factory to create {@link Action}. */
@@ -105,6 +114,7 @@ public interface Action {
         private static final String COMPACT = "compact";
         private static final String DROP_PARTITION = "drop-partition";
         private static final String DELETE = "delete";
+        private static final String MERGE_INTO = "merge-into";
 
         public static Optional<Action> create(String[] args) {
             String action = args[0].toLowerCase();
@@ -117,6 +127,8 @@ public interface Action {
                     return DropPartitionAction.create(actionArgs);
                 case DELETE:
                     return DeleteAction.create(actionArgs);
+                case MERGE_INTO:
+                    return MergeIntoAction.create(actionArgs);
                 default:
                     System.err.println("Unknown action \"" + action + "\"");
                     printHelp();
@@ -132,6 +144,7 @@ public interface Action {
             System.out.println("  " + COMPACT);
             System.out.println("  " + DROP_PARTITION);
             System.out.println("  " + DELETE);
+            System.out.println("  " + MERGE_INTO);
 
             System.out.println("For detailed options of each action, run <action> --help");
         }
