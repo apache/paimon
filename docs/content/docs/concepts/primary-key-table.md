@@ -65,7 +65,7 @@ Partial cannot receive `DELETE` messages because the behavior cannot be defined.
 
 Sometimes users only care about aggregated results. The `aggregation` merge engine aggregates each value field with the latest data one by one under the same primary key according to the aggregate function.
 
-Each field not part of the primary keys must be given an aggregate function, specified by the `fields.<field-name>.aggregate-function` table property. For example, consider the following table definition.
+Each field not part of the primary keys can be given an aggregate function, specified by the `fields.<field-name>.aggregate-function` table property, otherwise it will use `last_non_null_value` aggregation as default. For example, consider the following table definition.
 
 {{< tabs "aggregation-merge-engine-example" >}}
 
