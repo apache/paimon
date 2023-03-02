@@ -82,12 +82,9 @@ By using Table Store Hive catalog, changes to the catalog will directly affect t
 
 Download the jar file with corresponding version.
 
-| Version | Jar |
-|---|---|
-| Hive 3.1 | [flink-table-store-hive-catalog-{{< version >}}_3.1.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_3.1.jar) |
-| Hive 2.3 | [flink-table-store-hive-catalog-{{< version >}}_2.3.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.3.jar) |
-| Hive 2.2 | [flink-table-store-hive-catalog-{{< version >}}_2.2.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.2.jar) |
-| Hive 2.1 | [flink-table-store-hive-catalog-{{< version >}}_2.1.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}_2.1.jar) |
+| Version      | Jar |
+|--------------|---|
+| Hive 2 & 3 | [flink-table-store-hive-catalog-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}.jar) |
 
 You can also manually build bundled jar from the source code.
 
@@ -102,14 +99,7 @@ You are using an unreleased version of Table Store so you need to manually build
 To build from source code, either [download the source of a release](https://flink.apache.org/downloads.html) or [clone the git repository]({{< github_repo >}}).
 
 Build bundled jar with the following command.
-
-| Version | Command |
-|---|---|
-| Hive 3.1 | `mvn clean install -Dmaven.test.skip=true -Phive-3.1` |
-| Hive 2.3 | `mvn clean install -Dmaven.test.skip=true` |
-| Hive 2.2 | `mvn clean install -Dmaven.test.skip=true -Phive-2.2` |
-| Hive 2.1 | `mvn clean install -Dmaven.test.skip=true -Phive-2.1` |
-| Hive 2.1 CDH 6.3 | `mvn clean install -Dmaven.test.skip=true -Phive-2.1-cdh-6.3` |
+`mvn clean install -Dmaven.test.skip=true`
 
 You can find Hive catalog jar in `./flink-table-store-hive/flink-table-store-hive-catalog/target/flink-table-store-hive-catalog-{{< version >}}.jar`.
 
