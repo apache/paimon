@@ -271,8 +271,14 @@ For more information of 'delete', see
 
 ## Merging into table
 
-Table Store supports "MERGE INTO" via submitting the 'merge-into' job through `flink run`. 
-Only [primary key table]({{< ref "docs/concepts/primary-key-table" >}}) supports this feature. 
+Table Store supports "MERGE INTO" via submitting the 'merge-into' job through `flink run`.
+
+{{< hint info >}}
+Important table properties setting:
+1. Only [primary key table]({{< ref "docs/concepts/primary-key-table" >}}) supports this feature.
+2. The action won't produce UPDATE_BEFORE, so it's not recommended to set 'changelog-producer' = 'input'.
+{{< /hint >}}
+
 The design referenced such syntax:
 ```sql
 MERGE INTO target-table

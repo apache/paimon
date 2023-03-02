@@ -39,13 +39,13 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.flink.table.store.connector.action.Action.getTablePath;
 import static org.apache.flink.table.store.connector.action.Action.parseKeyValues;
@@ -88,10 +88,10 @@ public class MergeIntoAction extends ActionBase {
     private final List<String> targetFieldNames;
 
     // source
-    private String sourceTable;
+    @Nullable private String sourceTable;
     private Identifier sourceTableIdentifier;
-    private String source;
-    private String sourceAlias;
+    @Nullable private String source;
+    @Nullable private String sourceAlias;
 
     // merge condition
     private String mergeCondition;
@@ -104,22 +104,29 @@ public class MergeIntoAction extends ActionBase {
     private boolean insert;
 
     // upsert
-    private String matchedUpsertCondition;
-    private String matchedUpsertSet;
+    @Nullable private String matchedUpsertCondition;
+    @Nullable private String matchedUpsertSet;
 
-    private String notMatchedBySourceUpsertCondition;
-    private String notMatchedBySourceUpsertSet;
+    @Nullable private String notMatchedBySourceUpsertCondition;
+    @Nullable private String notMatchedBySourceUpsertSet;
 
     // delete
-    private String matchedDeleteCondition;
-    private String notMatchedBySourceDeleteCondition;
+    @Nullable private String matchedDeleteCondition;
+    @Nullable private String notMatchedBySourceDeleteCondition;
 
     // insert
-    private String notMatchedInsertCondition;
-    private String notMatchedInsertValues;
+    @Nullable private String notMatchedInsertCondition;
+    @Nullable private String notMatchedInsertValues;
 
     MergeIntoAction(String warehouse, String database, String tableName) {
         super(warehouse, database, tableName);
+
+        if (!(table instanceof FileStoreTable)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Only FileStoreTable supports merge-into action. The table type is '%s'.",
+                            table.getClass().getName()));
+        }
 
         // init primaryKeys of target table
         primaryKeys = ((FileStoreTable) table).schema().primaryKeys();
@@ -435,37 +442,26 @@ public class MergeIntoAction extends ActionBase {
             sourceTableIdentifier = Identifier.create(identifier.getDatabaseName(), sourceAlias);
         }
 
-        List<DataStream<RowData>> dataStreams = new ArrayList<>();
-        if (matchedUpsert || notMatchedUpsert) {
-            dataStreams.add(getUpsertDataStream());
-        }
+        List<DataStream<RowData>> dataStreams =
+                Stream.of(
+                                getMatchedUpsertDataStream(),
+                                getNotMatchedUpsertDataStream(),
+                                getMatchedDeleteDataStream(),
+                                getNotMatchedDeleteDataStream(),
+                                getInsertDataStream())
+                        .filter(Optional::isPresent)
+                        .map(Optional::get)
+                        .collect(Collectors.toList());
 
-        if (matchedDelete || notMatchedDelete) {
-            dataStreams.add(getDeleteDataStream());
-        }
-
-        if (insert) {
-            dataStreams.add(getInsertDataStream());
-        }
-
-        DataStream<RowData> unionDs = dataStreams.get(0);
-        sink(unionDs.union(dataStreams.stream().skip(1).toArray(DataStream[]::new)));
+        DataStream<RowData> firstDs = dataStreams.get(0);
+        sink(firstDs.union(dataStreams.stream().skip(1).toArray(DataStream[]::new)));
     }
 
-    private DataStream<RowData> getUpsertDataStream() {
-        Table updateSource;
-        if (matchedUpsert && notMatchedUpsert) {
-            updateSource = getMatchedUpsertSource().unionAll(getNotMatchedUpsertSource());
-        } else if (matchedUpsert) {
-            updateSource = getMatchedUpsertSource();
-        } else {
-            updateSource = getNotMatchedUpsertSource();
+    private Optional<DataStream<RowData>> getMatchedUpsertDataStream() {
+        if (!matchedUpsert) {
+            return Optional.empty();
         }
 
-        return toDataStream(updateSource, RowKind.UPDATE_AFTER, converters);
-    }
-
-    private Table getMatchedUpsertSource() {
         List<String> project;
         // extract project
         if (matchedUpsertSet.equals("*")) {
@@ -513,10 +509,14 @@ public class MergeIntoAction extends ActionBase {
         Table source = tEnv.sqlQuery(query);
         checkSchema("matched-upsert", source);
 
-        return source;
+        return Optional.of(toDataStream(source, RowKind.UPDATE_AFTER, converters));
     }
 
-    private Table getNotMatchedUpsertSource() {
+    private Optional<DataStream<RowData>> getNotMatchedUpsertDataStream() {
+        if (!notMatchedUpsert) {
+            return Optional.empty();
+        }
+
         // validate upsert change
         Map<String, String> changes = parseKeyValues(notMatchedBySourceUpsertSet);
         if (changes == null) {
@@ -560,23 +560,14 @@ public class MergeIntoAction extends ActionBase {
         Table source = tEnv.sqlQuery(query);
         checkSchema("not-matched-by-source-upsert", source);
 
-        return source;
+        return Optional.of(toDataStream(source, RowKind.UPDATE_AFTER, converters));
     }
 
-    private DataStream<RowData> getDeleteDataStream() {
-        Table deleteSource;
-        if (matchedDelete && notMatchedDelete) {
-            deleteSource = getMatchedDeleteSource().unionAll(getNotMatchedDeleteSource());
-        } else if (matchedDelete) {
-            deleteSource = getMatchedDeleteSource();
-        } else {
-            deleteSource = getNotMatchedDeleteSource();
+    private Optional<DataStream<RowData>> getMatchedDeleteDataStream() {
+        if (!matchedDelete) {
+            return Optional.empty();
         }
 
-        return toDataStream(deleteSource, RowKind.DELETE, converters);
-    }
-
-    private Table getMatchedDeleteSource() {
         // the table name is added before column name to avoid ambiguous column reference
         List<String> project =
                 targetFieldNames.stream()
@@ -597,10 +588,14 @@ public class MergeIntoAction extends ActionBase {
         Table source = tEnv.sqlQuery(query);
         checkSchema("matched-delete", source);
 
-        return source;
+        return Optional.of(toDataStream(source, RowKind.DELETE, converters));
     }
 
-    private Table getNotMatchedDeleteSource() {
+    private Optional<DataStream<RowData>> getNotMatchedDeleteDataStream() {
+        if (!notMatchedDelete) {
+            return Optional.empty();
+        }
+
         // use not exists to find not matched records
         String query =
                 String.format(
@@ -617,10 +612,14 @@ public class MergeIntoAction extends ActionBase {
         Table source = tEnv.sqlQuery(query);
         checkSchema("not-matched-by-source-delete", source);
 
-        return source;
+        return Optional.of(toDataStream(source, RowKind.DELETE, converters));
     }
 
-    private DataStream<RowData> getInsertDataStream() {
+    private Optional<DataStream<RowData>> getInsertDataStream() {
+        if (!insert) {
+            return Optional.empty();
+        }
+
         // use not exist to find rows to insert
         String query =
                 String.format(
@@ -637,7 +636,7 @@ public class MergeIntoAction extends ActionBase {
         Table source = tEnv.sqlQuery(query);
         checkSchema("not-matched-insert", source);
 
-        return toDataStream(source, RowKind.INSERT, converters);
+        return Optional.of(toDataStream(source, RowKind.INSERT, converters));
     }
 
     private void checkSchema(String action, Table source) {
