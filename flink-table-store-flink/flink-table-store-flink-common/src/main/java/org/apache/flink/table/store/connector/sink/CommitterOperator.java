@@ -156,6 +156,7 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     public void close() throws Exception {
         committablesPerCheckpoint.clear();
         inputs.clear();
+        committer.close();
         super.close();
     }
 
