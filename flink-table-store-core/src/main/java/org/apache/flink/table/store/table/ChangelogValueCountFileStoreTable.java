@@ -37,13 +37,12 @@ import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
-import org.apache.flink.table.store.table.sink.TableWrite;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
 import org.apache.flink.table.store.table.source.AbstractDataTableScan;
+import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
 import org.apache.flink.table.store.table.source.SplitGenerator;
-import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.ValueCountRowDataRecordIterator;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
@@ -125,17 +124,17 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableRead newRead() {
+    public InnerTableRead newRead() {
         return new KeyValueTableRead(store().newRead()) {
 
             @Override
-            public TableRead withFilter(Predicate predicate) {
+            public InnerTableRead withFilter(Predicate predicate) {
                 read.withFilter(predicate);
                 return this;
             }
 
             @Override
-            public TableRead withProjection(int[][] projection) {
+            public InnerTableRead withProjection(int[][] projection) {
                 read.withKeyProjection(projection);
                 return this;
             }
@@ -149,7 +148,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableWrite newWrite(String commitUser) {
+    public TableWriteImpl<KeyValue> newWrite(String commitUser) {
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store().newWrite(commitUser),

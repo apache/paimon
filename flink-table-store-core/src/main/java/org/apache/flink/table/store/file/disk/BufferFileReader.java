@@ -18,11 +18,17 @@
 
 package org.apache.flink.table.store.file.disk;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.file.memory.Buffer;
 
 import java.io.IOException;
 
-/** Read {@link Buffer} from file. */
+/**
+ * Read {@link Buffer} from file.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public interface BufferFileReader extends FileIOChannel {
 
     void readInto(Buffer buffer) throws IOException;

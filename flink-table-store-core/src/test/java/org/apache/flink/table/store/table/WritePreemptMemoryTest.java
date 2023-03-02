@@ -28,8 +28,8 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.MemorySize;
 import org.apache.flink.table.store.options.Options;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.StreamTableCommit;
+import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 
@@ -64,8 +64,8 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
     private void testWritePreemptMemory(boolean singlePartition) throws Exception {
         // write
         FileStoreTable table = createFileStoreTable();
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         Random random = new Random();
         List<String> expected = new ArrayList<>();
         for (int i = 0; i < 10_000; i++) {

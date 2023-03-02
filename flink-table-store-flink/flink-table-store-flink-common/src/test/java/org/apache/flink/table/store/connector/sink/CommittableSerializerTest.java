@@ -20,8 +20,9 @@ package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.NewFilesIncrement;
-import org.apache.flink.table.store.table.sink.FileCommittable;
-import org.apache.flink.table.store.table.sink.FileCommittableSerializer;
+import org.apache.flink.table.store.table.sink.CommitMessage;
+import org.apache.flink.table.store.table.sink.CommitMessageImpl;
+import org.apache.flink.table.store.table.sink.CommitMessageSerializer;
 
 import org.junit.jupiter.api.Test;
 
@@ -35,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link CommittableSerializer}. */
 public class CommittableSerializerTest {
 
-    private final FileCommittableSerializer fileSerializer = new FileCommittableSerializer();
+    private final CommitMessageSerializer fileSerializer = new CommitMessageSerializer();
 
     private final CommittableSerializer serializer = new CommittableSerializer(fileSerializer);
 
@@ -43,10 +44,10 @@ public class CommittableSerializerTest {
     public void testFile() throws IOException {
         NewFilesIncrement newFilesIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
-        FileCommittable committable =
-                new FileCommittable(row(0), 1, newFilesIncrement, compactIncrement);
-        FileCommittable newCommittable =
-                (FileCommittable)
+        CommitMessage committable =
+                new CommitMessageImpl(row(0), 1, newFilesIncrement, compactIncrement);
+        CommitMessage newCommittable =
+                (CommitMessage)
                         serializer
                                 .deserialize(
                                         2,

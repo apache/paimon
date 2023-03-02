@@ -27,8 +27,8 @@ import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.StreamTableCommit;
+import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
@@ -75,8 +75,8 @@ public class TableStoreRecordReaderTest {
                         Collections.emptyList(),
                         Collections.singletonList("a"));
 
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         write.write(GenericRow.of(1L, BinaryString.fromString("Hi")));
         write.write(GenericRow.of(2L, BinaryString.fromString("Hello")));
         write.write(GenericRow.of(3L, BinaryString.fromString("World")));
@@ -113,8 +113,8 @@ public class TableStoreRecordReaderTest {
                         Collections.emptyList(),
                         Collections.emptyList());
 
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         write.write(GenericRow.of(1, BinaryString.fromString("Hi")));
         write.write(GenericRow.of(2, BinaryString.fromString("Hello")));
         write.write(GenericRow.of(3, BinaryString.fromString("World")));
@@ -154,8 +154,8 @@ public class TableStoreRecordReaderTest {
                         Collections.emptyList(),
                         Collections.emptyList());
 
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         write.write(GenericRow.of(1, 10L, BinaryString.fromString("Hi")));
         write.write(GenericRow.of(2, 20L, BinaryString.fromString("Hello")));
         write.write(GenericRow.of(1, 10L, BinaryString.fromString("Hi")));
@@ -188,7 +188,7 @@ public class TableStoreRecordReaderTest {
         for (DataSplit split : table.newScan().plan().splits) {
             if (split.partition().equals(partition) && split.bucket() == bucket) {
                 return new TableStoreRecordReader(
-                        table.newRead(),
+                        table.newReadBuilder(),
                         new TableStoreInputSplit(tempDir.toString(), split),
                         table.schema().fieldNames(),
                         selectedColumns);

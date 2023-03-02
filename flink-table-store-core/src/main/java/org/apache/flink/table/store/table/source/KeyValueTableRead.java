@@ -31,7 +31,7 @@ import java.io.IOException;
  * An abstraction layer above {@link KeyValueFileStoreRead} to provide reading of {@link
  * InternalRow}.
  */
-public abstract class KeyValueTableRead implements TableRead {
+public abstract class KeyValueTableRead implements InnerTableRead {
 
     protected final KeyValueFileStoreRead read;
 

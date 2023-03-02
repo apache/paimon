@@ -27,8 +27,8 @@ import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.StreamTableCommit;
+import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.types.RowType;
 
 import java.util.Collections;
@@ -38,8 +38,8 @@ import java.util.Map;
 /** A simple table test helper to write and commit. */
 public class SimpleTableTestHelper {
 
-    private final TableWrite writer;
-    private final TableCommit commit;
+    private final StreamTableWrite writer;
+    private final StreamTableCommit commit;
 
     private long commitIdentifier;
 

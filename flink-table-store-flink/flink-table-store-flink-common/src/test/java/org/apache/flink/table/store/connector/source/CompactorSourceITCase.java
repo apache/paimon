@@ -34,8 +34,8 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.StreamTableCommit;
+import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowType;
@@ -80,8 +80,8 @@ public class CompactorSourceITCase extends AbstractTestBase {
     @Test
     public void testBatchRead() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
         write.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));
@@ -118,8 +118,8 @@ public class CompactorSourceITCase extends AbstractTestBase {
     @Test
     public void testStreamingRead() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
         write.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));
@@ -214,8 +214,8 @@ public class CompactorSourceITCase extends AbstractTestBase {
             List<String> expected)
             throws Exception {
         FileStoreTable table = createFileStoreTable();
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
         write.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));

@@ -23,6 +23,7 @@ import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.connector.FlinkConnectorOptions;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.table.FileStoreTable;
@@ -116,7 +117,9 @@ public class CompactActionITCase extends ActionITCaseBase {
     public void testStreamingCompact() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "full-compaction");
-        options.put(CoreOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL.key(), "1s");
+        options.put(
+                FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL.key(),
+                "1s");
         options.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
         options.put(CoreOptions.WRITE_ONLY.key(), "true");
         // test that dedicated compact job will expire snapshots

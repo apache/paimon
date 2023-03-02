@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.file.disk;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.utils.StringUtils;
 
 import java.io.File;
@@ -30,7 +31,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  * A Channel represents a collection of files that belong logically to the same resource. An example
  * is a collection of files that contain sorted runs of data from the same stream, that will later
  * on be merged together.
+ *
+ * @since 0.4.0
  */
+@Experimental
 public interface FileIOChannel {
 
     /**

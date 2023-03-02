@@ -30,10 +30,11 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.source.InnerTableRead;
+import org.apache.flink.table.store.table.source.InnerTableScan;
 import org.apache.flink.table.store.table.source.Split;
-import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowType;
@@ -55,7 +56,7 @@ import java.util.Objects;
 import static org.apache.flink.table.store.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing committing snapshots of table. */
-public class SnapshotsTable implements Table {
+public class SnapshotsTable implements ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -95,12 +96,12 @@ public class SnapshotsTable implements Table {
     }
 
     @Override
-    public TableScan newScan() {
+    public InnerTableScan newScan() {
         return new SnapshotsScan();
     }
 
     @Override
-    public TableRead newRead() {
+    public InnerTableRead newRead() {
         return new SnapshotsRead(fileIO);
     }
 
@@ -109,10 +110,10 @@ public class SnapshotsTable implements Table {
         return new SnapshotsTable(fileIO, location);
     }
 
-    private class SnapshotsScan implements TableScan {
+    private class SnapshotsScan implements InnerTableScan {
 
         @Override
-        public TableScan withFilter(Predicate predicate) {
+        public InnerTableScan withFilter(Predicate predicate) {
             // TODO
             return this;
         }
@@ -162,7 +163,7 @@ public class SnapshotsTable implements Table {
         }
     }
 
-    private static class SnapshotsRead implements TableRead {
+    private static class SnapshotsRead implements InnerTableRead {
 
         private final FileIO fileIO;
         private int[][] projection;
@@ -172,13 +173,13 @@ public class SnapshotsTable implements Table {
         }
 
         @Override
-        public TableRead withFilter(Predicate predicate) {
+        public InnerTableRead withFilter(Predicate predicate) {
             // TODO
             return this;
         }
 
         @Override
-        public TableRead withProjection(int[][] projection) {
+        public InnerTableRead withProjection(int[][] projection) {
             this.projection = projection;
             return this;
         }

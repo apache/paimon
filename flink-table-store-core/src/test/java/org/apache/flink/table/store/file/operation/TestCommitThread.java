@@ -26,7 +26,7 @@ import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
 import org.apache.flink.table.store.file.utils.RecordWriter;
-import org.apache.flink.table.store.table.sink.FileCommittable;
+import org.apache.flink.table.store.table.sink.CommitMessageImpl;
 import org.apache.flink.table.store.types.RowType;
 
 import org.slf4j.Logger;
@@ -98,7 +98,7 @@ public class TestCommitThread extends Thread {
         this.write = safeStore.newWrite(commitUser);
         this.commit =
                 retryArtificialException(
-                        () -> testStore.newCommit(commitUser).withCreateEmptyCommit(true));
+                        () -> testStore.newCommit(commitUser).ignoreEmptyCommit(false));
 
         this.commitIdentifier = 0;
     }
@@ -141,7 +141,7 @@ public class TestCommitThread extends Thread {
         for (Map.Entry<BinaryRow, MergeTreeWriter> entry : writers.entrySet()) {
             RecordWriter.CommitIncrement inc = entry.getValue().prepareCommit(true);
             committable.addFileCommittable(
-                    new FileCommittable(
+                    new CommitMessageImpl(
                             entry.getKey(), 0, inc.newFilesIncrement(), inc.compactIncrement()));
         }
 
@@ -153,7 +153,8 @@ public class TestCommitThread extends Thread {
         ManifestCommittable committable = new ManifestCommittable(commitIdentifier++);
         RecordWriter.CommitIncrement inc = writers.get(partition).prepareCommit(true);
         committable.addFileCommittable(
-                new FileCommittable(partition, 0, inc.newFilesIncrement(), inc.compactIncrement()));
+                new CommitMessageImpl(
+                        partition, 0, inc.newFilesIncrement(), inc.compactIncrement()));
 
         runWithRetry(
                 committable,
@@ -175,7 +176,7 @@ public class TestCommitThread extends Thread {
                     writer.compact(true);
                     RecordWriter.CommitIncrement inc = writer.prepareCommit(true);
                     committable.addFileCommittable(
-                            new FileCommittable(
+                            new CommitMessageImpl(
                                     partition, 0, inc.newFilesIncrement(), inc.compactIncrement()));
                 }
                 commit.commit(committable, Collections.emptyMap());

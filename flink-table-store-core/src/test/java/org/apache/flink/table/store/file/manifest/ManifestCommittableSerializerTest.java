@@ -22,7 +22,8 @@ import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.NewFilesIncrement;
-import org.apache.flink.table.store.table.sink.FileCommittable;
+import org.apache.flink.table.store.table.sink.CommitMessage;
+import org.apache.flink.table.store.table.sink.CommitMessageImpl;
 
 import org.junit.jupiter.api.Test;
 
@@ -66,15 +67,15 @@ public class ManifestCommittableSerializerTest {
 
     private static void addFileCommittables(
             ManifestCommittable committable, BinaryRow partition, int bucket) {
-        List<FileCommittable> fileCommittables = new ArrayList<>();
+        List<CommitMessage> commitMessages = new ArrayList<>();
         int length = ThreadLocalRandom.current().nextInt(10) + 1;
         for (int i = 0; i < length; i++) {
             NewFilesIncrement newFilesIncrement = randomNewFilesIncrement();
             CompactIncrement compactIncrement = randomCompactIncrement();
-            FileCommittable fileCommittable =
-                    new FileCommittable(partition, bucket, newFilesIncrement, compactIncrement);
-            fileCommittables.add(fileCommittable);
-            committable.addFileCommittable(fileCommittable);
+            CommitMessage commitMessage =
+                    new CommitMessageImpl(partition, bucket, newFilesIncrement, compactIncrement);
+            commitMessages.add(commitMessage);
+            committable.addFileCommittable(commitMessage);
         }
 
         if (!committable.logOffsets().containsKey(bucket)) {

@@ -22,7 +22,8 @@ import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
-import org.apache.flink.table.store.table.sink.BucketComputer;
+import org.apache.flink.table.store.table.sink.TableCommitImpl;
+import org.apache.flink.table.store.table.sink.TableWriteImpl;
 import org.apache.flink.table.store.types.RowType;
 
 import java.util.List;
@@ -32,7 +33,7 @@ import java.util.Map;
  * An abstraction layer above {@link org.apache.flink.table.store.file.FileStore} to provide reading
  * and writing of {@link InternalRow}.
  */
-public interface FileStoreTable extends DataTable, SupportsPartition, SupportsWrite {
+public interface FileStoreTable extends DataTable, SupportsPartition {
 
     @Override
     default String name() {
@@ -55,9 +56,10 @@ public interface FileStoreTable extends DataTable, SupportsPartition, SupportsWr
     FileStoreTable copy(Map<String, String> dynamicOptions);
 
     @Override
-    default BucketComputer bucketComputer() {
-        return new BucketComputer(schema());
-    }
+    TableWriteImpl<?> newWrite(String commitUser);
+
+    @Override
+    TableCommitImpl newCommit(String commitUser);
 
     default BinaryTableStats getSchemaFieldStats(DataFileMeta dataFileMeta) {
         return dataFileMeta.valueStats();

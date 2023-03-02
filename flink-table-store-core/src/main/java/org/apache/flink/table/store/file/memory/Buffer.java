@@ -18,11 +18,17 @@
 
 package org.apache.flink.table.store.file.memory;
 
+import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.memory.MemorySegment;
 
 import java.nio.ByteBuffer;
 
-/** A buffer with size. */
+/**
+ * A buffer with size.
+ *
+ * @since 0.4.0
+ */
+@Experimental
 public class Buffer {
 
     private final MemorySegment segment;

@@ -23,8 +23,8 @@ import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.StreamTableCommit;
+import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.system.BucketsTable;
@@ -50,8 +50,8 @@ public class ContinuousCompactorFollowUpScannerTest extends SnapshotEnumeratorTe
     public void testGetPlan() throws Exception {
         FileStoreTable table = createFileStoreTable();
         SnapshotManager snapshotManager = table.snapshotManager();
-        TableWrite write = table.newWrite(commitUser);
-        TableCommit commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
@@ -69,7 +69,7 @@ public class ContinuousCompactorFollowUpScannerTest extends SnapshotEnumeratorTe
         Map<String, String> overwritePartition = new HashMap<>();
         overwritePartition.put("pt", "1");
         write = table.newWrite(commitUser).withOverwrite(true);
-        commit = table.newCommit(commitUser).withOverwritePartition(overwritePartition);
+        commit = table.newCommit(commitUser).withOverwrite(overwritePartition);
         write.write(rowData(1, 10, 101L));
         write.write(rowData(1, 20, 201L));
         commit.commit(2, write.prepareCommit(true, 2));

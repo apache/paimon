@@ -28,10 +28,10 @@ import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.StreamTableWrite;
+import org.apache.flink.table.store.table.source.InnerTableRead;
+import org.apache.flink.table.store.table.source.InnerTableScan;
 import org.apache.flink.table.store.table.source.Split;
-import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.TableScan;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.FloatType;
@@ -85,7 +85,7 @@ public class SchemaEvolutionTest {
 
         FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
 
-        TableWrite write = table.newWrite(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
         write.write(GenericRow.of(1, 1L));
         write.write(GenericRow.of(2, 2L));
         table.newCommit(commitUser).commit(0, write.prepareCommit(true, 0));
@@ -348,12 +348,12 @@ public class SchemaEvolutionTest {
     private void forEachRemaining(
             FileStoreTable table, Predicate filter, Consumer<InternalRow> consumer)
             throws IOException {
-        TableScan scan = table.newScan();
+        InnerTableScan scan = table.newScan();
         if (filter != null) {
             scan.withFilter(filter);
         }
         for (Split split : scan.plan().splits()) {
-            TableRead read = table.newRead();
+            InnerTableRead read = table.newRead();
             if (filter != null) {
                 read.withFilter(filter);
             }

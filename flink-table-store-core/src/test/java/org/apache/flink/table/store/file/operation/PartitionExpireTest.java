@@ -28,7 +28,7 @@ import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.AbstractFileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
-import org.apache.flink.table.store.table.sink.TableWrite;
+import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.VarCharType;
 
@@ -131,7 +131,7 @@ public class PartitionExpireTest {
     }
 
     private void write(String f0, String f1) throws Exception {
-        TableWrite write =
+        StreamTableWrite write =
                 table.copy(Collections.singletonMap(WRITE_ONLY.key(), "true")).newWrite("");
         write.write(GenericRow.of(BinaryString.fromString(f0), BinaryString.fromString(f1)));
         table.newCommit("").commit(0, write.prepareCommit(true, 0));

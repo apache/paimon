@@ -22,13 +22,10 @@ import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.reader.RecordReader;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -39,26 +36,6 @@ import java.util.List;
 @Experimental
 public interface TableRead {
 
-    default TableRead withFilter(List<Predicate> predicates) {
-        if (predicates == null || predicates.isEmpty()) {
-            return this;
-        }
-        return withFilter(PredicateBuilder.and(predicates));
-    }
-
-    TableRead withFilter(Predicate predicate);
-
-    default TableRead withProjection(int[] projection) {
-        if (projection == null) {
-            return this;
-        }
-        int[][] nestedProjection =
-                Arrays.stream(projection).mapToObj(i -> new int[] {i}).toArray(int[][]::new);
-        return withProjection(nestedProjection);
-    }
-
-    TableRead withProjection(int[][] projection);
-
     RecordReader<InternalRow> createReader(Split split) throws IOException;
 
     default RecordReader<InternalRow> createReader(List<Split> splits) throws IOException {
@@ -67,5 +44,9 @@ public interface TableRead {
             readers.add(() -> createReader(split));
         }
         return ConcatRecordReader.create(readers);
+    }
+
+    default RecordReader<InternalRow> createReader(TableScan.Plan plan) throws IOException {
+        return createReader(plan.splits());
     }
 }

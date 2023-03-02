@@ -47,7 +47,7 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.MemorySize;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.reader.RecordReaderIterator;
-import org.apache.flink.table.store.table.sink.FileCommittable;
+import org.apache.flink.table.store.table.sink.CommitMessageImpl;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.types.RowType;
 
@@ -228,7 +228,7 @@ public class TestFileStore extends KeyValueFileStore {
                 RecordWriter.CommitIncrement increment =
                         entryWithBucket.getValue().prepareCommit(emptyWriter);
                 committable.addFileCommittable(
-                        new FileCommittable(
+                        new CommitMessageImpl(
                                 entryWithPartition.getKey(),
                                 entryWithBucket.getKey(),
                                 increment.newFilesIncrement(),

@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.core.io.SimpleVersionedSerializer;
-import org.apache.flink.table.store.table.sink.FileCommittable;
-import org.apache.flink.table.store.table.sink.FileCommittableSerializer;
+import org.apache.flink.table.store.table.sink.CommitMessage;
+import org.apache.flink.table.store.table.sink.CommitMessageSerializer;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -28,10 +28,10 @@ import java.nio.ByteBuffer;
 /** {@link SimpleVersionedSerializer} for {@link Committable}. */
 public class CommittableSerializer implements SimpleVersionedSerializer<Committable> {
 
-    private final FileCommittableSerializer fileCommittableSerializer;
+    private final CommitMessageSerializer commitMessageSerializer;
 
-    public CommittableSerializer(FileCommittableSerializer fileCommittableSerializer) {
-        this.fileCommittableSerializer = fileCommittableSerializer;
+    public CommittableSerializer(CommitMessageSerializer commitMessageSerializer) {
+        this.commitMessageSerializer = commitMessageSerializer;
     }
 
     @Override
@@ -45,10 +45,10 @@ public class CommittableSerializer implements SimpleVersionedSerializer<Committa
         int version;
         switch (committable.kind()) {
             case FILE:
-                version = fileCommittableSerializer.getVersion();
+                version = commitMessageSerializer.getVersion();
                 wrapped =
-                        fileCommittableSerializer.serialize(
-                                (FileCommittable) committable.wrappedCommittable());
+                        commitMessageSerializer.serialize(
+                                (CommitMessage) committable.wrappedCommittable());
                 break;
             case LOG_OFFSET:
                 version = 1;
@@ -82,7 +82,7 @@ public class CommittableSerializer implements SimpleVersionedSerializer<Committa
         Object wrappedCommittable;
         switch (kind) {
             case FILE:
-                wrappedCommittable = fileCommittableSerializer.deserialize(version, wrapped);
+                wrappedCommittable = commitMessageSerializer.deserialize(version, wrapped);
                 break;
             case LOG_OFFSET:
                 wrappedCommittable = LogOffsetCommittable.fromBytes(wrapped);

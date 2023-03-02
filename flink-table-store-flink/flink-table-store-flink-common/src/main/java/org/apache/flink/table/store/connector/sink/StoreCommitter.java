@@ -19,25 +19,35 @@
 package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.table.store.table.sink.FileCommittable;
+import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.TableCommit;
+import org.apache.flink.table.store.table.sink.TableCommitImpl;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /** {@link Committer} for dynamic store. */
 public class StoreCommitter implements Committer {
 
-    private final TableCommit commit;
+    private final TableCommitImpl commit;
 
     public StoreCommitter(TableCommit commit) {
-        this.commit = commit;
+        this.commit = (TableCommitImpl) commit;
     }
 
     @Override
     public List<ManifestCommittable> filterRecoveredCommittables(
             List<ManifestCommittable> globalCommittables) {
-        return commit.filterCommitted(globalCommittables);
+        Set<Long> identifiers =
+                commit.filterCommitted(
+                        globalCommittables.stream()
+                                .map(ManifestCommittable::identifier)
+                                .collect(Collectors.toSet()));
+        return globalCommittables.stream()
+                .filter(m -> identifiers.contains(m.identifier()))
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -46,7 +56,7 @@ public class StoreCommitter implements Committer {
         for (Committable committable : committables) {
             switch (committable.kind()) {
                 case FILE:
-                    FileCommittable file = (FileCommittable) committable.wrappedCommittable();
+                    CommitMessage file = (CommitMessage) committable.wrappedCommittable();
                     manifestCommittable.addFileCommittable(file);
                     break;
                 case LOG_OFFSET:
@@ -62,7 +72,7 @@ public class StoreCommitter implements Committer {
     @Override
     public void commit(List<ManifestCommittable> committables)
             throws IOException, InterruptedException {
-        commit.commit(committables);
+        commit.commitMultiple(committables);
     }
 
     @Override

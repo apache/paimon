@@ -22,7 +22,7 @@ import org.apache.flink.table.store.RowDataContainer;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.reader.RecordReaderIterator;
-import org.apache.flink.table.store.table.source.TableRead;
+import org.apache.flink.table.store.table.source.ReadBuilder;
 import org.apache.flink.table.store.utils.ProjectedRow;
 
 import org.apache.hadoop.mapred.RecordReader;
@@ -50,7 +50,7 @@ public class TableStoreRecordReader implements RecordReader<Void, RowDataContain
     private float progress;
 
     public TableStoreRecordReader(
-            TableRead read,
+            ReadBuilder readBuilder,
             TableStoreInputSplit split,
             List<String> columnNames,
             List<String> selectedColumns)
@@ -58,13 +58,15 @@ public class TableStoreRecordReader implements RecordReader<Void, RowDataContain
         if (columnNames.equals(selectedColumns)) {
             reusedProjectedRow = null;
         } else {
-            read.withProjection(selectedColumns.stream().mapToInt(columnNames::indexOf).toArray());
+            readBuilder.withProjection(
+                    selectedColumns.stream().mapToInt(columnNames::indexOf).toArray());
             reusedProjectedRow =
                     ProjectedRow.from(
                             columnNames.stream().mapToInt(selectedColumns::indexOf).toArray());
         }
 
-        this.iterator = new RecordReaderIterator<>(read.createReader(split.split()));
+        this.iterator =
+                new RecordReaderIterator<>(readBuilder.newRead().createReader(split.split()));
         this.splitLength = split.getLength();
         this.progress = 0;
     }
