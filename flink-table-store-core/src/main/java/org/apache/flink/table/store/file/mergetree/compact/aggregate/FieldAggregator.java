@@ -36,35 +36,40 @@ public abstract class FieldAggregator implements Serializable {
         if (isPrimaryKey) {
             fieldAggregator = new FieldPrimaryKeyAgg(fieldType);
         } else {
-            // ordered by type root definition
-            switch (strAgg) {
-                case FieldSumAgg.NAME:
-                    fieldAggregator = new FieldSumAgg(fieldType);
-                    break;
-                case FieldMaxAgg.NAME:
-                    fieldAggregator = new FieldMaxAgg(fieldType);
-                    break;
-                case FieldMinAgg.NAME:
-                    fieldAggregator = new FieldMinAgg(fieldType);
-                    break;
-                case FieldLastNonNullValueAgg.NAME:
-                    fieldAggregator = new FieldLastNonNullValueAgg(fieldType);
-                    break;
-                case FieldLastValueAgg.NAME:
-                    fieldAggregator = new FieldLastValueAgg(fieldType);
-                    break;
-                case FieldListaggAgg.NAME:
-                    fieldAggregator = new FieldListaggAgg(fieldType);
-                    break;
-                case FieldBoolOrAgg.NAME:
-                    fieldAggregator = new FieldBoolOrAgg(fieldType);
-                    break;
-                case FieldBoolAndAgg.NAME:
-                    fieldAggregator = new FieldBoolAndAgg(fieldType);
-                    break;
-                default:
-                    throw new RuntimeException(
-                            "Use unsupported aggregation or spell aggregate function incorrectly!");
+            // If the field has no aggregate function, use last_non_null_value.
+            if (strAgg == null) {
+                fieldAggregator = new FieldLastNonNullValueAgg(fieldType);
+            } else {
+                // ordered by type root definition
+                switch (strAgg) {
+                    case FieldSumAgg.NAME:
+                        fieldAggregator = new FieldSumAgg(fieldType);
+                        break;
+                    case FieldMaxAgg.NAME:
+                        fieldAggregator = new FieldMaxAgg(fieldType);
+                        break;
+                    case FieldMinAgg.NAME:
+                        fieldAggregator = new FieldMinAgg(fieldType);
+                        break;
+                    case FieldLastNonNullValueAgg.NAME:
+                        fieldAggregator = new FieldLastNonNullValueAgg(fieldType);
+                        break;
+                    case FieldLastValueAgg.NAME:
+                        fieldAggregator = new FieldLastValueAgg(fieldType);
+                        break;
+                    case FieldListaggAgg.NAME:
+                        fieldAggregator = new FieldListaggAgg(fieldType);
+                        break;
+                    case FieldBoolOrAgg.NAME:
+                        fieldAggregator = new FieldBoolOrAgg(fieldType);
+                        break;
+                    case FieldBoolAndAgg.NAME:
+                        fieldAggregator = new FieldBoolAndAgg(fieldType);
+                        break;
+                    default:
+                        throw new RuntimeException(
+                                "Use unsupported aggregation or spell aggregate function incorrectly!");
+                }
             }
         }
 

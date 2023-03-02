@@ -272,6 +272,7 @@ public class PreAggregationITCase {
                     "CREATE TABLE IF NOT EXISTS T4 ("
                             + "j INT, k INT, "
                             + "a INT, "
+                            + "b INT, "
                             + "i DATE,"
                             + "PRIMARY KEY (j,k) NOT ENFORCED)"
                             + " WITH ('merge-engine'='aggregation', "
@@ -286,26 +287,30 @@ public class PreAggregationITCase {
             // So we need to sort the input data.
             batchSql(
                     "CREATE TABLE myTable AS "
-                            + "SELECT b, c, d, e FROM "
+                            + "SELECT b, c, d, e, f FROM "
                             + "(VALUES "
-                            + "  (1, 1, 2, CAST(NULL AS INT), CAST('2020-01-01' AS DATE)),"
-                            + "  (2, 1, 2, 2, CAST('2020-01-02' AS DATE)),"
-                            + "  (3, 1, 2, 3, CAST(NULL AS DATE))"
-                            + ") AS V(a, b, c, d, e) "
+                            + "  (1, 1, 2, CAST(NULL AS INT), 4, CAST('2020-01-01' AS DATE)),"
+                            + "  (2, 1, 2, 2, CAST(NULL as INT), CAST('2020-01-02' AS DATE)),"
+                            + "  (3, 1, 2, 3, 5, CAST(NULL AS DATE))"
+                            + ") AS V(a, b, c, d, e, f) "
                             + "ORDER BY a");
             batchSql("INSERT INTO T4 SELECT * FROM myTable");
             List<Row> result = batchSql("SELECT * FROM T4");
-            assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2, 3, LocalDate.of(2020, 1, 2)));
+            assertThat(result)
+                    .containsExactlyInAnyOrder(Row.of(1, 2, 3, 5, LocalDate.of(2020, 1, 2)));
         }
 
         @Test
         public void testMergeRead() {
-            batchSql("INSERT INTO T4 VALUES (1, 2, CAST(NULL AS INT), CAST('2020-01-01' AS DATE))");
-            batchSql("INSERT INTO T4 VALUES (1, 2, 2, CAST('2020-01-02' AS DATE))");
-            batchSql("INSERT INTO T4 VALUES (1, 2, 3, CAST(NULL AS DATE))");
+            batchSql(
+                    "INSERT INTO T4 VALUES (1, 2, CAST(NULL AS INT), 3, CAST('2020-01-01' AS DATE))");
+            batchSql(
+                    "INSERT INTO T4 VALUES (1, 2, 2, CAST(NULL AS INT), CAST('2020-01-02' AS DATE))");
+            batchSql("INSERT INTO T4 VALUES (1, 2, 3, 5, CAST(NULL AS DATE))");
 
             List<Row> result = batchSql("SELECT * FROM T4");
-            assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2, 3, LocalDate.of(2020, 1, 2)));
+            assertThat(result)
+                    .containsExactlyInAnyOrder(Row.of(1, 2, 3, 5, LocalDate.of(2020, 1, 2)));
         }
 
         @Test
@@ -314,19 +319,22 @@ public class PreAggregationITCase {
             batchSql("ALTER TABLE T4 SET ('commit.force-compact'='true')");
 
             // key 1 2
-            batchSql("INSERT INTO T4 VALUES (1, 2, CAST(NULL AS INT), CAST('2020-01-01' AS DATE))");
-            batchSql("INSERT INTO T4 VALUES (1, 2, 2, CAST('2020-01-02' AS DATE))");
-            batchSql("INSERT INTO T4 VALUES (1, 2, 3, CAST(NULL AS DATE))");
+            batchSql(
+                    "INSERT INTO T4 VALUES (1, 2, CAST(NULL AS INT), 3, CAST('2020-01-01' AS DATE))");
+            batchSql(
+                    "INSERT INTO T4 VALUES (1, 2, 2, CAST(NULL AS INT), CAST('2020-01-02' AS DATE))");
+            batchSql("INSERT INTO T4 VALUES (1, 2, 3, 5, CAST(NULL AS DATE))");
 
             // key 1 3
-            batchSql("INSERT INTO T4 VALUES (1, 3, 3, CAST('2020-01-01' AS DATE))");
-            batchSql("INSERT INTO T4 VALUES (1, 3, 2, CAST(NULL AS DATE))");
-            batchSql("INSERT INTO T4 VALUES (1, 3, CAST(NULL AS INT), CAST('2022-01-02' AS DATE))");
+            batchSql("INSERT INTO T4 VALUES (1, 3, 3, 4, CAST('2020-01-01' AS DATE))");
+            batchSql("INSERT INTO T4 VALUES (1, 3, 2, 6, CAST(NULL AS DATE))");
+            batchSql(
+                    "INSERT INTO T4 VALUES (1, 3, CAST(NULL AS INT), CAST(NULL AS INT), CAST('2022-01-02' AS DATE))");
 
             assertThat(batchSql("SELECT * FROM T4"))
                     .containsExactlyInAnyOrder(
-                            Row.of(1, 2, 3, LocalDate.of(2020, 1, 2)),
-                            Row.of(1, 3, 2, LocalDate.of(2022, 1, 2)));
+                            Row.of(1, 2, 3, 5, LocalDate.of(2020, 1, 2)),
+                            Row.of(1, 3, 2, 6, LocalDate.of(2022, 1, 2)));
         }
 
         @Test
