@@ -214,10 +214,6 @@ public final class DataTypeCasts {
      * have the same {@code precision} and {@code scale}.
      */
     public static boolean supportsCompatibleCast(DataType sourceType, DataType targetType) {
-        if (sourceType.isNullable() && !targetType.isNullable()) {
-            return false;
-        }
-
         if (sourceType.copy(true).equals(targetType.copy(true))) {
             return true;
         }
