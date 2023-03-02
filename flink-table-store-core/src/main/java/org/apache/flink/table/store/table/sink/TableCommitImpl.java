@@ -31,6 +31,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.flink.table.store.utils.Preconditions.checkState;
+
 /**
  * An abstraction layer above {@link FileStoreCommit} and {@link FileStoreExpire} to provide
  * snapshot commit and expiration.
@@ -43,6 +45,8 @@ public class TableCommitImpl implements InnerTableCommit {
 
     @Nullable private List<Map<String, String>> overwritePartitions = null;
     @Nullable private Lock lock;
+
+    private boolean batchCommitted = false;
 
     public TableCommitImpl(
             FileStoreCommit commit,
@@ -140,5 +144,12 @@ public class TableCommitImpl implements InnerTableCommit {
         if (lock != null) {
             lock.close();
         }
+    }
+
+    @Override
+    public void commit(List<CommitMessage> commitMessages) {
+        checkState(!batchCommitted, "BatchTableCommit only support one-time committing.");
+        batchCommitted = true;
+        commit(BatchWriteBuilder.COMMIT_IDENTIFIER, commitMessages);
     }
 }

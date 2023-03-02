@@ -49,8 +49,8 @@ public interface TableWrite extends AutoCloseable {
      * compaction according to the 'num-sorted-run.compaction-trigger' option. If fullCompaction is
      * true, it will force a full compaction, which is expensive.
      *
-     * <p>NOTE: In Java API, full compaction is not automatically executed. If you open
-     * 'changelog-producer' of 'full-compaction', please execute this method regularly to produce
+     * <p>NOTE: In Java API, full compaction is not automatically executed. If you set
+     * 'changelog-producer' to 'full-compaction', please execute this method regularly to produce
      * changelog.
      *
      * <p>NOTE: this method will block until the completion of the compaction execution.

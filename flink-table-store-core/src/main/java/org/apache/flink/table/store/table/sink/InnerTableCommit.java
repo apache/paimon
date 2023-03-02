@@ -42,9 +42,4 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
     /** @deprecated lock should pass from table. */
     @Deprecated
     InnerTableCommit withLock(Lock lock);
-
-    @Override
-    default void commit(List<CommitMessage> commitMessages) {
-        commit(BatchWriteBuilder.COMMIT_IDENTIFIER, commitMessages);
-    }
 }

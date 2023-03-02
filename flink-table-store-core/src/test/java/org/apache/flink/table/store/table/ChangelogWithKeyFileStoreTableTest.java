@@ -33,12 +33,16 @@ import org.apache.flink.table.store.file.schema.SchemaUtils;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.Options;
+import org.apache.flink.table.store.table.sink.BatchTableCommit;
+import org.apache.flink.table.store.table.sink.BatchTableWrite;
+import org.apache.flink.table.store.table.sink.BatchWriteBuilder;
 import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.InnerTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.ReadBuilder;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
@@ -98,6 +102,34 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                     rowData.getRowKind().shortString()
                             + " "
                             + COMPATIBILITY_BATCH_ROW_TO_STRING.apply(rowData);
+
+    @Test
+    public void testBatchWriteBuilder() throws Exception {
+        Table table = createFileStoreTable();
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(1, 11, 101L));
+        commit.commit(write.prepareCommit());
+
+        assertThatThrownBy(write::prepareCommit)
+                .hasMessageContaining("BatchTableWrite only support one-time committing");
+        assertThatThrownBy(() -> commit.commit(Collections.emptyList()))
+                .hasMessageContaining("BatchTableCommit only support one-time committing");
+
+        write.close();
+        commit.close();
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
+                .isEqualTo(
+                        Arrays.asList(
+                                "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|11|101|binary|varbinary|mapKey:mapVal|multiset"));
+    }
 
     @Test
     public void testSequenceNumber() throws Exception {

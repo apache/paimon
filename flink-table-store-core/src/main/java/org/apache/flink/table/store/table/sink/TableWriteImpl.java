@@ -26,6 +26,8 @@ import org.apache.flink.table.store.file.operation.FileStoreWrite;
 
 import java.util.List;
 
+import static org.apache.flink.table.store.utils.Preconditions.checkState;
+
 /**
  * {@link TableWrite} implementation.
  *
@@ -36,6 +38,8 @@ public class TableWriteImpl<T> implements InnerTableWrite {
     private final FileStoreWrite<T> write;
     private final SinkRecordConverter recordConverter;
     private final RecordExtractor<T> recordExtractor;
+
+    private boolean batchCommitted = false;
 
     public TableWriteImpl(
             FileStoreWrite<T> write,
@@ -103,6 +107,13 @@ public class TableWriteImpl<T> implements InnerTableWrite {
     public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception {
         return write.prepareCommit(waitCompaction, commitIdentifier);
+    }
+
+    @Override
+    public List<CommitMessage> prepareCommit() throws Exception {
+        checkState(!batchCommitted, "BatchTableWrite only support one-time committing.");
+        batchCommitted = true;
+        return prepareCommit(true, BatchWriteBuilder.COMMIT_IDENTIFIER);
     }
 
     @Override
