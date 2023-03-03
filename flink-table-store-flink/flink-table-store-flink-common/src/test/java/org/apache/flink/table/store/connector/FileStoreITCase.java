@@ -19,6 +19,8 @@
 package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -297,6 +299,20 @@ public class FileStoreITCase extends AbstractTestBase {
     @TestTemplate
     public void testContinuousWithoutPK() throws Exception {
         innerTestContinuous(buildFileStoreTable(new int[0], new int[0]));
+    }
+
+    @TestTemplate
+    public void testContinuousBounded() throws Exception {
+        FileStoreTable table = buildFileStoreTable(new int[0], new int[] {2});
+        table =
+                table.copy(
+                        Collections.singletonMap(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "1024"));
+        Source<RowData, ?, ?> source =
+                new FlinkSourceBuilder(IDENTIFIER, table)
+                        .withContinuousMode(true)
+                        .withEnv(env)
+                        .buildSource();
+        assertThat(source.getBoundedness()).isEqualTo(Boundedness.BOUNDED);
     }
 
     private void innerTestContinuous(FileStoreTable table) throws Exception {

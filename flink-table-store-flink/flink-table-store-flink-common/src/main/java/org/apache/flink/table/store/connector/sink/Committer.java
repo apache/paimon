@@ -37,7 +37,7 @@ public interface Committer extends AutoCloseable {
             List<ManifestCommittable> globalCommittables) throws IOException;
 
     /** Compute an aggregated committable from a list of committables. */
-    ManifestCommittable combine(long checkpointId, List<Committable> committables)
+    ManifestCommittable combine(long checkpointId, long watermark, List<Committable> committables)
             throws IOException;
 
     /** Commits the given {@link ManifestCommittable}. */

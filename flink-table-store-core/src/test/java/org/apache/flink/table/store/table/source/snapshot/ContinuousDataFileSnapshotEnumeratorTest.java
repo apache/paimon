@@ -46,7 +46,7 @@ public class ContinuousDataFileSnapshotEnumeratorTest extends SnapshotEnumerator
                 ContinuousDataFileSnapshotEnumerator.create(table, table.newScan(), null);
 
         // first call without any snapshot, should return null
-        assertThat(enumerator.enumerate()).isNull();
+        assertThat(enumerator.enumerate().plan()).isNull();
 
         // write base data
         write.write(rowData(1, 10, 100L));
@@ -60,13 +60,13 @@ public class ContinuousDataFileSnapshotEnumeratorTest extends SnapshotEnumerator
         commit.commit(1, write.prepareCommit(true, 1));
 
         // first call with snapshot, should return complete records from 2nd commit
-        DataTableScan.DataFilePlan plan = enumerator.enumerate();
+        DataTableScan.DataFilePlan plan = enumerator.enumerate().plan();
         assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
 
         // incremental call without new snapshots, should return null
-        assertThat(enumerator.enumerate()).isNull();
+        assertThat(enumerator.enumerate().plan()).isNull();
 
         // write incremental data
         write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 101L));
@@ -81,19 +81,19 @@ public class ContinuousDataFileSnapshotEnumeratorTest extends SnapshotEnumerator
         commit.commit(3, write.prepareCommit(true, 3));
 
         // first incremental call, should return incremental records from 3rd commit
-        plan = enumerator.enumerate();
+        plan = enumerator.enumerate().plan();
         assertThat(plan.snapshotId).isEqualTo(3);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|102", "+I 1|20|201", "+I 1|40|400"));
 
         // second incremental call, should return incremental records from 4th commit
-        plan = enumerator.enumerate();
+        plan = enumerator.enumerate().plan();
         assertThat(plan.snapshotId).isEqualTo(4);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|103", "-D 1|40|400", "+I 1|50|500"));
 
         // no more new snapshots, should return null
-        assertThat(enumerator.enumerate()).isNull();
+        assertThat(enumerator.enumerate().plan()).isNull();
 
         write.close();
         commit.close();
@@ -112,7 +112,7 @@ public class ContinuousDataFileSnapshotEnumeratorTest extends SnapshotEnumerator
                 ContinuousDataFileSnapshotEnumerator.create(table, table.newScan(), null);
 
         // first call without any snapshot, should return null
-        assertThat(enumerator.enumerate()).isNull();
+        assertThat(enumerator.enumerate().plan()).isNull();
 
         // write base data
         write.write(rowData(1, 10, 100L));
@@ -134,13 +134,13 @@ public class ContinuousDataFileSnapshotEnumeratorTest extends SnapshotEnumerator
         commit.commit(2, write.prepareCommit(true, 2));
 
         // first call with snapshot, should return full compacted records from 3rd commit
-        DataTableScan.DataFilePlan plan = enumerator.enumerate();
+        DataTableScan.DataFilePlan plan = enumerator.enumerate().plan();
         assertThat(plan.snapshotId).isEqualTo(4);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
 
         // incremental call without new snapshots, should return null
-        assertThat(enumerator.enumerate()).isNull();
+        assertThat(enumerator.enumerate().plan()).isNull();
 
         // write incremental data
         write.write(rowData(1, 10, 103L));
@@ -149,13 +149,13 @@ public class ContinuousDataFileSnapshotEnumeratorTest extends SnapshotEnumerator
         commit.commit(3, write.prepareCommit(true, 3));
 
         // no new compact snapshots, should return null
-        assertThat(enumerator.enumerate()).isNull();
+        assertThat(enumerator.enumerate().plan()).isNull();
 
         write.compact(binaryRow(1), 0, true);
         commit.commit(4, write.prepareCommit(true, 4));
 
         // full compaction done, read new changelog
-        plan = enumerator.enumerate();
+        plan = enumerator.enumerate().plan();
         assertThat(plan.snapshotId).isEqualTo(6);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(
@@ -167,7 +167,7 @@ public class ContinuousDataFileSnapshotEnumeratorTest extends SnapshotEnumerator
                                 "+I 1|50|500"));
 
         // no more new snapshots, should return null
-        assertThat(enumerator.enumerate()).isNull();
+        assertThat(enumerator.enumerate().plan()).isNull();
 
         write.close();
         commit.close();

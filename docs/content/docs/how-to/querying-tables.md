@@ -87,6 +87,10 @@ Users can also adjust `changelog-producer` table property to specify the pattern
 
 {{< img src="/img/scan-mode.png">}}
 
+{{< hint info >}}
+Streaming Source can also be bounded, you can specify 'scan.bounded.watermark' to define the end condition for bounded streaming mode, stream reading will end until a larger watermark snapshot is encountered.
+{{< /hint >}}
+
 ## System Tables
 
 System tables contain metadata and information about each table, such as the snapshots created and the options in use. Users can access system tables with batch queries.

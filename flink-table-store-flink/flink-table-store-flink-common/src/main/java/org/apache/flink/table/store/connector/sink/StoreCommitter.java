@@ -51,8 +51,9 @@ public class StoreCommitter implements Committer {
     }
 
     @Override
-    public ManifestCommittable combine(long checkpointId, List<Committable> committables) {
-        ManifestCommittable manifestCommittable = new ManifestCommittable(checkpointId);
+    public ManifestCommittable combine(
+            long checkpointId, long watermark, List<Committable> committables) {
+        ManifestCommittable manifestCommittable = new ManifestCommittable(checkpointId, watermark);
         for (Committable committable : committables) {
             switch (committable.kind()) {
                 case FILE:

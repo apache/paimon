@@ -26,8 +26,6 @@ import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.utils.Preconditions;
 
-import javax.annotation.Nullable;
-
 import java.io.Serializable;
 
 /** {@link SnapshotEnumerator} for batch read. */
@@ -48,14 +46,13 @@ public class StaticDataFileSnapshotEnumerator implements SnapshotEnumerator {
         this.hasNext = true;
     }
 
-    @Nullable
     @Override
-    public DataTableScan.DataFilePlan enumerate() {
+    public Result enumerate() {
         if (hasNext) {
             hasNext = false;
-            return startingScanner.getPlan(snapshotManager, scan);
+            return planResult(startingScanner.getPlan(snapshotManager, scan));
         } else {
-            return null;
+            return finishedResult();
         }
     }
 

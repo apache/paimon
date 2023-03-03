@@ -26,13 +26,14 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
-import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
+import org.apache.flink.table.store.table.source.DataTableScan.DataFilePlan;
 import org.apache.flink.table.store.table.source.snapshot.StaticDataFileSnapshotEnumerator;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 
 /** Bounded {@link FlinkSource} for reading records. It does not monitor new snapshots. */
 public class StaticFileStoreSource extends FlinkSource {
@@ -80,12 +81,8 @@ public class StaticFileStoreSource extends FlinkSource {
             FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
 
             // read all splits from the enumerator in one go
-            SnapshotEnumerator snapshotEnumerator = enumeratorFactory.create(table, scan);
-            while (true) {
-                DataTableScan.DataFilePlan plan = snapshotEnumerator.enumerate();
-                if (plan == null) {
-                    break;
-                }
+            List<DataFilePlan> plans = enumeratorFactory.create(table, scan).enumerateAll();
+            for (DataFilePlan plan : plans) {
                 snapshotId = plan.snapshotId;
                 splits.addAll(splitGenerator.createSplits(plan));
             }
