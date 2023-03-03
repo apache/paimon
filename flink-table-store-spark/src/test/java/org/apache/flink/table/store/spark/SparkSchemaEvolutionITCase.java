@@ -107,6 +107,19 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @Test
     public void testRenameTable() {
+        Row oldNamespace = spark.sql("SHOW CURRENT NAMESPACE").collectAsList().get(0);
+        String oldCatalog = oldNamespace.getString(0);
+        String oldDatabase = oldNamespace.getString(1);
+
+        try {
+            spark.sql("USE tablestore.default");
+            testRenameTableImpl();
+        } finally {
+            spark.sql(String.format("USE %s.%s", oldCatalog, oldDatabase));
+        }
+    }
+
+    private void testRenameTableImpl() {
         // TODO: add test case for hive catalog table
         assertThatThrownBy(() -> spark.sql("ALTER TABLE t3 RENAME TO t4"))
                 .isInstanceOf(AnalysisException.class)
