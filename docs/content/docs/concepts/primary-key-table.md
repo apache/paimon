@@ -36,6 +36,12 @@ By [defining primary keys]({{< ref "docs/how-to/creating-tables#tables-with-prim
 
 When Table Store sink receives two or more records with the same primary keys, it will merge them into one record to keep primary keys unique. By specifying the `merge-engine` table property, users can choose how records are merged together.
 
+{{< hint info >}}
+Set `table.exec.sink.upsert-materialize` to `NONE` always in Flink SQL TableConfig, sink upsert-materialize may
+result in strange behavior. When the input is out of order, we recommend that you use
+[Sequence Field]({{< ref "docs/concepts/primary-key-table#sequence-field" >}}) to correct disorder.
+{{< /hint >}}
+
 ### Deduplicate
 
 `deduplicate` merge engine is the default merge engine. Table Store will only keep the latest record and throw away other records with the same primary keys.
@@ -159,6 +165,11 @@ Full compaction changelog producer can produce complete changelog for any type o
 By default, the primary key table determines the merge order according to the input order (the last input record will be the last to merge). However, in distributed computing,
 there will be some cases that lead to data disorder. At this time, you can use a time field as `sequence.field`, for example:
 
+{{< hint info >}}
+When the record is updated or deleted, the `sequence.field` must become larger and cannot remain unchanged. For example,
+you can use [Mysql Binlog operation time](https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#available-metadata) as `sequence.field`.
+{{< /hint >}}
+
 {{< tabs "sequence.field" >}}
 
 {{< tab "Flink" >}}
@@ -179,7 +190,3 @@ CREATE TABLE MyTable (
 {{< /tabs >}}
 
 The record with the largest `sequence.field` value will be the last to merge, regardless of the input order.
-
-{{< hint info >}}
-We recommend you set `sequence.field` to table to correct disorder. Set `table.exec.sink.upsert-materialize` to `NONE` always to avoid any materialize operator being added by Flink SQL, which may result in strange behavior.
-{{< /hint >}}
