@@ -20,15 +20,17 @@ package org.apache.flink.table.store.connector.source;
 
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
+import org.apache.flink.api.connector.source.SplitsAssignment;
 import org.apache.flink.table.store.file.Snapshot;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.LinkedList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Queue;
+import java.util.Map;
 
 /** A {@link SplitEnumerator} implementation for {@link StaticFileStoreSource} input. */
 public class StaticFileStoreSplitEnumerator
@@ -38,7 +40,7 @@ public class StaticFileStoreSplitEnumerator
 
     @Nullable private final Snapshot snapshot;
 
-    private final Queue<FileStoreSourceSplit> splits;
+    private final Map<Integer, List<FileStoreSourceSplit>> pendingSplitAssignment;
 
     public StaticFileStoreSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
@@ -46,7 +48,19 @@ public class StaticFileStoreSplitEnumerator
             Collection<FileStoreSourceSplit> splits) {
         this.context = context;
         this.snapshot = snapshot;
-        this.splits = new LinkedList<>(splits);
+        this.pendingSplitAssignment = createSplitAssignment(splits, context.currentParallelism());
+    }
+
+    private static Map<Integer, List<FileStoreSourceSplit>> createSplitAssignment(
+            Collection<FileStoreSourceSplit> splits, int numReaders) {
+        Map<Integer, List<FileStoreSourceSplit>> assignment = new HashMap<>();
+        int i = 0;
+        for (FileStoreSourceSplit split : splits) {
+            int task = i % numReaders;
+            assignment.computeIfAbsent(task, k -> new ArrayList<>()).add(split);
+            i++;
+        }
+        return assignment;
     }
 
     @Override
@@ -61,9 +75,16 @@ public class StaticFileStoreSplitEnumerator
             return;
         }
 
-        FileStoreSourceSplit split = splits.poll();
-        if (split != null) {
-            context.assignSplit(split, subtask);
+        // The following batch assignment operation is for two purposes:
+        // 1. To distribute splits evenly when batch reading to prevent a few tasks from reading all
+        // the data (for example, the current resource can only schedule part of the tasks).
+        // 2. Optimize limit reading. In limit reading, the task will repeatedly create SplitFetcher
+        // to read the data of the limit number for each coming split (the limit status is in the
+        // SplitFetcher). So if the assigment are divided too small, the task will cost more time on
+        // creating SplitFetcher and reading data.
+        List<FileStoreSourceSplit> splits = pendingSplitAssignment.remove(subtask);
+        if (splits != null && splits.size() > 0) {
+            context.assignSplits(new SplitsAssignment<>(Collections.singletonMap(subtask, splits)));
         } else {
             context.signalNoMoreSplits(subtask);
         }
@@ -71,7 +92,9 @@ public class StaticFileStoreSplitEnumerator
 
     @Override
     public void addSplitsBack(List<FileStoreSourceSplit> backSplits, int subtaskId) {
-        splits.addAll(backSplits);
+        pendingSplitAssignment
+                .computeIfAbsent(subtaskId, k -> new ArrayList<>())
+                .addAll(backSplits);
     }
 
     @Override
@@ -81,8 +104,9 @@ public class StaticFileStoreSplitEnumerator
 
     @Override
     public PendingSplitsCheckpoint snapshotState(long checkpointId) {
-        return new PendingSplitsCheckpoint(
-                new ArrayList<>(splits), snapshot == null ? null : snapshot.id());
+        List<FileStoreSourceSplit> splits = new ArrayList<>();
+        pendingSplitAssignment.values().forEach(splits::addAll);
+        return new PendingSplitsCheckpoint(splits, snapshot == null ? null : snapshot.id());
     }
 
     @Override
