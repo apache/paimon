@@ -49,6 +49,7 @@ import org.apache.flink.table.store.table.system.AuditLogTable;
 import org.apache.flink.table.store.utils.CompatibilityTestUtils;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.utils.LogicalTypeDataTypeConverter;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.function.FunctionWithException;
 
@@ -62,7 +63,6 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-import static org.apache.flink.table.store.file.KeyValue.rowDataToString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -718,7 +718,10 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                             options.setString("fields.c.ignore-retract", "true");
                         },
                         rowType);
-        Function<RowData, String> rowToString = row -> rowDataToString(row, rowType);
+        RowRowConverter converter =
+                RowRowConverter.create(LogicalTypeDataTypeConverter.toDataType(rowType));
+        Function<RowData, String> rowDataToString = row -> converter.toExternal(row).toString();
+
         DataTableScan scan = table.newScan();
         TableRead read = table.newRead();
         TableWrite write = table.newWrite("");
@@ -730,7 +733,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(GenericRowData.of(1, 1, 2, 2));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        List<String> result = getResult(read, scan.plan().splits(), rowToString);
+        List<String> result = getResult(read, scan.plan().splits(), rowDataToString);
         assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 6, 3]");
 
         // 2. Retracts
@@ -739,7 +742,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(GenericRowData.ofKind(RowKind.DELETE, 1, 1, 1, 1));
         commit.commit(1, write.prepareCommit(true, 1));
 
-        result = getResult(read, scan.plan().splits(), rowToString);
+        result = getResult(read, scan.plan().splits(), rowDataToString);
         assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 3]");
     }
 
