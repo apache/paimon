@@ -38,7 +38,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link DropPartitionAction}. */
-public class DropPartitionITCase extends ActionITCaseBase {
+public class DropPartitionActionITCase extends ActionITCaseBase {
 
     private static final DataType[] FIELD_TYPES =
             new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.STRING(), DataTypes.INT()};

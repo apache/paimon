@@ -268,3 +268,121 @@ For more information of 'delete', see
 {{< /tab >}}
 
 {{< /tabs >}}
+
+## Merging into table
+
+Table Store supports "MERGE INTO" via submitting the 'merge-into' job through `flink run`.
+
+{{< hint info >}}
+Important table properties setting:
+1. Only [primary key table]({{< ref "docs/concepts/primary-key-table" >}}) supports this feature.
+2. The action won't produce UPDATE_BEFORE, so it's not recommended to set 'changelog-producer' = 'input'.
+{{< /hint >}}
+
+The design referenced such syntax:
+```sql
+MERGE INTO target-table
+  USING source-table | source-expr AS source-alias
+  ON merge-condition
+  WHEN MATCHED [AND matched-condition]
+    THEN UPDATE SET xxx
+  WHEN MATCHED [AND matched-condition]
+    THEN DELETE
+  WHEN NOT MATCHED [AND not-matched-condition]
+    THEN INSERT VALUES (xxx)
+  WHEN NOT MATCHED BY SOURCE [AND not-matched-by-source-condition]
+    THEN UPDATE SET xxx
+  WHEN NOT MATCHED BY SOURCE [AND not-matched-by-source-condition]
+    THEN DELETE
+```
+The merge-into action use "upsert" semantics instead of "update", which means if the row exists, 
+then do update, else do insert. For example, for non-primary-key table, you can update every column,
+but for primary key table, if you want to update primary keys, you have to insert a new row which has 
+different primary keys from rows in the table. In this scenario, "upsert" is useful.
+
+{{< tabs "merge-into" >}}
+
+{{< tab "Flink Job" >}}
+
+Run the following command to submit a 'merge-into' job for the table.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    -c org.apache.flink.table.store.connector.action.FlinkActions \
+    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    merge-into \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <target-table> \
+    --using-table <source-table> \
+    --on <merge-condition> \
+    --merge-actions <matched-upsert,matched-delete,not-matched-insert,not-matched-by-source-upsert,not-matched-by-source-delete> \
+    --matched-upsert-condition <matched-condition> \
+    --matched-upsert-set <upsert-changes> \
+    --matched-delete-condition <matched-condition> \
+    --not-matched-insert-condition <not-matched-condition> \
+    --not-matched-insert-values <insert-values> \
+    --not-matched-by-source-upsert-condition <not-matched-by-source-condition> \
+    --not-matched-by-source-upsert-set <not-matched-upsert-changes> \
+    --not-matched-by-source-delete-condition <not-matched-by-source-condition>
+    
+-- Examples:
+-- Find all orders mentioned in the source table, then mark as important if the price is above 100 
+-- or delete if the price is under 10.
+./flink run \
+    -c org.apache.flink.table.store.connector.action.FlinkActions \
+    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    merge-into \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table T \
+    --using-table S \
+    --on "T.id = S.order_id" \
+    --merge-actions \
+    matched-upsert,matched-delete \
+    --matched-upsert-condition "T.price > 100" \
+    --matched-upsert-set "id = T.id, price = T.price, mark = 'important'" \
+    --matched-delete-condition "T.price < 10" 
+    
+-- For matched order rows, increase the price, and if there is no match, insert the order from the 
+-- source table:
+./flink run \
+    -c org.apache.flink.table.store.connector.action.FlinkActions \
+    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    merge-into \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table T \
+    --using-table S \
+    --on "T.id = S.order_id" \
+    --merge-actions \
+    matched-upsert,not-matched-insert \
+    --matched-upsert-set "id = T.id, price = T.price + 20, mark = T.mark" \
+    --not-matched-insert-values * 
+
+-- For not matched by source order rows (which are in the target table and does not match any row in the
+-- source table based on the merge-condition), decrease the price or if the mark is 'trivial', delete them:
+./flink run \
+    -c org.apache.flink.table.store.connector.action.FlinkActions \
+    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    merge-into \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table T \
+    --using-table S \
+    --on "T.id = S.order_id" \
+    --merge-actions \
+    not-matched-by-source-upsert,not-matched-by-source-delete \
+    --not-matched-by-source-upsert-condition "T.mark <> 'trivial'" \
+    --not-matched-by-source-upsert-set "id = T.id, price = T.price - 20, mark = T.mark" \
+    --not-matched-by-source-delete-condition "T.mark = 'trivial'"
+```
+
+For more information of 'merge-into', see
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    -c org.apache.flink.table.store.connector.action.FlinkActions \
+    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    merge-into --help
+```

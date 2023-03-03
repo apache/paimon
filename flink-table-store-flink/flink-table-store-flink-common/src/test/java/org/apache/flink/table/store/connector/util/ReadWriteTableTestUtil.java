@@ -317,7 +317,7 @@ public class ReadWriteTableTestUtil {
         assertThat(expectedRecords).isEmpty();
     }
 
-    private static String buildDdl(
+    public static String buildDdl(
             String table,
             List<String> fieldsSpec,
             List<String> primaryKeys,

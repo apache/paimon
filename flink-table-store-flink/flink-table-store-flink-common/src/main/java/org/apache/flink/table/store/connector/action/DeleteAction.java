@@ -21,17 +21,11 @@ package org.apache.flink.table.store.connector.action;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.Table;
-import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.conversion.DataStructureConverter;
 import org.apache.flink.table.data.conversion.DataStructureConverters;
-import org.apache.flink.table.store.connector.FlinkCatalog;
-import org.apache.flink.table.store.connector.sink.FlinkSinkBuilder;
-import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.types.RowKind;
 
 import org.slf4j.Logger;
@@ -42,21 +36,17 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.connector.action.Action.getTablePath;
-import static org.apache.flink.table.store.file.catalog.Catalog.DEFAULT_DATABASE;
 
 /** Delete from table action for Flink. */
 public class DeleteAction extends ActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(DeleteAction.class);
 
-    private final FlinkCatalog flinkCatalog;
-
     private final String filter;
 
     public DeleteAction(String warehouse, String databaseName, String tableName, String filter) {
         super(warehouse, databaseName, tableName);
         this.filter = filter;
-        flinkCatalog = new FlinkCatalog(catalog, "table-store", DEFAULT_DATABASE);
     }
 
     public static Optional<Action> create(String[] args) {
@@ -111,18 +101,11 @@ public class DeleteAction extends ActionBase {
     public void run() throws Exception {
         LOG.debug("Run delete action with filter '{}'.", filter);
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        StreamTableEnvironment tEnv =
-                StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
-
-        tEnv.registerCatalog(flinkCatalog.getName(), flinkCatalog);
-        tEnv.useCatalog(flinkCatalog.getName());
-
         Table queriedTable =
                 tEnv.sqlQuery(
                         String.format(
                                 "SELECT * FROM %s WHERE %s",
-                                identifier.getEscapedFullName('`'), filter));
+                                identifier.getEscapedFullName(), filter));
 
         List<DataStructureConverter<Object, Object>> converters =
                 queriedTable.getResolvedSchema().getColumnDataTypes().stream()
@@ -146,7 +129,6 @@ public class DeleteAction extends ActionBase {
                                     return rowData;
                                 });
 
-        new FlinkSinkBuilder((FileStoreTable) table).withInput(dataStream).build();
-        env.execute();
+        sink(dataStream);
     }
 }
