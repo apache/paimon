@@ -22,35 +22,34 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaHookLoader;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
+import org.apache.hadoop.hive.metastore.api.InvalidObjectException;
 import org.apache.hadoop.hive.metastore.api.MetaException;
+import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
+import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.thrift.TException;
 
-import java.util.ArrayList;
-import java.util.List;
-
-/** A {@link HiveMetaStoreClient} to test custom Hive metastore client. */
-public class TestHiveMetaStoreClient extends HiveMetaStoreClient implements IMetaStoreClient {
-
-    public static final String MOCK_DATABASE = "test_mock_database";
-
-    public TestHiveMetaStoreClient(HiveConf conf) throws MetaException {
+/** A {@link HiveMetaStoreClient} to test accessing exception in Hive metastore client. */
+public class FailHiveMetaStoreClient extends HiveMetaStoreClient implements IMetaStoreClient {
+    public FailHiveMetaStoreClient(HiveConf conf) throws MetaException {
         super(conf);
     }
 
-    public TestHiveMetaStoreClient(HiveConf conf, HiveMetaHookLoader hookLoader)
+    public FailHiveMetaStoreClient(HiveConf conf, HiveMetaHookLoader hookLoader)
             throws MetaException {
         super(conf, hookLoader);
     }
 
-    public TestHiveMetaStoreClient(
+    public FailHiveMetaStoreClient(
             HiveConf conf, HiveMetaHookLoader hookLoader, Boolean allowEmbedded)
             throws MetaException {
         super(conf, hookLoader, allowEmbedded);
     }
 
     @Override
-    public List<String> getAllDatabases() throws MetaException {
-        List<String> result = new ArrayList<>(super.getAllDatabases());
-        result.add(MOCK_DATABASE);
-        return result;
+    public void createTable(Table tbl)
+            throws AlreadyExistsException, InvalidObjectException, MetaException,
+                    NoSuchObjectException, TException {
+        throw new TException();
     }
 }

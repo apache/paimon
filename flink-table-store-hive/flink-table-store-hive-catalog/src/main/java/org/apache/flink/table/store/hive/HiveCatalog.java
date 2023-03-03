@@ -246,9 +246,9 @@ public class HiveCatalog extends AbstractCatalog {
         } catch (TException e) {
             Path path = getDataTableLocation(identifier);
             try {
-                fileIO.delete(path, true);
+                fileIO.deleteDirectoryQuietly(path);
             } catch (Exception ee) {
-                LOG.error("Delete file[{}] fail for table {}", path, identifier, ee);
+                LOG.error("Delete directory[{}] fail for table {}", path, identifier, ee);
             }
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
         }

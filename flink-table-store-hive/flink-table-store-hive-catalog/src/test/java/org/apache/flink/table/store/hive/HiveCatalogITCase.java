@@ -541,7 +541,7 @@ public class HiveCatalogITCase {
                         "  'uri' = '',",
                         "  'warehouse' = '" + path + "',",
                         "  'metastore.client.class' = '"
-                                + TestHiveMetaStoreClient.class.getName()
+                                + FailHiveMetaStoreClient.class.getName()
                                 + "'",
                         ")"));
         tEnv.executeSql("USE CATALOG my_hive_custom_client");
