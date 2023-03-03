@@ -22,7 +22,12 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaHookLoader;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
+import org.apache.hadoop.hive.metastore.api.InvalidObjectException;
 import org.apache.hadoop.hive.metastore.api.MetaException;
+import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
+import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.thrift.TException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -52,5 +57,12 @@ public class TestHiveMetaStoreClient extends HiveMetaStoreClient implements IMet
         List<String> result = new ArrayList<>(super.getAllDatabases());
         result.add(MOCK_DATABASE);
         return result;
+    }
+
+    @Override
+    public void createTable(Table tbl)
+            throws AlreadyExistsException, InvalidObjectException, MetaException,
+                    NoSuchObjectException, TException {
+        throw new TException();
     }
 }
