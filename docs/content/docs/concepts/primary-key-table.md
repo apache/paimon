@@ -179,3 +179,7 @@ CREATE TABLE MyTable (
 {{< /tabs >}}
 
 The record with the largest `sequence.field` value will be the last to merge, regardless of the input order.
+
+{{< hint info >}}
+We recommend you set `sequence.field` to table to correct disorder. Set `table.exec.sink.upsert-materialize` to `NONE` always to avoid any materialize operator being added by Flink SQL, which may result in strange behavior.
+{{< /hint >}}
