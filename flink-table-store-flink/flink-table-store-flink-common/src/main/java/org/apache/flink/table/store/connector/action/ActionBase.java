@@ -18,16 +18,34 @@
 
 package org.apache.flink.table.store.connector.action;
 
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.api.EnvironmentSettings;
+import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.catalog.CatalogContext;
+import org.apache.flink.table.store.connector.FlinkCatalog;
+import org.apache.flink.table.store.connector.LogicalTypeConversion;
+import org.apache.flink.table.store.connector.sink.FlinkSinkBuilder;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.file.catalog.Identifier;
+import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.options.Options;
+import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypeCasts;
+import org.apache.flink.table.types.logical.LogicalType;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+import static org.apache.flink.table.store.file.catalog.Catalog.DEFAULT_DATABASE;
 
 /** Abstract base of {@link Action}. */
 public abstract class ActionBase implements Action {
@@ -35,6 +53,12 @@ public abstract class ActionBase implements Action {
     private static final Logger LOG = LoggerFactory.getLogger(ActionBase.class);
 
     protected Catalog catalog;
+
+    protected final FlinkCatalog flinkCatalog;
+
+    protected StreamExecutionEnvironment env;
+
+    protected StreamTableEnvironment tEnv;
 
     protected Identifier identifier;
 
@@ -50,6 +74,14 @@ public abstract class ActionBase implements Action {
                 CatalogFactory.createCatalog(
                         CatalogContext.create(
                                 new Options().set(CatalogOptions.WAREHOUSE, warehouse)));
+        flinkCatalog = new FlinkCatalog(catalog, "table-store", DEFAULT_DATABASE);
+
+        env = StreamExecutionEnvironment.getExecutionEnvironment();
+        tEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
+
+        // register flink catalog to table environment
+        tEnv.registerCatalog(flinkCatalog.getName(), flinkCatalog);
+        tEnv.useCatalog(flinkCatalog.getName());
 
         try {
             table = catalog.getTable(identifier);
@@ -61,5 +93,44 @@ public abstract class ActionBase implements Action {
             System.err.println("Table doesn't exist in given path.");
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * Extract {@link LogicalType}s from Flink {@link org.apache.flink.table.types.DataType}s and
+     * convert to Table Store {@link DataType}s.
+     */
+    protected List<DataType> toTableStoreDataTypes(
+            List<org.apache.flink.table.types.DataType> flinkDataTypes) {
+        return flinkDataTypes.stream()
+                .map(org.apache.flink.table.types.DataType::getLogicalType)
+                .map(LogicalTypeConversion::toDataType)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Check whether each {@link DataType} of actualTypes is compatible with that of expectedTypes
+     * respectively.
+     */
+    protected boolean compatibleCheck(List<DataType> actualTypes, List<DataType> expectedTypes) {
+        if (actualTypes.size() != expectedTypes.size()) {
+            return false;
+        }
+
+        for (int i = 0; i < actualTypes.size(); i++) {
+            if (!DataTypeCasts.supportsCompatibleCast(actualTypes.get(i), expectedTypes.get(i))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** Sink {@link DataStream} dataStream to table. */
+    protected void sink(DataStream<RowData> dataStream) throws Exception {
+        new FlinkSinkBuilder((FileStoreTable) table)
+                .withInput(dataStream)
+                .withLockFactory(Lock.factory(catalog.lockFactory().orElse(null), identifier))
+                .build();
+        env.execute();
     }
 }

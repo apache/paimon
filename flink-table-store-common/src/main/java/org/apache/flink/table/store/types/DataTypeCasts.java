@@ -57,9 +57,12 @@ public final class DataTypeCasts {
 
     private static final Map<DataTypeRoot, Set<DataTypeRoot>> explicitCastingRules;
 
+    private static final Map<DataTypeRoot, Set<DataTypeRoot>> compatibleCastingRules;
+
     static {
         implicitCastingRules = new HashMap<>();
         explicitCastingRules = new HashMap<>();
+        compatibleCastingRules = new HashMap<>();
 
         // identity casts
 
@@ -69,28 +72,36 @@ public final class DataTypeCasts {
 
         // cast specification
 
-        castTo(CHAR).implicitFrom(CHAR).explicitFromFamily(PREDEFINED, CONSTRUCTED).build();
+        castTo(CHAR)
+                .implicitFrom(CHAR)
+                .explicitFromFamily(PREDEFINED, CONSTRUCTED)
+                .compatibleFrom(CHAR, VARCHAR)
+                .build();
 
         castTo(VARCHAR)
                 .implicitFromFamily(CHARACTER_STRING)
                 .explicitFromFamily(PREDEFINED, CONSTRUCTED)
+                .compatibleFrom(CHAR, VARCHAR)
                 .build();
 
         castTo(BOOLEAN)
                 .implicitFrom(BOOLEAN)
                 .explicitFromFamily(CHARACTER_STRING, INTEGER_NUMERIC)
+                .compatibleFrom(BOOLEAN)
                 .build();
 
         castTo(BINARY)
                 .implicitFrom(BINARY)
                 .explicitFromFamily(CHARACTER_STRING)
                 .explicitFrom(VARBINARY)
+                .compatibleFrom(BINARY, VARBINARY)
                 .build();
 
         castTo(VARBINARY)
                 .implicitFromFamily(BINARY_STRING)
                 .explicitFromFamily(CHARACTER_STRING)
                 .explicitFrom(BINARY)
+                .compatibleFrom(BINARY, VARBINARY)
                 .build();
 
         castTo(DECIMAL)
@@ -103,61 +114,71 @@ public final class DataTypeCasts {
                 .implicitFrom(TINYINT)
                 .explicitFromFamily(NUMERIC, CHARACTER_STRING)
                 .explicitFrom(BOOLEAN, TIMESTAMP_WITHOUT_TIME_ZONE, TIMESTAMP_WITH_LOCAL_TIME_ZONE)
+                .compatibleFrom(TINYINT)
                 .build();
 
         castTo(SMALLINT)
                 .implicitFrom(TINYINT, SMALLINT)
                 .explicitFromFamily(NUMERIC, CHARACTER_STRING)
                 .explicitFrom(BOOLEAN, TIMESTAMP_WITHOUT_TIME_ZONE, TIMESTAMP_WITH_LOCAL_TIME_ZONE)
+                .compatibleFrom(SMALLINT)
                 .build();
 
         castTo(INTEGER)
                 .implicitFrom(TINYINT, SMALLINT, INTEGER)
                 .explicitFromFamily(NUMERIC, CHARACTER_STRING)
                 .explicitFrom(BOOLEAN, TIMESTAMP_WITHOUT_TIME_ZONE, TIMESTAMP_WITH_LOCAL_TIME_ZONE)
+                .compatibleFrom(INTEGER, DATE, TIME_WITHOUT_TIME_ZONE)
                 .build();
 
         castTo(BIGINT)
                 .implicitFrom(TINYINT, SMALLINT, INTEGER, BIGINT)
                 .explicitFromFamily(NUMERIC, CHARACTER_STRING)
                 .explicitFrom(BOOLEAN, TIMESTAMP_WITHOUT_TIME_ZONE, TIMESTAMP_WITH_LOCAL_TIME_ZONE)
+                .compatibleFrom(BIGINT)
                 .build();
 
         castTo(FLOAT)
                 .implicitFrom(TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DECIMAL)
                 .explicitFromFamily(NUMERIC, CHARACTER_STRING)
                 .explicitFrom(BOOLEAN, TIMESTAMP_WITHOUT_TIME_ZONE, TIMESTAMP_WITH_LOCAL_TIME_ZONE)
+                .compatibleFrom(FLOAT)
                 .build();
 
         castTo(DOUBLE)
                 .implicitFromFamily(NUMERIC)
                 .explicitFromFamily(CHARACTER_STRING)
                 .explicitFrom(BOOLEAN, TIMESTAMP_WITHOUT_TIME_ZONE, TIMESTAMP_WITH_LOCAL_TIME_ZONE)
+                .compatibleFrom(DOUBLE)
                 .build();
 
         castTo(DATE)
                 .implicitFrom(DATE, TIMESTAMP_WITHOUT_TIME_ZONE)
                 .explicitFromFamily(TIMESTAMP, CHARACTER_STRING)
+                .compatibleFrom(INTEGER, DATE, TIME_WITHOUT_TIME_ZONE)
                 .build();
 
         castTo(TIME_WITHOUT_TIME_ZONE)
                 .implicitFrom(TIME_WITHOUT_TIME_ZONE, TIMESTAMP_WITHOUT_TIME_ZONE)
                 .explicitFromFamily(TIME, TIMESTAMP, CHARACTER_STRING)
+                .compatibleFrom(INTEGER, DATE, TIME_WITHOUT_TIME_ZONE)
                 .build();
 
         castTo(TIMESTAMP_WITHOUT_TIME_ZONE)
                 .implicitFrom(TIMESTAMP_WITHOUT_TIME_ZONE, TIMESTAMP_WITH_LOCAL_TIME_ZONE)
                 .explicitFromFamily(DATETIME, CHARACTER_STRING, NUMERIC)
+                .compatibleFrom(TIMESTAMP_WITHOUT_TIME_ZONE)
                 .build();
 
         castTo(TIMESTAMP_WITH_LOCAL_TIME_ZONE)
                 .implicitFrom(TIMESTAMP_WITH_LOCAL_TIME_ZONE, TIMESTAMP_WITHOUT_TIME_ZONE)
                 .explicitFromFamily(DATETIME, CHARACTER_STRING, NUMERIC)
+                .compatibleFrom(TIMESTAMP_WITH_LOCAL_TIME_ZONE)
                 .build();
     }
 
     /**
-     * Returns whether the source type can be safely casted to the target type without loosing
+     * Returns whether the source type can be safely cast to the target type without loosing
      * information.
      *
      * <p>Implicit casts are used for type widening and type generalization (finding a common
@@ -169,7 +190,7 @@ public final class DataTypeCasts {
     }
 
     /**
-     * Returns whether the source type can be casted to the target type.
+     * Returns whether the source type can be cast to the target type.
      *
      * <p>Explicit casts correspond to the SQL cast specification and represent the logic behind a
      * {@code CAST(sourceType AS targetType)} operation. For example, it allows for converting most
@@ -178,6 +199,28 @@ public final class DataTypeCasts {
      */
     public static boolean supportsExplicitCast(DataType sourceType, DataType targetType) {
         return supportsCasting(sourceType, targetType, true);
+    }
+
+    /**
+     * Returns whether the source type can be compatibly cast to the target type.
+     *
+     * <p>If two types are compatible, they should have the same underlying data structure. For
+     * example, {@link CharType} and {@link VarCharType} are both in the {@link
+     * DataTypeFamily#CHARACTER_STRING} family, meaning they both represent a character string. But
+     * the rest types are only compatible with themselves. For example, although {@link IntType} and
+     * {@link BigIntType} are both in the {@link DataTypeFamily#NUMERIC} family, they are not
+     * compatible because IntType represents a 4-byte signed integer while BigIntType represents an
+     * 8-byte signed integer. Especially, two {@link DecimalType}s are compatible only when they
+     * have the same {@code precision} and {@code scale}.
+     */
+    public static boolean supportsCompatibleCast(DataType sourceType, DataType targetType) {
+        if (sourceType.copy(true).equals(targetType.copy(true))) {
+            return true;
+        }
+
+        return compatibleCastingRules
+                .get(targetType.getTypeRoot())
+                .contains(sourceType.getTypeRoot());
     }
 
     // --------------------------------------------------------------------------------------------
@@ -219,6 +262,7 @@ public final class DataTypeCasts {
         private final DataTypeRoot targetType;
         private final Set<DataTypeRoot> implicitSourceTypes = new HashSet<>();
         private final Set<DataTypeRoot> explicitSourceTypes = new HashSet<>();
+        private final Set<DataTypeRoot> compatibleSourceTypes = new HashSet<>();
 
         CastingRuleBuilder(DataTypeRoot targetType) {
             this.targetType = targetType;
@@ -256,6 +300,11 @@ public final class DataTypeCasts {
             return this;
         }
 
+        CastingRuleBuilder compatibleFrom(DataTypeRoot... sourceTypes) {
+            this.compatibleSourceTypes.addAll(Arrays.asList(sourceTypes));
+            return this;
+        }
+
         /**
          * Should be called after {@link #explicitFromFamily(DataTypeFamily...)} to remove
          * previously added types.
@@ -274,6 +323,7 @@ public final class DataTypeCasts {
         void build() {
             implicitCastingRules.put(targetType, implicitSourceTypes);
             explicitCastingRules.put(targetType, explicitSourceTypes);
+            compatibleCastingRules.put(targetType, compatibleSourceTypes);
         }
     }
 

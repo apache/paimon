@@ -58,6 +58,10 @@ public class Identifier implements Serializable {
         return String.format("%s.%s", database, table);
     }
 
+    public String getEscapedFullName() {
+        return getEscapedFullName('`');
+    }
+
     public String getEscapedFullName(char escapeChar) {
         return String.format(
                 "%c%s%c.%c%s%c", escapeChar, database, escapeChar, escapeChar, table, escapeChar);
