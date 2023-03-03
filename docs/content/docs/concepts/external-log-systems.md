@@ -3,7 +3,7 @@ title: "External Log Systems"
 weight: 4
 type: docs
 aliases:
-- /features/external-log-systems.html
+- /concepts/external-log-systems.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
