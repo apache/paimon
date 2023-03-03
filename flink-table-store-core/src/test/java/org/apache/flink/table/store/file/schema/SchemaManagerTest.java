@@ -147,13 +147,15 @@ public class SchemaManagerTest {
 
     @Test
     public void testConcurrentCommit() throws Exception {
-        manager.createTable(
-                new Schema(
-                        rowType.getFields(),
-                        partitionKeys,
-                        primaryKeys,
-                        Collections.singletonMap("id", "-1"),
-                        "my_comment_4"));
+        retryArtificialException(
+                () ->
+                        manager.createTable(
+                                new Schema(
+                                        rowType.getFields(),
+                                        partitionKeys,
+                                        primaryKeys,
+                                        Collections.singletonMap("id", "-1"),
+                                        "my_comment_4")));
 
         int threadNumber = ThreadLocalRandom.current().nextInt(3) + 2;
         List<Thread> threads = new ArrayList<>();
