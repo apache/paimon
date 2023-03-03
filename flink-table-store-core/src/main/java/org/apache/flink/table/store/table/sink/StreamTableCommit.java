@@ -33,15 +33,6 @@ import java.util.Set;
 public interface StreamTableCommit extends TableCommit {
 
     /**
-     * If this is set to true, when there is no new data, no snapshot will be generated. By default,
-     * empty commit is not be ignored.
-     *
-     * <p>NOTE: It is recommended to keep 'ignoreEmptyCommit' to false in streaming write, in order
-     * to better remove duplicate commits (See {@link #filterCommitted}).
-     */
-    StreamTableCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
-
-    /**
      * Filter committed commits. Return uncommitted identifiers. This method is used for failover
      * cases.
      */

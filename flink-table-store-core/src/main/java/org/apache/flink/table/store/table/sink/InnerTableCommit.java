@@ -39,6 +39,17 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
 
     InnerTableCommit withOverwrite(@Nullable List<Map<String, String>> overwritePartitions);
 
+    /**
+     * If this is set to true, when there is no new data, no snapshot will be generated. By default,
+     * empty commit is be ignored.
+     *
+     * <ul>
+     *   <li>For Streaming: the default value of 'ignoreEmptyCommit' is false.
+     *   <li>For Batch: the default value of 'ignoreEmptyCommit' is true.
+     * </ul>
+     */
+    InnerTableCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
+
     /** @deprecated lock should pass from table. */
     @Deprecated
     InnerTableCommit withLock(Lock lock);
