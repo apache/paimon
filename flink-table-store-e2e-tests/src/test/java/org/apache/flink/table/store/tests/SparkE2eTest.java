@@ -20,6 +20,8 @@ package org.apache.flink.table.store.tests;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Container;
 import org.testcontainers.containers.ContainerState;
 
@@ -30,6 +32,8 @@ import java.util.stream.Collectors;
 /** Tests for reading table store from Spark3. */
 @DisabledIfSystemProperty(named = "test.flink.version", matches = "1.14.*")
 public class SparkE2eTest extends E2eReaderTestBase {
+
+    private static final Logger LOG = LoggerFactory.getLogger(SparkE2eTest.class);
 
     public SparkE2eTest() {
         super(false, false, true);
@@ -63,6 +67,8 @@ public class SparkE2eTest extends E2eReaderTestBase {
                                             "-f",
                                             TEST_DATA_DIR + "/" + sql);
                     if (execResult.getExitCode() != 0) {
+                        LOG.info(execResult.getStdout());
+                        LOG.info(execResult.getStderr());
                         throw new AssertionError("Failed when running spark sql.");
                     }
                     return Arrays.stream(execResult.getStdout().split("\n"))

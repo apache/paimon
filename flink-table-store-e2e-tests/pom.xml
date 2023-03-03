@@ -62,7 +62,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-spark</artifactId>
+            <artifactId>flink-table-store-spark-3.2</artifactId>
             <version>${project.version}</version>
             <scope>runtime</scope>
         </dependency>
@@ -132,7 +132,7 @@ under the License.
                         </artifactItem>
                         <artifactItem>
                             <groupId>org.apache.flink</groupId>
-                            <artifactId>flink-table-store-spark</artifactId>
+                            <artifactId>flink-table-store-spark-3.2</artifactId>
                             <version>${project.version}</version>
                             <destFileName>flink-table-store-spark.jar</destFileName>
                             <type>jar</type>

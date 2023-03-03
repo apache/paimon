@@ -32,6 +32,8 @@ This documentation is a guide for using Table Store in Spark3.
 
 {{< stable >}}
 
+Table Store currently supports Spark 3.3, 3.2 and 3.1. We recommend the latest Spark version for a better experience.
+
 Download [flink-table-store-spark-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-spark-{{< version >}}.jar).
 
 You can also manually build bundled jar from the source code.
@@ -52,7 +54,7 @@ Build bundled jar with the following command.
 mvn clean install -DskipTests
 ```
 
-You can find the bundled jar in `./flink-table-store-spark/target/flink-table-store-spark-{{< version >}}.jar`.
+For Spark 3.3, you can find the bundled jar in `./flink-table-store-spark/flink-table-store-spark-3.3/target/flink-table-store-spark-3.3-{{< version >}}.jar`.
 
 ## Quick Start
 
