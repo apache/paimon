@@ -150,7 +150,7 @@ If your input can’t produce a complete changelog but you still want to get rid
 
 By specifying `'changelog-producer' = 'full-compaction'`, Table Store will compare the results between full compactions and produce the differences as changelog. The latency of changelog is affected by the frequency of full compactions.
 
-By specifying `changelog-producer.compaction-interval` table property (default value `30min`), users can define the maximum interval between two full compactions to ensure latency. This table property does not affect normal compactions and they may still be performed once in a while by writers to reduce reader costs.
+By specifying `changelog-producer.compaction-interval` table property (default value `0s`), users can define the maximum interval between two full compactions to ensure latency. This table property does not affect normal compactions and they may still be performed once in a while by writers to reduce reader costs.
 
 {{< img src="/img/changelog-producer-full-compaction.png">}}
 
