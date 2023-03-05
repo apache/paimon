@@ -31,10 +31,12 @@ import org.apache.flink.table.store.utils.Preconditions;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
+import org.apache.spark.sql.catalyst.analysis.NoSuchProcedureException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
+import org.apache.spark.sql.connector.catalog.ProcedureCatalog;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -50,6 +52,8 @@ import org.apache.spark.sql.connector.catalog.TableChange.UpdateColumnType;
 import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.connector.procedure.Procedure;
+import org.apache.spark.sql.connector.procedure.ProcedureBuilder;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
@@ -63,7 +67,7 @@ import java.util.stream.Collectors;
 import static org.apache.flink.table.store.spark.SparkTypeUtils.toFlinkType;
 
 /** Spark {@link TableCatalog} for table store. */
-public class SparkCatalog implements TableCatalog, SupportsNamespaces {
+public class SparkCatalog implements ProcedureCatalog, TableCatalog, SupportsNamespaces {
 
     private static final String PRIMARY_KEY_IDENTIFIER = "primary-key";
 
@@ -251,6 +255,18 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         } catch (Catalog.TableNotExistException | NoSuchTableException e) {
             return false;
         }
+    }
+
+    @Override
+    public Procedure loadProcedure(Identifier ident) throws NoSuchProcedureException {
+        if (!isValidateNamespace(ident.namespace())) {
+            ProcedureBuilder builder = SparkProcedures.newBuilder(ident.name());
+            if (builder != null) {
+                return builder.withTableCatalog(this).build();
+            }
+        }
+
+        throw new NoSuchProcedureException(ident);
     }
 
     private SchemaChange toSchemaChange(TableChange change) {
