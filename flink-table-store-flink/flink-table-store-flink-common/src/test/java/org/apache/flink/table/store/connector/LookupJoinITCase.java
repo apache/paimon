@@ -18,55 +18,40 @@
 
 package org.apache.flink.table.store.connector;
 
-import org.apache.flink.table.api.EnvironmentSettings;
-import org.apache.flink.table.api.TableEnvironment;
-import org.apache.flink.table.api.config.ExecutionConfigOptions;
-import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.types.Row;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 
-import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for lookup join. */
-public class LookupJoinITCase extends AbstractTestBase {
+public class LookupJoinITCase extends CatalogITCaseBase {
 
-    private TableEnvironment env;
-
-    @BeforeEach
-    public void before() throws Exception {
-        env = TableEnvironment.create(EnvironmentSettings.newInstance().inStreamingMode().build());
-        env.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(100));
-        env.getConfig()
-                .getConfiguration()
-                .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
-        String path = getTempDirPath();
-        env.executeSql(
-                String.format(
-                        "CREATE CATALOG my_catalog WITH ('type'='table-store', 'warehouse'='%s')",
-                        path));
-        executeSql("USE CATALOG my_catalog");
-        executeSql("CREATE TABLE T (i INT, `proctime` AS PROCTIME())");
-        executeSql(
+    @Override
+    public List<String> ddl() {
+        return Arrays.asList(
+                "CREATE TABLE T (i INT, `proctime` AS PROCTIME())",
                 "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
                         + " ('continuous.discovery-interval'='1 ms')");
+    }
+
+    @Override
+    protected int defaultParallelism() {
+        return 1;
     }
 
     @Test
     public void testLookupEmptyTable() throws Exception {
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        executeSql("INSERT INTO T VALUES (1), (2), (3)");
+        sql("INSERT INTO T VALUES (1), (2), (3)");
 
         List<Row> result = iterator.collect(3);
         assertThat(result)
@@ -75,9 +60,9 @@ public class LookupJoinITCase extends AbstractTestBase {
                         Row.of(2, null, null, null),
                         Row.of(3, null, null, null));
 
-        executeSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (1), (2), (4)");
+        sql("INSERT INTO T VALUES (1), (2), (4)");
         result = iterator.collect(3);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -89,13 +74,13 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testLookup() throws Exception {
-        executeSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        executeSql("INSERT INTO T VALUES (1), (2), (3)");
+        sql("INSERT INTO T VALUES (1), (2), (3)");
         List<Row> result = iterator.collect(3);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -103,9 +88,9 @@ public class LookupJoinITCase extends AbstractTestBase {
                         Row.of(2, 22, 222, 2222),
                         Row.of(3, null, null, null));
 
-        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (1), (2), (3), (4)");
+        sql("INSERT INTO T VALUES (1), (2), (3), (4)");
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -119,13 +104,13 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testLookupWithLatest() throws Exception {
-        executeSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM /*+ OPTIONS('scan.mode'='latest') */"
                         + " for system_time as of T.proctime AS D ON T.i = D.i";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        executeSql("INSERT INTO T VALUES (1), (2), (3)");
+        sql("INSERT INTO T VALUES (1), (2), (3)");
         List<Row> result = iterator.collect(3);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -133,9 +118,9 @@ public class LookupJoinITCase extends AbstractTestBase {
                         Row.of(2, 22, 222, 2222),
                         Row.of(3, null, null, null));
 
-        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (1), (2), (3), (4)");
+        sql("INSERT INTO T VALUES (1), (2), (3), (4)");
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -149,21 +134,21 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testLookupProjection() throws Exception {
-        executeSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
                 "SELECT T.i, D.j, D.k1 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        executeSql("INSERT INTO T VALUES (1), (2), (3)");
+        sql("INSERT INTO T VALUES (1), (2), (3)");
         List<Row> result = iterator.collect(3);
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         Row.of(1, 11, 111), Row.of(2, 22, 222), Row.of(3, null, null));
 
-        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (1), (2), (3), (4)");
+        sql("INSERT INTO T VALUES (1), (2), (3), (4)");
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -177,21 +162,21 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testLookupFilterPk() throws Exception {
-        executeSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
                 "SELECT T.i, D.j, D.k1 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i AND D.i > 2";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        executeSql("INSERT INTO T VALUES (1), (2), (3)");
+        sql("INSERT INTO T VALUES (1), (2), (3)");
         List<Row> result = iterator.collect(3);
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         Row.of(1, null, null), Row.of(2, null, null), Row.of(3, null, null));
 
-        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (1), (2), (3), (4)");
+        sql("INSERT INTO T VALUES (1), (2), (3), (4)");
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -205,21 +190,21 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testLookupFilterSelect() throws Exception {
-        executeSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
                 "SELECT T.i, D.j, D.k1 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i AND D.k1 > 111";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        executeSql("INSERT INTO T VALUES (1), (2), (3)");
+        sql("INSERT INTO T VALUES (1), (2), (3)");
         List<Row> result = iterator.collect(3);
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         Row.of(1, null, null), Row.of(2, 22, 222), Row.of(3, null, null));
 
-        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (1), (2), (3), (4)");
+        sql("INSERT INTO T VALUES (1), (2), (3), (4)");
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -233,21 +218,21 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testLookupFilterUnSelect() throws Exception {
-        executeSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
                 "SELECT T.i, D.j, D.k1 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i AND D.k2 > 1111";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        executeSql("INSERT INTO T VALUES (1), (2), (3)");
+        sql("INSERT INTO T VALUES (1), (2), (3)");
         List<Row> result = iterator.collect(3);
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         Row.of(1, null, null), Row.of(2, 22, 222), Row.of(3, null, null));
 
-        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (1), (2), (3), (4)");
+        sql("INSERT INTO T VALUES (1), (2), (3), (4)");
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -261,21 +246,21 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testLookupFilterUnSelectAndUpdate() throws Exception {
-        executeSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
                 "SELECT T.i, D.j, D.k1 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i AND D.k2 < 4444";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        executeSql("INSERT INTO T VALUES (1), (2), (3)");
+        sql("INSERT INTO T VALUES (1), (2), (3)");
         List<Row> result = iterator.collect(3);
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         Row.of(1, 11, 111), Row.of(2, 22, 222), Row.of(3, null, null));
 
-        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (1), (2), (3), (4)");
+        sql("INSERT INTO T VALUES (1), (2), (3), (4)");
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -289,14 +274,13 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testNonPkLookup() throws Exception {
-        executeSql(
-                "INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
         String query =
                 "SELECT D.i, T.i, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.j";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        executeSql("INSERT INTO T VALUES (11), (22), (33)");
+        sql("INSERT INTO T VALUES (11), (22), (33)");
         List<Row> result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -305,9 +289,9 @@ public class LookupJoinITCase extends AbstractTestBase {
                         Row.of(3, 22, 333, 3333),
                         Row.of(null, 33, null, null));
 
-        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (11), (22), (33), (44)");
+        sql("INSERT INTO T VALUES (11), (22), (33), (44)");
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -321,22 +305,21 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testNonPkLookupProjection() throws Exception {
-        executeSql(
-                "INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
         String query =
                 "SELECT T.i, D.k1 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.j";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        executeSql("INSERT INTO T VALUES (11), (22), (33)");
+        sql("INSERT INTO T VALUES (11), (22), (33)");
         List<Row> result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         Row.of(11, 111), Row.of(22, 222), Row.of(22, 333), Row.of(33, null));
 
-        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (11), (22), (33), (44)");
+        sql("INSERT INTO T VALUES (11), (22), (33), (44)");
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -347,21 +330,20 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testNonPkLookupFilterPk() throws Exception {
-        executeSql(
-                "INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
         String query =
                 "SELECT T.i, D.k1 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.j AND D.i > 2";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        executeSql("INSERT INTO T VALUES (11), (22), (33)");
+        sql("INSERT INTO T VALUES (11), (22), (33)");
         List<Row> result = iterator.collect(3);
         assertThat(result)
                 .containsExactlyInAnyOrder(Row.of(11, null), Row.of(22, 333), Row.of(33, null));
 
-        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (11), (22), (33), (44)");
+        sql("INSERT INTO T VALUES (11), (22), (33), (44)");
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -372,22 +354,21 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testNonPkLookupFilterSelect() throws Exception {
-        executeSql(
-                "INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
         String query =
                 "SELECT T.i, D.k1 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.j AND D.k1 > 111";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        executeSql("INSERT INTO T VALUES (11), (22), (33)");
+        sql("INSERT INTO T VALUES (11), (22), (33)");
         List<Row> result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         Row.of(11, null), Row.of(22, 222), Row.of(22, 333), Row.of(33, null));
 
-        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (11), (22), (33), (44)");
+        sql("INSERT INTO T VALUES (11), (22), (33), (44)");
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -398,22 +379,21 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testNonPkLookupFilterUnSelect() throws Exception {
-        executeSql(
-                "INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
         String query =
                 "SELECT T.i, D.k1 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.j AND D.k2 > 1111";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        executeSql("INSERT INTO T VALUES (11), (22), (33)");
+        sql("INSERT INTO T VALUES (11), (22), (33)");
         List<Row> result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         Row.of(11, null), Row.of(22, 222), Row.of(22, 333), Row.of(33, null));
 
-        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (11), (22), (33), (44)");
+        sql("INSERT INTO T VALUES (11), (22), (33), (44)");
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -424,22 +404,21 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testNonPkLookupFilterUnSelectAndUpdate() throws Exception {
-        executeSql(
-                "INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
         String query =
                 "SELECT T.i, D.k1 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.j AND D.k2 < 4444";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        executeSql("INSERT INTO T VALUES (11), (22), (33)");
+        sql("INSERT INTO T VALUES (11), (22), (33)");
         List<Row> result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         Row.of(11, 111), Row.of(22, 222), Row.of(22, 333), Row.of(33, null));
 
-        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (11), (22), (33), (44)");
+        sql("INSERT INTO T VALUES (11), (22), (33), (44)");
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -450,22 +429,22 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testRepeatRefresh() throws Exception {
-        executeSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
                 "SELECT T.i, D.j, D.k1 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        executeSql("INSERT INTO T VALUES (1), (2), (3)");
+        sql("INSERT INTO T VALUES (1), (2), (3)");
         List<Row> result = iterator.collect(3);
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         Row.of(1, 11, 111), Row.of(2, 22, 222), Row.of(3, null, null));
 
-        executeSql("INSERT INTO DIM VALUES (2, 44, 444, 4444)");
-        executeSql("INSERT INTO DIM VALUES (3, 33, 333, 3333)");
+        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444)");
+        sql("INSERT INTO DIM VALUES (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (1), (2), (3), (4)");
+        sql("INSERT INTO T VALUES (1), (2), (3), (4)");
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -479,12 +458,12 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testLookupPartialUpdateIllegal() throws Exception {
-        executeSql(
+        sql(
                 "CREATE TABLE DIM2 (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
                         + " ('merge-engine'='partial-update','continuous.discovery-interval'='1 ms')");
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM2 for system_time as of T.proctime AS D ON T.i = D.i";
-        assertThatThrownBy(() -> env.executeSql(query))
+        assertThatThrownBy(() -> sEnv.executeSql(query))
                 .hasRootCauseMessage(
                         "Partial update continuous reading is not supported. "
                                 + "You can use full compaction changelog producer to support streaming reading.");
@@ -492,28 +471,46 @@ public class LookupJoinITCase extends AbstractTestBase {
 
     @Test
     public void testLookupPartialUpdate() throws Exception {
-        executeSql(
+        sql(
                 "CREATE TABLE DIM2 (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
                         + " ('merge-engine'='partial-update',"
                         + " 'changelog-producer'='full-compaction',"
                         + " 'changelog-producer.compaction-interval'='1 s',"
                         + " 'continuous.discovery-interval'='10 ms')");
-        executeSql("INSERT INTO DIM2 VALUES (1, CAST(NULL AS INT), 111, CAST(NULL AS INT))");
+        sql("INSERT INTO DIM2 VALUES (1, CAST(NULL AS INT), 111, CAST(NULL AS INT))");
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM2 for system_time as of T.proctime AS D ON T.i = D.i";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(env.executeSql(query).collect());
-        executeSql("INSERT INTO T VALUES (1)");
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+        sql("INSERT INTO T VALUES (1)");
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(1, null, 111, null));
 
-        executeSql("INSERT INTO DIM2 VALUES (1, 11, CAST(NULL AS INT), 1111)");
+        sql("INSERT INTO DIM2 VALUES (1, 11, CAST(NULL AS INT), 1111)");
         Thread.sleep(2000); // wait refresh
-        executeSql("INSERT INTO T VALUES (1)");
+        sql("INSERT INTO T VALUES (1)");
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(1, 11, 111, 1111));
 
         iterator.close();
     }
 
-    private void executeSql(String sql) throws ExecutionException, InterruptedException {
-        env.executeSql(sql).await();
+    @Test
+    public void testRetryLookup() throws Exception {
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+
+        String query =
+                "SELECT /*+ LOOKUP('table'='DIM', 'retry-predicate'='lookup_miss',"
+                        + " 'retry-strategy'='fixed_delay', 'fixed-delay'='1s','max-attempts'='60') */"
+                        + " T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T VALUES (1), (2), (3)");
+        Thread.sleep(2000); // wait
+        sql("INSERT INTO DIM VALUES (3, 33, 333, 3333)");
+        assertThat(iterator.collect(3))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(2, 22, 222, 2222),
+                        Row.of(3, 33, 333, 3333));
+
+        iterator.close();
     }
 }

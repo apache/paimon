@@ -23,7 +23,6 @@ import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.LookupTableSource;
-import org.apache.flink.table.connector.source.TableFunctionProvider;
 import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
@@ -33,6 +32,7 @@ import org.apache.flink.table.store.CoreOptions.LogConsistency;
 import org.apache.flink.table.store.connector.FlinkConnectorOptions;
 import org.apache.flink.table.store.connector.TableStoreDataStreamScanProvider;
 import org.apache.flink.table.store.connector.lookup.FileStoreLookupFunction;
+import org.apache.flink.table.store.connector.lookup.LookupRuntimeProviderFactory;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.log.LogStoreTableFactory;
@@ -206,7 +206,7 @@ public class TableStoreSource extends FlinkTableSource
                         ? IntStream.range(0, table.schema().fields().size()).toArray()
                         : Projection.of(projectFields).toTopLevelIndexes();
         int[] joinKey = Projection.of(context.getKeys()).toTopLevelIndexes();
-        return TableFunctionProvider.of(
+        return LookupRuntimeProviderFactory.create(
                 new FileStoreLookupFunction(table, projection, joinKey, predicate));
     }
 }
