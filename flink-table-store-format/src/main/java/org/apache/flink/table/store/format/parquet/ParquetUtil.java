@@ -44,17 +44,17 @@ public class ParquetUtil {
      * @return result sets as map, key is column name, value is statistics (for example, null count,
      *     minimum value, maximum value)
      */
-    public static Map<String, Statistics> extractColumnStats(FileIO fileIO, Path path)
+    public static Map<String, Statistics<?>> extractColumnStats(FileIO fileIO, Path path)
             throws IOException {
         ParquetMetadata parquetMetadata = getParquetReader(fileIO, path).getFooter();
         List<BlockMetaData> blockMetaDataList = parquetMetadata.getBlocks();
-        Map<String, Statistics> resultStats = new HashMap<>();
+        Map<String, Statistics<?>> resultStats = new HashMap<>();
         for (BlockMetaData blockMetaData : blockMetaDataList) {
             List<ColumnChunkMetaData> columnChunkMetaDataList = blockMetaData.getColumns();
             for (ColumnChunkMetaData columnChunkMetaData : columnChunkMetaDataList) {
-                Statistics stats = columnChunkMetaData.getStatistics();
+                Statistics<?> stats = columnChunkMetaData.getStatistics();
                 String columnName = columnChunkMetaData.getPath().toDotString();
-                Statistics midStats;
+                Statistics<?> midStats;
                 if (!resultStats.containsKey(columnName)) {
                     midStats = stats;
                 } else {
@@ -79,7 +79,7 @@ public class ParquetUtil {
     }
 
     static void assertStatsClass(
-            DataField field, Statistics stats, Class<? extends Statistics> expectedClass) {
+            DataField field, Statistics<?> stats, Class<? extends Statistics<?>> expectedClass) {
         if (!expectedClass.isInstance(stats)) {
             throw new IllegalArgumentException(
                     "Expecting "

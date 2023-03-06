@@ -22,12 +22,15 @@ import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DecimalType;
 import org.apache.flink.table.store.types.IntType;
+import org.apache.flink.table.store.types.LocalZonedTimestampType;
 import org.apache.flink.table.store.types.MapType;
 import org.apache.flink.table.store.types.MultisetType;
 import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.types.TimestampType;
 
 import org.apache.parquet.schema.ConversionPatterns;
 import org.apache.parquet.schema.GroupType;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.OriginalType;
 import org.apache.parquet.schema.PrimitiveType;
@@ -36,6 +39,10 @@ import org.apache.parquet.schema.Types;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY;
+import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT32;
+import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
 
 /** Schema converter converts Parquet schema to and from Flink internal types. */
 public class ParquetSchemaConverter {
@@ -73,28 +80,28 @@ public class ParquetSchemaConverter {
             case DECIMAL:
                 int precision = ((DecimalType) type).getPrecision();
                 int scale = ((DecimalType) type).getScale();
-                int numBytes = computeMinBytesForDecimalPrecision(precision);
-                return Types.primitive(
-                                PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY, repetition)
-                        .precision(precision)
-                        .scale(scale)
-                        .length(numBytes)
-                        .as(OriginalType.DECIMAL)
-                        .named(name);
+                if (is32BitDecimal(precision)) {
+                    return Types.primitive(INT32, repetition)
+                            .as(LogicalTypeAnnotation.decimalType(scale, precision))
+                            .named(name);
+                } else if (is64BitDecimal(precision)) {
+                    return Types.primitive(INT64, repetition)
+                            .as(LogicalTypeAnnotation.decimalType(scale, precision))
+                            .named(name);
+                } else {
+                    return Types.primitive(FIXED_LEN_BYTE_ARRAY, repetition)
+                            .as(LogicalTypeAnnotation.decimalType(scale, precision))
+                            .length(computeMinBytesForDecimalPrecision(precision))
+                            .named(name);
+                }
             case TINYINT:
-                return Types.primitive(PrimitiveType.PrimitiveTypeName.INT32, repetition)
-                        .as(OriginalType.INT_8)
-                        .named(name);
+                return Types.primitive(INT32, repetition).as(OriginalType.INT_8).named(name);
             case SMALLINT:
-                return Types.primitive(PrimitiveType.PrimitiveTypeName.INT32, repetition)
-                        .as(OriginalType.INT_16)
-                        .named(name);
+                return Types.primitive(INT32, repetition).as(OriginalType.INT_16).named(name);
             case INTEGER:
-                return Types.primitive(PrimitiveType.PrimitiveTypeName.INT32, repetition)
-                        .named(name);
+                return Types.primitive(INT32, repetition).named(name);
             case BIGINT:
-                return Types.primitive(PrimitiveType.PrimitiveTypeName.INT64, repetition)
-                        .named(name);
+                return Types.primitive(INT64, repetition).named(name);
             case FLOAT:
                 return Types.primitive(PrimitiveType.PrimitiveTypeName.FLOAT, repetition)
                         .named(name);
@@ -102,17 +109,21 @@ public class ParquetSchemaConverter {
                 return Types.primitive(PrimitiveType.PrimitiveTypeName.DOUBLE, repetition)
                         .named(name);
             case DATE:
-                return Types.primitive(PrimitiveType.PrimitiveTypeName.INT32, repetition)
-                        .as(OriginalType.DATE)
-                        .named(name);
+                return Types.primitive(INT32, repetition).as(OriginalType.DATE).named(name);
             case TIME_WITHOUT_TIME_ZONE:
-                return Types.primitive(PrimitiveType.PrimitiveTypeName.INT32, repetition)
-                        .as(OriginalType.TIME_MILLIS)
-                        .named(name);
+                return Types.primitive(INT32, repetition).as(OriginalType.TIME_MILLIS).named(name);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
+                TimestampType timestampType = (TimestampType) type;
+                return timestampType.getPrecision() <= 6
+                        ? Types.primitive(INT64, repetition).named(name)
+                        : Types.primitive(PrimitiveType.PrimitiveTypeName.INT96, repetition)
+                                .named(name);
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return Types.primitive(PrimitiveType.PrimitiveTypeName.INT96, repetition)
-                        .named(name);
+                LocalZonedTimestampType localZonedTimestampType = (LocalZonedTimestampType) type;
+                return localZonedTimestampType.getPrecision() <= 6
+                        ? Types.primitive(INT64, repetition).named(name)
+                        : Types.primitive(PrimitiveType.PrimitiveTypeName.INT96, repetition)
+                                .named(name);
             case ARRAY:
                 ArrayType arrayType = (ArrayType) type;
                 return ConversionPatterns.listOfElements(

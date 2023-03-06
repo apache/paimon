@@ -20,15 +20,16 @@ package org.apache.flink.table.store.format.parquet;
 
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.Decimal;
+import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.format.FileStatsExtractor;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DataTypeRoot;
 import org.apache.flink.table.store.types.DecimalType;
+import org.apache.flink.table.store.types.LocalZonedTimestampType;
 import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.DateTimeUtils;
+import org.apache.flink.table.store.types.TimestampType;
 
 import org.apache.parquet.column.statistics.BinaryStatistics;
 import org.apache.parquet.column.statistics.BooleanStatistics;
@@ -37,7 +38,6 @@ import org.apache.parquet.column.statistics.FloatStatistics;
 import org.apache.parquet.column.statistics.IntStatistics;
 import org.apache.parquet.column.statistics.LongStatistics;
 import org.apache.parquet.column.statistics.Statistics;
-import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.PrimitiveType;
 
 import java.io.IOException;
@@ -65,7 +65,7 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
 
     @Override
     public FieldStats[] extract(FileIO fileIO, Path path) throws IOException {
-        Map<String, Statistics> stats = ParquetUtil.extractColumnStats(fileIO, path);
+        Map<String, Statistics<?>> stats = ParquetUtil.extractColumnStats(fileIO, path);
 
         return IntStream.range(0, rowType.getFieldCount())
                 .mapToObj(
@@ -76,29 +76,23 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
                 .toArray(FieldStats[]::new);
     }
 
-    private FieldStats toFieldStats(DataField field, Statistics stats) {
-        DataTypeRoot flinkType = field.type().getTypeRoot();
-        if (stats == null
-                || flinkType == DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE
-                || flinkType == DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE) {
-            throw new UnsupportedOperationException(
-                    "type "
-                            + field.type().getTypeRoot()
-                            + " not supported for extracting statistics in parquet format");
+    private FieldStats toFieldStats(DataField field, Statistics<?> stats) {
+        if (stats == null) {
+            return new FieldStats(null, null, null);
         }
         long nullCount = stats.getNumNulls();
         if (!stats.hasNonNullValue()) {
             return new FieldStats(null, null, nullCount);
         }
 
-        switch (flinkType) {
+        switch (field.type().getTypeRoot()) {
             case CHAR:
             case VARCHAR:
                 assertStatsClass(field, stats, BinaryStatistics.class);
-                BinaryStatistics binaryStats = (BinaryStatistics) stats;
+                BinaryStatistics stringStats = (BinaryStatistics) stats;
                 return new FieldStats(
-                        BinaryString.fromString(binaryStats.minAsString()),
-                        BinaryString.fromString(binaryStats.maxAsString()),
+                        BinaryString.fromString(stringStats.minAsString()),
+                        BinaryString.fromString(stringStats.maxAsString()),
                         nullCount);
             case BOOLEAN:
                 assertStatsClass(field, stats, BooleanStatistics.class);
@@ -109,14 +103,8 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
                 DecimalType decimalType = (DecimalType) (field.type());
                 int precision = decimalType.getPrecision();
                 int scale = decimalType.getScale();
-                if (primitive.getOriginalType() != null
-                        && primitive.getLogicalTypeAnnotation()
-                                instanceof LogicalTypeAnnotation.DecimalLogicalTypeAnnotation) {
-                    return convertStatsToDecimalFieldStats(
-                            primitive, field, stats, precision, scale, nullCount);
-                } else {
-                    return new FieldStats(null, null, nullCount);
-                }
+                return convertStatsToDecimalFieldStats(
+                        primitive, field, stats, precision, scale, nullCount);
             case TINYINT:
                 assertStatsClass(field, stats, IntStatistics.class);
                 IntStatistics byteStats = (IntStatistics) stats;
@@ -128,6 +116,8 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
                 return new FieldStats(
                         (short) shortStats.getMin(), (short) shortStats.getMax(), nullCount);
             case INTEGER:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
                 assertStatsClass(field, stats, IntStatistics.class);
                 IntStatistics intStats = (IntStatistics) stats;
                 return new FieldStats(
@@ -146,15 +136,31 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
                 assertStatsClass(field, stats, DoubleStatistics.class);
                 DoubleStatistics doubleStats = (DoubleStatistics) stats;
                 return new FieldStats(doubleStats.getMin(), doubleStats.getMax(), nullCount);
-            case DATE:
-                assertStatsClass(field, stats, IntStatistics.class);
-                IntStatistics dateStats = (IntStatistics) stats;
-                return new FieldStats(
-                        DateTimeUtils.toInternal(EPOCH_DAY.plusDays(dateStats.getMin())),
-                        DateTimeUtils.toInternal(EPOCH_DAY.plusDays(dateStats.getMax())),
-                        nullCount);
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return toTimestampStats(stats, ((TimestampType) field.type()).getPrecision());
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return toTimestampStats(
+                        stats, ((LocalZonedTimestampType) field.type()).getPrecision());
             default:
                 return new FieldStats(null, null, nullCount);
+        }
+    }
+
+    private FieldStats toTimestampStats(Statistics<?> stats, int precision) {
+        if (precision <= 3) {
+            LongStatistics longStats = (LongStatistics) stats;
+            return new FieldStats(
+                    Timestamp.fromEpochMillis(longStats.getMin()),
+                    Timestamp.fromEpochMillis(longStats.getMax()),
+                    stats.getNumNulls());
+        } else if (precision <= 6) {
+            LongStatistics longStats = (LongStatistics) stats;
+            return new FieldStats(
+                    Timestamp.fromMicros(longStats.getMin()),
+                    Timestamp.fromMicros(longStats.getMax()),
+                    stats.getNumNulls());
+        } else {
+            return new FieldStats(null, null, stats.getNumNulls());
         }
     }
 
@@ -165,7 +171,7 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
     private FieldStats convertStatsToDecimalFieldStats(
             PrimitiveType primitive,
             DataField field,
-            Statistics stats,
+            Statistics<?> stats,
             int precision,
             int scale,
             long nullCount) {

@@ -27,13 +27,13 @@ import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
 import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.format.parquet.reader.ColumnReader;
 import org.apache.flink.table.store.format.parquet.reader.ParquetDecimalVector;
+import org.apache.flink.table.store.format.parquet.reader.ParquetTimestampVector;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.reader.RecordReader.RecordIterator;
 import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DataTypeRoot;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Pool;
 
@@ -223,10 +223,17 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             WritableColumnVector[] writableVectors) {
         ColumnVector[] vectors = new ColumnVector[writableVectors.length];
         for (int i = 0; i < writableVectors.length; i++) {
-            vectors[i] =
-                    projectedTypes[i].getTypeRoot() == DataTypeRoot.DECIMAL
-                            ? new ParquetDecimalVector(writableVectors[i])
-                            : writableVectors[i];
+            switch (projectedTypes[i].getTypeRoot()) {
+                case DECIMAL:
+                    vectors[i] = new ParquetDecimalVector(writableVectors[i]);
+                    break;
+                case TIMESTAMP_WITHOUT_TIME_ZONE:
+                case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                    vectors[i] = new ParquetTimestampVector(writableVectors[i]);
+                    break;
+                default:
+                    vectors[i] = writableVectors[i];
+            }
         }
         return new VectorizedColumnBatch(vectors);
     }

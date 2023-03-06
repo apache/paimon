@@ -86,6 +86,8 @@ public class ParquetReadWriteTest {
                             new BigIntType(),
                             new FloatType(),
                             new DoubleType(),
+                            new TimestampType(3),
+                            new TimestampType(6),
                             new TimestampType(9),
                             new DecimalType(5, 0),
                             new DecimalType(15, 2),
@@ -362,6 +364,8 @@ public class ParquetReadWriteTest {
                         assertThat(row.isNullAt(30)).isTrue();
                         assertThat(row.isNullAt(31)).isTrue();
                         assertThat(row.isNullAt(32)).isTrue();
+                        assertThat(row.isNullAt(33)).isTrue();
+                        assertThat(row.isNullAt(34)).isTrue();
                     } else {
                         assertThat(row.getString(0)).hasToString("" + v);
                         assertThat(row.getBoolean(1)).isEqualTo(v % 2 == 0);
@@ -371,55 +375,56 @@ public class ParquetReadWriteTest {
                         assertThat(row.getLong(5)).isEqualTo(v.longValue());
                         assertThat(row.getFloat(6)).isEqualTo(v.floatValue());
                         assertThat(row.getDouble(7)).isEqualTo(v.doubleValue());
-                        assertThat(row.getTimestamp(8, 9).toLocalDateTime())
-                                .isEqualTo(toDateTime(v));
+                        assertThat(row.getTimestamp(8, 3)).isEqualTo(toMills(v));
+                        assertThat(row.getTimestamp(9, 6)).isEqualTo(toMicros(v));
+                        assertThat(row.getTimestamp(10, 9)).isEqualTo(toNanos(v));
                         if (Decimal.fromBigDecimal(BigDecimal.valueOf(v), 5, 0) == null) {
-                            assertThat(row.isNullAt(9)).isTrue();
-                            assertThat(row.isNullAt(12)).isTrue();
-                            assertThat(row.isNullAt(24)).isTrue();
-                            assertThat(row.isNullAt(27)).isTrue();
+                            assertThat(row.isNullAt(11)).isTrue();
+                            assertThat(row.isNullAt(14)).isTrue();
+                            assertThat(row.isNullAt(26)).isTrue();
+                            assertThat(row.isNullAt(29)).isTrue();
                         } else {
-                            assertThat(row.getDecimal(9, 5, 0))
+                            assertThat(row.getDecimal(11, 5, 0))
                                     .isEqualTo(Decimal.fromBigDecimal(BigDecimal.valueOf(v), 5, 0));
-                            assertThat(row.getDecimal(12, 5, 0))
+                            assertThat(row.getDecimal(14, 5, 0))
                                     .isEqualTo(Decimal.fromBigDecimal(BigDecimal.valueOf(v), 5, 0));
-                            assertThat(row.getArray(24).getDecimal(0, 5, 0))
+                            assertThat(row.getArray(26).getDecimal(0, 5, 0))
                                     .isEqualTo(Decimal.fromBigDecimal(BigDecimal.valueOf(v), 5, 0));
-                            assertThat(row.getArray(27).getDecimal(0, 5, 0))
+                            assertThat(row.getArray(29).getDecimal(0, 5, 0))
                                     .isEqualTo(Decimal.fromBigDecimal(BigDecimal.valueOf(v), 5, 0));
                         }
-                        assertThat(row.getDecimal(10, 15, 2))
+                        assertThat(row.getDecimal(12, 15, 2))
                                 .isEqualTo(Decimal.fromUnscaledLong(v.longValue(), 15, 2));
-                        assertThat(row.getDecimal(11, 20, 0).toBigDecimal())
+                        assertThat(row.getDecimal(13, 20, 0).toBigDecimal())
                                 .isEqualTo(BigDecimal.valueOf(v));
-                        assertThat(row.getDecimal(13, 15, 0).toBigDecimal())
+                        assertThat(row.getDecimal(15, 15, 0).toBigDecimal())
                                 .isEqualTo(BigDecimal.valueOf(v));
-                        assertThat(row.getDecimal(14, 20, 0).toBigDecimal())
+                        assertThat(row.getDecimal(16, 20, 0).toBigDecimal())
                                 .isEqualTo(BigDecimal.valueOf(v));
-                        assertThat(row.getArray(15).getString(0)).hasToString("" + v);
-                        assertThat(row.getArray(16).getBoolean(0)).isEqualTo(v % 2 == 0);
-                        assertThat(row.getArray(17).getByte(0)).isEqualTo(v.byteValue());
-                        assertThat(row.getArray(18).getShort(0)).isEqualTo(v.shortValue());
-                        assertThat(row.getArray(19).getInt(0)).isEqualTo(v.intValue());
-                        assertThat(row.getArray(20).getLong(0)).isEqualTo(v.longValue());
-                        assertThat(row.getArray(21).getFloat(0)).isEqualTo(v.floatValue());
-                        assertThat(row.getArray(22).getDouble(0)).isEqualTo(v.doubleValue());
-                        assertThat(row.getArray(23).getTimestamp(0, 9).toLocalDateTime())
+                        assertThat(row.getArray(17).getString(0)).hasToString("" + v);
+                        assertThat(row.getArray(18).getBoolean(0)).isEqualTo(v % 2 == 0);
+                        assertThat(row.getArray(19).getByte(0)).isEqualTo(v.byteValue());
+                        assertThat(row.getArray(20).getShort(0)).isEqualTo(v.shortValue());
+                        assertThat(row.getArray(21).getInt(0)).isEqualTo(v.intValue());
+                        assertThat(row.getArray(22).getLong(0)).isEqualTo(v.longValue());
+                        assertThat(row.getArray(23).getFloat(0)).isEqualTo(v.floatValue());
+                        assertThat(row.getArray(24).getDouble(0)).isEqualTo(v.doubleValue());
+                        assertThat(row.getArray(25).getTimestamp(0, 9).toLocalDateTime())
                                 .isEqualTo(toDateTime(v));
 
-                        assertThat(row.getArray(25).getDecimal(0, 15, 0))
+                        assertThat(row.getArray(27).getDecimal(0, 15, 0))
                                 .isEqualTo(Decimal.fromBigDecimal(BigDecimal.valueOf(v), 15, 0));
-                        assertThat(row.getArray(26).getDecimal(0, 20, 0))
+                        assertThat(row.getArray(28).getDecimal(0, 20, 0))
                                 .isEqualTo(Decimal.fromBigDecimal(BigDecimal.valueOf(v), 20, 0));
-                        assertThat(row.getArray(28).getDecimal(0, 15, 0))
+                        assertThat(row.getArray(30).getDecimal(0, 15, 0))
                                 .isEqualTo(Decimal.fromBigDecimal(BigDecimal.valueOf(v), 15, 0));
-                        assertThat(row.getArray(29).getDecimal(0, 20, 0))
+                        assertThat(row.getArray(31).getDecimal(0, 20, 0))
                                 .isEqualTo(Decimal.fromBigDecimal(BigDecimal.valueOf(v), 20, 0));
-                        assertThat(row.getMap(30).valueArray().getString(0)).hasToString("" + v);
-                        assertThat(row.getMap(31).valueArray().getBoolean(0)).isEqualTo(v % 2 == 0);
-                        assertThat(row.getMap(32).keyArray().getString(0)).hasToString("" + v);
-                        assertThat(row.getRow(33, 2).getString(0)).hasToString("" + v);
-                        assertThat(row.getRow(33, 2).getInt(1)).isEqualTo(v.intValue());
+                        assertThat(row.getMap(32).valueArray().getString(0)).hasToString("" + v);
+                        assertThat(row.getMap(33).valueArray().getBoolean(0)).isEqualTo(v % 2 == 0);
+                        assertThat(row.getMap(34).keyArray().getString(0)).hasToString("" + v);
+                        assertThat(row.getRow(35, 2).getString(0)).hasToString("" + v);
+                        assertThat(row.getRow(35, 2).getInt(1)).isEqualTo(v.intValue());
                     }
                     cnt.incrementAndGet();
                 });
@@ -450,7 +455,9 @@ public class ParquetReadWriteTest {
                 v.longValue(),
                 v.floatValue(),
                 v.doubleValue(),
-                Timestamp.fromLocalDateTime(toDateTime(v)),
+                toMills(v),
+                toMicros(v),
+                toNanos(v),
                 Decimal.fromBigDecimal(BigDecimal.valueOf(v), 5, 0),
                 Decimal.fromUnscaledLong(v.longValue(), 15, 2),
                 Decimal.fromBigDecimal(BigDecimal.valueOf(v), 20, 0),
@@ -465,7 +472,7 @@ public class ParquetReadWriteTest {
                 new GenericArray(new Object[] {v.longValue(), null}),
                 new GenericArray(new Object[] {v.floatValue(), null}),
                 new GenericArray(new Object[] {v.doubleValue(), null}),
-                new GenericArray(new Object[] {Timestamp.fromLocalDateTime(toDateTime(v)), null}),
+                new GenericArray(new Object[] {toNanos(v), null}),
                 Decimal.fromBigDecimal(BigDecimal.valueOf(v), 5, 0) == null
                         ? null
                         : new GenericArray(
@@ -490,6 +497,19 @@ public class ParquetReadWriteTest {
                 new GenericMap(f31),
                 new GenericMap(f32),
                 GenericRow.of(BinaryString.fromString("" + v), v));
+    }
+
+    private Timestamp toMills(Integer v) {
+        return Timestamp.fromEpochMillis(
+                Timestamp.fromLocalDateTime(toDateTime(v)).getMillisecond());
+    }
+
+    private Timestamp toMicros(Integer v) {
+        return Timestamp.fromMicros(Timestamp.fromLocalDateTime(toDateTime(v)).toMicros());
+    }
+
+    private Timestamp toNanos(Integer v) {
+        return Timestamp.fromLocalDateTime(toDateTime(v));
     }
 
     private LocalDateTime toDateTime(Integer v) {

@@ -44,8 +44,11 @@ public abstract class NullFalseLeafBinaryFunction extends LeafFunction {
     @Override
     public boolean test(
             DataType type, long rowCount, FieldStats fieldStats, List<Object> literals) {
-        if (rowCount == fieldStats.nullCount() || literals.get(0) == null) {
-            return false;
+        Long nullCount = fieldStats.nullCount();
+        if (nullCount != null) {
+            if (rowCount == nullCount || literals.get(0) == null) {
+                return false;
+            }
         }
         return test(type, rowCount, fieldStats, literals.get(0));
     }

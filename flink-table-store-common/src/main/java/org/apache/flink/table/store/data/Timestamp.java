@@ -47,6 +47,10 @@ public final class Timestamp implements Comparable<Timestamp>, Serializable {
     // the number of milliseconds in a day
     private static final long MILLIS_PER_DAY = 86400000; // = 24 * 60 * 60 * 1000
 
+    public static final long MICROS_PER_MILLIS = 1000L;
+
+    public static final long NANOS_PER_MICROS = 1000L;
+
     // this field holds the integral second and the milli-of-second
     private final long millisecond;
 
@@ -102,6 +106,12 @@ public final class Timestamp implements Comparable<Timestamp>, Serializable {
         }
         long nanoAdjustment = milliOfSecond * 1_000_000 + nanoOfMillisecond;
         return Instant.ofEpochSecond(epochSecond, nanoAdjustment);
+    }
+
+    /** Converts this {@link Timestamp} object to micros. */
+    public long toMicros() {
+        long micros = Math.multiplyExact(millisecond, MICROS_PER_MILLIS);
+        return micros + nanoOfMillisecond / NANOS_PER_MICROS;
     }
 
     @Override
@@ -203,6 +213,13 @@ public final class Timestamp implements Comparable<Timestamp>, Serializable {
         int nanoOfMillisecond = nanoSecond % 1_000_000;
 
         return new Timestamp(millisecond, nanoOfMillisecond);
+    }
+
+    /** Creates an instance of {@link Timestamp} from micros. */
+    public static Timestamp fromMicros(long micros) {
+        long mills = Math.floorDiv(micros, MICROS_PER_MILLIS);
+        long nanos = (micros - mills * MICROS_PER_MILLIS) * NANOS_PER_MICROS;
+        return Timestamp.fromEpochMillis(mills, (int) nanos);
     }
 
     /**

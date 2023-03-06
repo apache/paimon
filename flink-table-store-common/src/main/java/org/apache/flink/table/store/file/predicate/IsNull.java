@@ -38,7 +38,8 @@ public class IsNull extends LeafUnaryFunction {
 
     @Override
     public boolean test(DataType type, long rowCount, FieldStats fieldStats) {
-        return fieldStats.nullCount() > 0;
+        Long nullCount = fieldStats.nullCount();
+        return nullCount == null || nullCount > 0;
     }
 
     @Override
