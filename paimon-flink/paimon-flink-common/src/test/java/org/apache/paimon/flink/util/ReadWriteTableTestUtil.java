@@ -236,10 +236,28 @@ public class ReadWriteTableTestUtil {
     }
 
     public static String buildQueryWithTableOptions(
+            String table,
+            String projection,
+            String filter,
+            Long limit,
+            Map<String, String> options) {
+        List<Object> params = new ArrayList<>();
+        params.add(projection);
+        params.add(table);
+        params.add(buildTableOptionsSpec(options));
+        params.add(filter);
+        StringBuilder queryFormat = new StringBuilder("SELECT %s FROM `%s` %s %s");
+        if (null != limit) {
+            queryFormat.append(" limit %s");
+            params.add(limit);
+        }
+
+        return String.format(queryFormat.toString(), params.toArray());
+    }
+
+    public static String buildQueryWithTableOptions(
             String table, String projection, String filter, Map<String, String> options) {
-        String queryFormat = "SELECT %s FROM `%s` %s %s;";
-        return String.format(
-                queryFormat, projection, table, buildTableOptionsSpec(options), filter);
+        return buildQueryWithTableOptions(table, projection, filter, null, options);
     }
 
     public static void checkFileStorePath(String table, List<String> partitionSpec) {
