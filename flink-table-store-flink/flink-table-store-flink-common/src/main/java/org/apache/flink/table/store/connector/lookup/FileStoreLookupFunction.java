@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.connector.lookup;
 
 import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
-import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.functions.FunctionContext;
 import org.apache.flink.table.functions.TableFunction;
 import org.apache.flink.table.store.CoreOptions;
@@ -44,11 +44,15 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
@@ -61,7 +65,9 @@ import static org.apache.flink.table.store.file.predicate.PredicateBuilder.trans
 import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /** A lookup {@link TableFunction} for file store. */
-public class FileStoreLookupFunction extends TableFunction<org.apache.flink.table.data.RowData> {
+public class FileStoreLookupFunction implements Serializable, Closeable {
+
+    private static final long serialVersionUID = 1L;
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreLookupFunction.class);
 
@@ -113,9 +119,7 @@ public class FileStoreLookupFunction extends TableFunction<org.apache.flink.tabl
         this.predicate = predicate;
     }
 
-    @Override
     public void open(FunctionContext context) throws Exception {
-        super.open(context);
         String tmpDirectory = getTmpDirectory(context);
         this.path = new File(tmpDirectory, "lookup-" + UUID.randomUUID());
 
@@ -159,13 +163,17 @@ public class FileStoreLookupFunction extends TableFunction<org.apache.flink.tabl
                 TypeUtils.project(table.schema().logicalRowType(), projection), adjustedPredicate);
     }
 
-    /** Used by code generation. */
-    @SuppressWarnings("unused")
-    public void eval(Object... values) throws Exception {
-        checkRefresh();
-        List<InternalRow> results = lookupTable.get(new FlinkRowWrapper(GenericRowData.of(values)));
-        for (InternalRow matchedRow : results) {
-            collect(new FlinkRowData(matchedRow));
+    public Collection<RowData> lookup(RowData keyRow) {
+        try {
+            checkRefresh();
+            List<InternalRow> results = lookupTable.get(new FlinkRowWrapper(keyRow));
+            List<RowData> rows = new ArrayList<>(results.size());
+            for (InternalRow matchedRow : results) {
+                rows.add(new FlinkRowData(matchedRow));
+            }
+            return rows;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -175,8 +183,8 @@ public class FileStoreLookupFunction extends TableFunction<org.apache.flink.tabl
         }
         if (nextLoadTime > 0) {
             LOG.info(
-                    "Lookup table has refreshed after {} minute(s), refreshing",
-                    refreshInterval.toMinutes());
+                    "Lookup table has refreshed after {} second(s), refreshing",
+                    refreshInterval.toMillis() / 1000);
         }
 
         refresh();
