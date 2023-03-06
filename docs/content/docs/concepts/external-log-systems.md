@@ -1,6 +1,6 @@
 ---
 title: "External Log Systems"
-weight: 4
+weight: 8
 type: docs
 aliases:
 - /concepts/external-log-systems.html

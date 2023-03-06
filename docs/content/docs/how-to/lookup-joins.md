@@ -1,6 +1,6 @@
 ---
 title: "Lookup Joins"
-weight: 3
+weight: 6
 type: docs
 aliases:
 - /how-to/lookup-joins.html
