@@ -162,7 +162,8 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
 
         // test #4: aggregation
         runSql(
-                "INSERT INTO result4 SELECT dt, category, sum(price) AS total FROM ts_table GROUP BY dt, category;",
+                "SET 'table.exec.resource.default-parallelism' = '1';\n"
+                        + "INSERT INTO result4 SELECT dt, category, sum(price) AS total FROM ts_table GROUP BY dt, category;",
                 catalogDdl,
                 useCatalogCmd,
                 tableStoreDdl,
