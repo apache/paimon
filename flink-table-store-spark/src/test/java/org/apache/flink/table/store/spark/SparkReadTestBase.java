@@ -40,7 +40,9 @@ import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 
 import java.io.File;
 import java.io.IOException;
@@ -71,7 +73,11 @@ public abstract class SparkReadTestBase {
         spark = SparkSession.builder().master("local[2]").getOrCreate();
         spark.conf().set("spark.sql.catalog.tablestore", SparkCatalog.class.getName());
         spark.conf().set("spark.sql.catalog.tablestore.warehouse", warehousePath.toString());
+        spark.sql("USE tablestore");
+    }
 
+    @BeforeEach
+    public void beforeEach() throws Exception {
         // flink sink
         tablePath1 = new Path(warehousePath, "default.db/t1");
         SimpleTableTestHelper testHelper1 = new SimpleTableTestHelper(tablePath1, rowType1());
@@ -127,6 +133,15 @@ public abstract class SparkReadTestBase {
                                         new GenericArrayData(new Boolean[] {true, false, true})),
                                 3L)));
         testHelper2.commit();
+    }
+
+    @AfterEach
+    public void afterEach() {
+        List<Row> tables = spark.sql("show tables").collectAsList();
+        tables.forEach(
+                table -> {
+                    spark.sql("DROP TABLE " + table.getString(0) + "." + table.getString(1));
+                });
     }
 
     protected static SimpleTableTestHelper createTestHelper(Path tablePath) throws Exception {

@@ -107,20 +107,6 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @Test
     public void testRenameTable() {
-        Row oldNamespace = spark.sql("SHOW CURRENT NAMESPACE").collectAsList().get(0);
-        String oldCatalog = oldNamespace.getString(0);
-        String oldDatabase = oldNamespace.getString(1);
-
-        try {
-            spark.sql("USE tablestore.default");
-            testRenameTableImpl();
-        } finally {
-            spark.sql(String.format("USE %s.%s", oldCatalog, oldDatabase));
-        }
-    }
-
-    private void testRenameTableImpl() {
-        // TODO: add test case for hive catalog table
         assertThatThrownBy(() -> spark.sql("ALTER TABLE t3 RENAME TO t4"))
                 .isInstanceOf(AnalysisException.class)
                 .hasMessageContaining("Table or view not found: t3");
@@ -193,7 +179,6 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @Test
     public void testRenamePartitionKey() {
-        spark.sql("USE tablestore");
         spark.sql(
                 "CREATE TABLE default.testRenamePartitionKey (\n"
                         + "a BIGINT,\n"
@@ -299,7 +284,6 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @Test
     public void testDropPartitionKey() {
-        spark.sql("USE tablestore");
         spark.sql(
                 "CREATE TABLE default.testDropPartitionKey (\n"
                         + "a BIGINT,\n"
@@ -339,7 +323,6 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @Test
     public void testDropPrimaryKey() {
-        spark.sql("USE tablestore");
         spark.sql(
                 "CREATE TABLE default.testDropPrimaryKey (\n"
                         + "a BIGINT,\n"
@@ -429,7 +412,6 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @Test
     public void testAlterPrimaryKeyNullability() {
-        spark.sql("USE tablestore");
         spark.sql(
                 "CREATE TABLE default.testAlterPkNullability (\n"
                         + "a BIGINT,\n"
