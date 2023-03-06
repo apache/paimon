@@ -114,7 +114,7 @@ For streaming queries, `aggregation` merge engine must be used together with `fu
 
 ## Changelog Producers
 
-Streaming queries will continuously produce latest changes. These changes can come from the underlying table files or from an [external log system]({{< ref "docs/features/external-log-systems" >}}) like Kafka. Compared to the external log system, changes from table files have lower cost but higher latency (depending on how often snapshots are created).
+Streaming queries will continuously produce latest changes. These changes can come from the underlying table files or from an [external log system]({{< ref "docs/concepts/external-log-systems" >}}) like Kafka. Compared to the external log system, changes from table files have lower cost but higher latency (depending on how often snapshots are created).
 
 By specifying the `changelog-producer` table property when creating the table, users can choose the pattern of changes produced from files.
 
