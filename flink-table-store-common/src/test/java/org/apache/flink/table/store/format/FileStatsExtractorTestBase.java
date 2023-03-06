@@ -90,7 +90,14 @@ public abstract class FileStatsExtractorTestBase {
         FileStatsExtractor extractor = format.createStatsExtractor(rowType).get();
         assertThat(extractor).isNotNull();
         FieldStats[] actual = extractor.extract(fileIO, path);
+        for (int i = 0; i < expected.length; i++) {
+            expected[i] = regenerate(expected[i], rowType.getTypeAt(i));
+        }
         assertThat(actual).isEqualTo(expected);
+    }
+
+    protected FieldStats regenerate(FieldStats stats, DataType type) {
+        return stats;
     }
 
     private List<GenericRow> createData(RowType rowType) {

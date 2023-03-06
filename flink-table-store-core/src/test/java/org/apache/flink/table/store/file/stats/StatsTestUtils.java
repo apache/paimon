@@ -76,7 +76,7 @@ public class StatsTestUtils {
                 new FieldStatsArraySerializer(RowType.of(new IntType()));
         FieldStats[] array = new FieldStats[fieldCount];
         for (int i = 0; i < fieldCount; i++) {
-            array[i] = new FieldStats(null, null, 0);
+            array[i] = new FieldStats(null, null, 0L);
         }
         return statsConverter.toBinary(array);
     }
@@ -84,6 +84,6 @@ public class StatsTestUtils {
     public static BinaryTableStats newTableStats(int min, int max) {
         FieldStatsArraySerializer statsConverter =
                 new FieldStatsArraySerializer(RowType.of(new IntType()));
-        return statsConverter.toBinary(new FieldStats[] {new FieldStats(min, max, 0)});
+        return statsConverter.toBinary(new FieldStats[] {new FieldStats(min, max, 0L)});
     }
 }

@@ -42,11 +42,11 @@ public class PredicateBuilderTest {
         assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
 
-        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 5, 0)})).isEqualTo(true);
-        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(2, 5, 0)})).isEqualTo(true);
-        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 2, 0)})).isEqualTo(true);
-        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(6, 7, 0)})).isEqualTo(false);
-        assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 5, 0L)})).isEqualTo(true);
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(2, 5, 0L)})).isEqualTo(true);
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 2, 0L)})).isEqualTo(true);
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(6, 7, 0L)})).isEqualTo(false);
+        assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1L)}))
                 .isEqualTo(false);
     }
 
@@ -61,11 +61,11 @@ public class PredicateBuilderTest {
         assertThat(predicate.test(new Object[] {4})).isEqualTo(false);
         assertThat(predicate.test(new Object[] {null})).isEqualTo(false);
 
-        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 5, 0)})).isEqualTo(false);
-        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(2, 5, 0)})).isEqualTo(false);
-        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 2, 0)})).isEqualTo(false);
-        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(6, 7, 0)})).isEqualTo(false);
-        assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1)}))
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 5, 0L)})).isEqualTo(false);
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(2, 5, 0L)})).isEqualTo(false);
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(0, 2, 0L)})).isEqualTo(false);
+        assertThat(predicate.test(3, new FieldStats[] {new FieldStats(6, 7, 0L)})).isEqualTo(false);
+        assertThat(predicate.test(1, new FieldStats[] {new FieldStats(null, null, 1L)}))
                 .isEqualTo(false);
     }
 

@@ -51,7 +51,8 @@ public class In extends LeafFunction {
     @Override
     public boolean test(
             DataType type, long rowCount, FieldStats fieldStats, List<Object> literals) {
-        if (rowCount == fieldStats.nullCount()) {
+        Long nullCount = fieldStats.nullCount();
+        if (nullCount != null && rowCount == nullCount) {
             return false;
         }
         for (Object literal : literals) {

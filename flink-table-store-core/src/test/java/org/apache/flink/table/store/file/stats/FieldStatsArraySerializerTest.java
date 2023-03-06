@@ -77,7 +77,7 @@ public class FieldStatsArraySerializerTest {
                         tableSchema.logicalRowType(), indexMapping, converterMapping);
         BinaryRow minRowData = row(1, 2, 3, 4);
         BinaryRow maxRowData = row(100, 99, 98, 97);
-        long[] nullCounts = new long[] {1, 0, 10, 100};
+        Long[] nullCounts = new Long[] {1L, 0L, 10L, 100L};
         BinaryTableStats dataTableStats = new BinaryTableStats(minRowData, maxRowData, nullCounts);
 
         FieldStats[] fieldStatsArray = dataTableStats.fields(fieldStatsArraySerializer, 1000L);

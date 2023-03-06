@@ -27,23 +27,27 @@ public class FieldStats {
 
     @Nullable private final Object minValue;
     @Nullable private final Object maxValue;
-    private final long nullCount;
+    private final Long nullCount;
 
-    public FieldStats(@Nullable Object minValue, @Nullable Object maxValue, long nullCount) {
+    public FieldStats(
+            @Nullable Object minValue, @Nullable Object maxValue, @Nullable Long nullCount) {
         this.minValue = minValue;
         this.maxValue = maxValue;
         this.nullCount = nullCount;
     }
 
+    @Nullable
     public Object minValue() {
         return minValue;
     }
 
+    @Nullable
     public Object maxValue() {
         return maxValue;
     }
 
-    public long nullCount() {
+    @Nullable
+    public Long nullCount() {
         return nullCount;
     }
 
@@ -55,7 +59,7 @@ public class FieldStats {
         FieldStats that = (FieldStats) o;
         return Objects.equals(minValue, that.minValue)
                 && Objects.equals(maxValue, that.maxValue)
-                && nullCount == that.nullCount;
+                && Objects.equals(nullCount, that.nullCount);
     }
 
     @Override
