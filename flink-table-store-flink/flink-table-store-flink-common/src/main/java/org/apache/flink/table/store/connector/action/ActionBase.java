@@ -23,12 +23,12 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
-import org.apache.flink.table.api.internal.TableResultImpl;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.connector.FlinkCatalog;
 import org.apache.flink.table.store.connector.LogicalTypeConversion;
 import org.apache.flink.table.store.connector.sink.FlinkSinkBuilder;
+import org.apache.flink.table.store.connector.utils.TableEnvironmentUtils;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.file.catalog.Identifier;
@@ -44,11 +44,8 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.catalog.Catalog.DEFAULT_DATABASE;
@@ -145,27 +142,6 @@ public abstract class ActionBase implements Action {
 
         List<String> sinkIdentifierNames = Collections.singletonList(identifier.getFullName());
 
-        // invoke TableEnvironmentImpl#executeInternal through reflecting
-        try {
-            // for Flink 1.14
-            Class<?> clazz = tEnv.getClass().getSuperclass();
-
-            // for Flink 1.15+
-            if (!clazz.getSimpleName().equals("TableEnvironmentImpl")) {
-                clazz = clazz.getSuperclass();
-            }
-
-            Method executeInternal =
-                    clazz.getDeclaredMethod("executeInternal", List.class, List.class);
-            executeInternal.setAccessible(true);
-            TableResultImpl tableResult =
-                    (TableResultImpl)
-                            executeInternal.invoke(tEnv, transformations, sinkIdentifierNames);
-            tableResult.await();
-        } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
-            throw new RuntimeException("Failed to do batch sink.", e);
-        } catch (ExecutionException | InterruptedException e) {
-            throw new RuntimeException("Failed to wait for insert job to finish.");
-        }
+        TableEnvironmentUtils.executeInternal(tEnv, transformations, sinkIdentifierNames);
     }
 }
