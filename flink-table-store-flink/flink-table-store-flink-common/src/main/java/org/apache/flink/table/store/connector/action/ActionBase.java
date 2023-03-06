@@ -147,7 +147,14 @@ public abstract class ActionBase implements Action {
 
         // invoke TableEnvironmentImpl#executeInternal through reflecting
         try {
-            Class<?> clazz = tEnv.getClass().getSuperclass().getSuperclass();
+            // for Flink 1.14
+            Class<?> clazz = tEnv.getClass().getSuperclass();
+
+            // for Flink 1.15+
+            if (!clazz.getSimpleName().equals("TableEnvironmentImpl")) {
+                clazz = clazz.getSuperclass();
+            }
+
             Method executeInternal =
                     clazz.getDeclaredMethod("executeInternal", List.class, List.class);
             executeInternal.setAccessible(true);
