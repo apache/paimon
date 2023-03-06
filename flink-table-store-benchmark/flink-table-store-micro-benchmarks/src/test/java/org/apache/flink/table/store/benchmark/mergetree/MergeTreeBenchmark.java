@@ -20,6 +20,7 @@ package org.apache.flink.table.store.benchmark.mergetree;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.catalog.CatalogContext;
+import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.catalog.Catalog;
@@ -30,38 +31,41 @@ import org.apache.flink.table.store.options.CatalogOptions;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.types.DataField;
+import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.IntType;
 
-import org.junit.jupiter.api.BeforeEach;
+import org.apache.commons.math3.random.RandomDataGenerator;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
 
 import static java.util.Collections.singletonList;
 
 /** Base class for merge tree benchmark. */
 public class MergeTreeBenchmark {
 
+    private static final int VALUE_COUNT = 20;
+
     @TempDir java.nio.file.Path tempFile;
 
-    protected Table table;
+    private final RandomDataGenerator random = new RandomDataGenerator();
 
-    @BeforeEach
-    public void beforeEach() throws Exception {
+    protected Table createTable(String format) throws Exception {
         Options catalogOptions = new Options();
         catalogOptions.set(CatalogOptions.WAREHOUSE, tempFile.toUri().toString());
         Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(catalogOptions));
         String database = "default";
         catalog.createDatabase(database, true);
 
-        List<DataField> fields =
-                Arrays.asList(
-                        new DataField(0, "k", new IntType()), new DataField(1, "v", new IntType()));
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "k", new IntType()));
+        for (int i = 1; i <= VALUE_COUNT; i++) {
+            fields.add(new DataField(i, "f" + i, DataTypes.STRING()));
+        }
         Options tableOptions = new Options();
-        tableOptions.set(CoreOptions.FILE_FORMAT, "parquet");
+        tableOptions.set(CoreOptions.FILE_FORMAT, format);
         tableOptions.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 20);
         Schema schema =
                 new Schema(
@@ -72,11 +76,15 @@ public class MergeTreeBenchmark {
                         "");
         Identifier identifier = Identifier.create(database, "T");
         catalog.createTable(identifier, schema, false);
-        table = catalog.getTable(identifier);
+        return catalog.getTable(identifier);
     }
 
     protected InternalRow newRandomRow() {
-        ThreadLocalRandom rnd = ThreadLocalRandom.current();
-        return GenericRow.of(rnd.nextInt(), rnd.nextInt());
+        GenericRow row = new GenericRow(1 + VALUE_COUNT);
+        row.setField(0, random.nextInt(0, Integer.MAX_VALUE));
+        for (int i = 1; i <= VALUE_COUNT; i++) {
+            row.setField(i, BinaryString.fromString(random.nextHexString(10)));
+        }
+        return row;
     }
 }

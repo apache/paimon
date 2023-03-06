@@ -24,65 +24,69 @@ import org.apache.flink.table.store.table.sink.StreamTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.sink.StreamWriteBuilder;
 
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Benchmark for merge tree writer with compaction. */
 public class MergeTreeWriterBenchmark extends MergeTreeBenchmark {
 
-    private StreamTableWrite write;
-
-    private StreamTableCommit commit;
-
-    private long writeCount = 0;
-
-    private long commitIdentifier = 0;
-
-    @BeforeEach
-    public void beforeEach() throws Exception {
-        super.beforeEach();
-        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
-        write = writeBuilder.newWrite();
-        commit = writeBuilder.newCommit();
-    }
-
-    @AfterEach
-    public void afterEach() throws Exception {
-        write.close();
+    @Test
+    public void testParquet() throws Exception {
+        innerTest("parquet");
+        /*
+         * Java HotSpot(TM) 64-Bit Server VM 1.8.0_301-b09 on Mac OS X 10.16
+         * Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz
+         * parquet:            Best/Avg Time(ms)    Row Rate(M/s)      Per Row(ns)   Relative
+         * ---------------------------------------------------------------------------------
+         * parquet_write       10872 / 12566              0.0          36239.7       1.0X
+         */
     }
 
     @Test
-    public void testWrite() {
-        long valuesPerIteration = 1_000_000;
+    public void testOrc() throws Exception {
+        innerTest("orc");
+        /*
+         * Java HotSpot(TM) 64-Bit Server VM 1.8.0_301-b09 on Mac OS X 10.16
+         * Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz
+         * orc:               Best/Avg Time(ms)    Row Rate(M/s)      Per Row(ns)   Relative
+         * ---------------------------------------------------------------------------------
+         * orc_write           8690 / 9771              0.0          28968.0       1.0X
+         */
+    }
+
+    public void innerTest(String format) throws Exception {
+        StreamWriteBuilder writeBuilder = createTable(format).newStreamWriteBuilder();
+        StreamTableWrite write = writeBuilder.newWrite();
+        StreamTableCommit commit = writeBuilder.newCommit();
+        long valuesPerIteration = 300_000;
         Benchmark benchmark =
-                new Benchmark("mergetree-write", valuesPerIteration)
+                new Benchmark(format, valuesPerIteration)
                         .setNumWarmupIters(1)
                         .setOutputPerIteration(true);
+        AtomicInteger writeCount = new AtomicInteger(0);
+        AtomicInteger commitIdentifier = new AtomicInteger(0);
         benchmark.addCase(
                 "write",
                 5,
                 () -> {
                     for (int i = 0; i < valuesPerIteration; i++) {
-                        write();
+                        try {
+                            write.write(newRandomRow());
+                            writeCount.incrementAndGet();
+                            if (writeCount.get() % 10_000 == 0) {
+                                List<CommitMessage> commitMessages =
+                                        write.prepareCommit(false, commitIdentifier.get());
+                                commit.commit(commitIdentifier.get(), commitMessages);
+                                commitIdentifier.incrementAndGet();
+                            }
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
                     }
                 });
         benchmark.run();
-    }
-
-    private void write() {
-        try {
-            write.write(newRandomRow());
-            writeCount++;
-            if (writeCount % 10_000 == 0) {
-                List<CommitMessage> commitMessages = write.prepareCommit(false, commitIdentifier);
-                commit.commit(commitIdentifier, commitMessages);
-                commitIdentifier++;
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        write.close();
     }
 }
