@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.tests;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -257,7 +256,6 @@ public class FlinkActionsE2eTest extends E2eTestBase {
                 "2023-01-21, 1, 31");
     }
 
-    @Disabled
     @Test
     public void testMergeInto() throws Exception {
         String tableTDdl =

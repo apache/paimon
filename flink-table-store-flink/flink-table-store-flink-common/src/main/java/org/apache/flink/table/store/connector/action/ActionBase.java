@@ -18,10 +18,12 @@
 
 package org.apache.flink.table.store.connector.action;
 
+import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.flink.table.api.internal.TableResultImpl;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.connector.FlinkCatalog;
@@ -42,7 +44,11 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.catalog.Catalog.DEFAULT_DATABASE;
@@ -125,12 +131,34 @@ public abstract class ActionBase implements Action {
         return true;
     }
 
-    /** Sink {@link DataStream} dataStream to table. */
-    protected void sink(DataStream<RowData> dataStream) throws Exception {
-        new FlinkSinkBuilder((FileStoreTable) table)
-                .withInput(dataStream)
-                .withLockFactory(Lock.factory(catalog.lockFactory().orElse(null), identifier))
-                .build();
-        env.execute();
+    /** Sink {@link DataStream} dataStream to table with Flink Table API in batch environment. */
+    protected void batchSink(DataStream<RowData> dataStream) {
+        List<Transformation<?>> transformations =
+                Collections.singletonList(
+                        new FlinkSinkBuilder((FileStoreTable) table)
+                                .withInput(dataStream)
+                                .withLockFactory(
+                                        Lock.factory(
+                                                catalog.lockFactory().orElse(null), identifier))
+                                .build()
+                                .getTransformation());
+
+        List<String> sinkIdentifierNames = Collections.singletonList(identifier.getFullName());
+
+        // invoke TableEnvironmentImpl#executeInternal through reflecting
+        try {
+            Class<?> clazz = tEnv.getClass().getSuperclass().getSuperclass();
+            Method executeInternal =
+                    clazz.getDeclaredMethod("executeInternal", List.class, List.class);
+            executeInternal.setAccessible(true);
+            TableResultImpl tableResult =
+                    (TableResultImpl)
+                            executeInternal.invoke(tEnv, transformations, sinkIdentifierNames);
+            tableResult.await();
+        } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
+            throw new RuntimeException("Failed to do batch sink.", e);
+        } catch (ExecutionException | InterruptedException e) {
+            throw new RuntimeException("Failed to wait for insert job to finish.");
+        }
     }
 }
