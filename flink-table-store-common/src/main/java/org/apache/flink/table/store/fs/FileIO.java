@@ -146,6 +146,20 @@ public interface FileIO extends Serializable {
         }
     }
 
+    default void deleteDirectoryQuietly(Path directory) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Ready to delete " + directory.toString());
+        }
+
+        try {
+            if (!delete(directory, true) && exists(directory)) {
+                LOG.warn("Failed to delete directory " + directory);
+            }
+        } catch (IOException e) {
+            LOG.warn("Exception occurs when deleting directory " + directory, e);
+        }
+    }
+
     default long getFileSize(Path path) throws IOException {
         return getFileStatus(path).getLen();
     }

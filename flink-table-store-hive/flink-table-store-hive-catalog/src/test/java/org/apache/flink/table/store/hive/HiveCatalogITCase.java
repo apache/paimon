@@ -22,12 +22,14 @@ import org.apache.flink.connectors.hive.FlinkEmbeddedHiveRunner;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.store.connector.FlinkCatalog;
 import org.apache.flink.table.store.file.catalog.AbstractCatalog;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.catalog.Identifier;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
@@ -60,6 +62,7 @@ import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_SUPPORT_CONCURR
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_TXN_MANAGER;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** IT cases for {@link HiveCatalog}. */
 @RunWith(FlinkEmbeddedHiveRunner.class)
@@ -525,6 +528,38 @@ public class HiveCatalogITCase {
                 .delete(new org.apache.flink.table.store.fs.Path(path, "test_db.db/t"), true);
         tables = collect("SHOW TABLES");
         Assert.assertEquals("[]", tables.toString());
+    }
+
+    @Test
+    public void testCreateExistTableInHive() throws Exception {
+        tEnv.executeSql(
+                String.join(
+                        "\n",
+                        "CREATE CATALOG my_hive_custom_client WITH (",
+                        "  'type' = 'table-store',",
+                        "  'metastore' = 'hive',",
+                        "  'uri' = '',",
+                        "  'warehouse' = '" + path + "',",
+                        "  'metastore.client.class' = '"
+                                + FailHiveMetaStoreClient.class.getName()
+                                + "'",
+                        ")"));
+        tEnv.executeSql("USE CATALOG my_hive_custom_client");
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                                "CREATE TABLE hive_table(a INT, b INT, c INT, d INT)")
+                                        .await())
+                .isInstanceOf(TableException.class)
+                .hasMessage(
+                        "Could not execute CreateTable in path `my_hive_custom_client`.`default`.`hive_table`");
+        assertTrue(
+                new SchemaManager(
+                                LocalFileIO.create(),
+                                new org.apache.flink.table.store.fs.Path(
+                                        path, "default.db/hive_table"))
+                        .listAllIds()
+                        .isEmpty());
     }
 
     private List<Row> collect(String sql) throws Exception {

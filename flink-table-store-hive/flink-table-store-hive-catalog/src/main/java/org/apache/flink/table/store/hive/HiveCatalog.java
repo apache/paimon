@@ -49,6 +49,8 @@ import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.metastore.api.UnknownDBException;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.thrift.TException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -66,6 +68,7 @@ import static org.apache.flink.table.store.utils.Preconditions.checkState;
 
 /** A catalog implementation for Hive. */
 public class HiveCatalog extends AbstractCatalog {
+    private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
 
     // we don't include flink-table-store-hive-connector as dependencies because it depends on
     // hive-exec
@@ -241,6 +244,12 @@ public class HiveCatalog extends AbstractCatalog {
         try {
             client.createTable(table);
         } catch (TException e) {
+            Path path = getDataTableLocation(identifier);
+            try {
+                fileIO.deleteDirectoryQuietly(path);
+            } catch (Exception ee) {
+                LOG.error("Delete directory[{}] fail for table {}", path, identifier, ee);
+            }
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
         }
     }
