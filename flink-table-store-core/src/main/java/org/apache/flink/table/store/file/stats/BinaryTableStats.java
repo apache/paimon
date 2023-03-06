@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.stats;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.GenericArray;
 import org.apache.flink.table.store.data.GenericRow;
+import org.apache.flink.table.store.data.InternalArray;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.format.FieldStats;
 
@@ -40,20 +41,20 @@ public class BinaryTableStats {
     @Nullable private FieldStats[] cacheArray;
     @Nullable private BinaryRow cacheMin;
     @Nullable private BinaryRow cacheMax;
-    @Nullable private long[] cacheNullCounts;
+    @Nullable private Long[] cacheNullCounts;
 
     public BinaryTableStats(InternalRow row) {
         this.row = row;
     }
 
-    public BinaryTableStats(BinaryRow cacheMin, BinaryRow cacheMax, long[] cacheNullCounts) {
+    public BinaryTableStats(BinaryRow cacheMin, BinaryRow cacheMax, Long[] cacheNullCounts) {
         this(cacheMin, cacheMax, cacheNullCounts, null);
     }
 
     public BinaryTableStats(
             BinaryRow cacheMin,
             BinaryRow cacheMax,
-            long[] cacheNullCounts,
+            Long[] cacheNullCounts,
             @Nullable FieldStats[] cacheArray) {
         this.cacheMin = cacheMin;
         this.cacheMax = cacheMax;
@@ -88,10 +89,15 @@ public class BinaryTableStats {
         return cacheMax;
     }
 
-    public long[] nullCounts() {
+    public Long[] nullCounts() {
         if (cacheNullCounts == null) {
             checkNotNull(row);
-            cacheNullCounts = row.getArray(2).toLongArray();
+            InternalArray internalArray = row.getArray(2);
+            Long[] array = new Long[internalArray.size()];
+            for (int i = 0; i < array.length; i++) {
+                array[i] = internalArray.isNullAt(i) ? null : internalArray.getLong(i);
+            }
+            return array;
         }
         return cacheNullCounts;
     }

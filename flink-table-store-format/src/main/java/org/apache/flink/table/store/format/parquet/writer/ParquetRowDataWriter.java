@@ -33,7 +33,6 @@ import org.apache.flink.table.store.types.MapType;
 import org.apache.flink.table.store.types.MultisetType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.TimestampType;
-import org.apache.flink.table.store.utils.Preconditions;
 
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.io.api.RecordConsumer;
@@ -50,6 +49,7 @@ import static org.apache.flink.table.store.format.parquet.ParquetSchemaConverter
 import static org.apache.flink.table.store.format.parquet.reader.TimestampColumnReader.JULIAN_EPOCH_OFFSET_DAYS;
 import static org.apache.flink.table.store.format.parquet.reader.TimestampColumnReader.MILLIS_IN_DAY;
 import static org.apache.flink.table.store.format.parquet.reader.TimestampColumnReader.NANOS_PER_MILLISECOND;
+import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /** Writes a record to the Parquet API with the expected schema in order to be written to a file. */
 public class ParquetRowDataWriter {
@@ -104,10 +104,10 @@ public class ParquetRowDataWriter {
                     return new DoubleWriter();
                 case TIMESTAMP_WITHOUT_TIME_ZONE:
                     TimestampType timestampType = (TimestampType) t;
-                    return new TimestampWriter(timestampType.getPrecision());
+                    return createTimestampWriter(timestampType.getPrecision());
                 case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                     LocalZonedTimestampType localZonedTimestampType = (LocalZonedTimestampType) t;
-                    return new TimestampWriter(localZonedTimestampType.getPrecision());
+                    return createTimestampWriter(localZonedTimestampType.getPrecision());
                 default:
                     throw new UnsupportedOperationException("Unsupported type: " + type);
             }
@@ -131,6 +131,16 @@ public class ParquetRowDataWriter {
             } else {
                 throw new UnsupportedOperationException("Unsupported type: " + type);
             }
+        }
+    }
+
+    private FieldWriter createTimestampWriter(int precision) {
+        if (precision <= 3) {
+            return new TimestampMillsWriter(precision);
+        } else if (precision > 6) {
+            return new TimestampInt96Writer(precision);
+        } else {
+            return new TimestampMicrosWriter(precision);
         }
     }
 
@@ -294,16 +304,61 @@ public class ParquetRowDataWriter {
         }
     }
 
-    /**
-     * We only support INT96 bytes now, julianDay(4) + nanosOfDay(8). See
-     * https://github.com/apache/parquet-format/blob/master/DataTypes.md#timestamp TIMESTAMP_MILLIS
-     * and TIMESTAMP_MICROS are the deprecated ConvertedType.
-     */
-    private class TimestampWriter implements FieldWriter {
+    private class TimestampMillsWriter implements FieldWriter {
 
         private final int precision;
 
-        private TimestampWriter(int precision) {
+        private TimestampMillsWriter(int precision) {
+            checkArgument(precision <= 3);
+            this.precision = precision;
+        }
+
+        @Override
+        public void write(InternalRow row, int ordinal) {
+            writeTimestamp(row.getTimestamp(ordinal, precision));
+        }
+
+        @Override
+        public void write(InternalArray arrayData, int ordinal) {
+            writeTimestamp(arrayData.getTimestamp(ordinal, precision));
+        }
+
+        private void writeTimestamp(Timestamp value) {
+            recordConsumer.addLong(value.getMillisecond());
+        }
+    }
+
+    private class TimestampMicrosWriter implements FieldWriter {
+
+        private final int precision;
+
+        private TimestampMicrosWriter(int precision) {
+            checkArgument(precision > 3);
+            checkArgument(precision <= 6);
+            this.precision = precision;
+        }
+
+        @Override
+        public void write(InternalRow row, int ordinal) {
+            writeTimestamp(row.getTimestamp(ordinal, precision));
+        }
+
+        @Override
+        public void write(InternalArray arrayData, int ordinal) {
+            writeTimestamp(arrayData.getTimestamp(ordinal, precision));
+        }
+
+        private void writeTimestamp(Timestamp value) {
+            recordConsumer.addLong(value.toMicros());
+        }
+    }
+
+    private class TimestampInt96Writer implements FieldWriter {
+
+        private final int precision;
+
+        private TimestampInt96Writer(int precision) {
+            checkArgument(precision > 6);
             this.precision = precision;
         }
 
@@ -487,25 +542,13 @@ public class ParquetRowDataWriter {
     }
 
     private FieldWriter createDecimalWriter(int precision, int scale) {
-        Preconditions.checkArgument(
+        checkArgument(
                 precision <= DecimalType.MAX_PRECISION,
                 "Decimal precision %s exceeds max precision %s",
                 precision,
                 DecimalType.MAX_PRECISION);
 
-        /*
-         * This is optimizer for UnscaledBytesWriter.
-         */
-        class LongUnscaledBytesWriter implements FieldWriter {
-            private final int numBytes;
-            private final int initShift;
-            private final byte[] decimalBuffer;
-
-            private LongUnscaledBytesWriter() {
-                this.numBytes = computeMinBytesForDecimalPrecision(precision);
-                this.initShift = 8 * (numBytes - 1);
-                this.decimalBuffer = new byte[numBytes];
-            }
+        class Int32Writer implements FieldWriter {
 
             @Override
             public void write(InternalArray arrayData, int ordinal) {
@@ -521,15 +564,27 @@ public class ParquetRowDataWriter {
             }
 
             private void addRecord(long unscaledLong) {
-                int i = 0;
-                int shift = initShift;
-                while (i < numBytes) {
-                    decimalBuffer[i] = (byte) (unscaledLong >> shift);
-                    i += 1;
-                    shift -= 8;
-                }
+                recordConsumer.addInteger((int) unscaledLong);
+            }
+        }
 
-                recordConsumer.addBinary(Binary.fromReusedByteArray(decimalBuffer, 0, numBytes));
+        class Int64Writer implements FieldWriter {
+
+            @Override
+            public void write(InternalArray arrayData, int ordinal) {
+                long unscaledLong =
+                        (arrayData.getDecimal(ordinal, precision, scale)).toUnscaledLong();
+                addRecord(unscaledLong);
+            }
+
+            @Override
+            public void write(InternalRow row, int ordinal) {
+                long unscaledLong = row.getDecimal(ordinal, precision, scale).toUnscaledLong();
+                addRecord(unscaledLong);
+            }
+
+            private void addRecord(long unscaledLong) {
+                recordConsumer.addLong(unscaledLong);
             }
         }
 
@@ -570,14 +625,12 @@ public class ParquetRowDataWriter {
             }
         }
 
-        // 1 <= precision <= 18, writes as FIXED_LEN_BYTE_ARRAY
-        // optimizer for UnscaledBytesWriter
-        if (ParquetSchemaConverter.is32BitDecimal(precision)
-                || ParquetSchemaConverter.is64BitDecimal(precision)) {
-            return new LongUnscaledBytesWriter();
+        if (ParquetSchemaConverter.is32BitDecimal(precision)) {
+            return new Int32Writer();
+        } else if (ParquetSchemaConverter.is64BitDecimal(precision)) {
+            return new Int64Writer();
+        } else {
+            return new UnscaledBytesWriter();
         }
-
-        // 19 <= precision <= 38, writes as FIXED_LEN_BYTE_ARRAY
-        return new UnscaledBytesWriter();
     }
 }

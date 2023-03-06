@@ -34,6 +34,7 @@ import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
 import org.apache.flink.table.store.format.parquet.ParquetSchemaConverter;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataType;
+import org.apache.flink.table.store.types.DataTypeChecks;
 import org.apache.flink.table.store.types.DecimalType;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.MapType;
@@ -100,6 +101,11 @@ public class ParquetSplitReaderUtil {
                         descriptors.get(0), pages.getPageReader(descriptors.get(0)));
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                if (descriptors.get(0).getPrimitiveType().getPrimitiveTypeName()
+                        == PrimitiveType.PrimitiveTypeName.INT64) {
+                    return new LongColumnReader(
+                            descriptors.get(0), pages.getPageReader(descriptors.get(0)));
+                }
                 return new TimestampColumnReader(
                         true, descriptors.get(0), pages.getPageReader(descriptors.get(0)));
             case DECIMAL:
@@ -245,11 +251,16 @@ public class ParquetSplitReaderUtil {
                 return new HeapBytesVector(batchSize);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                checkArgument(
-                        typeName == PrimitiveType.PrimitiveTypeName.INT96,
-                        "Unexpected type: %s",
-                        typeName);
-                return new HeapTimestampVector(batchSize);
+                int precision = DataTypeChecks.getPrecision(fieldType);
+                if (precision > 6) {
+                    checkArgument(
+                            typeName == PrimitiveType.PrimitiveTypeName.INT96,
+                            "Unexpected type: %s",
+                            typeName);
+                    return new HeapTimestampVector(batchSize);
+                } else {
+                    return new HeapLongVector(batchSize);
+                }
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) fieldType;
                 if (ParquetSchemaConverter.is32BitDecimal(decimalType.getPrecision())) {

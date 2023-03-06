@@ -71,7 +71,7 @@ public class FieldStatsArraySerializer {
         int rowFieldCount = stats.length;
         GenericRow minValues = new GenericRow(rowFieldCount);
         GenericRow maxValues = new GenericRow(rowFieldCount);
-        long[] nullCounts = new long[rowFieldCount];
+        Long[] nullCounts = new Long[rowFieldCount];
         for (int i = 0; i < rowFieldCount; i++) {
             minValues.setField(i, stats[i].minValue());
             maxValues.setField(i, stats[i].maxValue());
@@ -91,6 +91,7 @@ public class FieldStatsArraySerializer {
     public FieldStats[] fromBinary(BinaryTableStats array, @Nullable Long rowCount) {
         int fieldCount = indexMapping == null ? fieldGetters.length : indexMapping.length;
         FieldStats[] stats = new FieldStats[fieldCount];
+        Long[] nullCounts = array.nullCounts();
         for (int i = 0; i < fieldCount; i++) {
             int fieldIndex = indexMapping == null ? i : indexMapping[i];
             if (fieldIndex < 0 || fieldIndex >= array.min().getFieldCount()) {
@@ -108,7 +109,7 @@ public class FieldStatsArraySerializer {
                 Object max = fieldGetters[fieldIndex].getFieldOrNull(array.max());
                 max = converter == null || max == null ? max : converter.cast(max);
 
-                stats[i] = new FieldStats(min, max, array.nullCounts()[fieldIndex]);
+                stats[i] = new FieldStats(min, max, nullCounts[fieldIndex]);
             }
         }
         return stats;
@@ -118,7 +119,7 @@ public class FieldStatsArraySerializer {
         List<DataField> fields = new ArrayList<>();
         fields.add(new DataField(0, "_MIN_VALUES", newBytesType(false)));
         fields.add(new DataField(1, "_MAX_VALUES", newBytesType(false)));
-        fields.add(new DataField(2, "_NULL_COUNTS", new ArrayType(new BigIntType(false))));
+        fields.add(new DataField(2, "_NULL_COUNTS", new ArrayType(new BigIntType(true))));
         return new RowType(fields);
     }
 

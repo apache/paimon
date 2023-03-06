@@ -130,4 +130,13 @@ public class TimestampTest {
         assertThat(Timestamp.fromInstant(instant).toString())
                 .isEqualTo("1970-01-01T00:00:00.123456789");
     }
+
+    @Test
+    public void testToMicros() {
+        java.sql.Timestamp t = java.sql.Timestamp.valueOf("2005-01-02 00:00:00.123456789");
+        assertThat(Timestamp.fromSQLTimestamp(t).toString())
+                .isEqualTo("2005-01-02T00:00:00.123456789");
+        assertThat(Timestamp.fromMicros(Timestamp.fromSQLTimestamp(t).toMicros()).toString())
+                .isEqualTo("2005-01-02T00:00:00.123456");
+    }
 }

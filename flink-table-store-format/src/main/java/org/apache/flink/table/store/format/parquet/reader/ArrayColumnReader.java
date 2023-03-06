@@ -404,22 +404,38 @@ public class ArrayColumnReader extends BaseVectorizedColumnReader {
                 break;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                HeapTimestampVector timestampVector = new HeapTimestampVector(total);
-                timestampVector.reset();
-                lcv.setChild(timestampVector);
-                for (int i = 0; i < valueList.size(); i++) {
-                    if (valueList.get(i) == null) {
-                        ((HeapTimestampVector) lcv.getChild()).setNullAt(i);
-                    } else {
-                        ((HeapTimestampVector) lcv.getChild())
-                                .setTimestamp(i, ((List<Timestamp>) valueList).get(i));
+                if (descriptor.getPrimitiveType().getPrimitiveTypeName()
+                        == PrimitiveType.PrimitiveTypeName.INT64) {
+                    HeapLongVector heapLongVector = new HeapLongVector(total);
+                    heapLongVector.reset();
+                    lcv.setChild(new ParquetTimestampVector(heapLongVector));
+                    for (int i = 0; i < valueList.size(); i++) {
+                        if (valueList.get(i) == null) {
+                            ((HeapLongVector) ((ParquetTimestampVector) lcv.getChild()).getVector())
+                                    .setNullAt(i);
+                        } else {
+                            ((HeapLongVector) ((ParquetTimestampVector) lcv.getChild()).getVector())
+                                            .vector[i] =
+                                    ((List<Long>) valueList).get(i);
+                        }
                     }
+                    break;
+                } else {
+                    HeapTimestampVector timestampVector = new HeapTimestampVector(total);
+                    timestampVector.reset();
+                    lcv.setChild(timestampVector);
+                    for (int i = 0; i < valueList.size(); i++) {
+                        if (valueList.get(i) == null) {
+                            ((HeapTimestampVector) lcv.getChild()).setNullAt(i);
+                        } else {
+                            ((HeapTimestampVector) lcv.getChild())
+                                    .setTimestamp(i, ((List<Timestamp>) valueList).get(i));
+                        }
+                    }
+                    break;
                 }
-                break;
             case DECIMAL:
-                PrimitiveType.PrimitiveTypeName primitiveTypeName =
-                        descriptor.getPrimitiveType().getPrimitiveTypeName();
-                switch (primitiveTypeName) {
+                switch (descriptor.getPrimitiveType().getPrimitiveTypeName()) {
                     case INT32:
                         HeapIntVector heapIntVector = new HeapIntVector(total);
                         heapIntVector.reset();

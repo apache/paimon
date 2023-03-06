@@ -90,7 +90,8 @@ public class LeafPredicate implements Predicate {
     @Override
     public boolean test(long rowCount, FieldStats[] fieldStats) {
         FieldStats stats = fieldStats[fieldIndex];
-        if (rowCount != stats.nullCount()) {
+        Long nullCount = stats.nullCount();
+        if (nullCount == null || rowCount != nullCount) {
             // not all null
             // min or max is null
             // unknown stats

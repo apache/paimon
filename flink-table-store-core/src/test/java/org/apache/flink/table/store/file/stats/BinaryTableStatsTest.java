@@ -38,7 +38,7 @@ public class BinaryTableStatsTest {
     public void testBinaryTableStats() {
         List<Integer> minList = Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9);
         List<Integer> maxList = Arrays.asList(11, 12, 13, 14, 15, 16, 17, 18, 19);
-        long[] nullCounts = new long[] {0L, 1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L};
+        Long[] nullCounts = new Long[] {0L, 1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L};
 
         BinaryRow minRowData = binaryRow(minList);
         BinaryRow maxRowData = binaryRow(maxList);

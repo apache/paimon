@@ -46,7 +46,7 @@ public class DataFileMeta {
     // Append only data files don't have any key columns and meaningful level value. it will use
     // the following dummy values.
     public static final BinaryTableStats EMPTY_KEY_STATS =
-            new BinaryTableStats(EMPTY_ROW, EMPTY_ROW, new long[0]);
+            new BinaryTableStats(EMPTY_ROW, EMPTY_ROW, new Long[0]);
     public static final BinaryRow EMPTY_MIN_KEY = EMPTY_ROW;
     public static final BinaryRow EMPTY_MAX_KEY = EMPTY_ROW;
     public static final int DUMMY_LEVEL = 0;

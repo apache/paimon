@@ -70,4 +70,9 @@ public final class ColumnarMap implements InternalMap, Serializable {
         throw new UnsupportedOperationException(
                 "ColumnarMapData do not support hashCode, please hash fields one by one!");
     }
+
+    @Override
+    public String toString() {
+        return getClass().getName() + "@" + Integer.toHexString(super.hashCode());
+    }
 }
