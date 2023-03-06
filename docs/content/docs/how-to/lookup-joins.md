@@ -1,9 +1,9 @@
 ---
 title: "Lookup Joins"
-weight: 3
+weight: 6
 type: docs
 aliases:
-- /features/lookup-joins.html
+- /how-to/lookup-joins.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
