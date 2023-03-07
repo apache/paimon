@@ -82,6 +82,11 @@ The lookup join operator will maintain a RocksDB cache locally and pull the late
 
 This feature is only suitable for tables containing at most tens of millions of records to avoid excessive use of local disks.
 
+{{< hint info >}}
+If the records of `Orders` (main table) join missing because the corresponding data of `customers` (lookup table) is not ready.
+You can consider using Flink's [Delayed Retry Strategy For Lookup](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql/queries/hints/#3-enable-delayed-retry-strategy-for-lookup).
+{{< /hint >}}
+
 ## RocksDB Cache Options
 
 The following options allow users to finely adjust RocksDB for better performance. You can either specify them in table properties or in dynamic table hints.
