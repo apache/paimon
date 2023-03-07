@@ -129,6 +129,6 @@ public class DeleteAction extends ActionBase {
                                     return rowData;
                                 });
 
-        sink(dataStream);
+        batchSink(dataStream);
     }
 }

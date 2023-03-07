@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector.action;
 
+import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
@@ -27,6 +28,7 @@ import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.connector.FlinkCatalog;
 import org.apache.flink.table.store.connector.LogicalTypeConversion;
 import org.apache.flink.table.store.connector.sink.FlinkSinkBuilder;
+import org.apache.flink.table.store.connector.utils.TableEnvironmentUtils;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.file.catalog.Identifier;
@@ -42,6 +44,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -125,12 +128,20 @@ public abstract class ActionBase implements Action {
         return true;
     }
 
-    /** Sink {@link DataStream} dataStream to table. */
-    protected void sink(DataStream<RowData> dataStream) throws Exception {
-        new FlinkSinkBuilder((FileStoreTable) table)
-                .withInput(dataStream)
-                .withLockFactory(Lock.factory(catalog.lockFactory().orElse(null), identifier))
-                .build();
-        env.execute();
+    /** Sink {@link DataStream} dataStream to table with Flink Table API in batch environment. */
+    protected void batchSink(DataStream<RowData> dataStream) {
+        List<Transformation<?>> transformations =
+                Collections.singletonList(
+                        new FlinkSinkBuilder((FileStoreTable) table)
+                                .withInput(dataStream)
+                                .withLockFactory(
+                                        Lock.factory(
+                                                catalog.lockFactory().orElse(null), identifier))
+                                .build()
+                                .getTransformation());
+
+        List<String> sinkIdentifierNames = Collections.singletonList(identifier.getFullName());
+
+        TableEnvironmentUtils.executeInternal(tEnv, transformations, sinkIdentifierNames);
     }
 }

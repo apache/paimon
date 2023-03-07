@@ -454,7 +454,7 @@ public class MergeIntoAction extends ActionBase {
                         .collect(Collectors.toList());
 
         DataStream<RowData> firstDs = dataStreams.get(0);
-        sink(firstDs.union(dataStreams.stream().skip(1).toArray(DataStream[]::new)));
+        batchSink(firstDs.union(dataStreams.stream().skip(1).toArray(DataStream[]::new)));
     }
 
     private Optional<DataStream<RowData>> getMatchedUpsertDataStream() {
