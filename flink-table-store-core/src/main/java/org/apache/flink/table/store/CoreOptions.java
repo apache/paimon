@@ -359,7 +359,7 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "End condition \"watermark\" for bounded streaming mode. Stream"
-                                    + " reading will end until a larger watermark snapshot is encountered.");
+                                    + " reading will end when a larger watermark snapshot is encountered.");
 
     public static final ConfigOption<LogConsistency> LOG_CONSISTENCY =
             key("log.consistency")

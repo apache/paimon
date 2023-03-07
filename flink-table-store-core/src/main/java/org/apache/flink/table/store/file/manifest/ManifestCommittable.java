@@ -32,7 +32,7 @@ import java.util.Objects;
 public class ManifestCommittable {
 
     private final long identifier;
-    private final Long watermark;
+    @Nullable private final Long watermark;
     private final Map<Integer, Long> logOffsets;
     private final List<CommitMessage> commitMessages;
 
@@ -75,6 +75,7 @@ public class ManifestCommittable {
         return identifier;
     }
 
+    @Nullable
     public Long watermark() {
         return watermark;
     }

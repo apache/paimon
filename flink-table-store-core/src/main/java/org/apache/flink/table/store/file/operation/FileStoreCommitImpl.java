@@ -378,7 +378,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<ManifestEntry> tableFiles,
             List<ManifestEntry> changelogFiles,
             long identifier,
-            Long watermark,
+            @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             Long safeLatestSnapshotId) {
@@ -402,7 +402,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Predicate partitionFilter,
             List<ManifestEntry> changes,
             long identifier,
-            Long watermark,
+            @Nullable Long watermark,
             Map<Integer, Long> logOffsets) {
         while (true) {
             Long latestSnapshotId = snapshotManager.latestSnapshotId();
@@ -444,7 +444,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<ManifestEntry> tableFiles,
             List<ManifestEntry> changelogFiles,
             long identifier,
-            Long watermark,
+            @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             Long latestSnapshotId,

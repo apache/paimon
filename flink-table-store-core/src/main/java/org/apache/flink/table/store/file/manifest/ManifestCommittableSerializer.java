@@ -51,11 +51,12 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
         view.writeLong(obj.identifier());
-        if (obj.watermark() == null) {
+        Long watermark = obj.watermark();
+        if (watermark == null) {
             view.writeBoolean(true);
         } else {
             view.writeBoolean(false);
-            view.writeLong(obj.watermark());
+            view.writeLong(watermark);
         }
         serializeOffsets(view, obj.logOffsets());
         view.writeInt(commitMessageSerializer.getVersion());

@@ -29,11 +29,14 @@ import java.util.List;
 public interface SnapshotEnumerator {
 
     /**
-     * The first call to this method will produce a {@link DataFilePlan} containing the base files
-     * for the following incremental changes (or just return null if there are no base files).
+     * The first call to this method will produce a {@link PlanResult} containing the base files for
+     * the following incremental changes (or containing null if there are no base files).
      *
-     * <p>Following calls to this method will produce {@link DataFilePlan}s containing incremental
-     * changed files. If there is currently no newer snapshots, null will be returned instead.
+     * <p>Following calls to this method will produce {@link PlanResult}s containing incremental
+     * changed files. If there is currently no newer snapshots, {@link PlanResult} with null plan
+     * will be returned instead.
+     *
+     * <p>Returning {@link FinishedResult} if this enumerator is finished.
      */
     Result enumerate();
 
