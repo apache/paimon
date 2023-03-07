@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.benchmark.mergetree;
+package org.apache.flink.table.store.benchmark;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.catalog.CatalogContext;
@@ -43,8 +43,8 @@ import java.util.List;
 
 import static java.util.Collections.singletonList;
 
-/** Base class for merge tree benchmark. */
-public class MergeTreeBenchmark {
+/** Base class for table benchmark. */
+public class TableBenchmark {
 
     private static final int VALUE_COUNT = 20;
 
@@ -52,7 +52,7 @@ public class MergeTreeBenchmark {
 
     private final RandomDataGenerator random = new RandomDataGenerator();
 
-    protected Table createTable(String format) throws Exception {
+    protected Table createTable(Options tableOptions) throws Exception {
         Options catalogOptions = new Options();
         catalogOptions.set(CatalogOptions.WAREHOUSE, tempFile.toUri().toString());
         Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(catalogOptions));
@@ -64,9 +64,7 @@ public class MergeTreeBenchmark {
         for (int i = 1; i <= VALUE_COUNT; i++) {
             fields.add(new DataField(i, "f" + i, DataTypes.STRING()));
         }
-        Options tableOptions = new Options();
-        tableOptions.set(CoreOptions.FILE_FORMAT, format);
-        tableOptions.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 20);
+        tableOptions.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 10);
         Schema schema =
                 new Schema(
                         fields,

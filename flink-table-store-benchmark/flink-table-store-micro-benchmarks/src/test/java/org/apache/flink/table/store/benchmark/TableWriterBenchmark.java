@@ -16,9 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.benchmark.mergetree;
+package org.apache.flink.table.store.benchmark;
 
-import org.apache.flink.table.store.benchmark.Benchmark;
+import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.StreamTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;
@@ -29,12 +30,43 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Benchmark for merge tree writer with compaction. */
-public class MergeTreeWriterBenchmark extends MergeTreeBenchmark {
+/** Benchmark for table writer. */
+public class TableWriterBenchmark extends TableBenchmark {
+
+    @Test
+    public void testAvro() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, "avro");
+        innerTest("avro", options);
+        /*
+         * Java HotSpot(TM) 64-Bit Server VM 1.8.0_301-b09 on Mac OS X 10.16
+         * Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz
+         * avro:            Best/Avg Time(ms)    Row Rate(M/s)      Per Row(ns)   Relative
+         * ---------------------------------------------------------------------------------
+         * avro_write        10139 / 13044              0.0          33797.3       1.0X
+         */
+    }
+
+    @Test
+    public void testOrcNoCompression() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, "orc");
+        options.set("orc.compress", "none");
+        innerTest("orc", options);
+        /*
+         * Java HotSpot(TM) 64-Bit Server VM 1.8.0_301-b09 on Mac OS X 10.16
+         * Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz
+         * orc:            Best/Avg Time(ms)    Row Rate(M/s)      Per Row(ns)   Relative
+         * ---------------------------------------------------------------------------------
+         * orc_write        8448 / 9584              0.0          28160.1       1.0X
+         */
+    }
 
     @Test
     public void testParquet() throws Exception {
-        innerTest("parquet");
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, "parquet");
+        innerTest("parquet", options);
         /*
          * Java HotSpot(TM) 64-Bit Server VM 1.8.0_301-b09 on Mac OS X 10.16
          * Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz
@@ -46,7 +78,9 @@ public class MergeTreeWriterBenchmark extends MergeTreeBenchmark {
 
     @Test
     public void testOrc() throws Exception {
-        innerTest("orc");
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, "orc");
+        innerTest("orc", options);
         /*
          * Java HotSpot(TM) 64-Bit Server VM 1.8.0_301-b09 on Mac OS X 10.16
          * Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz
@@ -56,13 +90,13 @@ public class MergeTreeWriterBenchmark extends MergeTreeBenchmark {
          */
     }
 
-    public void innerTest(String format) throws Exception {
-        StreamWriteBuilder writeBuilder = createTable(format).newStreamWriteBuilder();
+    public void innerTest(String name, Options options) throws Exception {
+        StreamWriteBuilder writeBuilder = createTable(options).newStreamWriteBuilder();
         StreamTableWrite write = writeBuilder.newWrite();
         StreamTableCommit commit = writeBuilder.newCommit();
         long valuesPerIteration = 300_000;
         Benchmark benchmark =
-                new Benchmark(format, valuesPerIteration)
+                new Benchmark(name, valuesPerIteration)
                         .setNumWarmupIters(1)
                         .setOutputPerIteration(true);
         AtomicInteger writeCount = new AtomicInteger(0);
