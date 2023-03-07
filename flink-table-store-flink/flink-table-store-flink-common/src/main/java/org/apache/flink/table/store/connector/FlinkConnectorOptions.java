@@ -102,7 +102,7 @@ public class FlinkConnectorOptions {
     public static final ConfigOption<Duration> CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL =
             key("changelog-producer.compaction-interval")
                     .durationType()
-                    .defaultValue(Duration.ofMinutes(30))
+                    .defaultValue(Duration.ofSeconds(0))
                     .withDescription(
                             "When "
                                     + CoreOptions.CHANGELOG_PRODUCER.key()
