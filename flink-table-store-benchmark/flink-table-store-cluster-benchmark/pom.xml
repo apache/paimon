@@ -29,7 +29,7 @@ under the License.
     </parent>
 
     <artifactId>flink-table-store-cluster-benchmark</artifactId>
-    <name>Flink Table Store : Cluster Benchmark</name>
+    <name>Flink Table Store : Benchmark : Cluster</name>
 
     <dependencies>
         <dependency>
