@@ -26,6 +26,7 @@ import org.apache.flink.table.store.file.operation.PartitionExpire;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -102,6 +103,10 @@ public class TableCommitImpl implements InnerTableCommit {
             commit.overwrite(overwritePartitions, committable, new HashMap<>());
         }
         expire();
+    }
+
+    public void commit(ManifestCommittable committable) {
+        commitMultiple(Collections.singletonList(committable));
     }
 
     public void commitMultiple(List<ManifestCommittable> committables) {

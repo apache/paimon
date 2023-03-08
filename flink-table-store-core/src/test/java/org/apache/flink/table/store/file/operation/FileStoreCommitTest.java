@@ -495,6 +495,7 @@ public class FileStoreCommitTest {
                 kv -> 0,
                 false,
                 null,
+                null,
                 (commit, committable) -> commit.commit(committable, Collections.emptyMap()));
         assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(snapshot.id());
 
@@ -504,6 +505,7 @@ public class FileStoreCommitTest {
                 gen::getPartition,
                 kv -> 0,
                 false,
+                null,
                 null,
                 (commit, committable) -> {
                     commit.ignoreEmptyCommit(false);
@@ -525,6 +527,7 @@ public class FileStoreCommitTest {
                     kv -> 0,
                     false,
                     (long) i,
+                    null,
                     (commit, committable) -> {
                         commit.commit(committable, Collections.emptyMap());
                         committables.add(committable);
@@ -542,6 +545,42 @@ public class FileStoreCommitTest {
                             "Expecting RuntimeException, but nothing is thrown.");
             assertThat(e).hasMessageContaining("Give up committing.");
         }
+    }
+
+    @Test
+    public void testCommitWatermarkWithValue() throws Exception {
+        TestFileStore store = createStore(false, 2);
+
+        // first with watermark
+        Snapshot snapshot =
+                store.commitDataWatermark(generateDataList(10), gen::getPartition, 1024L).get(0);
+        assertThat(snapshot.watermark()).isEqualTo(1024);
+    }
+
+    @Test
+    public void testCommitWatermark() throws Exception {
+        TestFileStore store = createStore(false, 2);
+
+        // first with null
+        Snapshot snapshot =
+                store.commitDataWatermark(generateDataList(10), gen::getPartition, null).get(0);
+        assertThat(snapshot.watermark()).isEqualTo(null);
+
+        // with watermark
+        snapshot = store.commitDataWatermark(generateDataList(10), gen::getPartition, 1024L).get(0);
+        assertThat(snapshot.watermark()).isEqualTo(1024);
+
+        // lower watermark, the watermark should remain unchanged
+        snapshot = store.commitDataWatermark(generateDataList(10), gen::getPartition, 600L).get(0);
+        assertThat(snapshot.watermark()).isEqualTo(1024);
+
+        // null watermark, the watermark should remain unchanged
+        snapshot = store.commitDataWatermark(generateDataList(10), gen::getPartition, null).get(0);
+        assertThat(snapshot.watermark()).isEqualTo(1024);
+
+        // bigger watermark, the watermark should be updated
+        snapshot = store.commitDataWatermark(generateDataList(10), gen::getPartition, 2048L).get(0);
+        assertThat(snapshot.watermark()).isEqualTo(2048);
     }
 
     private TestFileStore createStore(boolean failing) throws Exception {

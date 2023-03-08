@@ -31,7 +31,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -57,7 +56,11 @@ public class ManifestCommittableSerializerTest {
     }
 
     public static ManifestCommittable create() {
-        ManifestCommittable committable = new ManifestCommittable(new Random().nextLong());
+        ThreadLocalRandom rnd = ThreadLocalRandom.current();
+        ManifestCommittable committable =
+                rnd.nextBoolean()
+                        ? new ManifestCommittable(rnd.nextLong(), rnd.nextLong())
+                        : new ManifestCommittable(rnd.nextLong(), null);
         addFileCommittables(committable, row(0), 0);
         addFileCommittables(committable, row(0), 1);
         addFileCommittables(committable, row(1), 0);

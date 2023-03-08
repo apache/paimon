@@ -53,7 +53,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 projectedFields,
                 predicate,
                 limit,
-                ContinuousDataFileSnapshotEnumerator::create);
+                new ContinuousDataFileSnapshotEnumerator.DefaultFactory());
     }
 
     public ContinuousFileStoreSource(
@@ -69,7 +69,9 @@ public class ContinuousFileStoreSource extends FlinkSource {
 
     @Override
     public Boundedness getBoundedness() {
-        return Boundedness.CONTINUOUS_UNBOUNDED;
+        return enumeratorFactory.isBounded(table)
+                ? Boundedness.BOUNDED
+                : Boundedness.CONTINUOUS_UNBOUNDED;
     }
 
     @Override

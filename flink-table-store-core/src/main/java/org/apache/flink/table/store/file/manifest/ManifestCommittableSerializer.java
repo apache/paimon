@@ -51,6 +51,13 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
         view.writeLong(obj.identifier());
+        Long watermark = obj.watermark();
+        if (watermark == null) {
+            view.writeBoolean(true);
+        } else {
+            view.writeBoolean(false);
+            view.writeLong(watermark);
+        }
         serializeOffsets(view, obj.logOffsets());
         view.writeInt(commitMessageSerializer.getVersion());
         commitMessageSerializer.serializeList(obj.fileCommittables(), view);
@@ -80,11 +87,12 @@ public class ManifestCommittableSerializer implements VersionedSerializer<Manife
 
         DataInputDeserializer view = new DataInputDeserializer(serialized);
         long identifier = view.readLong();
+        Long watermark = view.readBoolean() ? null : view.readLong();
         Map<Integer, Long> offsets = deserializeOffsets(view);
         int fileCommittableSerializerVersion = view.readInt();
-        List<CommitMessage> commitMessages =
+        List<CommitMessage> fileCommittables =
                 commitMessageSerializer.deserializeList(fileCommittableSerializerVersion, view);
-        return new ManifestCommittable(identifier, offsets, commitMessages);
+        return new ManifestCommittable(identifier, watermark, offsets, fileCommittables);
     }
 
     private Map<Integer, Long> deserializeOffsets(DataInputDeserializer view) throws IOException {

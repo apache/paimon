@@ -353,12 +353,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Optional snapshot id used in case of \"from-snapshot\" scan mode");
 
-    public static final ConfigOption<Duration> LOG_RETENTION =
-            key("log.retention")
-                    .durationType()
+    public static final ConfigOption<Long> SCAN_BOUNDED_WATERMARK =
+            key("scan.bounded.watermark")
+                    .longType()
                     .noDefaultValue()
                     .withDescription(
-                            "It means how long changes log will be kept. The default value is from the log system cluster.");
+                            "End condition \"watermark\" for bounded streaming mode. Stream"
+                                    + " reading will end when a larger watermark snapshot is encountered.");
 
     public static final ConfigOption<LogConsistency> LOG_CONSISTENCY =
             key("log.consistency")
@@ -690,6 +691,10 @@ public class CoreOptions implements Serializable {
 
     public Long scanTimestampMills() {
         return options.get(SCAN_TIMESTAMP_MILLIS);
+    }
+
+    public Long scanBoundedWatermark() {
+        return options.get(SCAN_BOUNDED_WATERMARK);
     }
 
     public Long scanSnapshotId() {

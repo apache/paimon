@@ -20,6 +20,8 @@ package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.table.store.table.sink.CommitMessage;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -30,18 +32,28 @@ import java.util.Objects;
 public class ManifestCommittable {
 
     private final long identifier;
+    @Nullable private final Long watermark;
     private final Map<Integer, Long> logOffsets;
     private final List<CommitMessage> commitMessages;
 
     public ManifestCommittable(long identifier) {
+        this(identifier, null);
+    }
+
+    public ManifestCommittable(long identifier, @Nullable Long watermark) {
         this.identifier = identifier;
+        this.watermark = watermark;
         this.logOffsets = new HashMap<>();
         this.commitMessages = new ArrayList<>();
     }
 
     public ManifestCommittable(
-            long identifier, Map<Integer, Long> logOffsets, List<CommitMessage> commitMessages) {
+            long identifier,
+            Long watermark,
+            Map<Integer, Long> logOffsets,
+            List<CommitMessage> commitMessages) {
         this.identifier = identifier;
+        this.watermark = watermark;
         this.logOffsets = logOffsets;
         this.commitMessages = commitMessages;
     }
@@ -63,6 +75,11 @@ public class ManifestCommittable {
         return identifier;
     }
 
+    @Nullable
+    public Long watermark() {
+        return watermark;
+    }
+
     public Map<Integer, Long> logOffsets() {
         return logOffsets;
     }
@@ -81,13 +98,14 @@ public class ManifestCommittable {
         }
         ManifestCommittable that = (ManifestCommittable) o;
         return Objects.equals(identifier, that.identifier)
+                && Objects.equals(watermark, that.watermark)
                 && Objects.equals(logOffsets, that.logOffsets)
                 && Objects.equals(commitMessages, that.commitMessages);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(identifier, logOffsets, commitMessages);
+        return Objects.hash(identifier, watermark, logOffsets, commitMessages);
     }
 
     @Override
@@ -95,8 +113,9 @@ public class ManifestCommittable {
         return String.format(
                 "ManifestCommittable {"
                         + "identifier = %s, "
+                        + "watermark = %s, "
                         + "logOffsets = %s, "
-                        + "fileCommittables = %s",
-                identifier, logOffsets, commitMessages);
+                        + "commitMessages = %s",
+                identifier, watermark, logOffsets, commitMessages);
     }
 }

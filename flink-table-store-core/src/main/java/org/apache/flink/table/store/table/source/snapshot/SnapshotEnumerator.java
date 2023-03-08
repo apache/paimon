@@ -18,22 +18,81 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
-import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.DataTableScan.DataFilePlan;
 
 import javax.annotation.Nullable;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /** Enumerate incremental changes from newly created snapshots. */
 public interface SnapshotEnumerator {
 
     /**
-     * The first call to this method will produce a {@link DataTableScan.DataFilePlan} containing
-     * the base files for the following incremental changes (or just return null if there are no
-     * base files).
+     * The first call to this method will produce a {@link PlanResult} containing the base files for
+     * the following incremental changes (or containing null if there are no base files).
      *
-     * <p>Following calls to this method will produce {@link DataTableScan.DataFilePlan}s containing
-     * incremental changed files. If there is currently no newer snapshots, null will be returned
-     * instead.
+     * <p>Following calls to this method will produce {@link PlanResult}s containing incremental
+     * changed files. If there is currently no newer snapshots, {@link PlanResult} with null plan
+     * will be returned instead.
+     *
+     * <p>Returning {@link FinishedResult} if this enumerator is finished.
      */
-    @Nullable
-    DataTableScan.DataFilePlan enumerate();
+    Result enumerate();
+
+    default Result planResult(@Nullable DataFilePlan plan) {
+        return new PlanResult(plan);
+    }
+
+    default Result finishedResult() {
+        return new FinishedResult();
+    }
+
+    default List<DataFilePlan> enumerateAll() {
+        List<DataFilePlan> plans = new ArrayList<>();
+        while (true) {
+            Result result = enumerate();
+            if (result instanceof FinishedResult) {
+                break;
+            }
+            DataFilePlan plan = result.plan();
+            if (plan == null) {
+                continue;
+            }
+            plans.add(plan);
+        }
+        return plans;
+    }
+
+    /** Result of enumeration. */
+    interface Result {
+        @Nullable
+        DataFilePlan plan();
+    }
+
+    /** Result for a plan. */
+    class PlanResult implements Result {
+
+        private final DataFilePlan plan;
+
+        public PlanResult(DataFilePlan plan) {
+            this.plan = plan;
+        }
+
+        @Nullable
+        @Override
+        public DataFilePlan plan() {
+            return plan;
+        }
+    }
+
+    /** Result for finished. */
+    class FinishedResult implements Result {
+
+        @Nullable
+        @Override
+        public DataFilePlan plan() {
+            throw new RuntimeException("This is a finished result.");
+        }
+    }
 }
