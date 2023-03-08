@@ -75,7 +75,8 @@ public class SnapshotsTable implements ReadonlyTable {
                             new DataField(5, "commit_time", new TimestampType(false, 3)),
                             new DataField(6, "total_record_count", new BigIntType(true)),
                             new DataField(7, "delta_record_count", new BigIntType(true)),
-                            new DataField(8, "changelog_record_count", new BigIntType(true))));
+                            new DataField(8, "changelog_record_count", new BigIntType(true)),
+                            new DataField(9, "watermark", new BigIntType(true))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -213,7 +214,8 @@ public class SnapshotsTable implements ReadonlyTable {
                                     ZoneId.systemDefault())),
                     snapshot.totalRecordCount(),
                     snapshot.deltaRecordCount(),
-                    snapshot.changelogRecordCount());
+                    snapshot.changelogRecordCount(),
+                    snapshot.watermark());
         }
     }
 }

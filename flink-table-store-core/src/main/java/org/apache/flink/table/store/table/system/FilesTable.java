@@ -173,7 +173,8 @@ public class FilesTable implements ReadonlyTable {
         @Nullable
         private DataTableScan.DataFilePlan dataFilePlan() {
             return StaticDataFileSnapshotEnumerator.create(storeTable, storeTable.newScan())
-                    .enumerate();
+                    .enumerate()
+                    .plan();
         }
 
         @Override

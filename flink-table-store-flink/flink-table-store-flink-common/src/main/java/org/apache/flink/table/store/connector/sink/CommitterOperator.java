@@ -23,6 +23,7 @@ import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.util.function.SerializableFunction;
@@ -75,7 +76,9 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
      */
     protected Committer committer;
 
-    private boolean endInput = false;
+    private transient long currentWatermark;
+
+    private transient boolean endInput;
 
     public CommitterOperator(
             boolean streamingCheckpointEnabled,
@@ -94,6 +97,8 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
 
+        this.currentWatermark = Long.MIN_VALUE;
+        this.endInput = false;
         // each job can only have one user name and this name must be consistent across restarts
         // we cannot use job id as commit user name here because user may change job id by creating
         // a savepoint, stop the job and then resume from savepoint
@@ -106,9 +111,18 @@ public class CommitterOperator extends AbstractStreamOperator<Committable>
         committableStateManager.initializeState(context, committer);
     }
 
+    @Override
+    public void processWatermark(Watermark mark) throws Exception {
+        super.processWatermark(mark);
+        // Do not consume Long.MAX_VALUE watermark in case of batch or bounded stream
+        if (mark.getTimestamp() != Long.MAX_VALUE) {
+            this.currentWatermark = mark.getTimestamp();
+        }
+    }
+
     private ManifestCommittable toCommittables(long checkpoint, List<Committable> inputs)
             throws Exception {
-        return committer.combine(checkpoint, inputs);
+        return committer.combine(checkpoint, currentWatermark, inputs);
     }
 
     @Override

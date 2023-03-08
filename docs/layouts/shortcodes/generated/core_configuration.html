@@ -33,12 +33,6 @@
             <td>Whether to double write to a changelog file. This changelog file keeps the details of data changes, it can be read directly during stream reads.<br /><br />Possible values:<ul><li>"none": No changelog file.</li><li>"input": Double write to a changelog file when flushing memory table, the changelog is from input.</li><li>"full-compaction": Generate changelog files with each full compaction.</li></ul></td>
         </tr>
         <tr>
-            <td><h5>changelog-producer.compaction-interval</h5></td>
-            <td style="word-wrap: break-word;">0 ms</td>
-            <td>Duration</td>
-            <td>When changelog-producer is set to FULL_COMPACTION, full compaction will be constantly triggered after this interval.</td>
-        </tr>
-        <tr>
             <td><h5>commit.force-compact</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -81,6 +75,12 @@
             <td>The discovery interval of continuous reading.</td>
         </tr>
         <tr>
+            <td><h5>file.compression.per.level</h5></td>
+            <td style="word-wrap: break-word;"></td>
+            <td>Map</td>
+            <td>Define different compression policies for different level, you can add the conf like this: 'file.compression.per.level' = '0:lz4,1:zlib', for orc file format, the compression value could be NONE, ZLIB, SNAPPY, LZO, LZ4, for parquet file format, the compression value could be UNCOMPRESSED, SNAPPY, GZIP, LZO, BROTLI, LZ4, ZSTD.</td>
+        </tr>
+        <tr>
             <td><h5>file.format</h5></td>
             <td style="word-wrap: break-word;">"orc"</td>
             <td>String</td>
@@ -115,12 +115,6 @@
             <td style="word-wrap: break-word;">"json"</td>
             <td>String</td>
             <td>Specify the key message format of log system with primary key.</td>
-        </tr>
-        <tr>
-            <td><h5>log.retention</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Duration</td>
-            <td>It means how long changes log will be kept. The default value is from the log system cluster.</td>
         </tr>
         <tr>
             <td><h5>log.scan.remove-normalize</h5></td>
@@ -183,12 +177,6 @@
             <td>Define the default false positive probability for bloom filters.</td>
         </tr>
         <tr>
-            <td><h5>file.compression.per.level</h5></td>
-            <td style="word-wrap: break-word;"></td>
-            <td>Map</td>
-            <td>Define different compression policies for different level, you can add the conf like this: 'file.compression.per.level' = '0:lz4,1:zlib', for orc file format, the compression value could be NONE, ZLIB, SNAPPY, LZO, LZ4, for parquet file format, the compression value could be UNCOMPRESSED, SNAPPY, GZIP, LZO, BROTLI, LZ4, ZSTD.</td>
-        </tr>
-        <tr>
             <td><h5>page-size</h5></td>
             <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>
@@ -199,6 +187,12 @@
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to ignore delete records in partial-update mode.</td>
+        </tr>
+        <tr>
+            <td><h5>partition</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Define partition by table options, cannot define partition on DDL and table options at the same time.</td>
         </tr>
         <tr>
             <td><h5>partition.default-name</h5></td>
@@ -229,6 +223,18 @@
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>You can specify a pattern to get a timestamp from partitions. The formatter pattern is defined by 'partition.timestamp-formatter'.<ul><li>By default, read from the first field.</li><li>If the timestamp in the partition is a single field called 'dt', you can use '$dt'.</li><li>If it is spread across multiple fields for year, month, day, and hour, you can use '$year-$month-$day $hour:00:00'.</li><li>If the timestamp is in fields dt and hour, you can use '$dt $hour:00:00'.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>primary-key</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Define primary key by table options, cannot define primary key on DDL and table options at the same time.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.bounded.watermark</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>End condition "watermark" for bounded streaming mode. Stream reading will end when a larger watermark snapshot is encountered.</td>
         </tr>
         <tr>
             <td><h5>scan.mode</h5></td>
@@ -325,18 +331,6 @@
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
-        </tr>
-        <tr>
-            <td><h5>primary-key</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Define primary key by table options, cannot define primary key on DDL and table options at the same time.</td>
-        </tr>
-        <tr>
-            <td><h5>partition</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Define partition by table options, cannot define partition on DDL and table options at the same time.</td>
         </tr>
     </tbody>
 </table>

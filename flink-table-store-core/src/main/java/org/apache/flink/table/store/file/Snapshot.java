@@ -82,6 +82,7 @@ public class Snapshot {
     private static final String FIELD_TOTAL_RECORD_COUNT = "totalRecordCount";
     private static final String FIELD_DELTA_RECORD_COUNT = "deltaRecordCount";
     private static final String FIELD_CHANGELOG_RECORD_COUNT = "changelogRecordCount";
+    private static final String FILED_WATERMARK = "watermark";
 
     // version of snapshot
     // null for table store <= 0.2
@@ -150,6 +151,14 @@ public class Snapshot {
     @Nullable
     private final Long changelogRecordCount;
 
+    // watermark for input records
+    // null for table store <= 0.3
+    // null if there is no watermark in new committing, and the previous snapshot does not have a
+    // watermark
+    @JsonProperty(FILED_WATERMARK)
+    @Nullable
+    private final Long watermark;
+
     public Snapshot(
             long id,
             long schemaId,
@@ -163,7 +172,8 @@ public class Snapshot {
             Map<Integer, Long> logOffsets,
             @Nullable Long totalRecordCount,
             @Nullable Long deltaRecordCount,
-            @Nullable Long changelogRecordCount) {
+            @Nullable Long changelogRecordCount,
+            @Nullable Long watermark) {
         this(
                 CURRENT_VERSION,
                 id,
@@ -178,7 +188,8 @@ public class Snapshot {
                 logOffsets,
                 totalRecordCount,
                 deltaRecordCount,
-                changelogRecordCount);
+                changelogRecordCount,
+                watermark);
     }
 
     @JsonCreator
@@ -196,7 +207,8 @@ public class Snapshot {
             @JsonProperty(FIELD_LOG_OFFSETS) Map<Integer, Long> logOffsets,
             @JsonProperty(FIELD_TOTAL_RECORD_COUNT) Long totalRecordCount,
             @JsonProperty(FIELD_DELTA_RECORD_COUNT) Long deltaRecordCount,
-            @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT) Long changelogRecordCount) {
+            @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT) Long changelogRecordCount,
+            @JsonProperty(FILED_WATERMARK) Long watermark) {
         this.version = version;
         this.id = id;
         this.schemaId = schemaId;
@@ -211,6 +223,7 @@ public class Snapshot {
         this.totalRecordCount = totalRecordCount;
         this.deltaRecordCount = deltaRecordCount;
         this.changelogRecordCount = changelogRecordCount;
+        this.watermark = watermark;
     }
 
     @JsonGetter(FIELD_VERSION)
@@ -286,6 +299,12 @@ public class Snapshot {
     @Nullable
     public Long changelogRecordCount() {
         return changelogRecordCount;
+    }
+
+    @JsonGetter(FILED_WATERMARK)
+    @Nullable
+    public Long watermark() {
+        return watermark;
     }
 
     /**

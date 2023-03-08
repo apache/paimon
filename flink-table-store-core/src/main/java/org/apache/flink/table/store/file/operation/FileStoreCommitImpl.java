@@ -212,6 +212,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     appendTableFiles,
                     appendChangelog,
                     committable.identifier(),
+                    committable.watermark(),
                     committable.logOffsets(),
                     Snapshot.CommitKind.APPEND,
                     safeLatestSnapshotId);
@@ -235,6 +236,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     compactTableFiles,
                     compactChangelog,
                     committable.identifier(),
+                    committable.watermark(),
                     committable.logOffsets(),
                     Snapshot.CommitKind.COMPACT,
                     safeLatestSnapshotId);
@@ -318,6 +320,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 partitionFilter,
                 appendTableFiles,
                 committable.identifier(),
+                committable.watermark(),
                 committable.logOffsets());
 
         if (!compactTableFiles.isEmpty()) {
@@ -325,6 +328,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     compactTableFiles,
                     Collections.emptyList(),
                     committable.identifier(),
+                    committable.watermark(),
                     committable.logOffsets(),
                     Snapshot.CommitKind.COMPACT,
                     null);
@@ -374,6 +378,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<ManifestEntry> tableFiles,
             List<ManifestEntry> changelogFiles,
             long identifier,
+            @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             Long safeLatestSnapshotId) {
@@ -383,6 +388,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     tableFiles,
                     changelogFiles,
                     identifier,
+                    watermark,
                     logOffsets,
                     commitKind,
                     latestSnapshotId,
@@ -396,6 +402,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Predicate partitionFilter,
             List<ManifestEntry> changes,
             long identifier,
+            @Nullable Long watermark,
             Map<Integer, Long> logOffsets) {
         while (true) {
             Long latestSnapshotId = snapshotManager.latestSnapshotId();
@@ -423,6 +430,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     changesWithOverwrite,
                     Collections.emptyList(),
                     identifier,
+                    watermark,
                     logOffsets,
                     Snapshot.CommitKind.OVERWRITE,
                     latestSnapshotId,
@@ -436,6 +444,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<ManifestEntry> tableFiles,
             List<ManifestEntry> changelogFiles,
             long identifier,
+            @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             Long latestSnapshotId,
@@ -474,6 +483,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestFileMeta> changelogMetas = new ArrayList<>();
         try {
             long previousTotalRecordCount = 0L;
+            Long currentWatermark = watermark;
             if (latestSnapshot != null) {
                 previousTotalRecordCount = latestSnapshot.totalRecordCount(scan);
                 List<ManifestFileMeta> previousManifests =
@@ -483,6 +493,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 // read the last snapshot to complete the bucket's offsets when logOffsets does not
                 // contain all buckets
                 latestSnapshot.logOffsets().forEach(logOffsets::putIfAbsent);
+                Long latestWatermark = latestSnapshot.watermark();
+                if (latestWatermark != null) {
+                    currentWatermark =
+                            currentWatermark == null
+                                    ? latestWatermark
+                                    : Math.max(currentWatermark, latestWatermark);
+                }
             }
             // merge manifest files with changes
             newMetas.addAll(
@@ -520,7 +537,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             logOffsets,
                             previousTotalRecordCount + deltaRecordCount,
                             deltaRecordCount,
-                            Snapshot.recordCount(changelogFiles));
+                            Snapshot.recordCount(changelogFiles),
+                            currentWatermark);
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
             cleanUpTmpManifests(

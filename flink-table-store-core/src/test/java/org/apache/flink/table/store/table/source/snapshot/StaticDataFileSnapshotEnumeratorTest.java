@@ -55,7 +55,7 @@ public class StaticDataFileSnapshotEnumeratorTest extends SnapshotEnumeratorTest
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(2);
 
-        DataTableScan.DataFilePlan plan = enumerator.enumerate();
+        DataTableScan.DataFilePlan plan = enumerator.enumerate().plan();
         assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(table.newRead(), plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
@@ -64,7 +64,7 @@ public class StaticDataFileSnapshotEnumeratorTest extends SnapshotEnumeratorTest
         write.write(rowData(1, 30, 301L));
         commit.commit(2, write.prepareCommit(true, 2));
 
-        assertThat(enumerator.enumerate()).isNull();
+        assertThat(enumerator.enumerate()).isInstanceOf(SnapshotEnumerator.FinishedResult.class);
 
         write.close();
         commit.close();

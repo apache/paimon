@@ -21,6 +21,7 @@ package org.apache.flink.table.store.connector.sink;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.table.store.connector.VersionedSerializerWrapper;
 import org.apache.flink.table.store.data.GenericRow;
@@ -186,6 +187,39 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness.close();
 
         assertResults(table, "1, 10", "2, 20", "5, 50", "6, 60");
+    }
+
+    @Test
+    public void testWatermarkCommit() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createRecoverableTestHarness(table);
+        testHarness.open();
+        long timestamp = 0;
+        StreamTableWrite write = table.newWrite(initialCommitUser);
+
+        long cpId = 1;
+        write.write(GenericRow.of(1, 10L));
+        testHarness.processElement(
+                new Committable(
+                        cpId, Committable.Kind.FILE, write.prepareCommit(true, cpId).get(0)),
+                timestamp++);
+        testHarness.processWatermark(new Watermark(1024));
+        testHarness.snapshot(cpId, timestamp++);
+        testHarness.notifyOfCompletedCheckpoint(cpId);
+        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(1024L);
+
+        cpId = 2;
+        write.write(GenericRow.of(1, 20L));
+        testHarness.processElement(
+                new Committable(
+                        cpId, Committable.Kind.FILE, write.prepareCommit(true, cpId).get(0)),
+                timestamp++);
+        testHarness.processWatermark(new Watermark(Long.MAX_VALUE));
+        testHarness.snapshot(cpId, timestamp++);
+        testHarness.notifyOfCompletedCheckpoint(cpId);
+        assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(1024L);
     }
 
     // ------------------------------------------------------------------------

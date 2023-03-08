@@ -149,7 +149,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         // no full compaction has happened, so plan should be empty
         SnapshotEnumerator snapshotEnumerator =
                 ContinuousDataFileSnapshotEnumerator.create(table, table.newScan(), null);
-        DataTableScan.DataFilePlan plan = snapshotEnumerator.enumerate();
+        DataTableScan.DataFilePlan plan = snapshotEnumerator.enumerate().plan();
         Assertions.assertEquals(1, (long) plan.snapshotId);
         Assertions.assertTrue(plan.splits().isEmpty());
 
@@ -220,7 +220,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         List<String> actual = new ArrayList<>();
         long start = System.currentTimeMillis();
         while (actual.size() != expected.size()) {
-            DataTableScan.DataFilePlan plan = snapshotEnumerator.enumerate();
+            DataTableScan.DataFilePlan plan = snapshotEnumerator.enumerate().plan();
             if (plan != null) {
                 actual.addAll(getResult(table.newRead(), plan.splits(), ROW_TYPE));
             }

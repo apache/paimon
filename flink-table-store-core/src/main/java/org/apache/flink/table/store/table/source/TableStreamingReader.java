@@ -24,8 +24,11 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.reader.RecordReaderIterator;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.source.DataTableScan.DataFilePlan;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
+import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator.FinishedResult;
+import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator.Result;
 import org.apache.flink.table.store.utils.TypeUtils;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
@@ -91,11 +94,16 @@ public class TableStreamingReader {
 
     @Nullable
     public Iterator<InternalRow> nextBatch() throws Exception {
-        DataTableScan.DataFilePlan plan = enumerator.enumerate();
+        Result result = enumerator.enumerate();
+        if (result instanceof FinishedResult) {
+            throw new IllegalArgumentException(
+                    "TableStreamingReader dose not support finished enumerator.");
+        }
+        DataFilePlan plan = result.plan();
         return plan == null ? null : read(plan);
     }
 
-    private Iterator<InternalRow> read(DataTableScan.DataFilePlan plan) throws IOException {
+    private Iterator<InternalRow> read(DataFilePlan plan) throws IOException {
         InnerTableRead read = table.newRead().withProjection(projection);
         if (predicate != null) {
             read.withFilter(predicate);

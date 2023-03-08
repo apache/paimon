@@ -144,6 +144,21 @@ public class TestFileStore extends KeyValueFileStore {
         return commitData(kvs, partitionCalculator, bucketCalculator, new HashMap<>());
     }
 
+    public List<Snapshot> commitDataWatermark(
+            List<KeyValue> kvs, Function<KeyValue, BinaryRow> partitionCalculator, Long watermark)
+            throws Exception {
+        return commitDataImpl(
+                kvs,
+                partitionCalculator,
+                kv -> 0,
+                false,
+                null,
+                watermark,
+                (commit, committable) -> {
+                    commit.commit(committable, Collections.emptyMap());
+                });
+    }
+
     public List<Snapshot> commitData(
             List<KeyValue> kvs,
             Function<KeyValue, BinaryRow> partitionCalculator,
@@ -155,6 +170,7 @@ public class TestFileStore extends KeyValueFileStore {
                 partitionCalculator,
                 bucketCalculator,
                 false,
+                null,
                 null,
                 (commit, committable) -> {
                     logOffsets.forEach(committable::addLogOffset);
@@ -174,6 +190,7 @@ public class TestFileStore extends KeyValueFileStore {
                 bucketCalculator,
                 true,
                 null,
+                null,
                 (commit, committable) ->
                         commit.overwrite(partition, committable, Collections.emptyMap()));
     }
@@ -184,6 +201,7 @@ public class TestFileStore extends KeyValueFileStore {
             Function<KeyValue, Integer> bucketCalculator,
             boolean emptyWriter,
             Long identifier,
+            Long watermark,
             BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction)
             throws Exception {
         AbstractFileStoreWrite<KeyValue> write = newWrite(commitUser);
@@ -220,7 +238,8 @@ public class TestFileStore extends KeyValueFileStore {
 
         FileStoreCommit commit = newCommit(commitUser);
         ManifestCommittable committable =
-                new ManifestCommittable(identifier == null ? commitIdentifier++ : identifier);
+                new ManifestCommittable(
+                        identifier == null ? commitIdentifier++ : identifier, watermark);
         for (Map.Entry<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> entryWithPartition :
                 writers.entrySet()) {
             for (Map.Entry<Integer, RecordWriter<KeyValue>> entryWithBucket :

@@ -118,7 +118,7 @@ public class FlinkSourceBuilder {
         return new ContinuousFileStoreSource(table, projectedFields, predicate, limit);
     }
 
-    private Source<RowData, ?, ?> buildSource() {
+    public Source<RowData, ?, ?> buildSource() {
         if (isContinuous) {
             ContinuousDataFileSnapshotEnumerator.validate(table.schema());
 

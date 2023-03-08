@@ -26,5 +26,13 @@ public interface FollowUpScanner {
 
     boolean shouldScanSnapshot(Snapshot snapshot);
 
+    default boolean shouldEndInput(Snapshot snapshot) {
+        return false;
+    }
+
+    default boolean isBounded() {
+        return false;
+    }
+
     DataTableScan.DataFilePlan getPlan(long snapshotId, DataTableScan scan);
 }
