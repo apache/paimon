@@ -42,12 +42,13 @@ Table Store currently supports MR and Tez execution engine for Hive.
 
 Download the jar file with corresponding version.
 
-| | Jar                                                                                                                                                                                                |
-|---|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-|Hive 3.1| [flink-table-store-hive-connector-3.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-{{< version >}}_3.1.jar) |
-|Hive 2.3| [flink-table-store-hive-connector-2.3-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-{{< version >}}_2.3.jar)           |
-|Hive 2.2| [flink-table-store-hive-connector-2.2-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-{{< version >}}_2.2.jar)           |
-|Hive 2.1| [flink-table-store-hive-connector-2.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-{{< version >}}_2.1.jar)           |
+|                  | Jar                                                                                                                                                                                                                |
+|------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Hive 3.1         | [flink-table-store-hive-connector-3.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-3.1-{{< version >}}.jar)                 |
+| Hive 2.3         | [flink-table-store-hive-connector-2.3-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-2.3-{{< version >}}.jar)                 |
+| Hive 2.2         | [flink-table-store-hive-connector-2.2-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-2.2-{{< version >}}.jar)                 |
+| Hive 2.1         | [flink-table-store-hive-connector-2.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-2.1-{{< version >}}.jar)                 |
+| Hive 2.1-cdh-6.3 | [flink-table-store-hive-connector-2.1-cdh-6.3-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-2.1-cdh-6.3-{{< version >}}.jar) |
 
 You can also manually build bundled jar from the source code.
 
@@ -64,7 +65,7 @@ To build from source code, either [download the source of a release](https://fli
 Build bundled jar with the following command.
 `mvn clean install -Dmaven.test.skip=true`
 
-For hive-2.3, you can find Hive connector jar in `./flink-table-store-hive/flink-table-store-hive-connector-2.3/target/flink-table-store-hive-connector-2.3-{{< version >}}.jar`.
+You can find Hive connector jar in `./flink-table-store-hive/flink-table-store-hive-connector-<hive-version>/target/flink-table-store-hive-connector-<hive-version>-{{< version >}}.jar`.
 
 There are several ways to add this jar to Hive.
 
