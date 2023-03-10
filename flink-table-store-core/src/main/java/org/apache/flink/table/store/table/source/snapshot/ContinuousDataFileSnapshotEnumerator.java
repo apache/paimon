@@ -183,17 +183,21 @@ public class ContinuousDataFileSnapshotEnumerator implements SnapshotEnumerator 
     private static FollowUpScanner createFollowUpScanner(DataTable table, DataTableScan scan) {
         CoreOptions.ChangelogProducer changelogProducer = table.options().changelogProducer();
         FollowUpScanner followUpScanner;
-        if (changelogProducer == CoreOptions.ChangelogProducer.NONE) {
-            followUpScanner = new DeltaFollowUpScanner();
-        } else if (changelogProducer == CoreOptions.ChangelogProducer.INPUT) {
-            followUpScanner = new InputChangelogFollowUpScanner();
-        } else if (changelogProducer == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
-            // this change in scan will affect both starting scanner and follow-up scanner
-            scan.withLevel(table.options().numLevels() - 1);
-            followUpScanner = new CompactionChangelogFollowUpScanner();
-        } else {
-            throw new UnsupportedOperationException(
-                    "Unknown changelog producer " + changelogProducer.name());
+        switch (changelogProducer) {
+            case NONE:
+                followUpScanner = new DeltaFollowUpScanner();
+                break;
+            case INPUT:
+                followUpScanner = new InputChangelogFollowUpScanner();
+                break;
+            case FULL_COMPACTION:
+                // this change in scan will affect both starting scanner and follow-up scanner
+                scan.withLevelFilter(level -> level == table.options().numLevels() - 1);
+                followUpScanner = new CompactionChangelogFollowUpScanner();
+                break;
+            default:
+                throw new UnsupportedOperationException(
+                        "Unknown changelog producer " + changelogProducer.name());
         }
 
         Long boundedWatermark = table.options().scanBoundedWatermark();

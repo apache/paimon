@@ -34,6 +34,7 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.types.RowType;
+import org.apache.flink.table.store.utils.Filter;
 import org.apache.flink.table.store.utils.Preconditions;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
 
@@ -71,7 +72,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private Integer specifiedBucket = null;
     private List<ManifestFileMeta> specifiedManifests = null;
     private ScanKind scanKind = ScanKind.ALL;
-    private Integer specifiedLevel = null;
+    private Filter<Integer> levelFilter = null;
 
     public AbstractFileStoreScan(
             RowType partitionType,
@@ -165,8 +166,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
-    public FileStoreScan withLevel(int level) {
-        this.specifiedLevel = level;
+    public FileStoreScan withLevelFilter(Filter<Integer> levelFilter) {
+        this.levelFilter = levelFilter;
         return this;
     }
 
@@ -320,7 +321,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     /** Note: Keep this thread-safe. */
     private boolean filterByLevel(ManifestEntry entry) {
-        return (specifiedLevel == null || entry.file().level() == specifiedLevel);
+        return (levelFilter == null || levelFilter.test(entry.file().level()));
     }
 
     /** Note: Keep this thread-safe. */

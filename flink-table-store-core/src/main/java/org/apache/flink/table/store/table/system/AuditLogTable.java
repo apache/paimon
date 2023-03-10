@@ -41,6 +41,7 @@ import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.VarCharType;
+import org.apache.flink.table.store.utils.Filter;
 import org.apache.flink.table.store.utils.ProjectedRow;
 
 import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
@@ -171,8 +172,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public DataTableScan withLevel(int level) {
-            dataScan.withLevel(level);
+        public DataTableScan withLevelFilter(Filter<Integer> levelFilter) {
+            dataScan.withLevelFilter(levelFilter);
             return this;
         }
 

@@ -546,14 +546,6 @@ public class CoreOptions implements Serializable {
         return options.get(PARTITION_DEFAULT_NAME);
     }
 
-    public String orcBloomFilterColumns() {
-        return options.get(ORC_BLOOM_FILTER_COLUMNS);
-    }
-
-    public double orcBloomFilterFpp() {
-        return options.get(ORC_BLOOM_FILTER_FPP);
-    }
-
     public Map<Integer, String> fileCompressionPerLevel() {
         Map<String, String> levelCompressions = options.get(FILE_COMPRESSION_PER_LEVEL);
         return levelCompressions.entrySet().stream()

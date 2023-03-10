@@ -69,6 +69,13 @@ public class MergeFunctionTestUtils {
         return expected;
     }
 
+    public static void assertKvsEquals(List<KeyValue> expected, List<KeyValue> actual) {
+        assertThat(actual).hasSize(expected.size());
+        for (int i = 0; i < actual.size(); i++) {
+            assertKvEquals(expected.get(i), actual.get(i));
+        }
+    }
+
     public static void assertKvEquals(KeyValue expected, KeyValue actual) {
         if (expected == null) {
             assertThat(actual).isNull();
