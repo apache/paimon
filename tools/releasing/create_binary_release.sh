@@ -62,8 +62,11 @@ cp flink-table-store-flink/flink-table-store-flink-1.14/target/flink-table-store
 
 cp flink-table-store-hive/flink-table-store-hive-catalog/target/flink-table-store-hive-catalog-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-hive-catalog-${RELEASE_VERSION}_2.3.jar
 cp flink-table-store-hive/flink-table-store-hive-connector/target/flink-table-store-hive-connector-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-hive-connector-${RELEASE_VERSION}_2.3.jar
-cp flink-table-store-spark/target/flink-table-store-spark-${RELEASE_VERSION}.jar ${RELEASE_DIR}
-cp flink-table-store-spark2/target/flink-table-store-spark2-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+
+cp flink-table-store-spark/flink-table-store-spark-3.3/target/flink-table-store-spark-3.3-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp flink-table-store-spark/flink-table-store-spark-3.2/target/flink-table-store-spark-3.2-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp flink-table-store-spark/flink-table-store-spark-3.1/target/flink-table-store-spark-3.1-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp flink-table-store-spark/flink-table-store-spark-2/target/flink-table-store-spark-2-${RELEASE_VERSION}.jar ${RELEASE_DIR}
 
 mvn clean install -Dcheckstyle.skip=true -Dgpg.skip -DskipTests -Phive-3.1 -f flink-table-store-hive
 cp flink-table-store-hive/flink-table-store-hive-catalog/target/flink-table-store-hive-catalog-${RELEASE_VERSION}.jar ${RELEASE_DIR}/flink-table-store-hive-catalog-${RELEASE_VERSION}_3.1.jar
@@ -89,8 +92,10 @@ gpg --armor --detach-sig "flink-table-store-hive-connector-${RELEASE_VERSION}_3.
 gpg --armor --detach-sig "flink-table-store-hive-connector-${RELEASE_VERSION}_2.3.jar"
 gpg --armor --detach-sig "flink-table-store-hive-connector-${RELEASE_VERSION}_2.2.jar"
 gpg --armor --detach-sig "flink-table-store-hive-connector-${RELEASE_VERSION}_2.1.jar"
-gpg --armor --detach-sig "flink-table-store-spark-${RELEASE_VERSION}.jar"
-gpg --armor --detach-sig "flink-table-store-spark2-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "flink-table-store-spark-3.3-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "flink-table-store-spark-3.2-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "flink-table-store-spark-3.1-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "flink-table-store-spark-2-${RELEASE_VERSION}.jar"
 
 $SHASUM "flink-table-store-flink-1.16-${RELEASE_VERSION}.jar" > "flink-table-store-flink-1.16-${RELEASE_VERSION}.jar.sha512"
 $SHASUM "flink-table-store-flink-1.15-${RELEASE_VERSION}.jar" > "flink-table-store-flink-1.15-${RELEASE_VERSION}.jar.sha512"
@@ -103,5 +108,7 @@ $SHASUM "flink-table-store-hive-connector-${RELEASE_VERSION}_3.1.jar" > "flink-t
 $SHASUM "flink-table-store-hive-connector-${RELEASE_VERSION}_2.3.jar" > "flink-table-store-hive-connector-${RELEASE_VERSION}_2.3.jar.sha512"
 $SHASUM "flink-table-store-hive-connector-${RELEASE_VERSION}_2.2.jar" > "flink-table-store-hive-connector-${RELEASE_VERSION}_2.2.jar.sha512"
 $SHASUM "flink-table-store-hive-connector-${RELEASE_VERSION}_2.1.jar" > "flink-table-store-hive-connector-${RELEASE_VERSION}_2.1.jar.sha512"
-$SHASUM "flink-table-store-spark-${RELEASE_VERSION}.jar" > "flink-table-store-spark-${RELEASE_VERSION}.jar.sha512"
-$SHASUM "flink-table-store-spark2-${RELEASE_VERSION}.jar" > "flink-table-store-spark2-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "flink-table-store-spark-3.3-${RELEASE_VERSION}.jar" > "flink-table-store-spark-3.3-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "flink-table-store-spark-3.2-${RELEASE_VERSION}.jar" > "flink-table-store-spark-3.2-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "flink-table-store-spark-3.1-${RELEASE_VERSION}.jar" > "flink-table-store-spark-3.1-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "flink-table-store-spark-2-${RELEASE_VERSION}.jar" > "flink-table-store-spark-2-${RELEASE_VERSION}.jar.sha512"
