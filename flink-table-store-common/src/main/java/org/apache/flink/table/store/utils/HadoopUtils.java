@@ -18,6 +18,8 @@
 
 package org.apache.flink.table.store.utils;
 
+import org.apache.flink.table.store.options.Options;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.HdfsConfiguration;
 import org.slf4j.Logger;
@@ -27,15 +29,16 @@ import java.io.File;
 
 /**
  * Utility class for working with Hadoop-related classes. This should only be used if Hadoop is on
- * the classpath.
+ * the classpath. Note: decoupled from specific engines.
  */
-public class HadoopConfUtils {
+public class HadoopUtils {
 
-    private static final Logger LOG = LoggerFactory.getLogger(HadoopConfUtils.class);
+    private static final Logger LOG = LoggerFactory.getLogger(HadoopUtils.class);
+    private static final String[] FLINK_CONFIG_PREFIXES = {"flink.hadoop."};
     public static final String HADOOP_HOME_ENV = "HADOOP_HOME";
     public static final String HADOOP_CONF_ENV = "HADOOP_CONF_DIR";
 
-    public static Configuration getHadoopConfiguration() {
+    public static Configuration getHadoopConfiguration(Options options) {
 
         // Instantiate an HdfsConfiguration to load the hdfs-site.xml and hdfs-default.xml
         // from the classpath
@@ -73,8 +76,26 @@ public class HadoopConfUtils {
                     addHadoopConfIfFound(result, hadoopConfDir) || foundHadoopConfiguration;
         }
 
+        // Approach 3: Flink configuration
+        // add all configuration key with prefix 'flink.hadoop.' in flink conf to hadoop conf
+        for (String key : options.keySet()) {
+            for (String prefix : FLINK_CONFIG_PREFIXES) {
+                if (key.startsWith(prefix)) {
+                    String newKey = key.substring(prefix.length());
+                    String value = options.getString(key, null);
+                    result.set(newKey, value);
+                    LOG.debug(
+                            "Adding Flink config entry for {} as {}={} to Hadoop config",
+                            key,
+                            newKey,
+                            value);
+                    foundHadoopConfiguration = true;
+                }
+            }
+        }
+
         if (!foundHadoopConfiguration) {
-            LOG.warn("Could not find Hadoop configuration via any of the supported methods ");
+            LOG.warn("Could not find Hadoop configuration via any of the supported methods");
         }
 
         return result;

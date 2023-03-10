@@ -26,7 +26,6 @@ import org.apache.flink.table.store.table.TableType;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.HdfsConfiguration;
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -73,9 +72,17 @@ public class CatalogFactoryTest {
     @Test
     public void testContextDefaultHadoopConf(@TempDir java.nio.file.Path path) {
         Path root = new Path(path.toUri().toString());
+        String defaultFS = "master:9999";
+        String replication = "8";
+
         Options options = new Options();
         options.set(WAREHOUSE, new Path(root, "warehouse").toString());
+        options.set("flink.hadoop.fs.defaultFS", defaultFS);
+        options.set("flink.hadoop.dfs.replication", replication);
         Configuration conf = CatalogContext.create(options).hadoopConf();
-        Assertions.assertThat(conf).isInstanceOf(HdfsConfiguration.class);
+
+        assertThat(conf).isInstanceOf(HdfsConfiguration.class);
+        assertThat(conf.get("fs.defaultFS")).isEqualTo(defaultFS);
+        assertThat(conf.get("dfs.replication")).isEqualTo(replication);
     }
 }

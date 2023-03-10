@@ -23,7 +23,7 @@ import org.apache.flink.table.store.fs.FileIOLoader;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.hadoop.HadoopFileIOLoader;
 import org.apache.flink.table.store.options.Options;
-import org.apache.flink.table.store.utils.HadoopConfUtils;
+import org.apache.flink.table.store.utils.HadoopUtils;
 
 import org.apache.hadoop.conf.Configuration;
 
@@ -62,7 +62,7 @@ public class CatalogContext {
     }
 
     public static CatalogContext create(Options options) {
-        return create(options, HadoopConfUtils.getHadoopConfiguration());
+        return create(options, HadoopUtils.getHadoopConfiguration(options));
     }
 
     public static CatalogContext create(Options options, Configuration hadoopConf) {
