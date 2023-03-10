@@ -78,10 +78,10 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
                             new KeyValue().replace(row(7), 11, RowKind.DELETE, row(3)).setLevel(0)),
                     Arrays.asList(
                             new KeyValue()
-                                    .replace(row(7), 10, RowKind.INSERT, row(3))
+                                    .replace(row(7), 12, RowKind.INSERT, row(3))
                                     .setLevel(MAX_LEVEL),
                             new KeyValue()
-                                    .replace(row(7), 11, RowKind.UPDATE_BEFORE, row(3))
+                                    .replace(row(7), 13, RowKind.UPDATE_BEFORE, row(3))
                                     .setLevel(0)));
 
     protected abstract KeyValue getExpectedBefore(int idx);
@@ -124,7 +124,7 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
                         null,
                         new KeyValue().replace(row(6), 8, RowKind.UPDATE_BEFORE, row(3)),
                         new KeyValue().replace(row(7), 10, RowKind.DELETE, row(3)),
-                        new KeyValue().replace(row(7), 10, RowKind.DELETE, row(3)));
+                        new KeyValue().replace(row(7), 12, RowKind.DELETE, row(3)));
 
         private static final List<KeyValue> EXPECTED_AFTER =
                 Arrays.asList(

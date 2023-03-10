@@ -57,14 +57,14 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
     public CompactResult rewrite(
             int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) throws Exception {
         if (rewriteChangelog(outputLevel, dropDelete, sections)) {
-            return rewriteLookupCompaction(outputLevel, sections);
+            return rewriteChangelogCompaction(outputLevel, sections);
         } else {
             return rewriteCompaction(outputLevel, dropDelete, sections);
         }
     }
 
-    private CompactResult rewriteLookupCompaction(int outputLevel, List<List<SortedRun>> sections)
-            throws Exception {
+    private CompactResult rewriteChangelogCompaction(
+            int outputLevel, List<List<SortedRun>> sections) throws Exception {
         List<ConcatRecordReader.ReaderSupplier<ChangelogResult>> sectionReaders = new ArrayList<>();
         for (List<SortedRun> section : sections) {
             sectionReaders.add(
@@ -117,7 +117,7 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
     @Override
     public CompactResult upgrade(int outputLevel, DataFileMeta file) throws Exception {
         if (upgradeChangelog(outputLevel, file)) {
-            return rewriteLookupCompaction(
+            return rewriteChangelogCompaction(
                     outputLevel,
                     Collections.singletonList(
                             Collections.singletonList(SortedRun.fromSingle(file))));
