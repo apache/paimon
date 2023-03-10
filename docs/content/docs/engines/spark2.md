@@ -36,7 +36,7 @@ Table Store supports Spark 2.4+. It is highly recommended to use Spark 2.4+ vers
 
 {{< stable >}}
 
-Download [flink-table-store-spark2-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-spark2-{{< version >}}.jar).
+Download [flink-table-store-spark-2-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-spark-2-{{< version >}}.jar).
 
 You can also manually build bundled jar from the source code.
 
@@ -56,7 +56,7 @@ Build bundled jar with the following command.
 mvn clean install -DskipTests
 ```
 
-You can find the bundled jar in `./flink-table-store-spark/flink-table-store-spark2/target/flink-table-store-spark2-{{< version >}}.jar`.
+You can find the bundled jar in `./flink-table-store-spark/flink-table-store-spark-2/target/flink-table-store-spark-2-{{< version >}}.jar`.
 
 ## Quick Start
 
@@ -77,10 +77,10 @@ After the guide, all table files should be stored under the path `/tmp/table_sto
 You can append path to table store jar file to the `--jars` argument when starting `spark-shell`.
 
 ```bash
-spark-shell ... --jars /path/to/flink-table-store-spark2-{{< version >}}.jar
+spark-shell ... --jars /path/to/flink-table-store-spark-2-{{< version >}}.jar
 ```
 
-Alternatively, you can copy `flink-table-store-spark2-{{< version >}}.jar` under `spark/jars` in your Spark installation directory.
+Alternatively, you can copy `flink-table-store-spark-2-{{< version >}}.jar` under `spark/jars` in your Spark installation directory.
 
 **Step 3: Query Table**
 
