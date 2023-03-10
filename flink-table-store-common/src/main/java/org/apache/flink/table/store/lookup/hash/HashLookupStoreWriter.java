@@ -81,7 +81,6 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     private int collisions;
 
     HashLookupStoreWriter(double loadFactor, File file) throws IOException {
-        // Options
         this.loadFactor = loadFactor;
         if (loadFactor <= 0.0 || loadFactor >= 1.0) {
             throw new IllegalArgumentException(

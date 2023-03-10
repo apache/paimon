@@ -87,7 +87,6 @@ public class HashLookupStoreReader
 
     HashLookupStoreReader(boolean useMmp, long mmpSegmentSize, File file) throws IOException {
         // File path
-        // Options
         if (!file.exists()) {
             throw new FileNotFoundException("File " + file.getAbsolutePath() + " not found");
         }
