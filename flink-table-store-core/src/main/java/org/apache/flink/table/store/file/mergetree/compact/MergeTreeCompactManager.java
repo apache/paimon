@@ -100,9 +100,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Trigger normal compaciton. Picking from the following runs\n{}", runs);
             }
-            optionalUnit =
-                    strategy.pick(levels.numberOfLevels(), runs)
-                            .map(unit -> unit.files().size() < 2 ? null : unit);
+            optionalUnit = strategy.pick(levels.numberOfLevels(), runs);
         }
 
         optionalUnit.ifPresent(

@@ -121,6 +121,11 @@ public class UniversalCompaction implements CompactStrategy {
 
     private CompactUnit pickForSizeRatio(
             int maxLevel, List<LevelSortedRun> runs, int candidateCount) {
+        return pickForSizeRatio(maxLevel, runs, candidateCount, false);
+    }
+
+    public CompactUnit pickForSizeRatio(
+            int maxLevel, List<LevelSortedRun> runs, int candidateCount, boolean forcePick) {
         long candidateSize = candidateSize(runs, candidateCount);
         for (int i = candidateCount; i < runs.size(); i++) {
             LevelSortedRun next = runs.get(i);
@@ -132,7 +137,7 @@ public class UniversalCompaction implements CompactStrategy {
             candidateCount++;
         }
 
-        if (candidateCount > 1) {
+        if (forcePick || candidateCount > 1) {
             return createUnit(runs, maxLevel, candidateCount, maxSortedRunNum);
         }
 
