@@ -34,7 +34,7 @@ import java.io.File;
 public class HadoopUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(HadoopUtils.class);
-    private static final String[] FLINK_CONFIG_PREFIXES = {"flink.hadoop."};
+    private static final String[] CONFIG_PREFIXES = {"hadoop."};
     public static final String HADOOP_HOME_ENV = "HADOOP_HOME";
     public static final String HADOOP_CONF_ENV = "HADOOP_CONF_DIR";
 
@@ -77,9 +77,9 @@ public class HadoopUtils {
         }
 
         // Approach 3: Flink configuration
-        // add all configuration key with prefix 'flink.hadoop.' in flink conf to hadoop conf
+        // add all configuration key with prefix 'hadoop.' in flink conf to hadoop conf
         for (String key : options.keySet()) {
-            for (String prefix : FLINK_CONFIG_PREFIXES) {
+            for (String prefix : CONFIG_PREFIXES) {
                 if (key.startsWith(prefix)) {
                     String newKey = key.substring(prefix.length());
                     String value = options.getString(key, null);

@@ -77,8 +77,8 @@ public class CatalogFactoryTest {
 
         Options options = new Options();
         options.set(WAREHOUSE, new Path(root, "warehouse").toString());
-        options.set("flink.hadoop.fs.defaultFS", defaultFS);
-        options.set("flink.hadoop.dfs.replication", replication);
+        options.set("hadoop.fs.defaultFS", defaultFS);
+        options.set("hadoop.dfs.replication", replication);
         Configuration conf = CatalogContext.create(options).hadoopConf();
 
         assertThat(conf).isInstanceOf(HdfsConfiguration.class);
