@@ -20,6 +20,7 @@ package org.apache.flink.table.store.utils;
 
 import org.apache.flink.table.store.memory.MemorySegment;
 
+import static org.apache.flink.table.store.memory.MemorySegment.BYTE_ARRAY_BASE_OFFSET;
 import static org.apache.flink.table.store.memory.MemorySegment.UNSAFE;
 
 /** Murmur Hash. This is inspired by Guava's Murmur3_32HashFunction. */
@@ -43,6 +44,16 @@ public final class MurmurHashUtils {
      */
     public static int hashUnsafeBytesByWords(Object base, long offset, int lengthInBytes) {
         return hashUnsafeBytesByWords(base, offset, lengthInBytes, DEFAULT_SEED);
+    }
+
+    /** Hash bytes. */
+    public static int hashBytesPositive(byte[] bytes) {
+        return hashBytes(bytes) & 0x7fffffff;
+    }
+
+    /** Hash bytes. */
+    public static int hashBytes(byte[] bytes) {
+        return hashUnsafeBytes(bytes, BYTE_ARRAY_BASE_OFFSET, bytes.length, DEFAULT_SEED);
     }
 
     /**

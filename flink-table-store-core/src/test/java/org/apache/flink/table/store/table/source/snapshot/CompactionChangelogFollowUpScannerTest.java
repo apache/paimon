@@ -65,7 +65,8 @@ public class CompactionChangelogFollowUpScannerTest extends SnapshotEnumeratorTe
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(5);
 
-        DataTableScan scan = table.newScan().withLevel(table.options().numLevels() - 1);
+        DataTableScan scan =
+                table.newScan().withLevelFilter(level -> level == table.options().numLevels() - 1);
         TableRead read = table.newRead();
         CompactionChangelogFollowUpScanner scanner = new CompactionChangelogFollowUpScanner();
 

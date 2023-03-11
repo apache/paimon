@@ -69,7 +69,7 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
     private final NavigableMap<Long, Long> firstWriteMs;
     private final ListState<Tuple2<Long, Long>> firstWriteMsState;
 
-    private transient TreeSet<Long> commitIdentifiersToCheck;
+    private final TreeSet<Long> commitIdentifiersToCheck;
 
     public FullChangelogStoreSinkWrite(
             FileStoreTable table,

@@ -24,6 +24,7 @@ import org.apache.flink.table.store.types.RowKind;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -74,8 +75,13 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
                             new KeyValue()
                                     .replace(row(7), 10, RowKind.INSERT, row(3))
                                     .setLevel(MAX_LEVEL),
+                            new KeyValue().replace(row(7), 11, RowKind.DELETE, row(3)).setLevel(0)),
+                    Arrays.asList(
                             new KeyValue()
-                                    .replace(row(7), 11, RowKind.DELETE, row(3))
+                                    .replace(row(7), 12, RowKind.INSERT, row(3))
+                                    .setLevel(MAX_LEVEL),
+                            new KeyValue()
+                                    .replace(row(7), 13, RowKind.UPDATE_BEFORE, row(3))
                                     .setLevel(0)));
 
     protected abstract KeyValue getExpectedBefore(int idx);
@@ -90,9 +96,15 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
             wrapper.reset();
             List<KeyValue> kvs = INPUT_KVS.get(i);
             kvs.forEach(kv -> wrapper.add(kv));
-            FullChangelogMergeFunctionWrapper.Result actualResult = wrapper.getResult();
-            MergeFunctionTestUtils.assertKvEquals(getExpectedBefore(i), actualResult.before());
-            MergeFunctionTestUtils.assertKvEquals(getExpectedAfter(i), actualResult.after());
+            ChangelogResult actualResult = wrapper.getResult();
+            List<KeyValue> expectedChangelogs = new ArrayList<>();
+            if (getExpectedBefore(i) != null) {
+                expectedChangelogs.add(getExpectedBefore(i));
+            }
+            if (getExpectedAfter(i) != null) {
+                expectedChangelogs.add(getExpectedAfter(i));
+            }
+            MergeFunctionTestUtils.assertKvsEquals(expectedChangelogs, actualResult.changelogs());
             MergeFunctionTestUtils.assertKvEquals(getExpectedResult(i), actualResult.result());
         }
     }
@@ -111,7 +123,8 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
                         null,
                         null,
                         new KeyValue().replace(row(6), 8, RowKind.UPDATE_BEFORE, row(3)),
-                        new KeyValue().replace(row(7), 10, RowKind.DELETE, row(3)));
+                        new KeyValue().replace(row(7), 10, RowKind.DELETE, row(3)),
+                        new KeyValue().replace(row(7), 12, RowKind.DELETE, row(3)));
 
         private static final List<KeyValue> EXPECTED_AFTER =
                 Arrays.asList(
@@ -121,6 +134,7 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
                         new KeyValue().replace(row(4), 5, RowKind.INSERT, row(-3)),
                         null,
                         new KeyValue().replace(row(6), 9, RowKind.UPDATE_AFTER, row(-3)),
+                        null,
                         null);
 
         private static final List<KeyValue> EXPECTED_RESULT =
@@ -131,6 +145,7 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
                         new KeyValue().replace(row(4), 5, RowKind.INSERT, row(-3)),
                         null,
                         new KeyValue().replace(row(6), 9, RowKind.INSERT, row(-3)),
+                        null,
                         null);
 
         @Override

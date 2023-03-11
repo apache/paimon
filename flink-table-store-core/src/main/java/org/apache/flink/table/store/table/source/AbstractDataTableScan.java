@@ -34,6 +34,7 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.utils.Filter;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -111,8 +112,8 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     @Override
-    public AbstractDataTableScan withLevel(int level) {
-        scan.withLevel(level);
+    public AbstractDataTableScan withLevelFilter(Filter<Integer> levelFilter) {
+        scan.withLevelFilter(levelFilter);
         return this;
     }
 
