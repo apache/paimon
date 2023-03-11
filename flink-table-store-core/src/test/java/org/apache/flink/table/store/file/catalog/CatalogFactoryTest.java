@@ -24,6 +24,8 @@ import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.TableType;
 
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hdfs.HdfsConfiguration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -65,5 +67,22 @@ public class CatalogFactoryTest {
         options.set(TABLE_TYPE, TableType.EXTERNAL);
         assertThatThrownBy(() -> CatalogFactory.createCatalog(CatalogContext.create(options)))
                 .hasMessageContaining("Only managed table is supported in File system catalog.");
+    }
+
+    @Test
+    public void testContextDefaultHadoopConf(@TempDir java.nio.file.Path path) {
+        Path root = new Path(path.toUri().toString());
+        String defaultFS = "master:9999";
+        String replication = "8";
+
+        Options options = new Options();
+        options.set(WAREHOUSE, new Path(root, "warehouse").toString());
+        options.set("hadoop.fs.defaultFS", defaultFS);
+        options.set("hadoop.dfs.replication", replication);
+        Configuration conf = CatalogContext.create(options).hadoopConf();
+
+        assertThat(conf).isInstanceOf(HdfsConfiguration.class);
+        assertThat(conf.get("fs.defaultFS")).isEqualTo(defaultFS);
+        assertThat(conf.get("dfs.replication")).isEqualTo(replication);
     }
 }
