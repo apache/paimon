@@ -33,8 +33,8 @@ public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValu
 
     private final MergeFunction<KeyValue> mergeFunction;
 
-    private transient KeyValue initialKv;
-    private transient boolean isInitialized;
+    private KeyValue initialKv;
+    private boolean isInitialized;
 
     public ReducerMergeFunctionWrapper(MergeFunction<KeyValue> mergeFunction) {
         this.mergeFunction = mergeFunction;

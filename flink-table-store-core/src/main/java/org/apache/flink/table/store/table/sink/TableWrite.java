@@ -52,8 +52,6 @@ public interface TableWrite extends AutoCloseable {
      * <p>NOTE: In Java API, full compaction is not automatically executed. If you set
      * 'changelog-producer' to 'full-compaction', please execute this method regularly to produce
      * changelog.
-     *
-     * <p>NOTE: this method will block until the completion of the compaction execution.
      */
     void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
 }
