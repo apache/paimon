@@ -46,6 +46,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.catalog.Catalog.DEFAULT_DATABASE;
@@ -58,6 +59,8 @@ public abstract class ActionBase implements Action {
     protected Catalog catalog;
 
     protected final FlinkCatalog flinkCatalog;
+
+    protected final String catalogName = "table-store-" + UUID.randomUUID();
 
     protected StreamExecutionEnvironment env;
 
@@ -77,7 +80,7 @@ public abstract class ActionBase implements Action {
                 CatalogFactory.createCatalog(
                         CatalogContext.create(
                                 new Options().set(CatalogOptions.WAREHOUSE, warehouse)));
-        flinkCatalog = new FlinkCatalog(catalog, "table-store", DEFAULT_DATABASE);
+        flinkCatalog = new FlinkCatalog(catalog, catalogName, DEFAULT_DATABASE);
 
         env = StreamExecutionEnvironment.getExecutionEnvironment();
         tEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());

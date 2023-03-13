@@ -314,7 +314,10 @@ Run the following command to submit a 'merge-into' job for the table.
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table <target-table> \
+    [--target-as <target-table-alias>] \
     --using-table <source-table> \
+    [--source-location <catalog.database>] \
+    [--source-as <source-table-alias>] \
     --on <merge-condition> \
     --merge-actions <matched-upsert,matched-delete,not-matched-insert,not-matched-by-source-upsert,not-matched-by-source-delete> \
     --matched-upsert-condition <matched-condition> \
@@ -325,6 +328,9 @@ Run the following command to submit a 'merge-into' job for the table.
     --not-matched-by-source-upsert-condition <not-matched-by-source-condition> \
     --not-matched-by-source-upsert-set <not-matched-upsert-changes> \
     --not-matched-by-source-delete-condition <not-matched-by-source-condition>
+    
+Alternatively, you can use '--using-query <query-expression>' to use query result as source table, or
+use '--using-dll <ddl> [, --using-ddl <ddl> ...]' to create a new table as source table in runtime.
     
 -- Examples:
 -- Find all orders mentioned in the source table, then mark as important if the price is above 100 
@@ -341,7 +347,7 @@ Run the following command to submit a 'merge-into' job for the table.
     --merge-actions \
     matched-upsert,matched-delete \
     --matched-upsert-condition "T.price > 100" \
-    --matched-upsert-set "id = T.id, price = T.price, mark = 'important'" \
+    --matched-upsert-set "mark = 'important'" \
     --matched-delete-condition "T.price < 10" 
     
 -- For matched order rows, increase the price, and if there is no match, insert the order from the 
@@ -357,7 +363,7 @@ Run the following command to submit a 'merge-into' job for the table.
     --on "T.id = S.order_id" \
     --merge-actions \
     matched-upsert,not-matched-insert \
-    --matched-upsert-set "id = T.id, price = T.price + 20, mark = T.mark" \
+    --matched-upsert-set "price = T.price + 20" \
     --not-matched-insert-values * 
 
 -- For not matched by source order rows (which are in the target table and does not match any row in the
@@ -374,9 +380,48 @@ Run the following command to submit a 'merge-into' job for the table.
     --merge-actions \
     not-matched-by-source-upsert,not-matched-by-source-delete \
     --not-matched-by-source-upsert-condition "T.mark <> 'trivial'" \
-    --not-matched-by-source-upsert-set "id = T.id, price = T.price - 20, mark = T.mark" \
+    --not-matched-by-source-upsert-set "price = T.price - 20" \
     --not-matched-by-source-delete-condition "T.mark = 'trivial'"
 ```
+
+The term 'matched' explanation:
+1. matched: changed rows are from target table and each can match a source table row based on 
+merge-condition and optional matched-condition (source ∩ target).
+2. not-matched: changed rows are from source table and all rows cannot match any target table 
+row based on merge-condition and optional not-matched-condition (source - target).
+3. not-matched-by-source: changed rows are from target table and all row cannot match any source 
+table row based on merge-condition and optional not-matched-by-source-condition (target - source).
+
+Parameters format:\
+All conditions, set changes and values should use Flink SQL syntax. Please quote them
+with \" to escape special characters.
+1. matched-upsert-changes:\
+col = <source-table>.col | expression [, ...] (Means set target.col with given value. Do not 
+add '<target-table>.' before 'col'.)\
+Especially, you can use '*' to set columns with all source columns (require target table's 
+schema is equal to source's).
+2. not-matched-upsert-changes is similar to matched-upsert-changes, but you cannot reference 
+source table's column or use '*'.
+3. insert-values:\
+col1,col2,...,col_end\ 
+Must specify values of all columns. For each column, you can reference <source-table>.col or 
+use an expression.\
+Especially, you can use '*' to insert with all source columns (require target table's schema 
+is equal to source's).
+4. not-matched-condition cannot use target table's columns to construct condition expression.
+5. not-matched-by-source-condition cannot use source table's columns to construct condition expression.
+
+{{< hint warning >}}
+1. source-alias cannot be duplicated with existed table name. If you use --using-query or 
+--using-ddl, source-alias must be specified. If you use --using-ddl, source-alias should be equal to the
+table name in "CREATE TABLE table-name".
+2. source-location must be specified if the source table is not in the same place as target table. 
+Format: catalog.database
+3. At least one merge action must be specified.
+4. If both matched-upsert and matched-delete actions are present, their conditions must both be present too 
+(same to not-matched-by-source-upsert and not-matched-by-source-delete). Otherwise, all conditions are optional.
+
+{{< /hint >}}
 
 For more information of 'merge-into', see
 

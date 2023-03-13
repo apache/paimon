@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector.action;
 
+import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.types.Row;
@@ -106,7 +107,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
         //   SET v = v || '_nmu', last_action = 'not_matched_upsert'
         // WHEN NOT MATCHED BY SOURCE AND (dt >= '02-28') THEN DELETE
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSourceTable("S")
+        action.withSourceTable(null, null, "S")
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withMatchedUpsert(
                         "T.v <> S.v AND S.v IS NOT NULL", "v = S.v, last_action = 'matched_upsert'")
@@ -130,7 +131,34 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testUsingSource() throws Exception {
+    public void testTargetAlias() throws Exception {
+        // prepare table T
+        prepareTable(CoreOptions.ChangelogProducer.NONE);
+
+        MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
+        action.withTargetAlias("TT")
+                .withSourceTable(null, null, "S")
+                .withMergeCondition("TT.k = S.k AND TT.dt = S.dt")
+                .withMatchedDelete("S.v IS NULL");
+
+        validateActionRunResult(
+                action,
+                Arrays.asList(
+                        changelogRow("-D", 4, "v_4", "creation", "02-27"),
+                        changelogRow("-D", 8, "v_8", "creation", "02-28")),
+                Arrays.asList(
+                        changelogRow("+I", 1, "v_1", "creation", "02-27"),
+                        changelogRow("+I", 2, "v_2", "creation", "02-27"),
+                        changelogRow("+I", 3, "v_3", "creation", "02-27"),
+                        changelogRow("+I", 5, "v_5", "creation", "02-28"),
+                        changelogRow("+I", 6, "v_6", "creation", "02-28"),
+                        changelogRow("+I", 7, "v_7", "creation", "02-28"),
+                        changelogRow("+I", 9, "v_9", "creation", "02-28"),
+                        changelogRow("+I", 10, "v_10", "creation", "02-28")));
+    }
+
+    @Test
+    public void testUsingQuerySource() throws Exception {
         // prepare table T
         prepareTable(CoreOptions.ChangelogProducer.NONE);
 
@@ -146,7 +174,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
         //   SET v = v || '_nmu', last_action = 'not_matched_upsert'
         // WHEN NOT MATCHED BY SOURCE AND (dt >= '02-28') THEN DELETE
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSource("SELECT * FROM S WHERE k < 12", "SS")
+        action.withQuerySource(null, "SS", "SELECT * FROM S WHERE k < 12")
                 .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
                 .withMatchedUpsert(
                         "T.v <> SS.v AND SS.v IS NOT NULL",
@@ -184,13 +212,61 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testUsingDdlSource() throws Exception {
+        // prepare table T
+        prepareTable(CoreOptions.ChangelogProducer.NONE);
+
+        TestValuesTableFactory.registerData(
+                Arrays.asList(
+                        changelogRow("+I", 1, "v_1", "02-27"),
+                        changelogRow("+I", 4, null, "02-27"),
+                        changelogRow("+I", 8, null, "02-28")));
+
+        String catalog =
+                String.format(
+                        "CREATE CATALOG test_cat WITH ('type' = 'table-store', 'warehouse' = '%s')",
+                        getTempDirPath());
+        String useCatalog = "USE CATALOG test_cat";
+        String id =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                changelogRow("+I", 1, "v_1", "02-27"),
+                                changelogRow("+I", 4, null, "02-27"),
+                                changelogRow("+I", 8, null, "02-28")));
+        String ddl =
+                String.format(
+                        "CREATE TEMPORARY TABLE S (k INT, v STRING, dt STRING)\n"
+                                + "WITH ('connector' = 'values', 'bounded' = 'true', 'data-id' = '%s');",
+                        id);
+
+        MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
+        action.withDdlSource("test_cat.default", "S", catalog, useCatalog, ddl)
+                .withMergeCondition("T.k = S.k AND T.dt = S.dt")
+                .withMatchedDelete("S.v IS NULL");
+        validateActionRunResult(
+                action,
+                Arrays.asList(
+                        changelogRow("-D", 4, "v_4", "creation", "02-27"),
+                        changelogRow("-D", 8, "v_8", "creation", "02-28")),
+                Arrays.asList(
+                        changelogRow("+I", 1, "v_1", "creation", "02-27"),
+                        changelogRow("+I", 2, "v_2", "creation", "02-27"),
+                        changelogRow("+I", 3, "v_3", "creation", "02-27"),
+                        changelogRow("+I", 5, "v_5", "creation", "02-28"),
+                        changelogRow("+I", 6, "v_6", "creation", "02-28"),
+                        changelogRow("+I", 7, "v_7", "creation", "02-28"),
+                        changelogRow("+I", 9, "v_9", "creation", "02-28"),
+                        changelogRow("+I", 10, "v_10", "creation", "02-28")));
+    }
+
+    @Test
     public void testMatchedUpsertSetAll() throws Exception {
         // prepare table T
         prepareTable(CoreOptions.ChangelogProducer.NONE);
 
         // build MergeIntoAction
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSource("SELECT k, v, 'unknown', dt FROM S", "SS")
+        action.withQuerySource(null, "SS", "SELECT k, v, 'unknown', dt FROM S")
                 .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
                 .withMatchedUpsert(null, "*");
 
@@ -225,7 +301,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         // build MergeIntoAction
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSource("SELECT k, v, 'unknown', dt FROM S", "SS")
+        action.withQuerySource(null, "SS", "SELECT k, v, 'unknown', dt FROM S")
                 .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
                 .withNotMatchedInsert("SS.k < 12", "*");
 
@@ -274,7 +350,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         // build MergeIntoAction
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSourceTable("S")
+        action.withSourceTable(null, null, "S")
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withNotMatchedInsert(null, "S.k, S.v, 0, S.dt");
 

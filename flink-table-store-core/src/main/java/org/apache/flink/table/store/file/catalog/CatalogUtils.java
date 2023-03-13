@@ -19,6 +19,10 @@
 package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.table.store.fs.Path;
+import org.apache.flink.table.store.utils.Preconditions;
+
+import java.util.Arrays;
+import java.util.stream.Collectors;
 
 /** Utils for {@link Catalog}. */
 public class CatalogUtils {
@@ -53,5 +57,18 @@ public class CatalogUtils {
 
     public static String table(String path) {
         return Identifier.fromPath(path).getObjectName();
+    }
+
+    public static String escapeQualifiedName(String qualifiedName, char escapeChar) {
+        String[] splits = qualifiedName.split("\\.");
+        Preconditions.checkArgument(
+                splits.length == 3,
+                String.format(
+                        "Cannot get splits from '%s' to get catalog, database and table",
+                        qualifiedName));
+
+        return Arrays.stream(splits)
+                .map(p -> String.format("%c%s%c", escapeChar, p, escapeChar))
+                .collect(Collectors.joining("."));
     }
 }
