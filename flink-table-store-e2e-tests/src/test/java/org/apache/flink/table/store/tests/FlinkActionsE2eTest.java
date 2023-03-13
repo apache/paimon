@@ -222,6 +222,8 @@ public class FlinkActionsE2eTest extends E2eTestBase {
                 jobManager.execInContainer(
                         "bin/flink",
                         "run",
+                        "-p",
+                        "1",
                         "-c",
                         "org.apache.flink.table.store.connector.action.FlinkActions",
                         "--detached",
