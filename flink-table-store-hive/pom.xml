@@ -36,7 +36,7 @@ under the License.
     <modules>
         <module>flink-table-store-hive-catalog</module>
         <module>flink-table-store-hive-common</module>
-        <module>flink-table-store-hive-connector</module>
+        <module>flink-table-store-hive-connector-common</module>
         <module>flink-table-store-hive-connector-2.1</module>
         <module>flink-table-store-hive-connector-2.1-cdh-6.3</module>
         <module>flink-table-store-hive-connector-2.2</module>

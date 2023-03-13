@@ -30,7 +30,7 @@ This documentation is a guide for using Table Store in Hive.
 
 ## Version
 
-Table Store currently supports Hive 2.1, 2.2, 2.3 and 3.1.
+Table Store currently supports Hive 2.1, 2.1-cdh-6.3, 2.2, 2.3 and 3.1.
 
 ## Execution Engine
 
@@ -131,7 +131,7 @@ SELECT * FROM test_table;
 Run the following Hive SQL in Hive CLI to access the created table.
 
 ```sql
--- Assume that flink-table-store-hive-connector-2.3-{{< version >}}.jar is already in auxlib directory.
+-- Assume that flink-table-store-hive-connector-<hive-version>-{{< version >}}.jar is already in auxlib directory.
 -- List tables in Hive
 -- (you might need to switch to "default" database if you're not there by default)
 

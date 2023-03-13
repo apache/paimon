@@ -40,7 +40,7 @@ under the License.
     <dependencies>
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-hive-connector</artifactId>
+            <artifactId>flink-table-store-hive-connector-common</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>
@@ -60,7 +60,7 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <include>org.apache.flink:flink-table-store-hive-connector</include>
+                                    <include>org.apache.flink:flink-table-store-hive-connector-common</include>
                                 </includes>
                             </artifactSet>
                         </configuration>
