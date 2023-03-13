@@ -316,7 +316,6 @@ Run the following command to submit a 'merge-into' job for the table.
     --table <target-table> \
     [--target-as <target-table-alias>] \
     --using-table <source-table> \
-    [--source-location <catalog.database>] \
     [--source-as <source-table-alias>] \
     --on <merge-condition> \
     --merge-actions <matched-upsert,matched-delete,not-matched-insert,not-matched-by-source-upsert,not-matched-by-source-delete> \
@@ -329,8 +328,7 @@ Run the following command to submit a 'merge-into' job for the table.
     --not-matched-by-source-upsert-set <not-matched-upsert-changes> \
     --not-matched-by-source-delete-condition <not-matched-by-source-condition>
     
-Alternatively, you can use '--using-query <query-expression>' to use query result as source table, or
-use '--using-dll <ddl> [, --using-ddl <ddl> ...]' to create a new table as source table in runtime.
+Alternatively, you can use '--using-sql <sql> [, --using-sql <sql> ...]' to create a new table as source table at runtime.
     
 -- Examples:
 -- Find all orders mentioned in the source table, then mark as important if the price is above 100 
@@ -382,6 +380,21 @@ use '--using-dll <ddl> [, --using-ddl <ddl> ...]' to create a new table as sourc
     --not-matched-by-source-upsert-condition "T.mark <> 'trivial'" \
     --not-matched-by-source-upsert-set "price = T.price - 20" \
     --not-matched-by-source-delete-condition "T.mark = 'trivial'"
+    
+-- An using-sql example: 
+-- Create a temporary view S at runtime and use S as source table
+./flink run \
+    -c org.apache.flink.table.store.connector.action.FlinkActions \
+    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    merge-into \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table T \
+    --using-sql "CREATE TEMPORARY VIEW S AS SELECT order_id, price, 'important' FROM important_order" \
+    --source-alias S \
+    --on "T.id = S.order_id" \
+    --merge-actions not-matched-insert\
+    --not-matched-insert-values *
 ```
 
 The term 'matched' explanation:
@@ -412,11 +425,10 @@ is equal to source's).
 5. not-matched-by-source-condition cannot use source table's columns to construct condition expression.
 
 {{< hint warning >}}
-1. source-alias cannot be duplicated with existed table name. If you use --using-query or 
---using-ddl, source-alias must be specified. If you use --using-ddl, source-alias should be equal to the
-table name in "CREATE TABLE table-name".
-2. source-location must be specified if the source table is not in the same place as target table. 
-Format: catalog.database
+1. source-alias cannot be duplicated with existed table name. If you use --using-ddl, source-alias 
+must be specified and equal to the table name in "CREATE" statement.
+2. If the source table is not in the same place as target table, the source-table-name or the source-alias 
+should be qualified (database.table or catalog.database.table if in different catalog).
 3. At least one merge action must be specified.
 4. If both matched-upsert and matched-delete actions are present, their conditions must both be present too 
 (same to not-matched-by-source-upsert and not-matched-by-source-delete). Otherwise, all conditions are optional.
