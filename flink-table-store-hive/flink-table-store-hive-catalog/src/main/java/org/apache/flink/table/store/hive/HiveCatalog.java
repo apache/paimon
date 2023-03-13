@@ -299,7 +299,7 @@ public class HiveCatalog extends AbstractCatalog {
         try {
             final SchemaManager schemaManager = schemaManager(identifier);
             // first commit changes to underlying files
-            TableSchema schema = schemaManager(identifier).commitChanges(changes);
+            TableSchema schema = schemaManager.commitChanges(changes);
 
             try {
                 // sync to hive hms
@@ -308,7 +308,7 @@ public class HiveCatalog extends AbstractCatalog {
                 updateHmsTable(table, identifier, schema);
                 client.alter_table(identifier.getDatabaseName(), identifier.getObjectName(), table);
             } catch (TException te) {
-                fileIO.deleteQuietly(schemaManager.toSchemaPath(schema.id()));
+                schemaManager.deleteSchema(schema.id());
                 throw te;
             }
         } catch (Exception e) {

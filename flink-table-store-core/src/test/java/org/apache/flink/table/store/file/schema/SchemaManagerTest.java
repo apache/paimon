@@ -289,4 +289,24 @@ public class SchemaManagerTest {
                         "Cannot define any primary key in an append-only table. "
                                 + "Set 'write-mode'='change-log' if still want to keep the primary key definition.");
     }
+
+    @Test
+    public void testDeleteSchemaWithSchemaId() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        partitionKeys,
+                        primaryKeys,
+                        options,
+                        "append-only table with primary key");
+        manager.createTable(schema);
+        String schemaContent = manager.latest().get().toString();
+
+        manager.commitChanges(SchemaChange.setOption("aa", "bb"));
+        assertThat(manager.latest().get().options().get("aa")).isEqualTo("bb");
+
+        manager.deleteSchema(manager.latest().get().id());
+        assertThat(manager.latest().get().toString()).isEqualTo(schemaContent);
+    }
 }
