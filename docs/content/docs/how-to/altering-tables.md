@@ -202,3 +202,23 @@ ALTER TABLE my_table ALTER COLUMN buy_count COMMENT 'buy count';
 {{< /tab >}}
 
 {{< /tabs >}}
+
+
+
+## Changing Column Position
+
+To modify an existent column to a new position, use FIRST or AFTER col_name.
+
+{{< tabs "change-column-position" >}}
+
+{{< tab "Spark3" >}}
+
+```sql
+ALTER TABLE my_table ALTER COLUMN col_a FIRST;
+
+ALTER TABLE my_table ALTER COLUMN col_a AFTER col_b;
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
