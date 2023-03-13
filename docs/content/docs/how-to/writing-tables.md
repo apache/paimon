@@ -382,7 +382,7 @@ Alternatively, you can use '--using-sql <sql> [, --using-sql <sql> ...]' to crea
     --not-matched-by-source-delete-condition "T.mark = 'trivial'"
     
 -- An using-sql example: 
--- Create a temporary view S at runtime and use S as source table
+-- Create a temporary view S in new catalog and use it as source table
 ./flink run \
     -c org.apache.flink.table.store.connector.action.FlinkActions \
     /path/to/flink-table-store-flink-**-{{< version >}}.jar \
@@ -390,8 +390,11 @@ Alternatively, you can use '--using-sql <sql> [, --using-sql <sql> ...]' to crea
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table T \
+    --using-sql "CREATE CATALOG test WITH (...)" \
+    --using-sql "USE CATALOG test" \
+    --using-sql "USE DATABASE default" \
     --using-sql "CREATE TEMPORARY VIEW S AS SELECT order_id, price, 'important' FROM important_order" \
-    --source-alias S \
+    --source-alias test.default.S \
     --on "T.id = S.order_id" \
     --merge-actions not-matched-insert\
     --not-matched-insert-values *

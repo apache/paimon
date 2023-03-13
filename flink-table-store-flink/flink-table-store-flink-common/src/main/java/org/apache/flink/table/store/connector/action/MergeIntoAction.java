@@ -298,7 +298,7 @@ public class MergeIntoAction extends ActionBase {
         if (sqlSource != null) {
             if (sourceAlias == null) {
                 System.err.println(
-                        "The ddl source and its alias must be specified together.\n"
+                        "--using-sql and --source-as must be specified together.\n"
                                 + "Run <action> --help for help.");
                 return false;
             }
@@ -308,7 +308,7 @@ public class MergeIntoAction extends ActionBase {
 
         if (count != 1) {
             System.err.println(
-                    "Please specify source as either \"using-table\" or \"using-ddl\".\n"
+                    "Please specify source as either \"using-table\" or \"using-sql\".\n"
                             + "Run <action> --help for help.");
             return false;
         }
