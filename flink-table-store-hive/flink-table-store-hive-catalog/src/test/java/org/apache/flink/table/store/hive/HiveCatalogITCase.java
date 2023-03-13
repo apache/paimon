@@ -541,7 +541,7 @@ public class HiveCatalogITCase {
                         "  'uri' = '',",
                         "  'warehouse' = '" + path + "',",
                         "  'metastore.client.class' = '"
-                                + FailHiveMetaStoreClient.class.getName()
+                                + CreateFailHiveMetaStoreClient.class.getName()
                                 + "'",
                         ")"));
         tEnv.executeSql("USE CATALOG my_hive_custom_client");
@@ -559,6 +559,44 @@ public class HiveCatalogITCase {
                                 new org.apache.flink.table.store.fs.Path(
                                         path, "default.db/hive_table"))
                         .listAllIds()
+                        .isEmpty());
+    }
+
+    @Test
+    public void testAlterTableFailedInHive() throws Exception {
+        tEnv.executeSql(
+                        String.join(
+                                "\n",
+                                "CREATE CATALOG my_alter_hive WITH (",
+                                "  'type' = 'table-store',",
+                                "  'metastore' = 'hive',",
+                                "  'uri' = '',",
+                                "  'warehouse' = '" + path + "',",
+                                "  'metastore.client.class' = '"
+                                        + AlterFailHiveMetaStoreClient.class.getName()
+                                        + "'",
+                                ")"))
+                .await();
+        tEnv.executeSql("USE CATALOG my_alter_hive").await();
+        tEnv.executeSql("CREATE TABLE alter_failed_table(a INT, b STRING)").await();
+
+        assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE alter_failed_table SET ('aa'='bb')"))
+                .isInstanceOf(TableException.class)
+                .hasMessage(
+                        String.format(
+                                "Could not execute "
+                                        + "ALTER TABLE my_alter_hive.default.alter_failed_table "
+                                        + "SET (aa: [bb], path: [%sdefault.db/alter_failed_table])",
+                                path));
+
+        assertTrue(
+                new SchemaManager(
+                                LocalFileIO.create(),
+                                new org.apache.flink.table.store.fs.Path(
+                                        path, "default.db/alter_failed_table"))
+                        .latest()
+                        .get()
+                        .options()
                         .isEmpty());
     }
 
