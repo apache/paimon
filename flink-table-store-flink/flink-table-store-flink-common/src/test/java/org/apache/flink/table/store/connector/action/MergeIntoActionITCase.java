@@ -186,7 +186,8 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         id);
 
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSqlSource("test_cat.default.S", catalog, useCatalog, ddl)
+        // test current catalog and current database
+        action.withSourceSqls("S", catalog, useCatalog, ddl)
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withMatchedDelete("S.v IS NULL");
         validateActionRunResult(
@@ -212,7 +213,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         // build MergeIntoAction
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSqlSource("SS", "CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
+        action.withSourceSqls("SS", "CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
                 .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
                 .withMatchedUpsert(null, "*");
 
@@ -247,7 +248,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         // build MergeIntoAction
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSqlSource("SS", "CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
+        action.withSourceSqls("SS", "CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
                 .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
                 .withNotMatchedInsert("SS.k < 12", "*");
 

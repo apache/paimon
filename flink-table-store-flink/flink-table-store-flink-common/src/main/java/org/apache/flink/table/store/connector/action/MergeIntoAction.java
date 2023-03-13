@@ -92,7 +92,7 @@ public class MergeIntoAction extends ActionBase {
 
     // source table
     @Nullable private String sourceTable;
-    @Nullable private String[] sqls;
+    @Nullable private String[] sourceSqls;
     @Nullable private String sourceAlias;
 
     // merge condition
@@ -163,9 +163,9 @@ public class MergeIntoAction extends ActionBase {
         return this;
     }
 
-    public MergeIntoAction withSqlSource(String sourceAlias, String... sqls) {
+    public MergeIntoAction withSourceSqls(String sourceAlias, String... sourceSqls) {
         this.sourceAlias = sourceAlias;
-        this.sqls = sqls;
+        this.sourceSqls = sourceSqls;
         return this;
     }
 
@@ -285,8 +285,8 @@ public class MergeIntoAction extends ActionBase {
     }
 
     private static boolean initSource(MultipleParameterTool params, MergeIntoAction action) {
-        String sourceTable = params.get("using-table");
-        Collection<String> sqlSource = params.getMultiParameter("using-sql");
+        String sourceTable = params.get("source-table");
+        Collection<String> sourceSqls = params.getMultiParameter("source-sql");
         String sourceAlias = params.get("source-as");
 
         int count = 0;
@@ -295,20 +295,20 @@ public class MergeIntoAction extends ActionBase {
             count++;
         }
 
-        if (sqlSource != null) {
+        if (sourceSqls != null) {
             if (sourceAlias == null) {
                 System.err.println(
-                        "--using-sql and --source-as must be specified together.\n"
+                        "--source-sql and --source-as must be specified together.\n"
                                 + "Run <action> --help for help.");
                 return false;
             }
-            action.withSqlSource(sourceAlias, sqlSource.toArray(new String[0]));
+            action.withSourceSqls(sourceAlias, sourceSqls.toArray(new String[0]));
             count++;
         }
 
         if (count != 1) {
             System.err.println(
-                    "Please specify source as either \"using-table\" or \"using-sql\".\n"
+                    "Please specify source as either \"source-table\" or \"source-sql\".\n"
                             + "Run <action> --help for help.");
             return false;
         }
@@ -373,7 +373,7 @@ public class MergeIntoAction extends ActionBase {
                         + "             --database <database-name>\n"
                         + "             --table <target-table-name>\n"
                         + "             [--target-as <target-table-alias>]\n"
-                        + "             --using-table <source-table>\n"
+                        + "             --source-table <source-table>\n"
                         + "             [--source-as <source-table-alias>]\n"
                         + "             --on <merge-condition>\n"
                         + "             --merge-actions <matched-upsert,matched-delete,not-matched-insert,not-matched-by-source-upsert,not-matched-by-source-delete>\n"
@@ -409,7 +409,7 @@ public class MergeIntoAction extends ActionBase {
         System.out.println("  alternative arguments:");
         System.out.println("    --path <table-path> to represent the table path.");
         System.out.println(
-                "    --using-sql <sql>[, --using-sql <sql> ...] can create a new table as source table at runtime.");
+                "    --source-sql <sql>[, --source-sql <sql> ...] can create a new table as source table at runtime.");
         System.out.println();
 
         System.out.println("Note: ");
@@ -418,7 +418,7 @@ public class MergeIntoAction extends ActionBase {
                 "  2. All conditions, set changes and values should use Flink SQL syntax. Please quote them with \" to escape special characters.");
         System.out.println(
                 "  3. source-alias cannot be duplicated with existed table name. "
-                        + "If you use --using-ddl, source-alias must be specified and equal to the table name in \"CREATE\" statement.");
+                        + "If you use --source-sql, source-alias must be specified and equal to the table name in \"CREATE\" statement.");
         System.out.println(
                 "  4. If the source table is not in the same place as target table, "
                         + "the source-table-name or the source-alias should be qualified (database.table or catalog.database.table if in different catalog).");
@@ -441,7 +441,7 @@ public class MergeIntoAction extends ActionBase {
         System.out.println("Examples:");
         System.out.println(
                 "  merge-into --path hdfs:///path/to/T\n"
-                        + "             --using-table S\n"
+                        + "             --source-table S\n"
                         + "             --on \"T.k = S.k\"\n"
                         + "             --merge-actions matched-upsert\n"
                         + "             --matched-upsert-condition \"T.v <> S.v\"\n"
@@ -463,12 +463,12 @@ public class MergeIntoAction extends ActionBase {
         } else {
             // NOTE: sql may change current catalog and database
             try {
-                for (String sql : sqls) {
+                for (String sql : sourceSqls) {
                     tEnv.executeSql(sql).await();
                 }
             } catch (Throwable t) {
-                LOG.error("Error occurs when executing sql in --using-sql.", t);
-                throw new RuntimeException("Error occurs when executing sql in --using-sql.", t);
+                LOG.error("Error occurs when executing sql in --source-sql.", t);
+                throw new RuntimeException("Error occurs when executing sql in --source-sql.", t);
             }
         }
 

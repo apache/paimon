@@ -315,7 +315,7 @@ Run the following command to submit a 'merge-into' job for the table.
     --database <database-name> \
     --table <target-table> \
     [--target-as <target-table-alias>] \
-    --using-table <source-table> \
+    --source-table <source-table> \
     [--source-as <source-table-alias>] \
     --on <merge-condition> \
     --merge-actions <matched-upsert,matched-delete,not-matched-insert,not-matched-by-source-upsert,not-matched-by-source-delete> \
@@ -328,7 +328,7 @@ Run the following command to submit a 'merge-into' job for the table.
     --not-matched-by-source-upsert-set <not-matched-upsert-changes> \
     --not-matched-by-source-delete-condition <not-matched-by-source-condition>
     
-Alternatively, you can use '--using-sql <sql> [, --using-sql <sql> ...]' to create a new table as source table at runtime.
+Alternatively, you can use '--source-sql <sql> [, --source-sql <sql> ...]' to create a new table as source table at runtime.
     
 -- Examples:
 -- Find all orders mentioned in the source table, then mark as important if the price is above 100 
@@ -340,7 +340,7 @@ Alternatively, you can use '--using-sql <sql> [, --using-sql <sql> ...]' to crea
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table T \
-    --using-table S \
+    --source-table S \
     --on "T.id = S.order_id" \
     --merge-actions \
     matched-upsert,matched-delete \
@@ -357,7 +357,7 @@ Alternatively, you can use '--using-sql <sql> [, --using-sql <sql> ...]' to crea
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table T \
-    --using-table S \
+    --source-table S \
     --on "T.id = S.order_id" \
     --merge-actions \
     matched-upsert,not-matched-insert \
@@ -373,7 +373,7 @@ Alternatively, you can use '--using-sql <sql> [, --using-sql <sql> ...]' to crea
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table T \
-    --using-table S \
+    --source-table S \
     --on "T.id = S.order_id" \
     --merge-actions \
     not-matched-by-source-upsert,not-matched-by-source-delete \
@@ -381,7 +381,7 @@ Alternatively, you can use '--using-sql <sql> [, --using-sql <sql> ...]' to crea
     --not-matched-by-source-upsert-set "price = T.price - 20" \
     --not-matched-by-source-delete-condition "T.mark = 'trivial'"
     
--- An using-sql example: 
+-- An source-sql example: 
 -- Create a temporary view S in new catalog and use it as source table
 ./flink run \
     -c org.apache.flink.table.store.connector.action.FlinkActions \
@@ -390,11 +390,11 @@ Alternatively, you can use '--using-sql <sql> [, --using-sql <sql> ...]' to crea
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table T \
-    --using-sql "CREATE CATALOG test WITH (...)" \
-    --using-sql "USE CATALOG test" \
-    --using-sql "USE DATABASE default" \
-    --using-sql "CREATE TEMPORARY VIEW S AS SELECT order_id, price, 'important' FROM important_order" \
-    --source-alias test.default.S \
+    --source-sql "CREATE CATALOG test WITH (...)" \
+    --source-sql "USE CATALOG test" \
+    --source-sql "USE DATABASE default" \
+    --source-sql "CREATE TEMPORARY VIEW S AS SELECT order_id, price, 'important' FROM important_order" \
+    --source-as test.default.S \
     --on "T.id = S.order_id" \
     --merge-actions not-matched-insert\
     --not-matched-insert-values *
@@ -428,7 +428,7 @@ is equal to source's).
 5. not-matched-by-source-condition cannot use source table's columns to construct condition expression.
 
 {{< hint warning >}}
-1. source-alias cannot be duplicated with existed table name. If you use --using-ddl, source-alias 
+1. source-alias cannot be duplicated with existed table name. If you use --source-ddl, source-alias 
 must be specified and equal to the table name in "CREATE" statement.
 2. If the source table is not in the same place as target table, the source-table-name or the source-alias 
 should be qualified (database.table or catalog.database.table if in different catalog).
