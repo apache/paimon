@@ -303,7 +303,7 @@ public class FlinkActionsE2eTest extends E2eTestBase {
                         "default",
                         "--table",
                         "T",
-                        "--using-table",
+                        "--source-table",
                         "S",
                         "--on",
                         "T.k=S.k",
