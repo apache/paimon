@@ -24,23 +24,24 @@ import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
 import org.apache.hadoop.hive.metastore.api.InvalidObjectException;
+import org.apache.hadoop.hive.metastore.api.InvalidOperationException;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.thrift.TException;
 
-/** A {@link HiveMetaStoreClient} to test accessing exception in Hive metastore client. */
-public class FailHiveMetaStoreClient extends HiveMetaStoreClient implements IMetaStoreClient {
-    public FailHiveMetaStoreClient(HiveConf conf) throws MetaException {
+/** A {@link HiveMetaStoreClient} to test creating table failed in Hive metastore client. */
+public class CreateFailHiveMetaStoreClient extends HiveMetaStoreClient implements IMetaStoreClient {
+    public CreateFailHiveMetaStoreClient(HiveConf conf) throws MetaException {
         super(conf);
     }
 
-    public FailHiveMetaStoreClient(HiveConf conf, HiveMetaHookLoader hookLoader)
+    public CreateFailHiveMetaStoreClient(HiveConf conf, HiveMetaHookLoader hookLoader)
             throws MetaException {
         super(conf, hookLoader);
     }
 
-    public FailHiveMetaStoreClient(
+    public CreateFailHiveMetaStoreClient(
             HiveConf conf, HiveMetaHookLoader hookLoader, Boolean allowEmbedded)
             throws MetaException {
         super(conf, hookLoader, allowEmbedded);
@@ -50,6 +51,12 @@ public class FailHiveMetaStoreClient extends HiveMetaStoreClient implements IMet
     public void createTable(Table tbl)
             throws AlreadyExistsException, InvalidObjectException, MetaException,
                     NoSuchObjectException, TException {
+        throw new TException();
+    }
+
+    @Override
+    public void alter_table(String defaultDatabaseName, String tblName, Table table)
+            throws InvalidOperationException, MetaException, TException {
         throw new TException();
     }
 }

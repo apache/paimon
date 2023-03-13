@@ -413,7 +413,6 @@ public class SchemaManager implements Serializable {
         return new Path(tableRoot + "/schema");
     }
 
-    @VisibleForTesting
     public Path toSchemaPath(long id) {
         return new Path(tableRoot + "/schema/" + SCHEMA_PREFIX + id);
     }
