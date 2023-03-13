@@ -297,13 +297,20 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         try {
+            final SchemaManager schemaManager = schemaManager(identifier);
             // first commit changes to underlying files
-            TableSchema schema = schemaManager(identifier).commitChanges(changes);
+            TableSchema schema = schemaManager.commitChanges(changes);
 
-            // sync to hive hms
-            Table table = client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
-            updateHmsTable(table, identifier, schema);
-            client.alter_table(identifier.getDatabaseName(), identifier.getObjectName(), table);
+            try {
+                // sync to hive hms
+                Table table =
+                        client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
+                updateHmsTable(table, identifier, schema);
+                client.alter_table(identifier.getDatabaseName(), identifier.getObjectName(), table);
+            } catch (TException te) {
+                schemaManager.deleteSchema(schema.id());
+                throw te;
+            }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

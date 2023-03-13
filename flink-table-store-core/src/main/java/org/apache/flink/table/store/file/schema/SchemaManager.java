@@ -418,6 +418,15 @@ public class SchemaManager implements Serializable {
         return new Path(tableRoot + "/schema/" + SCHEMA_PREFIX + id);
     }
 
+    /**
+     * Delete schema with specific id.
+     *
+     * @param schemaId the schema id to delete.
+     */
+    public void deleteSchema(long schemaId) {
+        fileIO.deleteQuietly(toSchemaPath(schemaId));
+    }
+
     public static void checkAlterTableOption(String key) {
         if (CoreOptions.getImmutableOptionKeys().contains(key)) {
             throw new UnsupportedOperationException(
