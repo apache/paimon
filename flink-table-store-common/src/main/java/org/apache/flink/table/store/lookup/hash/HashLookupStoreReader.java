@@ -57,8 +57,6 @@ public class HashLookupStoreReader
 
     // Buffer segment size
     private final long mmpSegmentSize;
-    // Number of keys in the index
-    private final int keyCount;
     // Key count for each key length
     private final int[] keyCounts;
     // Slot size for each key length
@@ -104,6 +102,7 @@ public class HashLookupStoreReader
         DataInputStream dataInputStream = new DataInputStream(new BufferedInputStream(inputStream));
         // Offset of the index in the channel
         int indexOffset;
+        int keyCount;
         try {
             // Time
             createdAt = dataInputStream.readLong();
@@ -251,21 +250,6 @@ public class HashLookupStoreReader
         return true;
     }
 
-    // Close the reader channel
-    public void close() throws IOException {
-        channel.close();
-        mappedFile.close();
-        indexBuffer = null;
-        dataBuffers = null;
-        mappedFile = null;
-        channel = null;
-        System.gc();
-    }
-
-    public int getKeyCount() {
-        return keyCount;
-    }
-
     // Read the data at the given offset, the data can be spread over multiple data buffers
     private byte[] getMMapBytes(long offset) {
         // Read the first 4 bytes to get the size of the data
@@ -350,6 +334,16 @@ public class HashLookupStoreReader
         Calendar cl = Calendar.getInstance();
         cl.setTimeInMillis(createdAt);
         return sdf.format(cl.getTime());
+    }
+
+    @Override
+    public void close() throws IOException {
+        channel.close();
+        mappedFile.close();
+        indexBuffer = null;
+        dataBuffers = null;
+        mappedFile = null;
+        channel = null;
     }
 
     @Override

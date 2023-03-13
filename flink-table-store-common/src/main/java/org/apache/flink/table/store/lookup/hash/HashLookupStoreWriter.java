@@ -53,6 +53,7 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     private static final Logger LOG =
             LoggerFactory.getLogger(HashLookupStoreWriter.class.getName());
 
+    // load factor of hash map, default 0.75
     private final double loadFactor;
     // Output
     private final File tempFolder;
