@@ -45,7 +45,6 @@ public class ManifestFile {
 
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
-    private final long schemaId;
     private final RowType partitionType;
     private final ManifestEntrySerializer serializer;
     private final FormatReaderFactory readerFactory;
@@ -56,7 +55,6 @@ public class ManifestFile {
     private ManifestFile(
             FileIO fileIO,
             SchemaManager schemaManager,
-            long schemaId,
             RowType partitionType,
             ManifestEntrySerializer serializer,
             FormatReaderFactory readerFactory,
@@ -65,7 +63,6 @@ public class ManifestFile {
             long suggestedFileSize) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
-        this.schemaId = schemaId;
         this.partitionType = partitionType;
         this.serializer = serializer;
         this.readerFactory = readerFactory;
@@ -118,6 +115,7 @@ public class ManifestFile {
 
         private long numAddedFiles = 0;
         private long numDeletedFiles = 0;
+        private long schemaId = Long.MIN_VALUE;
 
         ManifestEntryWriter(FormatWriterFactory factory, Path path) {
             super(ManifestFile.this.fileIO, factory, path, serializer::toRow, null);
@@ -140,6 +138,7 @@ public class ManifestFile {
                 default:
                     throw new UnsupportedOperationException("Unknown entry kind: " + entry.kind());
             }
+            schemaId = Math.max(schemaId, entry.file().schemaId());
 
             partitionStatsCollector.collect(entry.partition());
         }
@@ -152,7 +151,9 @@ public class ManifestFile {
                     numAddedFiles,
                     numDeletedFiles,
                     partitionStatsSerializer.toBinary(partitionStatsCollector.extract()),
-                    schemaId);
+                    numAddedFiles + numDeletedFiles > 0
+                            ? schemaId
+                            : schemaManager.latest().get().id());
         }
     }
 
@@ -161,7 +162,6 @@ public class ManifestFile {
 
         private final FileIO fileIO;
         private final SchemaManager schemaManager;
-        private final long schemaId;
         private final RowType partitionType;
         private final FileFormat fileFormat;
         private final FileStorePathFactory pathFactory;
@@ -170,14 +170,12 @@ public class ManifestFile {
         public Factory(
                 FileIO fileIO,
                 SchemaManager schemaManager,
-                long schemaId,
                 RowType partitionType,
                 FileFormat fileFormat,
                 FileStorePathFactory pathFactory,
                 long suggestedFileSize) {
             this.fileIO = fileIO;
             this.schemaManager = schemaManager;
-            this.schemaId = schemaId;
             this.partitionType = partitionType;
             this.fileFormat = fileFormat;
             this.pathFactory = pathFactory;
@@ -189,7 +187,6 @@ public class ManifestFile {
             return new ManifestFile(
                     fileIO,
                     schemaManager,
-                    schemaId,
                     partitionType,
                     new ManifestEntrySerializer(),
                     fileFormat.createReaderFactory(entryType),
