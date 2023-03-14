@@ -55,6 +55,8 @@ public interface FileStoreTable extends DataTable, SupportsPartition {
     @Override
     FileStoreTable copy(Map<String, String> dynamicOptions);
 
+    FileStoreTable copyWithLatestSchema();
+
     @Override
     TableWriteImpl<?> newWrite(String commitUser);
 
