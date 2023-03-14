@@ -18,34 +18,27 @@
 
 package org.apache.flink.table.store.data.serializer;
 
-import org.apache.flink.table.store.data.BinaryArray;
-import org.apache.flink.table.store.data.BinaryArrayWriter;
-import org.apache.flink.table.store.data.BinaryMap;
-import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
-
-import org.junit.jupiter.api.Test;
-
-import java.util.Objects;
+import org.apache.flink.table.store.types.RowType;
 
 import static org.apache.flink.table.store.data.BinaryString.fromString;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.apache.flink.table.store.data.serializer.InternalRowSerializerTest.createArray;
+import static org.apache.flink.table.store.data.serializer.InternalRowSerializerTest.createMap;
+import static org.apache.flink.table.store.data.serializer.InternalRowSerializerTest.createRow;
+import static org.apache.flink.table.store.data.serializer.InternalRowSerializerTest.deepEqualsInternalRow;
 
-/** Test for {@link InternalRowSerializer}. */
-abstract class InternalRowSerializerTest extends SerializerTestInstance<InternalRow> {
+/** Test for {@link RowCompactedSerializer}. */
+abstract class RowCompactedSerializerTest extends SerializerTestInstance<InternalRow> {
 
-    private final InternalRowSerializer serializer;
-    private final InternalRow[] testData;
+    private final RowCompactedSerializer serializer;
 
-    InternalRowSerializerTest(InternalRowSerializer serializer, InternalRow[] testData) {
+    RowCompactedSerializerTest(RowCompactedSerializer serializer, InternalRow[] testData) {
         super(serializer, testData);
         this.serializer = serializer;
-        this.testData = testData;
     }
 
     @Override
@@ -53,105 +46,12 @@ abstract class InternalRowSerializerTest extends SerializerTestInstance<Internal
         return deepEqualsInternalRow(
                 o1,
                 o2,
-                (InternalRowSerializer) serializer.duplicate(),
-                (InternalRowSerializer) serializer.duplicate());
+                new InternalRowSerializer(serializer.rowType()),
+                new InternalRowSerializer(serializer.rowType()));
     }
 
-    // ----------------------------------------------------------------------------------------------
-
-    public static BinaryArray createArray(int... ints) {
-        BinaryArray array = new BinaryArray();
-        BinaryArrayWriter writer = new BinaryArrayWriter(array, ints.length, 4);
-        for (int i = 0; i < ints.length; i++) {
-            writer.writeInt(i, ints[i]);
-        }
-        writer.complete();
-        return array;
-    }
-
-    public static BinaryMap createMap(int[] keys, int[] values) {
-        return BinaryMap.valueOf(createArray(keys), createArray(values));
-    }
-
-    public static GenericRow createRow(Object f0, Object f1, Object f2, Object f3, Object f4) {
-        GenericRow row = new GenericRow(5);
-        row.setField(0, f0);
-        row.setField(1, f1);
-        row.setField(2, f2);
-        row.setField(3, f3);
-        row.setField(4, f4);
-        return row;
-    }
-
-    public static boolean deepEqualsInternalRow(
-            InternalRow should,
-            InternalRow is,
-            InternalRowSerializer serializer1,
-            InternalRowSerializer serializer2) {
-        return deepEqualsInternalRow(should, is, serializer1, serializer2, false);
-    }
-
-    private static boolean deepEqualsInternalRow(
-            InternalRow should,
-            InternalRow is,
-            InternalRowSerializer serializer1,
-            InternalRowSerializer serializer2,
-            boolean checkClass) {
-        if (should.getFieldCount() != is.getFieldCount()) {
-            return false;
-        }
-        if (checkClass && (should.getClass() != is.getClass() || !should.equals(is))) {
-            return false;
-        }
-
-        BinaryRow row1 = serializer1.toBinaryRow(should);
-        BinaryRow row2 = serializer2.toBinaryRow(is);
-
-        return Objects.equals(row1, row2);
-    }
-
-    private void checkDeepEquals(InternalRow should, InternalRow is, boolean checkClass) {
-        boolean equals =
-                deepEqualsInternalRow(
-                        should,
-                        is,
-                        (InternalRowSerializer) serializer.duplicate(),
-                        (InternalRowSerializer) serializer.duplicate(),
-                        checkClass);
-        assertThat(equals).isTrue();
-    }
-
-    @Test
-    protected void testCopy() {
-        for (InternalRow row : testData) {
-            checkDeepEquals(row, serializer.copy(row), true);
-        }
-
-        for (InternalRow row : testData) {
-            checkDeepEquals(row, serializer.copy(row), true);
-        }
-
-        for (InternalRow row : testData) {
-            checkDeepEquals(row, serializer.copy(serializer.toBinaryRow(row)), false);
-        }
-
-        for (InternalRow row : testData) {
-            checkDeepEquals(row, serializer.copy(serializer.toBinaryRow(row)), false);
-        }
-
-        for (InternalRow row : testData) {
-            checkDeepEquals(row, serializer.copy(serializer.toBinaryRow(row)), false);
-        }
-    }
-
-    @Test
-    void testWrongCopy() {
-        assertThatThrownBy(() -> serializer.copy(new GenericRow(serializer.getArity() + 1)))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    static final class SimpleInternalRowSerializerTest extends InternalRowSerializerTest {
-        public SimpleInternalRowSerializerTest() {
+    static final class SimpleTest extends RowCompactedSerializerTest {
+        public SimpleTest() {
             super(getRowSerializer(), getData());
         }
 
@@ -167,13 +67,13 @@ abstract class InternalRowSerializerTest extends SerializerTestInstance<Internal
             return new InternalRow[] {row1, row2};
         }
 
-        private static InternalRowSerializer getRowSerializer() {
-            return new InternalRowSerializer(DataTypes.INT(), DataTypes.STRING());
+        private static RowCompactedSerializer getRowSerializer() {
+            return new RowCompactedSerializer(RowType.of(DataTypes.INT(), DataTypes.STRING()));
         }
     }
 
-    static final class LargeInternalRowSerializerTest extends InternalRowSerializerTest {
-        public LargeInternalRowSerializerTest() {
+    static final class LargeTest extends RowCompactedSerializerTest {
+        public LargeTest() {
             super(getRowSerializer(), getData());
         }
 
@@ -195,26 +95,27 @@ abstract class InternalRowSerializerTest extends SerializerTestInstance<Internal
             return new InternalRow[] {row};
         }
 
-        private static InternalRowSerializer getRowSerializer() {
-            return new InternalRowSerializer(
-                    DataTypes.INT(),
-                    DataTypes.INT(),
-                    DataTypes.INT(),
-                    DataTypes.INT(),
-                    DataTypes.INT(),
-                    DataTypes.INT(),
-                    DataTypes.INT(),
-                    DataTypes.INT(),
-                    DataTypes.INT(),
-                    DataTypes.INT(),
-                    DataTypes.INT(),
-                    DataTypes.INT(),
-                    DataTypes.STRING());
+        private static RowCompactedSerializer getRowSerializer() {
+            return new RowCompactedSerializer(
+                    RowType.of(
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.STRING()));
         }
     }
 
-    static final class InternalRowSerializerWithComplexTypesTest extends InternalRowSerializerTest {
-        public InternalRowSerializerWithComplexTypesTest() {
+    static final class ComplexTypesTest extends RowCompactedSerializerTest {
+        public ComplexTypesTest() {
             super(getRowSerializer(), getData());
         }
 
@@ -266,26 +167,26 @@ abstract class InternalRowSerializerTest extends SerializerTestInstance<Internal
             };
         }
 
-        private static InternalRowSerializer getRowSerializer() {
-            return new InternalRowSerializer(
-                    DataTypes.INT(),
-                    DataTypes.DOUBLE(),
-                    DataTypes.STRING(),
-                    DataTypes.ARRAY(DataTypes.INT()),
-                    DataTypes.MAP(DataTypes.INT(), DataTypes.INT()));
+        private static RowCompactedSerializer getRowSerializer() {
+            return new RowCompactedSerializer(
+                    RowType.of(
+                            DataTypes.INT(),
+                            DataTypes.DOUBLE(),
+                            DataTypes.STRING(),
+                            DataTypes.ARRAY(DataTypes.INT()),
+                            DataTypes.MAP(DataTypes.INT(), DataTypes.INT())));
         }
     }
 
-    static final class InternalRowSerializerWithNestedInternalRowTest
-            extends InternalRowSerializerTest {
+    static final class NestedInternalRowTest extends RowCompactedSerializerTest {
 
-        private static final DataType NESTED_DATA_TYPE =
+        private static final RowType NESTED_DATA_TYPE =
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "ri", DataTypes.INT()),
                         DataTypes.FIELD(1, "rs", DataTypes.STRING()),
                         DataTypes.FIELD(2, "rb", DataTypes.BIGINT()));
 
-        public InternalRowSerializerWithNestedInternalRowTest() {
+        public NestedInternalRowTest() {
             super(getRowSerializer(), getData());
         }
 
@@ -314,9 +215,8 @@ abstract class InternalRowSerializerTest extends SerializerTestInstance<Internal
             return new InternalRow[] {nestedRow1, nestedRow2};
         }
 
-        private static InternalRowSerializer getRowSerializer() {
-            return (InternalRowSerializer)
-                    InternalSerializers.<InternalRow>create(NESTED_DATA_TYPE);
+        private static RowCompactedSerializer getRowSerializer() {
+            return new RowCompactedSerializer(NESTED_DATA_TYPE);
         }
     }
 }

@@ -21,7 +21,6 @@ package org.apache.flink.table.store.file.mergetree;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.format.FlushingFileFormat;
 import org.apache.flink.table.store.file.io.DataFileMeta;
@@ -59,6 +58,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.flink.table.store.CoreOptions.TARGET_FILE_SIZE;
+import static org.apache.flink.table.store.file.KeyValue.UNKNOWN_SEQUENCE;
 import static org.apache.flink.table.store.file.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -91,18 +91,21 @@ public class LookupLevelsTest {
         // only in level 1
         KeyValue kv = lookupLevels.lookup(row(1), 1);
         assertThat(kv).isNotNull();
+        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
         assertThat(kv.level()).isEqualTo(1);
         assertThat(kv.value().getInt(1)).isEqualTo(11);
 
         // only in level 2
         kv = lookupLevels.lookup(row(2), 1);
         assertThat(kv).isNotNull();
+        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
         assertThat(kv.level()).isEqualTo(2);
         assertThat(kv.value().getInt(1)).isEqualTo(22);
 
         // both in level 1 and level 2
         kv = lookupLevels.lookup(row(5), 1);
         assertThat(kv).isNotNull();
+        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
         assertThat(kv.level()).isEqualTo(1);
         assertThat(kv.value().getInt(1)).isEqualTo(5);
 
@@ -143,6 +146,7 @@ public class LookupLevelsTest {
         for (Map.Entry<Integer, Integer> entry : contains.entrySet()) {
             KeyValue kv = lookupLevels.lookup(row(entry.getKey()), 1);
             assertThat(kv).isNotNull();
+            assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
             assertThat(kv.level()).isEqualTo(1);
             assertThat(kv.value().getInt(1)).isEqualTo(entry.getValue());
         }
@@ -176,6 +180,7 @@ public class LookupLevelsTest {
         for (int i = 0; i < fileNum * recordInFile; i++) {
             KeyValue kv = lookupLevels.lookup(row(i), 1);
             assertThat(kv).isNotNull();
+            assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
             assertThat(kv.level()).isEqualTo(1);
             assertThat(kv.value().getInt(1)).isEqualTo(i);
         }
@@ -195,8 +200,8 @@ public class LookupLevelsTest {
         return new LookupLevels(
                 levels,
                 comparator,
-                new InternalRowSerializer(keyType),
-                new InternalRowSerializer(rowType),
+                keyType,
+                rowType,
                 file -> createReaderFactory().createRecordReader(0, file.fileName(), file.level()),
                 () -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new HashLookupStoreFactory(new CacheManager(2048, MemorySize.ofMebiBytes(1)), 0.75),
