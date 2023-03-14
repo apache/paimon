@@ -198,7 +198,8 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                                 streamSqlIter(
                                         "SELECT * FROM T1 /*+ OPTIONS('log.scan'='from-timestamp') */"))
                 .hasCauseInstanceOf(IllegalArgumentException.class)
-                .hasRootCauseMessage("scan.timestamp-millis can not be null when you use from-timestamp for scan.mode");
+                .hasRootCauseMessage(
+                        "scan.timestamp-millis can not be null when you use from-timestamp for scan.mode");
     }
 
     @TestTemplate
@@ -222,7 +223,8 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                                         "SELECT * FROM T1 /*+ OPTIONS('log.scan'='latest', 'log.scan.timestamp-millis'='%s') */",
                                         0))
                 .hasCauseInstanceOf(IllegalArgumentException.class)
-                .hasRootCauseMessage("scan.timestamp-millis must be null when you use latest for scan.mode");
+                .hasRootCauseMessage(
+                        "scan.timestamp-millis must be null when you use latest for scan.mode");
     }
 
     @TestTemplate
@@ -254,7 +256,8 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                                         "SELECT * FROM T1 /*+ OPTIONS('scan.mode'='latest', 'scan.snapshot-id'='%s') */",
                                         0))
                 .hasCauseInstanceOf(IllegalArgumentException.class)
-                .hasRootCauseMessage("scan.snapshot-id must be null when you use latest for scan.mode");
+                .hasRootCauseMessage(
+                        "scan.snapshot-id must be null when you use latest for scan.mode");
     }
 
     @TestTemplate
@@ -276,20 +279,22 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     @TestTemplate
     public void testUnsupportedUpsert() {
         assertThatThrownBy(
-                () ->
-                        streamSqlIter(
-                                "SELECT * FROM T1 /*+ OPTIONS('log.changelog-mode'='upsert') */"))
+                        () ->
+                                streamSqlIter(
+                                        "SELECT * FROM T1 /*+ OPTIONS('log.changelog-mode'='upsert') */"))
                 .hasCauseInstanceOf(ValidationException.class)
-                .hasRootCauseMessage("File store continuous reading dose not support upsert changelog mode.");
+                .hasRootCauseMessage(
+                        "File store continuous reading dose not support upsert changelog mode.");
     }
 
     @TestTemplate
     public void testUnsupportedEventual() {
         assertThatThrownBy(
-                () ->
-                        streamSqlIter(
-                                "SELECT * FROM T1 /*+ OPTIONS('log.consistency'='eventual') */"))
+                        () ->
+                                streamSqlIter(
+                                        "SELECT * FROM T1 /*+ OPTIONS('log.consistency'='eventual') */"))
                 .hasCauseInstanceOf(ValidationException.class)
-                .hasRootCauseMessage("File store continuous reading dose not support eventual consistency mode.");
+                .hasRootCauseMessage(
+                        "File store continuous reading dose not support eventual consistency mode.");
     }
 }
