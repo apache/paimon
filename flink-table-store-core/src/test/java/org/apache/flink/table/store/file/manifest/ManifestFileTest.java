@@ -101,7 +101,6 @@ public class ManifestFileTest {
         return new ManifestFile.Factory(
                         fileIO,
                         new SchemaManager(fileIO, path),
-                        0,
                         DEFAULT_PART_TYPE,
                         avro,
                         pathFactory,

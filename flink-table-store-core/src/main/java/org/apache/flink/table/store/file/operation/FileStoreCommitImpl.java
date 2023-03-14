@@ -30,6 +30,7 @@ import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
@@ -85,7 +86,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreCommitImpl.class);
 
     private final FileIO fileIO;
-    private final long schemaId;
+    private final SchemaManager schemaManager;
     private final String commitUser;
     private final RowType partitionType;
     private final RowDataToObjectArrayConverter partitionObjectConverter;
@@ -104,7 +105,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     public FileStoreCommitImpl(
             FileIO fileIO,
-            long schemaId,
+            SchemaManager schemaManager,
             String commitUser,
             RowType partitionType,
             FileStorePathFactory pathFactory,
@@ -117,7 +118,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             int manifestMergeMinCount,
             @Nullable Comparator<InternalRow> keyComparator) {
         this.fileIO = fileIO;
-        this.schemaId = schemaId;
+        this.schemaManager = schemaManager;
         this.commitUser = commitUser;
         this.partitionType = partitionType;
         this.partitionObjectConverter = new RowDataToObjectArrayConverter(partitionType);
@@ -526,7 +527,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             newSnapshot =
                     new Snapshot(
                             newSnapshotId,
-                            schemaId,
+                            schemaManager.latest().get().id(),
                             previousChangesListName,
                             newChangesListName,
                             changelogListName,
