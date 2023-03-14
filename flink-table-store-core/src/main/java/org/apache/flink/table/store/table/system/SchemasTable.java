@@ -34,6 +34,7 @@ import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.InnerTableScan;
+import org.apache.flink.table.store.table.source.ReadOnceTableScan;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.types.BigIntType;
@@ -104,7 +105,7 @@ public class SchemasTable implements ReadonlyTable {
         return new SchemasTable(fileIO, location);
     }
 
-    private class SchemasScan implements InnerTableScan {
+    private class SchemasScan extends ReadOnceTableScan {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
@@ -112,7 +113,7 @@ public class SchemasTable implements ReadonlyTable {
         }
 
         @Override
-        public Plan plan() {
+        public Plan innerPlan() {
             return () -> Collections.singletonList(new SchemasSplit(fileIO, location));
         }
     }

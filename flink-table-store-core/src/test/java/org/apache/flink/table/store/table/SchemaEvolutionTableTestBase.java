@@ -39,7 +39,7 @@ import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.reader.RecordReaderIterator;
 import org.apache.flink.table.store.table.sink.StreamTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;
-import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.types.BigIntType;
@@ -428,11 +428,8 @@ public abstract class SchemaEvolutionTableTestBase {
         return GenericRow.of(valueList.toArray(new Object[0]));
     }
 
-    protected static void checkFilterRowCount(
-            DataTableScan.DataFilePlan plan, long expectedRowCount) {
-        List<DataFileMeta> fileMetaList =
-                plan.splits.stream().flatMap(s -> s.files().stream()).collect(Collectors.toList());
-        checkFilterRowCount(fileMetaList, expectedRowCount);
+    protected static List<DataFileMeta> toDataFileMetas(List<DataSplit> splits) {
+        return splits.stream().flatMap(s -> s.files().stream()).collect(Collectors.toList());
     }
 
     protected static void checkFilterRowCount(
@@ -524,5 +521,9 @@ public abstract class SchemaEvolutionTableTestBase {
         public TableSchema schema(long id) {
             return checkNotNull(tableSchemas.get(id));
         }
+    }
+
+    protected List<Split> toSplits(List<DataSplit> dataSplits) {
+        return new ArrayList<>(dataSplits);
     }
 }

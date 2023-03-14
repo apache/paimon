@@ -29,8 +29,7 @@ import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
-import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
-import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
+import org.apache.flink.table.store.table.source.StreamDataTableScan;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowType;
@@ -100,9 +99,9 @@ public class CompactActionITCase extends ActionITCaseBase {
         Assertions.assertEquals(3, snapshot.id());
         Assertions.assertEquals(Snapshot.CommitKind.COMPACT, snapshot.commitKind());
 
-        DataTableScan.DataFilePlan plan = table.newScan().plan();
-        Assertions.assertEquals(3, plan.splits().size());
-        for (DataSplit split : plan.splits) {
+        List<DataSplit> splits = table.newSnapshotSplitReader().splits();
+        Assertions.assertEquals(3, splits.size());
+        for (DataSplit split : splits) {
             if (split.partition().getInt(1) == 15) {
                 // compacted
                 Assertions.assertEquals(1, split.files().size());
@@ -147,9 +146,8 @@ public class CompactActionITCase extends ActionITCaseBase {
         Assertions.assertEquals(Snapshot.CommitKind.APPEND, snapshot.commitKind());
 
         // no full compaction has happened, so plan should be empty
-        SnapshotEnumerator snapshotEnumerator =
-                ContinuousDataFileSnapshotEnumerator.create(table, table.newScan(), null);
-        DataTableScan.DataFilePlan plan = snapshotEnumerator.enumerate().plan();
+        StreamDataTableScan scan = table.newStreamScan();
+        DataTableScan.DataFilePlan plan = scan.plan();
         Assertions.assertEquals(1, (long) plan.snapshotId);
         Assertions.assertTrue(plan.splits().isEmpty());
 
@@ -166,7 +164,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         // first full compaction
         validateResult(
                 table,
-                snapshotEnumerator,
+                scan,
                 Arrays.asList("+I[1, 100, 15, 20221208]", "+I[1, 100, 15, 20221209]"),
                 60_000);
 
@@ -179,7 +177,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         // second full compaction
         validateResult(
                 table,
-                snapshotEnumerator,
+                scan,
                 Arrays.asList(
                         "+U[1, 101, 15, 20221208]",
                         "+U[1, 101, 15, 20221209]",
@@ -212,15 +210,12 @@ public class CompactActionITCase extends ActionITCaseBase {
     }
 
     private void validateResult(
-            FileStoreTable table,
-            SnapshotEnumerator snapshotEnumerator,
-            List<String> expected,
-            long timeout)
+            FileStoreTable table, StreamDataTableScan scan, List<String> expected, long timeout)
             throws Exception {
         List<String> actual = new ArrayList<>();
         long start = System.currentTimeMillis();
         while (actual.size() != expected.size()) {
-            DataTableScan.DataFilePlan plan = snapshotEnumerator.enumerate().plan();
+            DataTableScan.DataFilePlan plan = scan.plan();
             if (plan != null) {
                 actual.addAll(getResult(table.newRead(), plan.splits(), ROW_TYPE));
             }

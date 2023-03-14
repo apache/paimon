@@ -34,7 +34,8 @@ public class ContinuousCompactorStartingScanner implements StartingScanner {
             LoggerFactory.getLogger(ContinuousCompactorStartingScanner.class);
 
     @Override
-    public DataTableScan.DataFilePlan getPlan(SnapshotManager snapshotManager, DataTableScan scan) {
+    public DataTableScan.DataFilePlan getPlan(
+            SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
         if (latestSnapshotId == null || earliestSnapshotId == null) {

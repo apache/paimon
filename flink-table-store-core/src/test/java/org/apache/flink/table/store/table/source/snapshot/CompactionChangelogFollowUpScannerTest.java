@@ -36,11 +36,10 @@ import java.util.Arrays;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CompactionChangelogFollowUpScanner}. */
-public class CompactionChangelogFollowUpScannerTest extends SnapshotEnumeratorTestBase {
+public class CompactionChangelogFollowUpScannerTest extends ScannerTestBase {
 
     @Test
     public void testGetPlan() throws Exception {
-        FileStoreTable table = createFileStoreTable();
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -65,8 +64,7 @@ public class CompactionChangelogFollowUpScannerTest extends SnapshotEnumeratorTe
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(5);
 
-        DataTableScan scan =
-                table.newScan().withLevelFilter(level -> level == table.options().numLevels() - 1);
+        snapshotSplitReader.withLevelFilter(level -> level == table.options().numLevels() - 1);
         TableRead read = table.newRead();
         CompactionChangelogFollowUpScanner scanner = new CompactionChangelogFollowUpScanner();
 
@@ -81,7 +79,7 @@ public class CompactionChangelogFollowUpScannerTest extends SnapshotEnumeratorTe
         snapshot = snapshotManager.snapshot(3);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        DataTableScan.DataFilePlan plan = scanner.getPlan(3, scan);
+        DataTableScan.DataFilePlan plan = scanner.getPlan(3, snapshotSplitReader);
         assertThat(plan.snapshotId).isEqualTo(3);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|102", "+I 1|20|200", "+I 1|30|300"));
@@ -93,7 +91,7 @@ public class CompactionChangelogFollowUpScannerTest extends SnapshotEnumeratorTe
         snapshot = snapshotManager.snapshot(5);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        plan = scanner.getPlan(5, scan);
+        plan = scanner.getPlan(5, snapshotSplitReader);
         assertThat(plan.snapshotId).isEqualTo(5);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(

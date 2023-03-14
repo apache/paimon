@@ -23,8 +23,7 @@ import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumerator
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan.DataFilePlan;
-import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
-import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator.Result;
+import org.apache.flink.table.store.table.source.EndOfScanException;
 
 import org.junit.jupiter.api.Test;
 
@@ -35,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.stream.Collectors;
 
@@ -46,7 +46,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ContinuousFileSplitEnumeratorTest {
 
     @Test
-    public void testSplitAllocationIsOrdered() throws Exception {
+    public void testSplitAllocationIsOrdered() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 new TestingSplitEnumeratorContext<>(1);
         context.registerReader(0, "test-host");
@@ -99,7 +99,7 @@ public class ContinuousFileSplitEnumeratorTest {
     }
 
     @Test
-    public void testSplitAllocationIsFair() throws Exception {
+    public void testSplitAllocationIsFair() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 new TestingSplitEnumeratorContext<>(1);
         context.registerReader(0, "test-host");
@@ -148,14 +148,22 @@ public class ContinuousFileSplitEnumeratorTest {
         context.registerReader(0, "test-host");
         context.registerReader(1, "test-host");
 
-        Queue<Result> results = new LinkedBlockingQueue<>();
-        SnapshotEnumerator snapshotEnumerator = results::poll;
+        Queue<DataFilePlan> results = new LinkedBlockingQueue<>();
+        Callable<DataFilePlan> callable =
+                () -> {
+                    DataFilePlan plan = results.poll();
+                    if (plan == null) {
+                        throw new EndOfScanException();
+                    }
+                    return plan;
+                };
+
         ContinuousFileSplitEnumerator enumerator =
                 new Builder()
                         .setSplitEnumeratorContext(context)
                         .setInitialSplits(Collections.emptyList())
                         .setDiscoveryInterval(1)
-                        .setSnapshotEnumerator(snapshotEnumerator)
+                        .setCallable(callable)
                         .build();
         enumerator.start();
 
@@ -164,7 +172,7 @@ public class ContinuousFileSplitEnumeratorTest {
         for (int i = 0; i < 4; i++) {
             splits.add(createDataSplit(snapshot, i, Collections.emptyList()));
         }
-        results.add(snapshotEnumerator.planResult(new DataFilePlan(snapshot, splits)));
+        results.add(new DataFilePlan(snapshot, splits));
         context.triggerAllActions();
 
         // assign to task 0
@@ -177,7 +185,6 @@ public class ContinuousFileSplitEnumeratorTest {
 
         // no more splits task 0
         enumerator.handleSplitRequest(0, "test-host");
-        results.add(snapshotEnumerator.finishedResult());
         context.triggerAllActions();
         assignments = context.getSplitAssignments();
         assertThat(assignments).containsOnlyKeys(0);
@@ -223,7 +230,7 @@ public class ContinuousFileSplitEnumeratorTest {
         private Collection<FileStoreSourceSplit> initialSplits = Collections.emptyList();
         private Long nextSnapshotId;
         private long discoveryInterval = Long.MAX_VALUE;
-        private SnapshotEnumerator snapshotEnumerator;
+        private Callable<DataFilePlan> callable;
 
         public Builder setSplitEnumeratorContext(
                 SplitEnumeratorContext<FileStoreSourceSplit> context) {
@@ -246,14 +253,14 @@ public class ContinuousFileSplitEnumeratorTest {
             return this;
         }
 
-        public Builder setSnapshotEnumerator(SnapshotEnumerator snapshotEnumerator) {
-            this.snapshotEnumerator = snapshotEnumerator;
+        public Builder setCallable(Callable<DataFilePlan> callable) {
+            this.callable = callable;
             return this;
         }
 
         public ContinuousFileSplitEnumerator build() {
             return new ContinuousFileSplitEnumerator(
-                    context, initialSplits, nextSnapshotId, discoveryInterval, snapshotEnumerator);
+                    context, initialSplits, nextSnapshotId, discoveryInterval, callable);
         }
     }
 }

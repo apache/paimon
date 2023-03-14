@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.table.source.snapshot;
 
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.StreamTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -32,11 +31,10 @@ import java.util.Arrays;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CompactedStartingScanner}. */
-public class CompactedStartingScannerTest extends SnapshotEnumeratorTestBase {
+public class CompactedStartingScannerTest extends ScannerTestBase {
 
     @Test
     public void testGetPlan() throws Exception {
-        FileStoreTable table = createFileStoreTable();
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -59,7 +57,7 @@ public class CompactedStartingScannerTest extends SnapshotEnumeratorTestBase {
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(4);
 
         CompactedStartingScanner scanner = new CompactedStartingScanner();
-        DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, table.newScan());
+        DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, snapshotSplitReader);
         assertThat(plan.snapshotId).isEqualTo(3);
         assertThat(getResult(table.newRead(), plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
@@ -69,16 +67,14 @@ public class CompactedStartingScannerTest extends SnapshotEnumeratorTestBase {
     }
 
     @Test
-    public void testNoSnapshot() throws Exception {
-        FileStoreTable table = createFileStoreTable();
+    public void testNoSnapshot() {
         SnapshotManager snapshotManager = table.snapshotManager();
         CompactedStartingScanner scanner = new CompactedStartingScanner();
-        assertThat(scanner.getPlan(snapshotManager, table.newScan())).isNull();
+        assertThat(scanner.getPlan(snapshotManager, snapshotSplitReader)).isNull();
     }
 
     @Test
     public void testNoCompactSnapshot() throws Exception {
-        FileStoreTable table = createFileStoreTable();
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -91,7 +87,7 @@ public class CompactedStartingScannerTest extends SnapshotEnumeratorTestBase {
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(1);
 
         CompactedStartingScanner scanner = new CompactedStartingScanner();
-        assertThat(scanner.getPlan(snapshotManager, table.newScan())).isNull();
+        assertThat(scanner.getPlan(snapshotManager, snapshotSplitReader)).isNull();
 
         write.close();
         commit.close();

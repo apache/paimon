@@ -16,19 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.table.source.snapshot;
+package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.source.BatchDataTableScan;
-import org.apache.flink.table.store.table.source.DataTableScan;
-import org.apache.flink.table.store.table.source.StreamDataTableScan;
+/** An {@link InnerTableScan} for reading only once, this is for batch scan. */
+public abstract class ReadOnceTableScan implements InnerTableScan {
 
-/**
- * Helper class for the first planning of {@link BatchDataTableScan} and {@link
- * StreamDataTableScan}.
- */
-public interface StartingScanner {
+    private boolean hasNext = true;
 
-    DataTableScan.DataFilePlan getPlan(
-            SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader);
+    @Override
+    public Plan plan() {
+        if (hasNext) {
+            hasNext = false;
+            return innerPlan();
+        } else {
+            throw new EndOfScanException();
+        }
+    }
+
+    protected abstract Plan innerPlan();
 }

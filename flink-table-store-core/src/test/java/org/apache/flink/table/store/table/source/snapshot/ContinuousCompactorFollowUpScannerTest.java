@@ -22,7 +22,6 @@ import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.StreamTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -42,13 +41,12 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ContinuousCompactorFollowUpScanner}. */
-public class ContinuousCompactorFollowUpScannerTest extends SnapshotEnumeratorTestBase {
+public class ContinuousCompactorFollowUpScannerTest extends ScannerTestBase {
 
     private final DataFileMetaSerializer dataFileMetaSerializer = new DataFileMetaSerializer();
 
     @Test
     public void testGetPlan() throws Exception {
-        FileStoreTable table = createFileStoreTable();
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -80,14 +78,13 @@ public class ContinuousCompactorFollowUpScannerTest extends SnapshotEnumeratorTe
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(4);
 
         BucketsTable bucketsTable = new BucketsTable(table, true);
-        DataTableScan scan = bucketsTable.newScan();
         TableRead read = bucketsTable.newRead();
         ContinuousCompactorFollowUpScanner scanner = new ContinuousCompactorFollowUpScanner();
 
         Snapshot snapshot = snapshotManager.snapshot(1);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        DataTableScan.DataFilePlan plan = scanner.getPlan(1, scan);
+        DataTableScan.DataFilePlan plan = scanner.getPlan(1, snapshotSplitReader);
         assertThat(plan.snapshotId).isEqualTo(1);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|1|0|1", "+I 1|2|0|1"));
@@ -95,7 +92,7 @@ public class ContinuousCompactorFollowUpScannerTest extends SnapshotEnumeratorTe
         snapshot = snapshotManager.snapshot(2);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        plan = scanner.getPlan(2, scan);
+        plan = scanner.getPlan(2, snapshotSplitReader);
         assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Collections.singletonList("+I 2|2|0|1"));

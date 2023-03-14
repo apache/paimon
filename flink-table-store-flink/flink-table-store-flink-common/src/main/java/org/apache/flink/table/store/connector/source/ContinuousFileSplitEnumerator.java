@@ -24,9 +24,7 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.SplitsAssignment;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan.DataFilePlan;
-import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
-import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator.FinishedResult;
-import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator.Result;
+import org.apache.flink.table.store.table.source.EndOfScanException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,6 +41,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 
 import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
@@ -63,7 +62,7 @@ public class ContinuousFileSplitEnumerator
 
     private final FileStoreSourceSplitGenerator splitGenerator;
 
-    private final SnapshotEnumerator snapshotEnumerator;
+    private final Callable<DataFilePlan> callable;
 
     private Long nextSnapshotId;
 
@@ -74,7 +73,7 @@ public class ContinuousFileSplitEnumerator
             Collection<FileStoreSourceSplit> remainSplits,
             Long nextSnapshotId,
             long discoveryInterval,
-            SnapshotEnumerator snapshotEnumerator) {
+            Callable<DataFilePlan> callable) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.bucketSplits = new HashMap<>();
@@ -83,7 +82,7 @@ public class ContinuousFileSplitEnumerator
         this.discoveryInterval = discoveryInterval;
         this.readersAwaitingSplit = new HashSet<>();
         this.splitGenerator = new FileStoreSourceSplitGenerator();
-        this.snapshotEnumerator = snapshotEnumerator;
+        this.callable = callable;
     }
 
     private void addSplits(Collection<FileStoreSourceSplit> splits) {
@@ -108,8 +107,7 @@ public class ContinuousFileSplitEnumerator
 
     @Override
     public void start() {
-        context.callAsync(
-                snapshotEnumerator::enumerate, this::processDiscoveredSplits, 0, discoveryInterval);
+        context.callAsync(callable, this::processDiscoveredSplits, 0, discoveryInterval);
     }
 
     @Override
@@ -152,19 +150,19 @@ public class ContinuousFileSplitEnumerator
 
     // ------------------------------------------------------------------------
 
-    private void processDiscoveredSplits(Result result, Throwable error) {
+    private void processDiscoveredSplits(DataFilePlan plan, Throwable error) {
         if (error != null) {
-            LOG.error("Failed to enumerate files", error);
+            if (error instanceof EndOfScanException) {
+                // finished
+                LOG.debug("Catching EndOfStreamException, the stream is finished.");
+                finished = true;
+                assignSplits();
+            } else {
+                LOG.error("Failed to enumerate files", error);
+            }
             return;
         }
 
-        if (result instanceof FinishedResult) {
-            finished = true;
-            assignSplits();
-            return;
-        }
-
-        DataFilePlan plan = result.plan();
         if (plan == null) {
             return;
         }

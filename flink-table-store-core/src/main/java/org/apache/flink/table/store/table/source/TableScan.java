@@ -31,6 +31,7 @@ import java.util.List;
 @Experimental
 public interface TableScan {
 
+    /** Plan splits, throws {@link EndOfScanException} if the scan is ended. */
     Plan plan();
 
     /**

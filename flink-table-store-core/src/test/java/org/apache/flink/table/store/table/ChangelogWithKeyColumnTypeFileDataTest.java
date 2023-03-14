@@ -25,7 +25,7 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.Split;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,7 +45,7 @@ public class ChangelogWithKeyColumnTypeFileDataTest extends ColumnTypeFileDataTe
     }
 
     @Test
-    public void testTableScanFilterNormalFields() throws Exception {
+    public void testTableSplitFilterNormalFields() throws Exception {
         writeAndCheckFileResultForColumnType(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -56,9 +56,10 @@ public class ChangelogWithKeyColumnTypeFileDataTest extends ColumnTypeFileDataTe
                     Predicate predicate =
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(6, 200L, 500L);
-                    DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
+                    List<Split> splits =
+                            toSplits(table.newSnapshotSplitReader().withFilter(predicate).splits());
                     List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
-                    assertThat(getResult(table.newRead(), plan.splits(), fieldGetterList))
+                    assertThat(getResult(table.newRead(), splits, fieldGetterList))
                             .containsExactlyInAnyOrder(
                                     "2|200|201|202.00|203|204|205|206.0|207.0|208|1970-07-29T00:00|210",
                                     "2|300|301|302.00|303|304|305|306.0|307.0|308|1970-11-06T00:00|310",
@@ -72,14 +73,16 @@ public class ChangelogWithKeyColumnTypeFileDataTest extends ColumnTypeFileDataTe
                      * Changelog with key table doesn't support filter in value, it will scan all
                      * data. TODO support filter value in future.
                      */
-                    DataTableScan.DataFilePlan plan =
-                            table.newScan()
-                                    .withFilter(
-                                            new PredicateBuilder(table.schema().logicalRowType())
-                                                    .between(6, 200F, 500F))
-                                    .plan();
+                    List<Split> splits =
+                            toSplits(
+                                    table.newSnapshotSplitReader()
+                                            .withFilter(
+                                                    new PredicateBuilder(
+                                                                    table.schema().logicalRowType())
+                                                            .between(6, 200F, 500F))
+                                            .splits());
                     List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
-                    assertThat(getResult(table.newRead(), plan.splits(), fieldGetterList))
+                    assertThat(getResult(table.newRead(), splits, fieldGetterList))
                             .containsExactlyInAnyOrder(
                                     "2|200|201|202.0|203|204.00|205.0|206.0|207.00|208|209|210",
                                     "2|300|301|302.0|303|304.00|305.0|306.0|307.00|308|309|310",

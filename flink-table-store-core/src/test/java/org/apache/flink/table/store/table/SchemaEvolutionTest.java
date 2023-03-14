@@ -30,8 +30,8 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.InnerTableRead;
-import org.apache.flink.table.store.table.source.InnerTableScan;
 import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReader;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.FloatType;
@@ -145,11 +145,11 @@ public class SchemaEvolutionTest {
         schemaManager.commitChanges(
                 Collections.singletonList(SchemaChange.addColumn(columnName, new BigIntType())));
         assertThatThrownBy(
-                        () -> {
-                            schemaManager.commitChanges(
-                                    Collections.singletonList(
-                                            SchemaChange.addColumn(columnName, new FloatType())));
-                        })
+                        () ->
+                                schemaManager.commitChanges(
+                                        Collections.singletonList(
+                                                SchemaChange.addColumn(
+                                                        columnName, new FloatType()))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("The column [%s] exists in the table[%s].", columnName, tablePath);
     }
@@ -348,11 +348,11 @@ public class SchemaEvolutionTest {
     private void forEachRemaining(
             FileStoreTable table, Predicate filter, Consumer<InternalRow> consumer)
             throws IOException {
-        InnerTableScan scan = table.newScan();
+        SnapshotSplitReader snapshotSplitReader = table.newSnapshotSplitReader();
         if (filter != null) {
-            scan.withFilter(filter);
+            snapshotSplitReader.withFilter(filter);
         }
-        for (Split split : scan.plan().splits()) {
+        for (Split split : snapshotSplitReader.splits()) {
             InnerTableRead read = table.newRead();
             if (filter != null) {
                 read.withFilter(filter);

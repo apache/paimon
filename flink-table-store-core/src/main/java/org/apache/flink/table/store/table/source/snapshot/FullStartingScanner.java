@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -25,21 +26,24 @@ import org.apache.flink.table.store.table.source.DataTableScan;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * {@link StartingScanner} for the {@link
- * org.apache.flink.table.store.CoreOptions.StartupMode#LATEST_FULL} startup mode.
- */
+/** {@link StartingScanner} for the {@link CoreOptions.StartupMode#LATEST_FULL} startup mode. */
 public class FullStartingScanner implements StartingScanner {
 
     private static final Logger LOG = LoggerFactory.getLogger(FullStartingScanner.class);
 
     @Override
-    public DataTableScan.DataFilePlan getPlan(SnapshotManager snapshotManager, DataTableScan scan) {
+    public DataTableScan.DataFilePlan getPlan(
+            SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
         Long startingSnapshotId = snapshotManager.latestSnapshotId();
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");
             return null;
         }
-        return scan.withKind(ScanKind.ALL).withSnapshot(startingSnapshotId).plan();
+        return new DataTableScan.DataFilePlan(
+                startingSnapshotId,
+                snapshotSplitReader
+                        .withKind(ScanKind.ALL)
+                        .withSnapshot(startingSnapshotId)
+                        .splits());
     }
 }

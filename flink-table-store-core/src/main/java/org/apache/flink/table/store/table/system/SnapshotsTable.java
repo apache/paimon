@@ -34,6 +34,7 @@ import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.InnerTableScan;
+import org.apache.flink.table.store.table.source.ReadOnceTableScan;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
@@ -111,7 +112,7 @@ public class SnapshotsTable implements ReadonlyTable {
         return new SnapshotsTable(fileIO, location);
     }
 
-    private class SnapshotsScan implements InnerTableScan {
+    private class SnapshotsScan extends ReadOnceTableScan {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
@@ -120,7 +121,7 @@ public class SnapshotsTable implements ReadonlyTable {
         }
 
         @Override
-        public Plan plan() {
+        public Plan innerPlan() {
             return () -> Collections.singletonList(new SnapshotsSplit(fileIO, location));
         }
     }

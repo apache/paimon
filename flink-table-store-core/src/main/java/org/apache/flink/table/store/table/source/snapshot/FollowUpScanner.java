@@ -20,8 +20,9 @@ package org.apache.flink.table.store.table.source.snapshot;
 
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.StreamDataTableScan;
 
-/** Helper class for the follow-up enumeration of a {@link SnapshotEnumerator}. */
+/** Helper class for the follow-up planning of {@link StreamDataTableScan}. */
 public interface FollowUpScanner {
 
     boolean shouldScanSnapshot(Snapshot snapshot);
@@ -34,5 +35,11 @@ public interface FollowUpScanner {
         return false;
     }
 
-    DataTableScan.DataFilePlan getPlan(long snapshotId, DataTableScan scan);
+    DataTableScan.DataFilePlan getPlan(long snapshotId, SnapshotSplitReader snapshotSplitReader);
+
+    default DataTableScan.DataFilePlan getOverwriteChangesPlan(
+            long snapshotId, SnapshotSplitReader snapshotSplitReader) {
+        return new DataTableScan.DataFilePlan(
+                snapshotId, snapshotSplitReader.withSnapshot(snapshotId).overwriteSplits());
+    }
 }
