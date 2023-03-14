@@ -44,7 +44,6 @@ import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.store.fs.FileIO;
@@ -54,7 +53,6 @@ import org.apache.flink.table.store.types.RowType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -119,28 +117,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     @Override
-    public WriterContainer<KeyValue> createWriterContainer(
-            BinaryRow partition, int bucket, ExecutorService compactExecutor) {
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        RecordWriter<KeyValue> writer =
-                createMergeTreeWriter(
-                        partition,
-                        bucket,
-                        scanExistingFileMetas(latestSnapshotId, partition, bucket),
-                        compactExecutor);
-        return new WriterContainer<>(writer, latestSnapshotId);
-    }
-
-    @Override
-    public WriterContainer<KeyValue> createEmptyWriterContainer(
-            BinaryRow partition, int bucket, ExecutorService compactExecutor) {
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        RecordWriter<KeyValue> writer =
-                createMergeTreeWriter(partition, bucket, Collections.emptyList(), compactExecutor);
-        return new WriterContainer<>(writer, latestSnapshotId);
-    }
-
-    private MergeTreeWriter createMergeTreeWriter(
+    protected MergeTreeWriter createWriter(
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoreFiles,

@@ -51,14 +51,12 @@ import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.Preconditions;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
 import static java.util.Collections.singletonList;
@@ -97,10 +95,9 @@ public class TestChangelogDataReadWrite {
     private final Path tablePath;
     private final FileStorePathFactory pathFactory;
     private final SnapshotManager snapshotManager;
-    private final ExecutorService service;
     private final String commitUser;
 
-    public TestChangelogDataReadWrite(String root, ExecutorService service) {
+    public TestChangelogDataReadWrite(String root) {
         this.avro = FileFormat.fromIdentifier("avro", new Options());
         this.tablePath = new Path(root);
         this.pathFactory =
@@ -110,7 +107,6 @@ public class TestChangelogDataReadWrite {
                         "default",
                         CoreOptions.FILE_FORMAT.defaultValue());
         this.snapshotManager = new SnapshotManager(LocalFileIO.create(), new Path(root));
-        this.service = service;
         this.commitUser = UUID.randomUUID().toString();
     }
 
@@ -160,8 +156,6 @@ public class TestChangelogDataReadWrite {
 
     public List<DataFileMeta> writeFiles(
             BinaryRow partition, int bucket, List<Tuple2<Long, Long>> kvs) throws Exception {
-        Preconditions.checkNotNull(
-                service, "ExecutorService must be provided if writeFiles is needed");
         RecordWriter<KeyValue> writer = createMergeTreeWriter(partition, bucket);
         for (Tuple2<Long, Long> tuple2 : kvs) {
             writer.write(
@@ -194,7 +188,7 @@ public class TestChangelogDataReadWrite {
                                 null, // not used, we only create an empty writer
                                 options,
                                 EXTRACTOR)
-                        .createEmptyWriterContainer(partition, bucket, service)
+                        .createWriterContainer(partition, bucket, true)
                         .writer;
         ((MemoryOwner) writer)
                 .setMemoryPool(

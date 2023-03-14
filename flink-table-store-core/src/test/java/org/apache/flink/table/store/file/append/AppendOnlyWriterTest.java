@@ -27,6 +27,7 @@ import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
+import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.file.utils.ExecutorThreadFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FieldStats;
@@ -87,7 +88,7 @@ public class AppendOnlyWriterTest {
 
         for (int i = 0; i < 3; i++) {
             writer.sync();
-            RecordWriter.CommitIncrement inc = writer.prepareCommit(true);
+            CommitIncrement inc = writer.prepareCommit(true);
 
             assertThat(inc.newFilesIncrement().isEmpty()).isTrue();
             assertThat(inc.compactIncrement().isEmpty()).isTrue();
@@ -98,7 +99,7 @@ public class AppendOnlyWriterTest {
     public void testSingleWrite() throws Exception {
         RecordWriter<InternalRow> writer = createEmptyWriter(1024 * 1024L);
         writer.write(row(1, "AAA", PART));
-        RecordWriter.CommitIncrement increment = writer.prepareCommit(true);
+        CommitIncrement increment = writer.prepareCommit(true);
         writer.close();
 
         assertThat(increment.newFilesIncrement().newFiles().size()).isEqualTo(1);
@@ -140,7 +141,7 @@ public class AppendOnlyWriterTest {
             }
 
             writer.sync();
-            RecordWriter.CommitIncrement inc = writer.prepareCommit(true);
+            CommitIncrement inc = writer.prepareCommit(true);
             if (txn > 0 && txn % 3 == 0) {
                 assertThat(inc.compactIncrement().compactBefore()).hasSize(4);
                 assertThat(inc.compactIncrement().compactAfter()).hasSize(1);
@@ -199,7 +200,7 @@ public class AppendOnlyWriterTest {
         }
 
         writer.sync();
-        RecordWriter.CommitIncrement firstInc = writer.prepareCommit(true);
+        CommitIncrement firstInc = writer.prepareCommit(true);
         assertThat(firstInc.compactIncrement().compactBefore()).isEqualTo(Collections.emptyList());
         assertThat(firstInc.compactIncrement().compactAfter()).isEqualTo(Collections.emptyList());
 
@@ -241,7 +242,7 @@ public class AppendOnlyWriterTest {
         assertThat(toCompact).containsExactlyElementsOf(firstInc.newFilesIncrement().newFiles());
         writer.write(row(id, String.format("%03d", id), PART));
         writer.sync();
-        RecordWriter.CommitIncrement secInc = writer.prepareCommit(true);
+        CommitIncrement secInc = writer.prepareCommit(true);
 
         // check compact before and after
         List<DataFileMeta> compactBefore = secInc.compactIncrement().compactBefore();

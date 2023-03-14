@@ -33,6 +33,7 @@ import org.apache.flink.table.store.file.io.RollingFileWriter;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.memory.MemorySegmentPool;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.types.RowType;
 
@@ -149,6 +150,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
+    public List<DataFileMeta> allFiles() {
+        return compactManager.allFiles();
+    }
+
+    @Override
     public long memoryOccupancy() {
         return writeBuffer.memoryOccupancy();
     }
@@ -232,17 +238,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         compactAfter.clear();
         compactChangelog.clear();
 
-        return new CommitIncrement() {
-            @Override
-            public NewFilesIncrement newFilesIncrement() {
-                return newFilesIncrement;
-            }
-
-            @Override
-            public CompactIncrement compactIncrement() {
-                return compactIncrement;
-            }
-        };
+        return new CommitIncrement(newFilesIncrement, compactIncrement);
     }
 
     private void updateCompactResult(CompactResult result) {
@@ -306,5 +302,21 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         for (DataFileMeta file : delete) {
             writerFactory.deleteFile(file.fileName());
         }
+    }
+
+    @Override
+    public CommitIncrement extractStateAndClose() throws Exception {
+        CommitIncrement state = prepareCommit(false);
+        close();
+        return state;
+    }
+
+    @Override
+    public void recoverFromState(CommitIncrement state) {
+        newFiles.addAll(state.newFilesIncrement().newFiles());
+        newFilesChangelog.addAll(state.newFilesIncrement().changelogFiles());
+        state.compactIncrement().compactBefore().forEach(f -> compactBefore.put(f.fileName(), f));
+        compactAfter.addAll(state.compactIncrement().compactAfter());
+        compactChangelog.addAll(state.compactIncrement().changelogFiles());
     }
 }

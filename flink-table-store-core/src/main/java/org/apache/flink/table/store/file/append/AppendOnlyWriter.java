@@ -26,6 +26,7 @@ import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.io.NewFilesIncrement;
 import org.apache.flink.table.store.file.io.RowDataRollingFileWriter;
+import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.fs.FileIO;
@@ -108,6 +109,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
     }
 
     @Override
+    public List<DataFileMeta> allFiles() {
+        return compactManager.allFiles();
+    }
+
+    @Override
     public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
         flushWriter(false, false);
         trySyncLatestCompaction(waitCompaction || forceCompact);
@@ -186,16 +192,20 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
         compactBefore.clear();
         compactAfter.clear();
 
-        return new CommitIncrement() {
-            @Override
-            public NewFilesIncrement newFilesIncrement() {
-                return newFilesIncrement;
-            }
+        return new CommitIncrement(newFilesIncrement, compactIncrement);
+    }
 
-            @Override
-            public CompactIncrement compactIncrement() {
-                return compactIncrement;
-            }
-        };
+    @Override
+    public CommitIncrement extractStateAndClose() throws Exception {
+        CommitIncrement state = prepareCommit(false);
+        close();
+        return state;
+    }
+
+    @Override
+    public void recoverFromState(CommitIncrement state) {
+        newFiles.addAll(state.newFilesIncrement().newFiles());
+        compactBefore.addAll(state.compactIncrement().compactBefore());
+        compactAfter.addAll(state.compactIncrement().compactAfter());
     }
 }

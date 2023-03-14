@@ -38,8 +38,6 @@ import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -50,8 +48,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -65,20 +61,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Test for {@link FileStoreSourceSplitReader}. */
 public class FileStoreSourceSplitReaderTest {
 
-    private static ExecutorService service;
-
     @TempDir java.nio.file.Path tempDir;
-
-    @BeforeAll
-    public static void before() {
-        service = Executors.newSingleThreadExecutor();
-    }
-
-    @AfterAll
-    public static void after() {
-        service.shutdownNow();
-        service = null;
-    }
 
     @BeforeEach
     public void beforeEach() throws Exception {
@@ -126,7 +109,7 @@ public class FileStoreSourceSplitReaderTest {
     }
 
     private void innerTestOnce(boolean valueCountMode, int skip) throws Exception {
-        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
         FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
                 createReader(
                         valueCountMode ? rw.createReadWithValueCount() : rw.createReadWithKey(),
@@ -170,7 +153,7 @@ public class FileStoreSourceSplitReaderTest {
 
     @Test
     public void testPrimaryKeyWithDelete() throws Exception {
-        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
         FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
                 createReader(rw.createReadWithKey(), null);
 
@@ -213,7 +196,7 @@ public class FileStoreSourceSplitReaderTest {
 
     @Test
     public void testMultipleBatchInSplit() throws Exception {
-        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
         FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
                 createReader(rw.createReadWithKey(), null);
 
@@ -250,7 +233,7 @@ public class FileStoreSourceSplitReaderTest {
 
     @Test
     public void testRestore() throws Exception {
-        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
         FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
                 createReader(rw.createReadWithKey(), null);
 
@@ -277,7 +260,7 @@ public class FileStoreSourceSplitReaderTest {
 
     @Test
     public void testRestoreMultipleBatchInSplit() throws Exception {
-        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
         FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
                 createReader(rw.createReadWithKey(), null);
 
@@ -309,7 +292,7 @@ public class FileStoreSourceSplitReaderTest {
 
     @Test
     public void testMultipleSplits() throws Exception {
-        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
         FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
                 createReader(rw.createReadWithKey(), null);
 
@@ -348,7 +331,7 @@ public class FileStoreSourceSplitReaderTest {
 
     @Test
     public void testNoSplit() throws Exception {
-        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
         FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
                 createReader(rw.createReadWithKey(), null);
         assertThatThrownBy(reader::fetch).hasMessageContaining("no split remaining");
@@ -357,7 +340,7 @@ public class FileStoreSourceSplitReaderTest {
 
     @Test
     public void testLimit() throws Exception {
-        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString(), service);
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
         FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
                 createReader(rw.createReadWithKey(), 2L);
 
