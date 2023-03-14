@@ -30,7 +30,7 @@ This documentation is a guide for using Table Store in Hive.
 
 ## Version
 
-Table Store currently supports Hive 2.1, 2.1-cdh-6.3, 2.2, 2.3 and 3.1.
+Table Store currently supports Hive 3.1, 2.3, 2.2, 2.1 and 2.1-cdh-6.3.
 
 ## Execution Engine
 

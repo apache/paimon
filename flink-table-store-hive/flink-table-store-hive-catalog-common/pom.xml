@@ -23,13 +23,13 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-hive</artifactId>
         <groupId>org.apache.flink</groupId>
+        <artifactId>flink-table-store-hive</artifactId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-hive-catalog</artifactId>
-    <name>Flink Table Store : Hive Catalog</name>
+    <artifactId>flink-table-store-hive-catalog-common</artifactId>
+    <name>Flink Table Store : Hive Catalog Common</name>
 
     <packaging>jar</packaging>
 
