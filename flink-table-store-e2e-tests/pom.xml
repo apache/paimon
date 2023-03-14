@@ -55,7 +55,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-hive-connector</artifactId>
+            <artifactId>flink-table-store-hive-connector-common</artifactId>
             <version>${project.version}</version>
             <scope>runtime</scope>
         </dependency>
@@ -122,7 +122,7 @@ under the License.
                         </artifactItem>
                         <artifactItem>
                             <groupId>org.apache.flink</groupId>
-                            <artifactId>flink-table-store-hive-connector</artifactId>
+                            <artifactId>flink-table-store-hive-connector-common</artifactId>
                             <version>${project.version}</version>
                             <destFileName>flink-table-store-hive-connector.jar</destFileName>
                             <type>jar</type>

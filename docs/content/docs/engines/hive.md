@@ -30,7 +30,7 @@ This documentation is a guide for using Table Store in Hive.
 
 ## Version
 
-Table Store currently supports Hive 2.1, 2.2, 2.3 and 3.1.
+Table Store currently supports Hive 2.1, 2.1-cdh-6.3, 2.2, 2.3 and 3.1.
 
 ## Execution Engine
 
@@ -42,12 +42,13 @@ Table Store currently supports MR and Tez execution engine for Hive.
 
 Download the jar file with corresponding version.
 
-| |Jar|
-|---|---|
-|Hive 3.1|[flink-table-store-hive-connector-{{< version >}}_3.1.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-{{< version >}}_3.1.jar)|
-|Hive 2.3|[flink-table-store-hive-connector-{{< version >}}_2.3.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-{{< version >}}_2.3.jar)|
-|Hive 2.2|[flink-table-store-hive-connector-{{< version >}}_2.2.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-{{< version >}}_2.2.jar)|
-|Hive 2.1|[flink-table-store-hive-connector-{{< version >}}_2.1.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-{{< version >}}_2.1.jar)|
+|                  | Jar                                                                                                                                                                                                                |
+|------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Hive 3.1         | [flink-table-store-hive-connector-3.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-3.1-{{< version >}}.jar)                 |
+| Hive 2.3         | [flink-table-store-hive-connector-2.3-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-2.3-{{< version >}}.jar)                 |
+| Hive 2.2         | [flink-table-store-hive-connector-2.2-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-2.2-{{< version >}}.jar)                 |
+| Hive 2.1         | [flink-table-store-hive-connector-2.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-2.1-{{< version >}}.jar)                 |
+| Hive 2.1-cdh-6.3 | [flink-table-store-hive-connector-2.1-cdh-6.3-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-2.1-cdh-6.3-{{< version >}}.jar) |
 
 You can also manually build bundled jar from the source code.
 
@@ -62,16 +63,9 @@ You are using an unreleased version of Table Store so you need to manually build
 To build from source code, either [download the source of a release](https://flink.apache.org/downloads.html) or [clone the git repository]({{< github_repo >}}).
 
 Build bundled jar with the following command.
+`mvn clean install -Dmaven.test.skip=true`
 
-| Version | Command |
-|---|---|
-| Hive 3.1 | `mvn clean install -Dmaven.test.skip=true -Phive-3.1` |
-| Hive 2.3 | `mvn clean install -Dmaven.test.skip=true` |
-| Hive 2.2 | `mvn clean install -Dmaven.test.skip=true -Phive-2.2` |
-| Hive 2.1 | `mvn clean install -Dmaven.test.skip=true -Phive-2.1` |
-| Hive 2.1 CDH 6.3 | `mvn clean install -Dmaven.test.skip=true -Phive-2.1-cdh-6.3` |
-
-You can find Hive connector jar in `./flink-table-store-hive/flink-table-store-hive-connector/target/flink-table-store-hive-connector-{{< version >}}.jar`.
+You can find Hive connector jar in `./flink-table-store-hive/flink-table-store-hive-connector-<hive-version>/target/flink-table-store-hive-connector-<hive-version>-{{< version >}}.jar`.
 
 There are several ways to add this jar to Hive.
 
@@ -137,7 +131,7 @@ SELECT * FROM test_table;
 Run the following Hive SQL in Hive CLI to access the created table.
 
 ```sql
--- Assume that flink-table-store-hive-connector-{{< version >}}.jar is already in auxlib directory.
+-- Assume that flink-table-store-hive-connector-<hive-version>-{{< version >}}.jar is already in auxlib directory.
 -- List tables in Hive
 -- (you might need to switch to "default" database if you're not there by default)
 

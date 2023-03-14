@@ -91,8 +91,8 @@ public class MergeTreeCompactManagerTest {
     @Test
     public void testNoCompaction() throws ExecutionException, InterruptedException {
         innerTest(
-                Collections.singletonList(new LevelMinMax(0, 1, 3)),
-                Collections.singletonList(new LevelMinMax(0, 1, 3)));
+                Collections.singletonList(new LevelMinMax(3, 1, 3)),
+                Collections.singletonList(new LevelMinMax(3, 1, 3)));
     }
 
     @Test
