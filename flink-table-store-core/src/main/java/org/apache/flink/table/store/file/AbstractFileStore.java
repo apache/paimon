@@ -79,7 +79,6 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
         return new ManifestFile.Factory(
                 fileIO,
                 schemaManager,
-                schemaId,
                 partitionType,
                 options.manifestFormat(),
                 pathFactory(),
@@ -106,7 +105,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     public FileStoreCommitImpl newCommit(String commitUser) {
         return new FileStoreCommitImpl(
                 fileIO,
-                schemaId,
+                schemaManager,
                 commitUser,
                 partitionType,
                 pathFactory(),

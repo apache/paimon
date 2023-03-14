@@ -144,7 +144,6 @@ public class ManifestFileMetaTest {
         return new ManifestFile.Factory(
                         fileIO,
                         new SchemaManager(fileIO, path),
-                        0,
                         PARTITION_TYPE,
                         avro,
                         new FileStorePathFactory(
