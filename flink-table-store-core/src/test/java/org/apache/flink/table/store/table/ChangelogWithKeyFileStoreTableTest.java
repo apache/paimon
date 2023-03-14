@@ -421,10 +421,11 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 // partition 2
                                 Collections.singletonList("-D 2|10|301|binary|varbinary")));
 
-        StreamDataTableScan scan = table.newStreamScan();
-        scan.withStartingScanner(new FullStartingScanner())
-                .withFollowUpScanner(new InputChangelogFollowUpScanner())
-                .withNextSnapshotId(1L);
+        StreamDataTableScan scan =
+                table.newStreamScan()
+                        .withStartingScanner(new FullStartingScanner())
+                        .withFollowUpScanner(new InputChangelogFollowUpScanner());
+        scan.restore(1L);
 
         Function<Integer, Void> assertNextSnapshot =
                 i -> {
