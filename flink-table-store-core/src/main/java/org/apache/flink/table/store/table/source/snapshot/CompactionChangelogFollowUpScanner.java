@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -26,8 +27,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * {@link FollowUpScanner} for {@link
- * org.apache.flink.table.store.CoreOptions.ChangelogProducer#FULL_COMPACTION} changelog producer.
+ * {@link FollowUpScanner} for {@link CoreOptions.ChangelogProducer#FULL_COMPACTION} changelog
+ * producer.
  */
 public class CompactionChangelogFollowUpScanner implements FollowUpScanner {
 
@@ -48,7 +49,10 @@ public class CompactionChangelogFollowUpScanner implements FollowUpScanner {
     }
 
     @Override
-    public DataTableScan.DataFilePlan getPlan(long snapshotId, DataTableScan scan) {
-        return scan.withKind(ScanKind.CHANGELOG).withSnapshot(snapshotId).plan();
+    public DataTableScan.DataFilePlan getPlan(
+            long snapshotId, SnapshotSplitReader snapshotSplitReader) {
+        return new DataTableScan.DataFilePlan(
+                snapshotId,
+                snapshotSplitReader.withKind(ScanKind.CHANGELOG).withSnapshot(snapshotId).splits());
     }
 }

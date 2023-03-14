@@ -34,9 +34,11 @@ import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReader;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
@@ -99,6 +101,16 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     @Override
     public DataTableScan newScan() {
         return new AuditLogScan(dataTable.newScan());
+    }
+
+    @Override
+    public DataTableScan newStreamScan() {
+        return new AuditLogScan(dataTable.newStreamScan());
+    }
+
+    @Override
+    public SnapshotSplitReader newDataSplitReader() {
+        return new AuditLogDataSplitReader(dataTable.newDataSplitReader());
     }
 
     @Override
@@ -181,15 +193,47 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         public DataTableScan.DataFilePlan plan() {
             return dataScan.plan();
         }
+    }
 
-        @Override
-        public DataFilePlan planOverwriteChanges() {
-            return dataScan.planOverwriteChanges();
+    private class AuditLogDataSplitReader implements SnapshotSplitReader {
+
+        private final SnapshotSplitReader snapshotSplitReader;
+
+        private AuditLogDataSplitReader(SnapshotSplitReader snapshotSplitReader) {
+            this.snapshotSplitReader = snapshotSplitReader;
         }
 
-        @Override
-        public boolean supportStreamingReadOverwrite() {
-            return dataScan.supportStreamingReadOverwrite();
+        public SnapshotSplitReader withSnapshot(long snapshotId) {
+            snapshotSplitReader.withSnapshot(snapshotId);
+            return this;
+        }
+
+        public SnapshotSplitReader withFilter(Predicate predicate) {
+            convert(predicate).ifPresent(snapshotSplitReader::withFilter);
+            return this;
+        }
+
+        public SnapshotSplitReader withKind(ScanKind scanKind) {
+            snapshotSplitReader.withKind(scanKind);
+            return this;
+        }
+
+        public SnapshotSplitReader withLevelFilter(Filter<Integer> levelFilter) {
+            snapshotSplitReader.withLevelFilter(levelFilter);
+            return this;
+        }
+
+        public SnapshotSplitReader withBucket(int bucket) {
+            snapshotSplitReader.withBucket(bucket);
+            return this;
+        }
+
+        public List<DataSplit> splits() {
+            return snapshotSplitReader.splits();
+        }
+
+        public List<DataSplit> overwriteSplits() {
+            return snapshotSplitReader.overwriteSplits();
         }
     }
 

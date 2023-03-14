@@ -16,19 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.table.source.snapshot;
+package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.source.BatchDataTableScan;
-import org.apache.flink.table.store.table.source.DataTableScan;
-import org.apache.flink.table.store.table.source.StreamDataTableScan;
+/** This exception is thrown when reading from a stream that has already ended. */
+public class EndOfStreamException extends RuntimeException {
+    private static final long serialVersionUID = 1L;
 
-/**
- * Helper class for the first planning of {@link BatchDataTableScan} and {@link
- * StreamDataTableScan}.
- */
-public interface StartingScanner {
+    public EndOfStreamException(String message) {
+        super(message);
+    }
 
-    DataTableScan.DataFilePlan getPlan(
-            SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader);
+    public EndOfStreamException(String message, Throwable t) {
+        super(message, t);
+    }
+
+    public EndOfStreamException(Throwable t) {
+        super(t);
+    }
 }

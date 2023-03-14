@@ -41,15 +41,14 @@ import org.apache.flink.table.store.table.sink.InnerTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.DataSplit;
-import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.ReadBuilder;
 import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.StreamDataTableScan;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.source.TableScan;
-import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
 import org.apache.flink.table.store.table.source.snapshot.FullStartingScanner;
 import org.apache.flink.table.store.table.source.snapshot.InputChangelogFollowUpScanner;
-import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
+import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReader;
 import org.apache.flink.table.store.table.system.AuditLogTable;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
@@ -105,7 +104,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     @Test
     public void testBatchWriteBuilder() throws Exception {
-        Table table = createFileStoreTable();
+        FileStoreTable table = createFileStoreTable();
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();
         BatchTableCommit commit = writeBuilder.newCommit();
@@ -122,7 +121,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         commit.close();
 
         ReadBuilder readBuilder = table.newReadBuilder();
-        List<Split> splits = readBuilder.newScan().plan().splits();
+        List<Split> splits = toSplits(table.newDataSplitReader().splits());
         TableRead read = readBuilder.newRead();
         assertThat(getResult(read, splits, BATCH_ROW_TO_STRING))
                 .isEqualTo(
@@ -145,7 +144,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         commit.commit(1, write.prepareCommit(true, 1));
         write.close();
 
-        List<Split> splits = table.newScan().plan().splits();
+        List<Split> splits = toSplits(table.newDataSplitReader().splits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .isEqualTo(
@@ -159,7 +158,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().plan().splits();
+        List<Split> splits = toSplits(table.newDataSplitReader().splits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .isEqualTo(
@@ -177,7 +176,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().plan().splits();
+        List<Split> splits = toSplits(table.newDataSplitReader().splits());
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Collections.singletonList("1000|10"));
@@ -192,7 +191,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
 
         Predicate predicate = PredicateBuilder.and(builder.equal(2, 201L), builder.equal(1, 21));
-        List<Split> splits = table.newScan().withFilter(predicate).plan().splits();
+        List<Split> splits = toSplits(table.newDataSplitReader().withFilter(predicate).splits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
@@ -209,7 +208,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
+        List<Split> splits = toSplits(table.newDataSplitReader().withKind(ScanKind.DELTA).splits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
@@ -228,7 +227,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
+        List<Split> splits = toSplits(table.newDataSplitReader().withKind(ScanKind.DELTA).splits());
         TableRead read = table.newRead().withProjection(PROJECTION);
 
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
@@ -245,7 +244,11 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         Predicate predicate = PredicateBuilder.and(builder.equal(2, 201L), builder.equal(1, 21));
         List<Split> splits =
-                table.newScan().withKind(ScanKind.DELTA).withFilter(predicate).plan().splits();
+                toSplits(
+                        table.newDataSplitReader()
+                                .withKind(ScanKind.DELTA)
+                                .withFilter(predicate)
+                                .splits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
@@ -276,7 +279,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
 
-        List<Split> splits = table.newScan().withKind(ScanKind.CHANGELOG).plan().splits();
+        List<Split> splits =
+                toSplits(table.newDataSplitReader().withKind(ScanKind.CHANGELOG).splits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
@@ -310,7 +314,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.compact(binaryRow(2), 0, true);
         commit.commit(0, write.prepareCommit(true, 0));
 
-        List<Split> splits = table.newScan().withKind(ScanKind.CHANGELOG).plan().splits();
+        List<Split> splits =
+                toSplits(table.newDataSplitReader().withKind(ScanKind.CHANGELOG).splits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
@@ -331,7 +336,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.compact(binaryRow(2), 0, true);
         commit.commit(2, write.prepareCommit(true, 2));
 
-        splits = table.newScan().withKind(ScanKind.CHANGELOG).plan().splits();
+        splits = toSplits(table.newDataSplitReader().withKind(ScanKind.CHANGELOG).splits());
         assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
                 .containsExactlyInAnyOrder("+I 1|30|130|binary|varbinary|mapKey:mapVal|multiset");
         assertThat(getResult(read, splits, binaryRow(2), 0, CHANGELOG_ROW_TO_STRING))
@@ -355,7 +360,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.compact(binaryRow(2), 0, true);
         commit.commit(4, write.prepareCommit(true, 4));
 
-        splits = table.newScan().withKind(ScanKind.CHANGELOG).plan().splits();
+        splits = toSplits(table.newDataSplitReader().withKind(ScanKind.CHANGELOG).splits());
         assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
                         "-D 1|20|120|binary|varbinary|mapKey:mapVal|multiset",
@@ -413,18 +418,14 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 // partition 2
                                 Collections.singletonList("-D 2|10|301|binary|varbinary")));
 
-        SnapshotEnumerator enumerator =
-                new ContinuousDataFileSnapshotEnumerator(
-                        LocalFileIO.create(),
-                        tablePath,
-                        table.newScan(),
-                        new FullStartingScanner(),
-                        new InputChangelogFollowUpScanner(),
-                        1L);
+        StreamDataTableScan scan = table.newStreamScan();
+        scan.withStartingScanner(new FullStartingScanner())
+                .withFollowUpScanner(new InputChangelogFollowUpScanner())
+                .withNextSnapshotId(1L);
 
         Function<Integer, Void> assertNextSnapshot =
                 i -> {
-                    TableScan.Plan plan = enumerator.enumerate().plan();
+                    TableScan.Plan plan = scan.plan();
                     assertThat(plan).isNotNull();
 
                     List<Split> splits = plan.splits();
@@ -452,7 +453,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         }
 
         // no more changelog
-        assertThat(enumerator.enumerate().plan()).isNull();
+        assertThat(scan.plan()).isNull();
 
         // write another commit
         StreamTableWrite write = table.newWrite(commitUser);
@@ -467,7 +468,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertNextSnapshot.apply(2);
 
         // no more changelog
-        assertThat(enumerator.enumerate().plan()).isNull();
+        assertThat(scan.plan()).isNull();
     }
 
     private void writeData() throws Exception {
@@ -520,7 +521,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         commit.commit(2, write.prepareCommit(true, 2));
 
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
-        List<Split> splits = table.newScan().plan().splits();
+        List<Split> splits = toSplits(table.newDataSplitReader().splits());
 
         // push down key filter a = 30
         TableRead read = table.newRead().withFilter(builder.equal(1, 30));
@@ -559,7 +560,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.close();
 
         // cannot push down value filter b = 600L
-        splits = table.newScan().plan().splits();
+        splits = toSplits(table.newDataSplitReader().splits());
         read = table.newRead().withFilter(builder.equal(2, 600L));
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
@@ -591,7 +592,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
 
-        List<Split> splits = table.newScan().plan().splits();
+        List<Split> splits = toSplits(table.newDataSplitReader().splits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .isEqualTo(
@@ -621,7 +622,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         write.close();
 
-        List<Split> splits = table.newScan().plan().splits();
+        List<Split> splits = toSplits(table.newDataSplitReader().splits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .isEqualTo(
@@ -635,7 +636,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
-    public void testIncrementalScanOverwrite() throws Exception {
+    public void testIncrementalSplitOverwrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
         StreamTableWrite write = table.newWrite(commitUser);
         InnerTableCommit commit = table.newCommit(commitUser);
@@ -644,8 +645,9 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(1, 20, 200L));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        DataTableScan scan = table.newScan().withKind(ScanKind.DELTA);
-        List<DataSplit> splits0 = scan.plan().splits;
+        SnapshotSplitReader snapshotSplitReader =
+                table.newDataSplitReader().withKind(ScanKind.DELTA);
+        List<DataSplit> splits0 = snapshotSplitReader.splits();
         assertThat(splits0).hasSize(1);
         assertThat(splits0.get(0).files()).hasSize(1);
 
@@ -656,7 +658,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         commit.withOverwrite(overwritePartition);
         commit.commit(1, write.prepareCommit(true, 1));
 
-        List<DataSplit> splits1 = scan.plan().splits;
+        List<DataSplit> splits1 = snapshotSplitReader.splits();
         assertThat(splits1).hasSize(1);
         assertThat(splits1.get(0).files()).hasSize(1);
         assertThat(splits1.get(0).files().get(0).fileName())
@@ -696,30 +698,32 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         PredicateBuilder predicateBuilder = new PredicateBuilder(auditLogTable.rowType());
 
         // Read all
-        TableScan scan = auditLogTable.newScan();
+        SnapshotSplitReader snapshotSplitReader = auditLogTable.newDataSplitReader();
         TableRead read = auditLogTable.newRead();
-        List<String> result = getResult(read, scan.plan().splits(), rowDataToString);
+        List<String> result =
+                getResult(read, toSplits(snapshotSplitReader.splits()), rowDataToString);
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         "+I[+I, 2, 20, 200]", "+I[+U, 1, 30, 300]", "+I[+I, 1, 10, 100]");
 
         // Read by filter row kind (No effect)
         Predicate rowKindEqual = predicateBuilder.equal(0, BinaryString.fromString("+I"));
-        scan = auditLogTable.newScan().withFilter(rowKindEqual);
+        snapshotSplitReader = auditLogTable.newDataSplitReader().withFilter(rowKindEqual);
         read = auditLogTable.newRead().withFilter(rowKindEqual);
-        result = getResult(read, scan.plan().splits(), rowDataToString);
+        result = getResult(read, toSplits(snapshotSplitReader.splits()), rowDataToString);
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         "+I[+I, 2, 20, 200]", "+I[+U, 1, 30, 300]", "+I[+I, 1, 10, 100]");
 
         // Read by filter
-        scan = auditLogTable.newScan().withFilter(predicateBuilder.equal(2, 10));
+        snapshotSplitReader =
+                auditLogTable.newDataSplitReader().withFilter(predicateBuilder.equal(2, 10));
         read = auditLogTable.newRead().withFilter(predicateBuilder.equal(2, 10));
-        result = getResult(read, scan.plan().splits(), rowDataToString);
+        result = getResult(read, toSplits(snapshotSplitReader.splits()), rowDataToString);
         assertThat(result).containsExactlyInAnyOrder("+I[+I, 1, 10, 100]");
 
         // Read by projection
-        scan = auditLogTable.newScan();
+        snapshotSplitReader = auditLogTable.newDataSplitReader();
         read = auditLogTable.newRead().withProjection(new int[] {2, 0, 1});
         Function<InternalRow, String> projectToString1 =
                 row ->
@@ -727,16 +731,16 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 row,
                                 DataTypes.ROW(
                                         DataTypes.INT(), DataTypes.STRING(), DataTypes.INT()));
-        result = getResult(read, scan.plan().splits(), projectToString1);
+        result = getResult(read, toSplits(snapshotSplitReader.splits()), projectToString1);
         assertThat(result)
                 .containsExactlyInAnyOrder("+I[20, +I, 2]", "+I[30, +U, 1]", "+I[10, +I, 1]");
 
         // Read by projection without row kind
-        scan = auditLogTable.newScan();
+        snapshotSplitReader = auditLogTable.newDataSplitReader();
         read = auditLogTable.newRead().withProjection(new int[] {2, 1});
         Function<InternalRow, String> projectToString2 =
                 row -> rowDataToString(row, DataTypes.ROW(DataTypes.INT(), DataTypes.INT()));
-        result = getResult(read, scan.plan().splits(), projectToString2);
+        result = getResult(read, toSplits(snapshotSplitReader.splits()), projectToString2);
         assertThat(result).containsExactlyInAnyOrder("+I[20, 2]", "+I[30, 1]", "+I[10, 1]");
     }
 
@@ -758,7 +762,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                         },
                         rowType);
         Function<InternalRow, String> rowToString = row -> rowDataToString(row, rowType);
-        DataTableScan scan = table.newScan();
+        SnapshotSplitReader snapshotSplitReader = table.newDataSplitReader();
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite("");
         StreamTableCommit commit = table.newCommit("");
@@ -769,7 +773,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(GenericRow.of(1, 1, 2, 2));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        List<String> result = getResult(read, scan.plan().splits(), rowToString);
+        List<String> result = getResult(read, toSplits(snapshotSplitReader.splits()), rowToString);
         assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 6, 3]");
 
         // 2. Retracts
@@ -778,7 +782,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 1, 1));
         commit.commit(1, write.prepareCommit(true, 1));
 
-        result = getResult(read, scan.plan().splits(), rowToString);
+        result = getResult(read, toSplits(snapshotSplitReader.splits()), rowToString);
         assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 3]");
     }
 

@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.table.source.snapshot;
 
 import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.DataTableScan.DataFilePlan;
 
 /**
@@ -53,7 +52,7 @@ public class BoundedWatermarkFollowUpScanner implements FollowUpScanner {
     }
 
     @Override
-    public DataFilePlan getPlan(long snapshotId, DataTableScan scan) {
-        return innerScanner.getPlan(snapshotId, scan);
+    public DataFilePlan getPlan(long snapshotId, SnapshotSplitReader snapshotSplitReader) {
+        return innerScanner.getPlan(snapshotId, snapshotSplitReader);
     }
 }

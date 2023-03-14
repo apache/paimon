@@ -52,11 +52,11 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Base test class for {@link SnapshotEnumerator} and related classes.
+ * Base test class for {@link StartingScanner} and related classes.
  *
  * <p>TODO: merge this class with FileStoreTableTestBase.
  */
-public abstract class SnapshotEnumeratorTestBase {
+public abstract class ScannerTestBase {
 
     private static final RowType ROW_TYPE =
             RowType.of(
@@ -68,12 +68,16 @@ public abstract class SnapshotEnumeratorTestBase {
     protected Path tablePath;
     protected FileIO fileIO;
     protected String commitUser;
+    protected FileStoreTable table;
+    protected SnapshotSplitReader snapshotSplitReader;
 
     @BeforeEach
-    public void before() {
+    public void before() throws Exception {
         tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
         fileIO = FileIOFinder.find(tablePath);
         commitUser = UUID.randomUUID().toString();
+        table = createFileStoreTable();
+        snapshotSplitReader = table.newDataSplitReader();
     }
 
     protected GenericRow rowData(Object... values) {

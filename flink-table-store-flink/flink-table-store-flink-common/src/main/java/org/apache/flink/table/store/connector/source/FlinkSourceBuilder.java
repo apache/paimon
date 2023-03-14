@@ -34,7 +34,7 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.log.LogSourceProvider;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
+import org.apache.flink.table.store.table.source.StreamDataTableScan;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -120,7 +120,7 @@ public class FlinkSourceBuilder {
 
     public Source<RowData, ?, ?> buildSource() {
         if (isContinuous) {
-            ContinuousDataFileSnapshotEnumerator.validate(table.schema());
+            StreamDataTableScan.validate(table.schema());
 
             // TODO visit all options through CoreOptions
             StartupMode startupMode = CoreOptions.startupMode(conf);

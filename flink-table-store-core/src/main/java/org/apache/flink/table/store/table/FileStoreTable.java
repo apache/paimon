@@ -24,6 +24,8 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.table.sink.TableCommitImpl;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
+import org.apache.flink.table.store.table.source.BatchDataTableScan;
+import org.apache.flink.table.store.table.source.StreamDataTableScan;
 import org.apache.flink.table.store.types.RowType;
 
 import java.util.List;
@@ -49,6 +51,12 @@ public interface FileStoreTable extends DataTable, SupportsPartition {
     default List<String> partitionKeys() {
         return schema().partitionKeys();
     }
+
+    @Override
+    BatchDataTableScan newScan();
+
+    @Override
+    StreamDataTableScan newStreamScan();
 
     TableSchema schema();
 

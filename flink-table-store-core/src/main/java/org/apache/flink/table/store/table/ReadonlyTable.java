@@ -22,6 +22,7 @@ import org.apache.flink.table.store.table.sink.BatchWriteBuilder;
 import org.apache.flink.table.store.table.sink.InnerTableCommit;
 import org.apache.flink.table.store.table.sink.InnerTableWrite;
 import org.apache.flink.table.store.table.sink.StreamWriteBuilder;
+import org.apache.flink.table.store.table.source.InnerTableScan;
 
 /** Readonly table which only provide implementation for scan and read. */
 public interface ReadonlyTable extends InnerTable {
@@ -55,6 +56,14 @@ public interface ReadonlyTable extends InnerTable {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support newCommit.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default InnerTableScan newStreamScan() {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support newStreamScan.",
                         this.getClass().getSimpleName()));
     }
 }

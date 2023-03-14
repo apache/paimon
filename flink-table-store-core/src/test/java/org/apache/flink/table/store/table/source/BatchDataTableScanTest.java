@@ -16,13 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.table.source.snapshot;
+package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.StreamTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;
-import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.snapshot.ScannerTestBase;
 import org.apache.flink.table.store.types.RowKind;
 
 import org.junit.jupiter.api.Test;
@@ -31,17 +30,15 @@ import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link StaticDataFileSnapshotEnumerator}. */
-public class StaticDataFileSnapshotEnumeratorTest extends SnapshotEnumeratorTestBase {
+/** Tests for {@link BatchDataTableScan}. */
+public class BatchDataTableScanTest extends ScannerTestBase {
 
     @Test
-    public void testEnumerate() throws Exception {
-        FileStoreTable table = createFileStoreTable();
+    public void testPlan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
-        SnapshotEnumerator enumerator =
-                StaticDataFileSnapshotEnumerator.create(table, table.newScan());
+        BatchDataTableScan scan = table.newScan();
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
@@ -55,7 +52,7 @@ public class StaticDataFileSnapshotEnumeratorTest extends SnapshotEnumeratorTest
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(2);
 
-        DataTableScan.DataFilePlan plan = enumerator.enumerate().plan();
+        DataTableScan.DataFilePlan plan = scan.plan();
         assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(table.newRead(), plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
@@ -64,7 +61,7 @@ public class StaticDataFileSnapshotEnumeratorTest extends SnapshotEnumeratorTest
         write.write(rowData(1, 30, 301L));
         commit.commit(2, write.prepareCommit(true, 2));
 
-        assertThat(enumerator.enumerate()).isInstanceOf(SnapshotEnumerator.FinishedResult.class);
+        assertThat(scan.plan()).isNull();
 
         write.close();
         commit.close();

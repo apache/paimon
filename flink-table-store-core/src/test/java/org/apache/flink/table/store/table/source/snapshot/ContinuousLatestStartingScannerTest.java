@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.table.source.snapshot;
 
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.StreamTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -30,11 +29,10 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ContinuousLatestStartingScanner}. */
-public class ContinuousLatestStartingScannerTest extends SnapshotEnumeratorTestBase {
+public class ContinuousLatestStartingScannerTest extends ScannerTestBase {
 
     @Test
     public void testGetPlan() throws Exception {
-        FileStoreTable table = createFileStoreTable();
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -52,7 +50,7 @@ public class ContinuousLatestStartingScannerTest extends SnapshotEnumeratorTestB
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(2);
 
         ContinuousLatestStartingScanner scanner = new ContinuousLatestStartingScanner();
-        DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, table.newScan());
+        DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, snapshotSplitReader);
         assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(table.newRead(), plan.splits())).isEmpty();
 
@@ -61,10 +59,9 @@ public class ContinuousLatestStartingScannerTest extends SnapshotEnumeratorTestB
     }
 
     @Test
-    public void testNoSnapshot() throws Exception {
-        FileStoreTable table = createFileStoreTable();
+    public void testNoSnapshot() {
         SnapshotManager snapshotManager = table.snapshotManager();
         ContinuousLatestStartingScanner scanner = new ContinuousLatestStartingScanner();
-        assertThat(scanner.getPlan(snapshotManager, table.newScan())).isNull();
+        assertThat(scanner.getPlan(snapshotManager, snapshotSplitReader)).isNull();
     }
 }

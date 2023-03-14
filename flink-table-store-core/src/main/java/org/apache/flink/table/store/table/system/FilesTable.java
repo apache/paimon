@@ -41,7 +41,6 @@ import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.InnerTableScan;
 import org.apache.flink.table.store.table.source.Split;
-import org.apache.flink.table.store.table.source.snapshot.StaticDataFileSnapshotEnumerator;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataTypes;
@@ -172,9 +171,7 @@ public class FilesTable implements ReadonlyTable {
 
         @Nullable
         private DataTableScan.DataFilePlan dataFilePlan() {
-            return StaticDataFileSnapshotEnumerator.create(storeTable, storeTable.newScan())
-                    .enumerate()
-                    .plan();
+            return storeTable.newScan().plan();
         }
 
         @Override

@@ -52,6 +52,17 @@ import java.util.List;
  *
  * }</pre>
  *
+ * <p>Especially, you can use {@link #newStreamScan()} to create a TableScan that can perform
+ * continuously planning:
+ *
+ * <pre>{@code
+ * TableScan scan = builder.newStreamScan();
+ * while (true) {
+ *     List<Split> splits = scan.plan().splits();
+ *     ...
+ * }
+ * }</pre>
+ *
  * <p>NOTE: {@link InternalRow} cannot be saved in memory. It may be reused internally, so you need
  * to convert it into your own data structure or copy it.
  *
@@ -107,6 +118,8 @@ public interface ReadBuilder extends Serializable {
 
     /** Create a {@link TableScan} to generate {@link Split}s. */
     TableScan newScan();
+
+    TableScan newStreamScan();
 
     /** Create a {@link TableRead} to read {@link Split}s. */
     TableRead newRead();

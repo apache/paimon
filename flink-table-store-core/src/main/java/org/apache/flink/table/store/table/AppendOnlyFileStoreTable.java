@@ -24,16 +24,15 @@ import org.apache.flink.table.store.file.AppendOnlyFileStore;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreRead;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
+import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.ReverseReader;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
-import org.apache.flink.table.store.table.source.AbstractDataTableScan;
 import org.apache.flink.table.store.table.source.AppendOnlySplitGenerator;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.InnerTableRead;
@@ -43,6 +42,7 @@ import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.utils.Preconditions;
 
 import java.io.IOException;
+import java.util.function.BiConsumer;
 
 /** {@link FileStoreTable} for {@link WriteMode#APPEND_ONLY} write mode. */
 public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
@@ -77,33 +77,25 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public AbstractDataTableScan newScan() {
-        AppendOnlyFileStoreScan scan = store().newScan();
-        return new AbstractDataTableScan(
-                fileIO, scan, tableSchema, store().pathFactory(), options()) {
-            /**
-             * Currently, the streaming read of overwrite is implemented by reversing the {@link
-             * RowKind} of overwrote records to {@link RowKind#DELETE}, so only tables that have
-             * primary key support it.
-             *
-             * @see ReverseReader
-             */
-            @Override
-            public boolean supportStreamingReadOverwrite() {
-                return false;
-            }
+    public SplitGenerator splitGenerator() {
+        return new AppendOnlySplitGenerator(
+                store().options().splitTargetSize(), store().options().splitOpenFileCost());
+    }
 
-            @Override
-            protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
-                return new AppendOnlySplitGenerator(
-                        store().options().splitTargetSize(), store().options().splitOpenFileCost());
-            }
+    /**
+     * Currently, the streaming read of overwrite is implemented by reversing the {@link RowKind} of
+     * overwrote records to {@link RowKind#DELETE}, so only tables that have primary key support it.
+     *
+     * @see ReverseReader
+     */
+    @Override
+    public boolean supportStreamingReadOverwrite() {
+        return false;
+    }
 
-            @Override
-            protected void withNonPartitionFilter(Predicate predicate) {
-                scan.withFilter(predicate);
-            }
-        };
+    @Override
+    public BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer() {
+        return (scan, predicate) -> ((AppendOnlyFileStoreScan) scan).withFilter(predicate);
     }
 
     @Override

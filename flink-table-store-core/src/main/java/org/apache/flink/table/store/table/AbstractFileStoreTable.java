@@ -21,6 +21,8 @@ package org.apache.flink.table.store.table;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.FileStore;
+import org.apache.flink.table.store.file.operation.FileStoreScan;
+import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.SchemaValidation;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -29,9 +31,15 @@ import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.sink.TableCommitImpl;
+import org.apache.flink.table.store.table.source.BatchDataTableScan;
+import org.apache.flink.table.store.table.source.SplitGenerator;
+import org.apache.flink.table.store.table.source.StreamDataTableScan;
+import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReader;
+import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReaderImpl;
 
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.BiConsumer;
 
 import static org.apache.flink.table.store.CoreOptions.PATH;
 
@@ -52,6 +60,38 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @VisibleForTesting
     public abstract FileStore<?> store();
+
+    @Override
+    public BatchDataTableScan newScan() {
+        return new BatchDataTableScan(options(), newDataSplitReader(), snapshotManager()) {};
+    }
+
+    @Override
+    public StreamDataTableScan newStreamScan() {
+        return new StreamDataTableScan(options(), newDataSplitReader(), snapshotManager()) {
+            @Override
+            public boolean supportStreamingReadOverwrite() {
+                return AbstractFileStoreTable.this.supportStreamingReadOverwrite();
+            }
+        };
+    }
+
+    @Override
+    public SnapshotSplitReader newDataSplitReader() {
+        return new SnapshotSplitReaderImpl(
+                store().newScan(),
+                tableSchema,
+                options(),
+                snapshotManager(),
+                splitGenerator(),
+                nonPartitionFilterConsumer());
+    }
+
+    public abstract SplitGenerator splitGenerator();
+
+    protected abstract boolean supportStreamingReadOverwrite();
+
+    public abstract BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer();
 
     protected abstract FileStoreTable copy(TableSchema newTableSchema);
 

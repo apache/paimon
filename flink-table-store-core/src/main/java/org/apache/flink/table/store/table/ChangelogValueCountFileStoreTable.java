@@ -26,19 +26,18 @@ import org.apache.flink.table.store.file.KeyValueFileStore;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
+import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.operation.ReverseReader;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
-import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
-import org.apache.flink.table.store.table.source.AbstractDataTableScan;
 import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
@@ -51,6 +50,7 @@ import org.apache.flink.table.store.types.RowType;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.function.BiConsumer;
 
 import static org.apache.flink.table.store.file.schema.SystemColumns.VALUE_COUNT;
 
@@ -92,35 +92,27 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public AbstractDataTableScan newScan() {
-        KeyValueFileStoreScan scan = store().newScan();
-        return new AbstractDataTableScan(
-                fileIO, scan, tableSchema, store().pathFactory(), options()) {
-            /**
-             * Currently, the streaming read of overwrite is implemented by reversing the {@link
-             * RowKind} of overwrote records to {@link RowKind#DELETE}, so only tables that have
-             * primary key support it.
-             *
-             * @see ReverseReader
-             */
-            @Override
-            public boolean supportStreamingReadOverwrite() {
-                return false;
-            }
+    public SplitGenerator splitGenerator() {
+        return new MergeTreeSplitGenerator(
+                store().newKeyComparator(),
+                store().options().splitTargetSize(),
+                store().options().splitOpenFileCost());
+    }
 
-            @Override
-            protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
-                return new MergeTreeSplitGenerator(
-                        store().newKeyComparator(),
-                        store().options().splitTargetSize(),
-                        store().options().splitOpenFileCost());
-            }
+    /**
+     * Currently, the streaming read of overwrite is implemented by reversing the {@link RowKind} of
+     * overwrote records to {@link RowKind#DELETE}, so only tables that have primary key support it.
+     *
+     * @see ReverseReader
+     */
+    @Override
+    public boolean supportStreamingReadOverwrite() {
+        return false;
+    }
 
-            @Override
-            protected void withNonPartitionFilter(Predicate predicate) {
-                scan.withKeyFilter(predicate);
-            }
-        };
+    @Override
+    public BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer() {
+        return (scan, predicate) -> ((KeyValueFileStoreScan) scan).withKeyFilter(predicate);
     }
 
     @Override

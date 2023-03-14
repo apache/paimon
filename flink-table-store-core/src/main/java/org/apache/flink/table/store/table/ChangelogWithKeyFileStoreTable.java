@@ -27,11 +27,11 @@ import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunct
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.aggregate.AggregateMergeFunction;
+import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.Options;
@@ -39,7 +39,6 @@ import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.sink.SequenceGenerator;
 import org.apache.flink.table.store.table.sink.SinkRecordConverter;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
-import org.apache.flink.table.store.table.source.AbstractDataTableScan;
 import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.KeyValueTableRead;
 import org.apache.flink.table.store.table.source.MergeTreeSplitGenerator;
@@ -49,6 +48,7 @@ import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowType;
 
 import java.util.List;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
@@ -147,42 +147,37 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public AbstractDataTableScan newScan() {
-        KeyValueFileStoreScan scan = store().newScan();
-        return new AbstractDataTableScan(
-                fileIO(), scan, tableSchema, store().pathFactory(), options()) {
-            @Override
-            public boolean supportStreamingReadOverwrite() {
-                return new CoreOptions(tableSchema.options()).streamingReadOverwrite();
-            }
+    public SplitGenerator splitGenerator() {
+        return new MergeTreeSplitGenerator(
+                store().newKeyComparator(),
+                store().options().splitTargetSize(),
+                store().options().splitOpenFileCost());
+    }
 
-            @Override
-            protected SplitGenerator splitGenerator(FileStorePathFactory pathFactory) {
-                return new MergeTreeSplitGenerator(
-                        store().newKeyComparator(),
-                        store().options().splitTargetSize(),
-                        store().options().splitOpenFileCost());
-            }
+    @Override
+    public boolean supportStreamingReadOverwrite() {
+        return new CoreOptions(tableSchema.options()).streamingReadOverwrite();
+    }
 
-            @Override
-            protected void withNonPartitionFilter(Predicate predicate) {
-                // currently we can only perform filter push down on keys
-                // consider this case:
-                //   data file 1: insert key = a, value = 1
-                //   data file 2: update key = a, value = 2
-                //   filter: value = 1
-                // if we perform filter push down on values, data file 1 will be chosen, but data
-                // file 2 will be ignored, and the final result will be key = a, value = 1 while the
-                // correct result is an empty set
-                // TODO support value filter
-                List<Predicate> keyFilters =
-                        pickTransformFieldMapping(
-                                splitAnd(predicate),
-                                tableSchema.fieldNames(),
-                                tableSchema.trimmedPrimaryKeys());
-                if (keyFilters.size() > 0) {
-                    scan.withKeyFilter(and(keyFilters));
-                }
+    @Override
+    public BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer() {
+        return (scan, predicate) -> {
+            // currently we can only perform filter push down on keys
+            // consider this case:
+            //   data file 1: insert key = a, value = 1
+            //   data file 2: update key = a, value = 2
+            //   filter: value = 1
+            // if we perform filter push down on values, data file 1 will be chosen, but data
+            // file 2 will be ignored, and the final result will be key = a, value = 1 while the
+            // correct result is an empty set
+            // TODO support value filter
+            List<Predicate> keyFilters =
+                    pickTransformFieldMapping(
+                            splitAnd(predicate),
+                            tableSchema.fieldNames(),
+                            tableSchema.trimmedPrimaryKeys());
+            if (keyFilters.size() > 0) {
+                ((KeyValueFileStoreScan) scan).withKeyFilter(and(keyFilters));
             }
         };
     }

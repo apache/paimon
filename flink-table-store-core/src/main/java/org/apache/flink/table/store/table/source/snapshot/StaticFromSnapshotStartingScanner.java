@@ -18,13 +18,14 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.source.DataTableScan;
 
 /**
- * {@link StartingScanner} for the {@link
- * org.apache.flink.table.store.CoreOptions.StartupMode#FROM_SNAPSHOT} startup mode of a batch read.
+ * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_SNAPSHOT} startup mode of a
+ * batch read.
  */
 public class StaticFromSnapshotStartingScanner implements StartingScanner {
     private final long snapshotId;
@@ -34,11 +35,14 @@ public class StaticFromSnapshotStartingScanner implements StartingScanner {
     }
 
     @Override
-    public DataTableScan.DataFilePlan getPlan(SnapshotManager snapshotManager, DataTableScan scan) {
+    public DataTableScan.DataFilePlan getPlan(
+            SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
         if (snapshotManager.earliestSnapshotId() == null
                 || snapshotId < snapshotManager.earliestSnapshotId()) {
             return null;
         }
-        return scan.withKind(ScanKind.ALL).withSnapshot(snapshotId).plan();
+        return new DataTableScan.DataFilePlan(
+                snapshotId,
+                snapshotSplitReader.withKind(ScanKind.ALL).withSnapshot(snapshotId).splits());
     }
 }

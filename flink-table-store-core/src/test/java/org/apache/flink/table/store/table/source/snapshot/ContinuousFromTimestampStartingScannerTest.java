@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.table.source.snapshot;
 
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.StreamTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -30,11 +29,10 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ContinuousFromTimestampStartingScanner}. */
-public class ContinuousFromTimestampStartingScannerTest extends SnapshotEnumeratorTestBase {
+public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase {
 
     @Test
     public void testGetPlan() throws Exception {
-        FileStoreTable table = createFileStoreTable();
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -62,7 +60,7 @@ public class ContinuousFromTimestampStartingScannerTest extends SnapshotEnumerat
 
         ContinuousFromTimestampStartingScanner scanner =
                 new ContinuousFromTimestampStartingScanner(timestamp);
-        DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, table.newScan());
+        DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, snapshotSplitReader);
         assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(table.newRead(), plan.splits())).isEmpty();
 
@@ -71,17 +69,15 @@ public class ContinuousFromTimestampStartingScannerTest extends SnapshotEnumerat
     }
 
     @Test
-    public void testNoSnapshot() throws Exception {
-        FileStoreTable table = createFileStoreTable();
+    public void testNoSnapshot() {
         SnapshotManager snapshotManager = table.snapshotManager();
         ContinuousFromTimestampStartingScanner scanner =
                 new ContinuousFromTimestampStartingScanner(System.currentTimeMillis());
-        assertThat(scanner.getPlan(snapshotManager, table.newScan())).isNull();
+        assertThat(scanner.getPlan(snapshotManager, snapshotSplitReader)).isNull();
     }
 
     @Test
     public void testNoSnapshotBeforeTimestamp() throws Exception {
-        FileStoreTable table = createFileStoreTable();
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -97,7 +93,7 @@ public class ContinuousFromTimestampStartingScannerTest extends SnapshotEnumerat
 
         ContinuousFromTimestampStartingScanner scanner =
                 new ContinuousFromTimestampStartingScanner(timestamp);
-        DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, table.newScan());
+        DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, snapshotSplitReader);
         assertThat(plan.snapshotId).isEqualTo(0);
         assertThat(getResult(table.newRead(), plan.splits())).isEmpty();
 

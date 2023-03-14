@@ -38,6 +38,7 @@ import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReader;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.IntType;
@@ -105,6 +106,16 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     @Override
     public DataTableScan newScan() {
         return wrapped.newScan();
+    }
+
+    @Override
+    public DataTableScan newStreamScan() {
+        return wrapped.newStreamScan();
+    }
+
+    @Override
+    public SnapshotSplitReader newDataSplitReader() {
+        return wrapped.newDataSplitReader();
     }
 
     @Override

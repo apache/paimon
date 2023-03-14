@@ -34,6 +34,8 @@ public interface InnerTable extends Table {
 
     InnerTableScan newScan();
 
+    InnerTableScan newStreamScan();
+
     InnerTableRead newRead();
 
     InnerTableWrite newWrite(String commitUser);

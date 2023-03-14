@@ -72,6 +72,11 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public TableScan newStreamScan() {
+        return table.newStreamScan().withFilter(filter);
+    }
+
+    @Override
     public TableRead newRead() {
         InnerTableRead read = table.newRead().withFilter(filter);
         if (projection != null) {
