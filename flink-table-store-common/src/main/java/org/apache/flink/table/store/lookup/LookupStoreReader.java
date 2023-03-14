@@ -24,5 +24,6 @@ import java.io.IOException;
 /** Reader, lookup value by key bytes. */
 public interface LookupStoreReader extends Closeable {
 
+    /** Lookup value by key. */
     byte[] lookup(byte[] key) throws IOException;
 }

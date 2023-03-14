@@ -14,7 +14,7 @@
 
 package org.apache.flink.table.store.utils;
 
-/** A simple read buffer provide {@code readUnsignedByte} and position. */
+/** A simple read buffer provides {@code readUnsignedByte} and position. */
 public final class SimpleReadBuffer {
 
     private int pos = 0;

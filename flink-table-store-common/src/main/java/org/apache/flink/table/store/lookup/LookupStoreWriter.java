@@ -24,5 +24,6 @@ import java.io.IOException;
 /** Writer to prepare binary file. */
 public interface LookupStoreWriter extends Closeable {
 
+    /** Put key value to store. */
     void put(byte[] key, byte[] value) throws IOException;
 }
