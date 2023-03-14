@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.connector;
 
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -196,7 +197,8 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                         () ->
                                 streamSqlIter(
                                         "SELECT * FROM T1 /*+ OPTIONS('log.scan'='from-timestamp') */"))
-                .hasMessageContaining("Unable to create a source for reading table");
+                .hasCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage("scan.timestamp-millis can not be null when you use from-timestamp for scan.mode");
     }
 
     @TestTemplate
@@ -219,7 +221,8 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                                 streamSqlIter(
                                         "SELECT * FROM T1 /*+ OPTIONS('log.scan'='latest', 'log.scan.timestamp-millis'='%s') */",
                                         0))
-                .hasMessageContaining("Unable to create a source for reading table");
+                .hasCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage("scan.timestamp-millis must be null when you use latest for scan.mode");
     }
 
     @TestTemplate
@@ -250,7 +253,8 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                                 streamSqlIter(
                                         "SELECT * FROM T1 /*+ OPTIONS('scan.mode'='latest', 'scan.snapshot-id'='%s') */",
                                         0))
-                .hasMessageContaining("Unable to create a source for reading table");
+                .hasCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage("scan.snapshot-id must be null when you use latest for scan.mode");
     }
 
     @TestTemplate
@@ -274,8 +278,9 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         assertThatThrownBy(
                 () ->
                         streamSqlIter(
-                                "SELECT * FROM T1 /*+ OPTIONS('log.changelog-mode'='upsert') */"),
-                "File store continuous reading dose not support upsert changelog mode");
+                                "SELECT * FROM T1 /*+ OPTIONS('log.changelog-mode'='upsert') */"))
+                .hasCauseInstanceOf(ValidationException.class)
+                .hasRootCauseMessage("File store continuous reading dose not support upsert changelog mode.");
     }
 
     @TestTemplate
@@ -283,7 +288,8 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         assertThatThrownBy(
                 () ->
                         streamSqlIter(
-                                "SELECT * FROM T1 /*+ OPTIONS('log.consistency'='eventual') */"),
-                "File store continuous reading dose not support eventual consistency mode");
+                                "SELECT * FROM T1 /*+ OPTIONS('log.consistency'='eventual') */"))
+                .hasCauseInstanceOf(ValidationException.class)
+                .hasRootCauseMessage("File store continuous reading dose not support eventual consistency mode.");
     }
 }
