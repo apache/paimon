@@ -16,20 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.mergetree.compact;
+package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.store.file.compact.CompactResult;
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.mergetree.SortedRun;
+import java.io.IOException;
 
-import java.io.Closeable;
-import java.util.List;
+/**
+ * A functional interface for a {@link java.util.function.Function} that may throw {@link
+ * IOException}.
+ */
+@FunctionalInterface
+public interface IOFunction<T, R> {
 
-/** Rewrite sections to the files. */
-public interface CompactRewriter extends Closeable {
-
-    CompactResult rewrite(int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
-            throws Exception;
-
-    CompactResult upgrade(int outputLevel, DataFileMeta file) throws Exception;
+    R apply(T value) throws IOException;
 }

@@ -23,50 +23,71 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
+import org.apache.flink.table.store.file.mergetree.LookupLevels;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
-import org.apache.flink.table.store.utils.Preconditions;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Comparator;
 import java.util.List;
 
-/** A {@link MergeTreeCompactRewriter} which produces changelog files for each full compaction. */
-public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
+/**
+ * A {@link MergeTreeCompactRewriter} which produces changelog files by lookup for the compaction
+ * involving level 0 files.
+ */
+public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
 
-    private final int maxLevel;
+    private final LookupLevels lookupLevels;
 
-    public FullChangelogMergeTreeCompactRewriter(
-            int maxLevel,
+    public LookupMergeTreeCompactRewriter(
+            LookupLevels lookupLevels,
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory) {
         super(readerFactory, writerFactory, keyComparator, mfFactory);
-        this.maxLevel = maxLevel;
+        this.lookupLevels = lookupLevels;
     }
 
     @Override
     protected boolean rewriteChangelog(
             int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) {
-        boolean changelog = outputLevel == maxLevel;
-        if (changelog) {
-            Preconditions.checkArgument(
-                    dropDelete,
-                    "Delete records should be dropped from result of full compaction. This is unexpected.");
+        if (outputLevel == 0) {
+            return false;
         }
-        return changelog;
+
+        for (List<SortedRun> runs : sections) {
+            for (SortedRun run : runs) {
+                for (DataFileMeta file : run.files()) {
+                    if (file.level() == 0) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     @Override
     protected boolean upgradeChangelog(int outputLevel, DataFileMeta file) {
-        return outputLevel == maxLevel;
+        return file.level() == 0;
     }
 
     @Override
     protected MergeFunctionWrapper<ChangelogResult> createMergeWrapper(int outputLevel) {
-        return new FullChangelogMergeFunctionWrapper(mfFactory.create(), maxLevel);
+        return new LookupChangelogMergeFunctionWrapper(
+                mfFactory,
+                key -> {
+                    try {
+                        return lookupLevels.lookup(key, outputLevel + 1);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                });
     }
 
     @Override
-    public void close() throws IOException {}
+    public void close() throws IOException {
+        lookupLevels.close();
+    }
 }

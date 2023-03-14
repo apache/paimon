@@ -20,11 +20,12 @@ package org.apache.flink.table.store.file.compact;
 
 import org.apache.flink.table.store.file.io.DataFileMeta;
 
+import java.io.Closeable;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 
 /** Manager to submit compaction task. */
-public interface CompactManager {
+public interface CompactManager extends Closeable {
 
     /** Should wait compaction finish. */
     boolean shouldWaitCompaction();

@@ -31,8 +31,8 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.connector.utils.StreamExecutionEnvironmentUtils;
+import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.utils.Preconditions;
 import org.apache.flink.util.function.SerializableFunction;
@@ -41,6 +41,7 @@ import java.io.Serializable;
 import java.util.UUID;
 
 import static org.apache.flink.table.store.connector.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
+import static org.apache.flink.table.store.connector.FlinkConnectorOptions.CHANGELOG_PRODUCER_LOOKUP_WAIT;
 
 /** Abstract sink of table store. */
 public abstract class FlinkSink implements Serializable {
@@ -59,26 +60,34 @@ public abstract class FlinkSink implements Serializable {
     }
 
     protected StoreSinkWrite.Provider createWriteProvider(String initialCommitUser) {
-        if (table.options().changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION
-                && !table.options().writeOnly()) {
-            long fullCompactionThresholdMs =
-                    table.options()
-                            .toConfiguration()
-                            .get(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL)
-                            .toMillis();
-            return (table, context, ioManager) ->
-                    new FullChangelogStoreSinkWrite(
-                            table,
-                            context,
-                            initialCommitUser,
-                            ioManager,
-                            isOverwrite,
-                            fullCompactionThresholdMs);
-        } else {
-            return (table, context, ioManager) ->
-                    new StoreSinkWriteImpl(
-                            table, context, initialCommitUser, ioManager, isOverwrite);
+        if (!table.options().writeOnly()) {
+            Options options = table.options().toConfiguration();
+            switch (table.options().changelogProducer()) {
+                case FULL_COMPACTION:
+                    long fullCompactionThresholdMs =
+                            options.get(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL)
+                                    .toMillis();
+                    return (table, context, ioManager) ->
+                            new FullChangelogStoreSinkWrite(
+                                    table,
+                                    context,
+                                    initialCommitUser,
+                                    ioManager,
+                                    isOverwrite,
+                                    fullCompactionThresholdMs);
+                case LOOKUP:
+                    if (options.get(CHANGELOG_PRODUCER_LOOKUP_WAIT)) {
+                        return (table, context, ioManager) ->
+                                new LookupChangelogStoreSinkWrite(
+                                        table, context, initialCommitUser, ioManager, isOverwrite);
+                    }
+                    break;
+                default:
+            }
         }
+
+        return (table, context, ioManager) ->
+                new StoreSinkWriteImpl(table, context, initialCommitUser, ioManager, isOverwrite);
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<RowData> input) {

@@ -277,6 +277,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         // cancel compaction so that it does not block job cancelling
         compactManager.cancelCompaction();
         sync();
+        compactManager.close();
 
         // delete temporary files
         List<DataFileMeta> delete = new ArrayList<>(newFiles);

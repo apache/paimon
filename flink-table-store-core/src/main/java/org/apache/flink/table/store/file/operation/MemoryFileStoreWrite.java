@@ -24,11 +24,14 @@ import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.memory.MemoryPoolFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.flink.table.store.io.cache.CacheManager;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 
 import java.util.Iterator;
 import java.util.Map;
+
+import static org.apache.flink.table.store.CoreOptions.LOOKUP_CACHE_MAX_MEMORY_SIZE;
 
 /**
  * Base {@link FileStoreWrite} implementation which supports using shared memory and preempting
@@ -37,7 +40,9 @@ import java.util.Map;
  * @param <T> type of record to write.
  */
 public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> {
-    private final MemoryPoolFactory memoryPoolFactory;
+
+    private final MemoryPoolFactory writeBufferPool;
+    protected final CacheManager cacheManager;
 
     public MemoryFileStoreWrite(
             String commitUser,
@@ -47,7 +52,11 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
         super(commitUser, snapshotManager, scan);
         HeapMemorySegmentPool memoryPool =
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize());
-        this.memoryPoolFactory = new MemoryPoolFactory(memoryPool, this::memoryOwners);
+        this.writeBufferPool = new MemoryPoolFactory(memoryPool, this::memoryOwners);
+        this.cacheManager =
+                new CacheManager(
+                        options.pageSize(),
+                        options.toConfiguration().get(LOOKUP_CACHE_MAX_MEMORY_SIZE));
     }
 
     private Iterator<MemoryOwner> memoryOwners() {
@@ -79,6 +88,6 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
                             + " but this is: "
                             + writer.getClass());
         }
-        memoryPoolFactory.notifyNewOwner((MemoryOwner) writer);
+        writeBufferPool.notifyNewOwner((MemoryOwner) writer);
     }
 }
