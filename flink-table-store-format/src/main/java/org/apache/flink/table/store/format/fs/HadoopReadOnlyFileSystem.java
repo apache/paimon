@@ -145,29 +145,29 @@ public class HadoopReadOnlyFileSystem extends FileSystem {
     private static class FSDataWrappedInputStream extends InputStream
             implements Seekable, PositionedReadable {
 
-        private final org.apache.flink.table.store.fs.SeekableInputStream sekableInputStream;
+        private final org.apache.flink.table.store.fs.SeekableInputStream seekableInputStream;
 
         private FSDataWrappedInputStream(
-                org.apache.flink.table.store.fs.SeekableInputStream sekableInputStream) {
-            this.sekableInputStream = sekableInputStream;
+                org.apache.flink.table.store.fs.SeekableInputStream seekableInputStream) {
+            this.seekableInputStream = seekableInputStream;
         }
 
         @Override
         public int read() throws IOException {
-            return sekableInputStream.read();
+            return seekableInputStream.read();
         }
 
         @Override
         public int read(long position, byte[] buffer, int offset, int length) throws IOException {
-            sekableInputStream.seek(position);
-            return sekableInputStream.read(buffer, offset, length);
+            seekableInputStream.seek(position);
+            return seekableInputStream.read(buffer, offset, length);
         }
 
         @Override
         public void readFully(long position, byte[] buffer, int offset, int length)
                 throws IOException {
-            sekableInputStream.seek(position);
-            IOUtils.readFully(sekableInputStream, buffer, offset, length);
+            seekableInputStream.seek(position);
+            IOUtils.readFully(seekableInputStream, buffer, offset, length);
         }
 
         @Override
@@ -177,12 +177,12 @@ public class HadoopReadOnlyFileSystem extends FileSystem {
 
         @Override
         public void seek(long pos) throws IOException {
-            sekableInputStream.seek(pos);
+            seekableInputStream.seek(pos);
         }
 
         @Override
         public long getPos() throws IOException {
-            return sekableInputStream.getPos();
+            return seekableInputStream.getPos();
         }
 
         @Override
@@ -192,7 +192,7 @@ public class HadoopReadOnlyFileSystem extends FileSystem {
 
         @Override
         public void close() throws IOException {
-            sekableInputStream.close();
+            seekableInputStream.close();
         }
     }
 }
