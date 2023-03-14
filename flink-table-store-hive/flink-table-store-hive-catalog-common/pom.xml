@@ -23,8 +23,8 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>org.apache.flink</groupId>
         <artifactId>flink-table-store-hive</artifactId>
+        <groupId>org.apache.flink</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
