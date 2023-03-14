@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link BatchDataTableScan}. */
 public class BatchDataTableScanTest extends ScannerTestBase {
@@ -61,7 +62,7 @@ public class BatchDataTableScanTest extends ScannerTestBase {
         write.write(rowData(1, 30, 301L));
         commit.commit(2, write.prepareCommit(true, 2));
 
-        assertThat(scan.plan()).isNull();
+        assertThatThrownBy(scan::plan).isInstanceOf(EndOfScanException.class);
 
         write.close();
         commit.close();
