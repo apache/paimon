@@ -26,7 +26,7 @@ import java.util.Iterator;
 import java.util.LinkedList;
 
 /**
- * A {@link MergeFunction} for lookup, this wrapper only consider the latest high level record,
+ * A {@link MergeFunction} for lookup, this wrapper only considers the latest high level record,
  * because each merge will query the old merged record, so the latest high level record should be
  * the final merged value.
  */

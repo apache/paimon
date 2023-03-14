@@ -57,7 +57,7 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
         MergeFunction<KeyValue> mergeFunction = mergeFunctionFactory.create();
         checkArgument(
                 mergeFunction instanceof LookupMergeFunction,
-                "Merge function should be a  LookupMergeFunction, but is %s, there is a bug.",
+                "Merge function should be a LookupMergeFunction, but is %s, there is a bug.",
                 mergeFunction.getClass().getName());
         this.mergeFunction = (LookupMergeFunction) mergeFunction;
         this.mergeFunction2 = mergeFunctionFactory.create();

@@ -143,9 +143,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
                         conf.get(
                                 key(FIELDS + "." + fieldName + "." + AGG_FUNCTION)
                                         .stringType()
-                                        .noDefaultValue()
-                                        .withDescription(
-                                                "Get " + fieldName + "'s aggregate function"));
+                                        .noDefaultValue());
                 boolean ignoreRetract =
                         conf.get(
                                 key(FIELDS + "." + fieldName + "." + IGNORE_RETRACT)

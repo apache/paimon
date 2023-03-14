@@ -27,25 +27,21 @@ import java.util.Optional;
 /** A {@link CompactStrategy} to force compacting level 0 files. */
 public class ForceUpLevel0Compaction implements CompactStrategy {
 
-    private final UniversalCompaction universalCompaction;
+    private final UniversalCompaction universal;
 
-    public ForceUpLevel0Compaction(UniversalCompaction universalCompaction) {
-        this.universalCompaction = universalCompaction;
+    public ForceUpLevel0Compaction(UniversalCompaction universal) {
+        this.universal = universal;
     }
 
     @Override
     public Optional<CompactUnit> pick(int numLevels, List<LevelSortedRun> runs) {
-        Optional<CompactUnit> pick = universalCompaction.pick(numLevels, runs);
+        Optional<CompactUnit> pick = universal.pick(numLevels, runs);
         if (pick.isPresent()) {
             return pick;
         }
 
-        if (runs.isEmpty() || runs.get(0).level() > 0) {
-            return Optional.empty();
-        }
-
         // collect all level 0 files
-        int candidateCount = 1;
+        int candidateCount = 0;
         for (int i = candidateCount; i < runs.size(); i++) {
             if (runs.get(i).level() > 0) {
                 break;
@@ -53,7 +49,9 @@ public class ForceUpLevel0Compaction implements CompactStrategy {
             candidateCount++;
         }
 
-        return Optional.of(
-                universalCompaction.pickForSizeRatio(numLevels - 1, runs, candidateCount, true));
+        return candidateCount == 0
+                ? Optional.empty()
+                : Optional.of(
+                        universal.pickForSizeRatio(numLevels - 1, runs, candidateCount, true));
     }
 }
