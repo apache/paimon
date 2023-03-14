@@ -30,7 +30,6 @@ import org.apache.flink.table.store.utils.Projection;
 
 import javax.annotation.Nullable;
 
-import java.io.Serializable;
 import java.util.List;
 
 import static org.apache.flink.table.store.options.ConfigOptions.key;
@@ -43,17 +42,21 @@ import static org.apache.flink.table.store.utils.RowDataUtils.createFieldGetters
  */
 public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
+    public static final String FIELDS = "fields";
+    public static final String AGG_FUNCTION = "aggregate-function";
+    public static final String IGNORE_RETRACT = "ignore-retract";
+
     private final InternalRow.FieldGetter[] getters;
-    private final RowAggregator rowAggregator;
+    private final FieldAggregator[] aggregators;
 
     private KeyValue latestKv;
     private GenericRow row;
     private KeyValue reused;
 
-    protected AggregateMergeFunction(
-            InternalRow.FieldGetter[] getters, RowAggregator rowAggregator) {
+    public AggregateMergeFunction(
+            InternalRow.FieldGetter[] getters, FieldAggregator[] aggregators) {
         this.getters = getters;
-        this.rowAggregator = rowAggregator;
+        this.aggregators = aggregators;
     }
 
     @Override
@@ -68,7 +71,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         boolean isRetract =
                 kv.valueKind() != RowKind.INSERT && kv.valueKind() != RowKind.UPDATE_AFTER;
         for (int i = 0; i < getters.length; i++) {
-            FieldAggregator fieldAggregator = rowAggregator.getFieldAggregatorAtPos(i);
+            FieldAggregator fieldAggregator = aggregators[i];
             Object accumulator = getters[i].getFieldOrNull(row);
             Object inputField = getters[i].getFieldOrNull(kv.value());
             Object mergedField =
@@ -90,48 +93,6 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
             reused = new KeyValue();
         }
         return reused.replace(latestKv.key(), latestKv.sequenceNumber(), RowKind.INSERT, row);
-    }
-
-    /** Provide an Aggregator for merge a new row data. */
-    public static class RowAggregator implements Serializable {
-        public static final String FIELDS = "fields";
-        public static final String AGG_FUNCTION = "aggregate-function";
-        public static final String IGNORE_RETRACT = "ignore-retract";
-
-        private final FieldAggregator[] fieldAggregators;
-
-        public RowAggregator(
-                Options sqlConf,
-                List<String> fieldNames,
-                List<DataType> fieldTypes,
-                List<String> primaryKeys) {
-            fieldAggregators = new FieldAggregator[fieldNames.size()];
-            for (int i = 0; i < fieldNames.size(); i++) {
-                String fieldName = fieldNames.get(i);
-                DataType fieldType = fieldTypes.get(i);
-                // aggregate by primary keys, so they do not aggregate
-                boolean isPrimaryKey = primaryKeys.contains(fieldName);
-                String strAggFunc =
-                        sqlConf.get(
-                                key(FIELDS + "." + fieldName + "." + AGG_FUNCTION)
-                                        .stringType()
-                                        .noDefaultValue()
-                                        .withDescription(
-                                                "Get " + fieldName + "'s aggregate function"));
-                boolean ignoreRetract =
-                        sqlConf.get(
-                                key(FIELDS + "." + fieldName + "." + IGNORE_RETRACT)
-                                        .booleanType()
-                                        .defaultValue(false));
-                fieldAggregators[i] =
-                        FieldAggregator.createFieldAggregator(
-                                fieldType, strAggFunc, ignoreRetract, isPrimaryKey);
-            }
-        }
-
-        public FieldAggregator getFieldAggregatorAtPos(int fieldPos) {
-            return fieldAggregators[fieldPos];
-        }
     }
 
     public static MergeFunctionFactory<KeyValue> factory(
@@ -172,10 +133,28 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
                 fieldTypes = project.project(tableTypes);
             }
 
-            return new AggregateMergeFunction(
-                    createFieldGetters(fieldTypes),
-                    new AggregateMergeFunction.RowAggregator(
-                            conf, fieldNames, fieldTypes, primaryKeys));
+            FieldAggregator[] fieldAggregators = new FieldAggregator[fieldNames.size()];
+            for (int i = 0; i < fieldNames.size(); i++) {
+                String fieldName = fieldNames.get(i);
+                DataType fieldType = fieldTypes.get(i);
+                // aggregate by primary keys, so they do not aggregate
+                boolean isPrimaryKey = primaryKeys.contains(fieldName);
+                String strAggFunc =
+                        conf.get(
+                                key(FIELDS + "." + fieldName + "." + AGG_FUNCTION)
+                                        .stringType()
+                                        .noDefaultValue());
+                boolean ignoreRetract =
+                        conf.get(
+                                key(FIELDS + "." + fieldName + "." + IGNORE_RETRACT)
+                                        .booleanType()
+                                        .defaultValue(false));
+                fieldAggregators[i] =
+                        FieldAggregator.createFieldAggregator(
+                                fieldType, strAggFunc, ignoreRetract, isPrimaryKey);
+            }
+
+            return new AggregateMergeFunction(createFieldGetters(fieldTypes), fieldAggregators);
         }
     }
 }

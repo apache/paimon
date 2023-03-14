@@ -102,7 +102,12 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             }
             optionalUnit =
                     strategy.pick(levels.numberOfLevels(), runs)
-                            .map(unit -> unit.files().size() < 2 ? null : unit);
+                            .filter(unit -> unit.files().size() > 0)
+                            .filter(
+                                    unit ->
+                                            unit.files().size() > 1
+                                                    || unit.files().get(0).level()
+                                                            != unit.outputLevel());
         }
 
         optionalUnit.ifPresent(

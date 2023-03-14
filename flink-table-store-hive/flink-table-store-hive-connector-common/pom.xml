@@ -28,29 +28,81 @@ under the License.
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-hive-catalog</artifactId>
-    <name>Flink Table Store : Hive Catalog</name>
+    <artifactId>flink-table-store-hive-connector-common</artifactId>
+    <name>Flink Table Store : Hive Connector Common</name>
 
     <packaging>jar</packaging>
 
     <dependencies>
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-core</artifactId>
-            <version>${project.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
             <artifactId>flink-table-store-hive-common</artifactId>
             <version>${project.version}</version>
         </dependency>
 
+        <!-- Flink All dependencies -->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-store-shade</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-common</artifactId>
+            <version>${hadoop.version}</version>
+            <scope>provided</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-client</artifactId>
+            <version>${hadoop.version}</version>
+            <scope>provided</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!--
+        Why we need this test dependency:
+        IDEA reads classes from the same project from target/classes of that module,
+        so even though we've packaged and shaded avro classes into flink-table-store-format.jar
+        we still have to include this test dependency here.
+
+        Why do we put this test dependency before the provided hive-exec:
+        hive-exec produces a shaded jar which contains old versioned avro classes,
+        so we need to make sure that our newer avro is loaded first.
+        -->
+        <dependency>
+            <groupId>org.apache.avro</groupId>
+            <artifactId>avro</artifactId>
+            <version>${avro.version}</version>
+            <scope>test</scope>
+        </dependency>
+
         <dependency>
             <groupId>org.apache.hive</groupId>
-            <artifactId>hive-metastore</artifactId>
+            <artifactId>hive-exec</artifactId>
             <version>${hive.version}</version>
+            <scope>provided</scope>
             <exclusions>
                 <exclusion>
                     <groupId>log4j</groupId>
@@ -76,47 +128,10 @@ under the License.
                     <groupId>org.apache.orc</groupId>
                     <artifactId>orc-core</artifactId>
                 </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.hadoop</groupId>
-            <artifactId>hadoop-common</artifactId>
-            <version>${hadoop.version}</version>
-            <scope>provided</scope>
-            <exclusions>
+                <!-- this dependency cannot be fetched from central maven repository anymore -->
                 <exclusion>
-                    <groupId>org.apache.avro</groupId>
-                    <artifactId>avro</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>log4j</groupId>
-                    <artifactId>log4j</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-log4j12</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.hadoop</groupId>
-            <artifactId>hadoop-hdfs</artifactId>
-            <version>${hadoop.version}</version>
-            <scope>provided</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>jdk.tools</groupId>
-                    <artifactId>jdk.tools</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>log4j</groupId>
-                    <artifactId>log4j</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-log4j12</artifactId>
+                    <groupId>org.pentaho</groupId>
+                    <artifactId>*</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -125,28 +140,24 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-flink-common</artifactId>
+            <artifactId>flink-table-store-core</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
+            <type>test-jar</type>
         </dependency>
+
+        <!-- dependencies for IT cases -->
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-hive-connector-common</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-planner_${scala.binary.version}</artifactId>
+            <artifactId>flink-core</artifactId>
             <version>${test.flink.version}</version>
             <scope>test</scope>
         </dependency>
 
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-runtime</artifactId>
+            <artifactId>flink-table-common</artifactId>
             <version>${test.flink.version}</version>
             <scope>test</scope>
         </dependency>
@@ -164,27 +175,6 @@ under the License.
             <version>${test.flink.version}</version>
             <scope>test</scope>
             <type>test-jar</type>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-connector-test-utils</artifactId>
-            <version>${test.flink.version}</version>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>junit</groupId>
-                    <artifactId>junit</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.junit.vintage</groupId>
-                    <artifactId>junit-vintage-engine</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>log4j</groupId>
-                    <artifactId>log4j</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
         <dependency>
@@ -220,10 +210,6 @@ under the License.
                 <exclusion>
                     <groupId>org.apache.hive.hcatalog</groupId>
                     <artifactId>hive-webhcat-java-client</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.tez</groupId>
-                    <artifactId>tez-common</artifactId>
                 </exclusion>
                 <exclusion>
                     <!-- This dependency is no longer shipped with the JDK since Java 9.-->
@@ -269,10 +255,6 @@ under the License.
                 <exclusion>
                     <artifactId>hadoop-yarn-server-web-proxy</artifactId>
                     <groupId>org.apache.hadoop</groupId>
-                </exclusion>
-                <exclusion>
-                    <artifactId>hadoop-shim</artifactId>
-                    <groupId>org.apache.tez</groupId>
                 </exclusion>
                 <exclusion>
                     <artifactId>jms</artifactId>
@@ -456,6 +438,10 @@ under the License.
             <scope>test</scope>
             <exclusions>
                 <exclusion>
+                    <groupId>org.jamon</groupId>
+                    <artifactId>jamon-runtime</artifactId>
+                </exclusion>
+                <exclusion>
                     <groupId>jdk.tools</groupId>
                     <artifactId>jdk.tools</artifactId>
                 </exclusion>
@@ -474,69 +460,6 @@ under the License.
                 <exclusion>
                     <groupId>org.pentaho</groupId>
                     <artifactId>pentaho-aggdesigner-algorithm</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.jamon</groupId>
-                    <artifactId>jamon-runtime</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.hive</groupId>
-                    <artifactId>hive-exec</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <!--
-        Why we need this test dependency:
-        IDEA reads classes from the same project from target/classes of that module,
-        so even though we've packaged and shaded avro classes into flink-table-store-format.jar
-        we still have to include this test dependency here.
-
-        Why do we put this test dependency before the provided hive-exec:
-        hive-exec produces a shaded jar which contains old versioned avro classes,
-        so we need to make sure that our newer avro is loaded first.
-        -->
-        <dependency>
-            <groupId>org.apache.avro</groupId>
-            <artifactId>avro</artifactId>
-            <version>${avro.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.hive</groupId>
-            <artifactId>hive-exec</artifactId>
-            <version>${hive.version}</version>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>log4j</groupId>
-                    <artifactId>log4j</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-log4j12</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>com.fasterxml.jackson.core</groupId>
-                    <artifactId>jackson-annotations</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>com.fasterxml.jackson.core</groupId>
-                    <artifactId>jackson-core</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>com.fasterxml.jackson.core</groupId>
-                    <artifactId>jackson-databind</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.orc</groupId>
-                    <artifactId>orc-core</artifactId>
-                </exclusion>
-                <!-- this dependency cannot be fetched from central maven repository anymore -->
-                <exclusion>
-                    <groupId>org.pentaho</groupId>
-                    <artifactId>*</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -565,6 +488,26 @@ under the License.
     <build>
         <plugins>
             <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>1.7</version>
+                <executions>
+                    <execution>
+                        <id>add-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>src/main/${hive.main.version}</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
                 <executions>
@@ -576,68 +519,15 @@ under the License.
                         </goals>
                         <configuration>
                             <artifactSet>
-                                <includes>
+                                <includes combine.children="append">
                                     <include>org.apache.flink:flink-table-store-hive-common</include>
-                                    <include>org.apache.thrift:libthrift</include>
-                                    <include>org.apache.thrift:libfb303</include>
-                                    <include>com.google.guava:guava</include>
-                                    <include>org.apache.hive:hive-common</include>
-                                    <include>org.apache.hive.shims:hive-shims-common</include>
-                                    <include>org.apache.hive.shims:hive-shims-0.23</include>
-                                    <include>org.apache.hive:hive-serde</include>
-                                    <include>org.apache.hive:hive-metastore</include>
-                                    <include>org.apache.hive:hive-storage-api</include>
+                                    <include>org.apache.flink:flink-table-store-shade</include>
                                 </includes>
                             </artifactSet>
-                            <relocations>
-                                <relocation>
-                                    <pattern>com.facebook.fb303</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.com.facebook.fb303</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>com.google.common</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.com.google.common</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.hadoop.fs.ProxyLocalFileSystem</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.fs.ProxyLocalFileSystem</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.hadoop.fs.ProxyFileSystem</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.fs.ProxyFileSystem</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.hadoop.fs.DefaultFileAccess</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.fs.DefaultFileAccess</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.hadoop.mapred.WebHCatJTShim23</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.mapred.WebHCatJTShim23</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.hadoop.security.token.delegation.HiveDelegationTokenSupport</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.security.token.delegation.HiveDelegationTokenSupport</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>org.apache.thrift</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.thrift</shadedPattern>
-                                </relocation>
-                            </relocations>
                         </configuration>
                     </execution>
                 </executions>
             </plugin>
         </plugins>
-
-        <resources>
-            <resource>
-                <directory>src/main/resources</directory>
-                <filtering>false</filtering>
-            </resource>
-            <resource>
-                <directory>src/main/resources-filtered</directory>
-                <filtering>true</filtering>
-            </resource>
-        </resources>
     </build>
 </project>

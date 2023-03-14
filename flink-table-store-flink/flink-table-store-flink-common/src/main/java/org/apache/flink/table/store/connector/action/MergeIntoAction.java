@@ -27,7 +27,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.conversion.DataStructureConverter;
 import org.apache.flink.table.data.conversion.DataStructureConverters;
 import org.apache.flink.table.store.connector.LogicalTypeConversion;
-import org.apache.flink.table.store.file.catalog.Identifier;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataType;
@@ -40,6 +39,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -87,10 +87,12 @@ public class MergeIntoAction extends ActionBase {
     // field names of target table
     private final List<String> targetFieldNames;
 
-    // source
+    // target table
+    @Nullable private String targetAlias;
+
+    // source table
     @Nullable private String sourceTable;
-    private Identifier sourceTableIdentifier;
-    @Nullable private String source;
+    @Nullable private String[] sourceSqls;
     @Nullable private String sourceAlias;
 
     // merge condition
@@ -150,14 +152,20 @@ public class MergeIntoAction extends ActionBase {
                         .collect(Collectors.toList());
     }
 
-    public MergeIntoAction withSourceTable(String sourceTable) {
+    public MergeIntoAction withTargetAlias(String targetAlias) {
+        this.targetAlias = targetAlias;
+        return this;
+    }
+
+    public MergeIntoAction withSourceTable(@Nullable String sourceAlias, String sourceTable) {
+        this.sourceAlias = sourceAlias;
         this.sourceTable = sourceTable;
         return this;
     }
 
-    public MergeIntoAction withSource(String source, String sourceAlias) {
-        this.source = source;
+    public MergeIntoAction withSourceSqls(String sourceAlias, String... sourceSqls) {
         this.sourceAlias = sourceAlias;
+        this.sourceSqls = sourceSqls;
         return this;
     }
 
@@ -221,6 +229,10 @@ public class MergeIntoAction extends ActionBase {
 
         MergeIntoAction action = new MergeIntoAction(tablePath.f0, tablePath.f1, tablePath.f2);
 
+        if (params.has("target-as")) {
+            action.withTargetAlias(params.get("target-as"));
+        }
+
         if (!initSource(params, action)) {
             return Optional.empty();
         }
@@ -273,30 +285,30 @@ public class MergeIntoAction extends ActionBase {
     }
 
     private static boolean initSource(MultipleParameterTool params, MergeIntoAction action) {
-        String sourceTable = params.get("using-table");
-        String source = params.get("using-source");
-        String sourceAlias = params.get("as");
+        String sourceTable = params.get("source-table");
+        Collection<String> sourceSqls = params.getMultiParameter("source-sql");
+        String sourceAlias = params.get("source-as");
 
         int count = 0;
         if (sourceTable != null) {
-            action.withSourceTable(params.get("using-table"));
+            action.withSourceTable(sourceAlias, sourceTable);
             count++;
         }
 
-        if (source != null) {
+        if (sourceSqls != null) {
             if (sourceAlias == null) {
                 System.err.println(
-                        "The source and its alias must be specified together.\n"
+                        "--source-sql and --source-as must be specified together.\n"
                                 + "Run <action> --help for help.");
                 return false;
             }
-            action.withSource(source, sourceAlias);
+            action.withSourceSqls(sourceAlias, sourceSqls.toArray(new String[0]));
             count++;
         }
 
         if (count != 1) {
             System.err.println(
-                    "Please specify either \"source table\" or \"source, source's alias\".\n"
+                    "Please specify source as either \"source-table\" or \"source-sql\".\n"
                             + "Run <action> --help for help.");
             return false;
         }
@@ -359,8 +371,10 @@ public class MergeIntoAction extends ActionBase {
         System.out.println(
                 "  merge-into --warehouse <warehouse-path>\n"
                         + "             --database <database-name>\n"
-                        + "             --table <table-name>\n"
-                        + "             --using-table <source-table>\n"
+                        + "             --table <target-table-name>\n"
+                        + "             [--target-as <target-table-alias>]\n"
+                        + "             --source-table <source-table>\n"
+                        + "             [--source-as <source-table-alias>]\n"
                         + "             --on <merge-condition>\n"
                         + "             --merge-actions <matched-upsert,matched-delete,not-matched-insert,not-matched-by-source-upsert,not-matched-by-source-delete>\n"
                         + "             --matched-upsert-condition <matched-condition>\n"
@@ -371,35 +385,45 @@ public class MergeIntoAction extends ActionBase {
                         + "             --not-matched-by-source-upsert-condition <not-matched-by-source-condition>\n"
                         + "             --not-matched-by-source-upsert-set <not-matched-upsert-changes>\n"
                         + "             --not-matched-by-source-delete-condition <not-matched-by-source-condition>");
+
         System.out.println("  matched-upsert-changes format:");
         System.out.println(
                 "    col=<source-table>.col | expression [, ...] (do not add '<target-table>.' before 'col')");
         System.out.println(
                 "    * (upsert with all source cols; require target table's schema is equal to source's)");
+
         System.out.println("  not-matched-upsert-changes format:");
         System.out.println("    col=expression (cannot use source table's col)");
+
         System.out.println("  insert-values format:");
         System.out.println(
                 "    col1,col2,...,col_end (must specify values of all columns; can use <source-table>.col or expression)");
         System.out.println(
                 "    * (insert with all source cols; require target table's schema is equal to source's)");
+
         System.out.println(
                 "  not-matched-condition: cannot use target table's columns to construct condition expression.");
         System.out.println(
                 "  not-matched-by-source-condition: cannot use source table's columns to construct condition expression.");
+
         System.out.println("  alternative arguments:");
         System.out.println("    --path <table-path> to represent the table path.");
         System.out.println(
-                "    --using-source <source-expression> --as <source-alias> to replace --using-table.");
+                "    --source-sql <sql>[, --source-sql <sql> ...] can create a new table as source table at runtime.");
         System.out.println();
 
         System.out.println("Note: ");
         System.out.println("  1. Target table must has primary keys.");
         System.out.println(
                 "  2. All conditions, set changes and values should use Flink SQL syntax. Please quote them with \" to escape special characters.");
-        System.out.println("  3. source-alias cannot be duplicated with existed table name.");
-        System.out.println("  4. At least one merge action must be specified.");
-        System.out.println("  5. How to determine the changed rows with different \"matched\":");
+        System.out.println(
+                "  3. source-alias cannot be duplicated with existed table name. "
+                        + "If you use --source-sql, source-alias must be specified and equal to the table name in \"CREATE\" statement.");
+        System.out.println(
+                "  4. If the source table is not in the same place as target table, "
+                        + "the source-table-name or the source-alias should be qualified (database.table or catalog.database.table if in different catalog).");
+        System.out.println("  5. At least one merge action must be specified.");
+        System.out.println("  6. How to determine the changed rows with different \"matched\":");
         System.out.println(
                 "    matched: changed rows are from target table and each can match a source table row "
                         + "based on merge-condition and optional matched-condition.");
@@ -410,36 +434,42 @@ public class MergeIntoAction extends ActionBase {
                 "    not-matched-by-source: changed rows are from target table and all row cannot match any source table row "
                         + "based on merge-condition and optional not-matched-by-source-condition.");
         System.out.println(
-                "  6. If both matched-upsert and matched-delete actions are present, their conditions must both be present too "
+                "  7. If both matched-upsert and matched-delete actions are present, their conditions must both be present too "
                         + "(same to not-matched-by-source-upsert and not-matched-by-source-delete). Otherwise, all conditions are optional.");
-        System.out.println("  7. source-alias cannot be duplicated with existed table name.");
         System.out.println();
 
         System.out.println("Examples:");
         System.out.println(
                 "  merge-into --path hdfs:///path/to/T\n"
-                        + "             --using-table S\n"
-                        + "             --on \"T.k=S.k\"\n"
+                        + "             --source-table S\n"
+                        + "             --on \"T.k = S.k\"\n"
                         + "             --merge-actions matched-upsert\n"
-                        + "             --matched-upsert-condition \"T.v<>S.v\"\n"
-                        + "             --matched-upsert-set \"S.k,S.v\"");
+                        + "             --matched-upsert-condition \"T.v <> S.v\"\n"
+                        + "             --matched-upsert-set \"v = S.v\"");
         System.out.println(
-                "  It will find matched rows of target table that meet condition (T.k=S.k AND T.v<>S.v) ind '-D' to test_table, then update T.v with S.v.");
+                "  It will find matched rows of target table that meet condition (T.k = S.k), then update T.v with S.v where (T.v <> S.v).");
     }
 
     @Override
     public void run() throws Exception {
+        // handle target alias
+        if (targetAlias != null) {
+            tEnv.registerTable(targetAlias, tEnv.from(identifier.getObjectName()));
+        }
+
         // prepare source table
         if (sourceTable != null) {
-            if (sourceTable.contains(".")) {
-                sourceTableIdentifier = Identifier.fromString(sourceTable);
-            } else {
-                sourceTableIdentifier =
-                        Identifier.create(identifier.getDatabaseName(), sourceTable);
-            }
+            sourceAlias = sourceTable;
         } else {
-            tEnv.registerTable(sourceAlias, tEnv.sqlQuery(source));
-            sourceTableIdentifier = Identifier.create(identifier.getDatabaseName(), sourceAlias);
+            // NOTE: sql may change current catalog and database
+            try {
+                for (String sql : sourceSqls) {
+                    tEnv.executeSql(sql).await();
+                }
+            } catch (Throwable t) {
+                LOG.error("Error occurs when executing sql in --source-sql.", t);
+                throw new RuntimeException("Error occurs when executing sql in --source-sql.", t);
+            }
         }
 
         List<DataStream<RowData>> dataStreams =
@@ -465,7 +495,7 @@ public class MergeIntoAction extends ActionBase {
         List<String> project;
         // extract project
         if (matchedUpsertSet.equals("*")) {
-            project = Collections.singletonList(sourceTableIdentifier.getObjectName() + "." + "*");
+            project = Collections.singletonList(sourceAlias + "." + "*");
         } else {
             // validate upsert changes
             // no need to check primary keys changes because merge condition must contain all pks
@@ -488,10 +518,7 @@ public class MergeIntoAction extends ActionBase {
             // the table name is added before column name to avoid ambiguous column reference
             project =
                     targetFieldNames.stream()
-                            .map(
-                                    name ->
-                                            changes.getOrDefault(
-                                                    name, identifier.getObjectName() + "." + name))
+                            .map(name -> changes.getOrDefault(name, targetTableName() + "." + name))
                             .collect(Collectors.toList());
         }
 
@@ -500,8 +527,8 @@ public class MergeIntoAction extends ActionBase {
                 String.format(
                         "SELECT %s FROM %s INNER JOIN %s ON %s %s",
                         String.join(",", project),
-                        identifier.getEscapedFullName(),
-                        sourceTableIdentifier.getEscapedFullName(),
+                        escapedTargetName(),
+                        escapedSourceName(),
                         mergeCondition,
                         matchedUpsertCondition == null ? "" : "WHERE " + matchedUpsertCondition);
         LOG.info("Query used for matched-update:\n{}", query);
@@ -548,8 +575,8 @@ public class MergeIntoAction extends ActionBase {
                 String.format(
                         "SELECT %s FROM %s WHERE NOT EXISTS (SELECT * FROM %s WHERE %s) %s",
                         String.join(",", project),
-                        identifier.getEscapedFullName(),
-                        sourceTableIdentifier.getEscapedFullName(),
+                        escapedTargetName(),
+                        escapedSourceName(),
                         mergeCondition,
                         notMatchedBySourceUpsertCondition == null
                                 ? ""
@@ -571,7 +598,7 @@ public class MergeIntoAction extends ActionBase {
         // the table name is added before column name to avoid ambiguous column reference
         List<String> project =
                 targetFieldNames.stream()
-                        .map(name -> identifier.getObjectName() + "." + name)
+                        .map(name -> targetTableName() + "." + name)
                         .collect(Collectors.toList());
 
         // use inner join to find matched records
@@ -579,8 +606,8 @@ public class MergeIntoAction extends ActionBase {
                 String.format(
                         "SELECT %s FROM %s INNER JOIN %s ON %s %s",
                         String.join(",", project),
-                        identifier.getEscapedFullName(),
-                        sourceTableIdentifier.getEscapedFullName(),
+                        escapedTargetName(),
+                        escapedSourceName(),
                         mergeCondition,
                         matchedDeleteCondition == null ? "" : "WHERE " + matchedDeleteCondition);
         LOG.info("Query used by matched-delete:\n{}", query);
@@ -601,8 +628,8 @@ public class MergeIntoAction extends ActionBase {
                 String.format(
                         "SELECT %s FROM %s WHERE NOT EXISTS (SELECT * FROM %s WHERE %s) %s",
                         String.join(",", targetFieldNames),
-                        identifier.getEscapedFullName(),
-                        sourceTableIdentifier.getEscapedFullName(),
+                        escapedTargetName(),
+                        escapedSourceName(),
                         mergeCondition,
                         notMatchedBySourceDeleteCondition == null
                                 ? ""
@@ -625,8 +652,8 @@ public class MergeIntoAction extends ActionBase {
                 String.format(
                         "SELECT %s FROM %s WHERE NOT EXISTS (SELECT * FROM %s WHERE %s) %s",
                         notMatchedInsertValues,
-                        sourceTableIdentifier.getEscapedFullName(),
-                        identifier.getEscapedFullName(),
+                        escapedSourceName(),
+                        escapedTargetName(),
                         mergeCondition,
                         notMatchedInsertCondition == null
                                 ? ""
@@ -673,5 +700,20 @@ public class MergeIntoAction extends ActionBase {
                             }
                             return rowData;
                         });
+    }
+
+    private String targetTableName() {
+        return targetAlias == null ? identifier.getObjectName() : targetAlias;
+    }
+
+    private String escapedTargetName() {
+        return String.format(
+                "`%s`.`%s`.`%s`", catalogName, identifier.getDatabaseName(), targetTableName());
+    }
+
+    private String escapedSourceName() {
+        return Arrays.stream(sourceAlias.split("\\."))
+                .map(s -> String.format("`%s`", s))
+                .collect(Collectors.joining("."));
     }
 }
