@@ -155,7 +155,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                 schemas -> {
                     PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_0_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = toSplits(table.newDataSplitReader().splits());
+                    List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
                     // filter with "b" = 15 in schema0
                     TableRead read = table.newRead().withFilter(builder.equal(2, 15));
 
@@ -168,7 +168,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                 (files, schemas) -> {
                     PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = toSplits(table.newDataSplitReader().splits());
+                    List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
 
                     // filter with "d" = 15 in schema1 which should be mapped to "b" = 15 in schema0
                     TableRead read1 = table.newRead().withFilter(builder.equal(1, 15));
@@ -196,7 +196,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                 (files, schemas) -> {
                     PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = toSplits(table.newDataSplitReader().splits());
+                    List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
 
                     // filter with "a" = 1122 in schema1 which is not exist in schema0
                     TableRead read1 = table.newRead().withFilter(builder.equal(3, 1122));
@@ -215,7 +215,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     // filter with "a" = 1122 in scan and read
                     splits =
                             toSplits(
-                                    table.newDataSplitReader()
+                                    table.newSnapshotSplitReader()
                                             .withFilter(builder.equal(3, 1122))
                                             .splits());
                     TableRead read2 = table.newRead().withFilter(builder.equal(3, 1122));
@@ -249,7 +249,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                                             "f",
                                             Collections.emptyList()));
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = toSplits(table.newDataSplitReader().splits());
+                    List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
 
                     // filter with "d" = 21 or "f" is null in schema1 that "f" is not exist in
                     // schema0, read all data
@@ -271,7 +271,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                                             "1|17|117|1117|S007|S17",
                                             "1|19|119|1119|S009|S19"));
 
-                    splits = toSplits(table.newDataSplitReader().splits());
+                    splits = toSplits(table.newSnapshotSplitReader().splits());
                     // filter with "d" = 21 or "f" is null, read snapshot which contains "d" = 21
                     TableRead read2 =
                             table.newRead().withFilter(PredicateBuilder.and(predicateList));
@@ -290,7 +290,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = toSplits(table.newDataSplitReader().splits());
+                    List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
                     // project "c", "b", "pt" in schema0
                     TableRead read = table.newRead().withProjection(PROJECTION);
 
@@ -307,7 +307,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                 },
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits = toSplits(table.newDataSplitReader().splits());
+                    List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
 
                     // project "a", "kt", "d" in schema1
                     TableRead read = table.newRead().withProjection(PROJECTION);
@@ -338,7 +338,10 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits =
-                            toSplits(table.newDataSplitReader().withKind(ScanKind.DELTA).splits());
+                            toSplits(
+                                    table.newSnapshotSplitReader()
+                                            .withKind(ScanKind.DELTA)
+                                            .splits());
                     TableRead read = table.newRead();
 
                     assertThat(getResult(read, splits, STREAMING_SCHEMA_0_ROW_TO_STRING))
@@ -352,7 +355,10 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits =
-                            toSplits(table.newDataSplitReader().withKind(ScanKind.DELTA).splits());
+                            toSplits(
+                                    table.newSnapshotSplitReader()
+                                            .withKind(ScanKind.DELTA)
+                                            .splits());
 
                     TableRead read = table.newRead();
                     assertThat(getResult(read, splits, STREAMING_SCHEMA_1_ROW_TO_STRING))
@@ -373,7 +379,10 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits =
-                            toSplits(table.newDataSplitReader().withKind(ScanKind.DELTA).splits());
+                            toSplits(
+                                    table.newSnapshotSplitReader()
+                                            .withKind(ScanKind.DELTA)
+                                            .splits());
                     // project "c", "b", "pt" in schema0
                     TableRead read = table.newRead().withProjection(PROJECTION);
 
@@ -385,7 +394,10 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits =
-                            toSplits(table.newDataSplitReader().withKind(ScanKind.DELTA).splits());
+                            toSplits(
+                                    table.newSnapshotSplitReader()
+                                            .withKind(ScanKind.DELTA)
+                                            .splits());
 
                     // project "a", "kt", "d" in schema1
                     TableRead read = table.newRead().withProjection(PROJECTION);
@@ -405,7 +417,10 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_0_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits =
-                            toSplits(table.newDataSplitReader().withKind(ScanKind.DELTA).splits());
+                            toSplits(
+                                    table.newSnapshotSplitReader()
+                                            .withKind(ScanKind.DELTA)
+                                            .splits());
                     // filter with "b" = 15 in schema0
                     TableRead read = table.newRead().withFilter(builder.equal(2, 15));
 
@@ -419,7 +434,10 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits =
-                            toSplits(table.newDataSplitReader().withKind(ScanKind.DELTA).splits());
+                            toSplits(
+                                    table.newSnapshotSplitReader()
+                                            .withKind(ScanKind.DELTA)
+                                            .splits());
 
                     // filter with "d" = 15 in schema1 which should be mapped to "b" = 15 in schema0
                     TableRead read1 = table.newRead().withFilter(builder.equal(1, 15));

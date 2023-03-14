@@ -64,21 +64,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     public abstract FileStore<?> store();
 
     @Override
-    public BatchDataTableScan newScan() {
-        return new BatchDataTableScanImpl(options(), newDataSplitReader(), snapshotManager());
-    }
-
-    @Override
-    public StreamDataTableScan newStreamScan() {
-        return new StreamDataTableScanImpl(
-                options(),
-                newDataSplitReader(),
-                snapshotManager(),
-                supportStreamingReadOverwrite());
-    }
-
-    @Override
-    public SnapshotSplitReader newDataSplitReader() {
+    public SnapshotSplitReader newSnapshotSplitReader() {
         return new SnapshotSplitReaderImpl(
                 store().newScan(),
                 tableSchema,
@@ -86,6 +72,20 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 splitGenerator(),
                 nonPartitionFilterConsumer());
+    }
+
+    @Override
+    public BatchDataTableScan newScan() {
+        return new BatchDataTableScanImpl(options(), newSnapshotSplitReader(), snapshotManager());
+    }
+
+    @Override
+    public StreamDataTableScan newStreamScan() {
+        return new StreamDataTableScanImpl(
+                options(),
+                newSnapshotSplitReader(),
+                snapshotManager(),
+                supportStreamingReadOverwrite());
     }
 
     public abstract SplitGenerator splitGenerator();

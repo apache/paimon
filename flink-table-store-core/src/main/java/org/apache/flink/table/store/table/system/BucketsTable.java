@@ -105,6 +105,11 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public SnapshotSplitReader newSnapshotSplitReader() {
+        return wrapped.newSnapshotSplitReader();
+    }
+
+    @Override
     public BatchDataTableScan newScan() {
         return wrapped.newScan();
     }
@@ -112,11 +117,6 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     @Override
     public StreamDataTableScan newStreamScan() {
         return wrapped.newStreamScan();
-    }
-
-    @Override
-    public SnapshotSplitReader newDataSplitReader() {
-        return wrapped.newDataSplitReader();
     }
 
     @Override

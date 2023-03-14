@@ -19,14 +19,10 @@
 package org.apache.flink.table.store.table.source.snapshot;
 
 import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.table.source.BatchDataTableScan;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.StreamDataTableScan;
 
-/**
- * Helper class for the follow-up planning of {@link BatchDataTableScan} and {@link
- * StreamDataTableScan}.
- */
+/** Helper class for the follow-up planning of {@link StreamDataTableScan}. */
 public interface FollowUpScanner {
 
     boolean shouldScanSnapshot(Snapshot snapshot);

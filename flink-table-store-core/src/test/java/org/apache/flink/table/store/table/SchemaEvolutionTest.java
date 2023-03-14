@@ -348,7 +348,7 @@ public class SchemaEvolutionTest {
     private void forEachRemaining(
             FileStoreTable table, Predicate filter, Consumer<InternalRow> consumer)
             throws IOException {
-        SnapshotSplitReader snapshotSplitReader = table.newDataSplitReader();
+        SnapshotSplitReader snapshotSplitReader = table.newSnapshotSplitReader();
         if (filter != null) {
             snapshotSplitReader.withFilter(filter);
         }

@@ -105,6 +105,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public SnapshotSplitReader newSnapshotSplitReader() {
+        return new AuditLogDataSplitReader(dataTable.newSnapshotSplitReader());
+    }
+
+    @Override
     public BatchDataTableScan newScan() {
         return new AuditLogBatchScan(dataTable.newScan());
     }
@@ -112,11 +117,6 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     @Override
     public StreamDataTableScan newStreamScan() {
         return new AuditLogStreamScan(dataTable.newStreamScan());
-    }
-
-    @Override
-    public SnapshotSplitReader newDataSplitReader() {
-        return new AuditLogDataSplitReader(dataTable.newDataSplitReader());
     }
 
     @Override
@@ -161,6 +161,48 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
             return Optional.empty();
         }
         return Optional.of(PredicateBuilder.and(result));
+    }
+
+    private class AuditLogDataSplitReader implements SnapshotSplitReader {
+
+        private final SnapshotSplitReader snapshotSplitReader;
+
+        private AuditLogDataSplitReader(SnapshotSplitReader snapshotSplitReader) {
+            this.snapshotSplitReader = snapshotSplitReader;
+        }
+
+        public SnapshotSplitReader withSnapshot(long snapshotId) {
+            snapshotSplitReader.withSnapshot(snapshotId);
+            return this;
+        }
+
+        public SnapshotSplitReader withFilter(Predicate predicate) {
+            convert(predicate).ifPresent(snapshotSplitReader::withFilter);
+            return this;
+        }
+
+        public SnapshotSplitReader withKind(ScanKind scanKind) {
+            snapshotSplitReader.withKind(scanKind);
+            return this;
+        }
+
+        public SnapshotSplitReader withLevelFilter(Filter<Integer> levelFilter) {
+            snapshotSplitReader.withLevelFilter(levelFilter);
+            return this;
+        }
+
+        public SnapshotSplitReader withBucket(int bucket) {
+            snapshotSplitReader.withBucket(bucket);
+            return this;
+        }
+
+        public List<DataSplit> splits() {
+            return snapshotSplitReader.splits();
+        }
+
+        public List<DataSplit> overwriteSplits() {
+            return snapshotSplitReader.overwriteSplits();
+        }
     }
 
     private class AuditLogBatchScan implements BatchDataTableScan {
@@ -266,48 +308,6 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public StreamDataTableScan withSnapshotStarting() {
             return streamScan.withSnapshotStarting();
-        }
-    }
-
-    private class AuditLogDataSplitReader implements SnapshotSplitReader {
-
-        private final SnapshotSplitReader snapshotSplitReader;
-
-        private AuditLogDataSplitReader(SnapshotSplitReader snapshotSplitReader) {
-            this.snapshotSplitReader = snapshotSplitReader;
-        }
-
-        public SnapshotSplitReader withSnapshot(long snapshotId) {
-            snapshotSplitReader.withSnapshot(snapshotId);
-            return this;
-        }
-
-        public SnapshotSplitReader withFilter(Predicate predicate) {
-            convert(predicate).ifPresent(snapshotSplitReader::withFilter);
-            return this;
-        }
-
-        public SnapshotSplitReader withKind(ScanKind scanKind) {
-            snapshotSplitReader.withKind(scanKind);
-            return this;
-        }
-
-        public SnapshotSplitReader withLevelFilter(Filter<Integer> levelFilter) {
-            snapshotSplitReader.withLevelFilter(levelFilter);
-            return this;
-        }
-
-        public SnapshotSplitReader withBucket(int bucket) {
-            snapshotSplitReader.withBucket(bucket);
-            return this;
-        }
-
-        public List<DataSplit> splits() {
-            return snapshotSplitReader.splits();
-        }
-
-        public List<DataSplit> overwriteSplits() {
-            return snapshotSplitReader.overwriteSplits();
         }
     }
 

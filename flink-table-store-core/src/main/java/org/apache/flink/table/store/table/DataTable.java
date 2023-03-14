@@ -30,12 +30,13 @@ import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReader;
 public interface DataTable extends InnerTable {
 
     @Override
+    SnapshotSplitReader newSnapshotSplitReader();
+
+    @Override
     BatchDataTableScan newScan();
 
     @Override
     StreamDataTableScan newStreamScan();
-
-    SnapshotSplitReader newDataSplitReader();
 
     CoreOptions options();
 

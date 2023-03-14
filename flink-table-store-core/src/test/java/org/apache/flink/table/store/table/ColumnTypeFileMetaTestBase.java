@@ -49,7 +49,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
         writeAndCheckFileResultForColumnType(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<DataSplit> splits = table.newDataSplitReader().splits();
+                    List<DataSplit> splits = table.newSnapshotSplitReader().splits();
                     checkFilterRowCount(toDataFileMetas(splits), 3L);
                     return splits.stream()
                             .flatMap(s -> s.files().stream())
@@ -59,7 +59,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                     FileStoreTable table = createFileStoreTable(schemas);
                     // Scan all data files
                     List<DataSplit> splits =
-                            table.newDataSplitReader()
+                            table.newSnapshotSplitReader()
                                     .withFilter(
                                             new PredicateBuilder(table.schema().logicalRowType())
                                                     .greaterOrEqual(
@@ -122,7 +122,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(6, 200L, 500L);
                     List<DataSplit> splits =
-                            table.newDataSplitReader().withFilter(predicate).splits();
+                            table.newSnapshotSplitReader().withFilter(predicate).splits();
                     checkFilterRowCount(toDataFileMetas(splits), 2L);
                     return splits.stream()
                             .flatMap(s -> s.files().stream())
@@ -142,7 +142,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                      * <p>Then we can check the results of the two result files.
                      */
                     List<DataSplit> splits =
-                            table.newDataSplitReader()
+                            table.newSnapshotSplitReader()
                                     .withFilter(
                                             new PredicateBuilder(table.schema().logicalRowType())
                                                     .between(6, 200F, 500F))
@@ -180,7 +180,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(4, (short) 200, (short) 500);
                     List<DataSplit> splits =
-                            table.newDataSplitReader().withFilter(predicate).splits();
+                            table.newSnapshotSplitReader().withFilter(predicate).splits();
                     checkFilterRowCount(toDataFileMetas(splits), 2L);
                     return splits.stream()
                             .flatMap(s -> s.files().stream())
@@ -191,7 +191,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                     // results of field "e" in [200, 500] in SCHEMA_FIELDS which is updated from
                     // bigint to int
                     List<DataSplit> splits =
-                            table.newDataSplitReader()
+                            table.newSnapshotSplitReader()
                                     .withFilter(
                                             new PredicateBuilder(table.schema().logicalRowType())
                                                     .between(4, 200, 500))
