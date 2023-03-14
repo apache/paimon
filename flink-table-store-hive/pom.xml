@@ -36,54 +36,18 @@ under the License.
     <modules>
         <module>flink-table-store-hive-catalog</module>
         <module>flink-table-store-hive-common</module>
-        <module>flink-table-store-hive-connector</module>
+        <module>flink-table-store-hive-connector-common</module>
+        <module>flink-table-store-hive-connector-2.1</module>
+        <module>flink-table-store-hive-connector-2.1-cdh-6.3</module>
+        <module>flink-table-store-hive-connector-2.2</module>
+        <module>flink-table-store-hive-connector-2.3</module>
+        <module>flink-table-store-hive-connector-3.1</module>
     </modules>
 
     <properties>
-        <hive.main.version>2</hive.main.version>
         <hive.version>2.3.9</hive.version>
         <hiverunner.version>4.0.0</hiverunner.version>
         <reflections.version>0.9.8</reflections.version>
     </properties>
-
-    <profiles>
-        <profile>
-            <id>hive-2.1</id>
-            <properties>
-                <hive.main.version>2</hive.main.version>
-                <hive.version>2.1.1</hive.version>
-            </properties>
-        </profile>
-
-        <profile>
-            <id>hive-2.2</id>
-            <properties>
-                <hive.main.version>2</hive.main.version>
-                <hive.version>2.2.0</hive.version>
-            </properties>
-        </profile>
-
-        <profile>
-            <id>hive-2.1-cdh-6.3</id>
-            <properties>
-                <hive.main.version>2</hive.main.version>
-                <hive.version>2.1.1-cdh6.3.4</hive.version>
-            </properties>
-            <repositories>
-                <repository>
-                    <id>cloudera</id>
-                    <url>https://repository.cloudera.com/artifactory/cloudera-repos/</url>
-                </repository>
-            </repositories>
-        </profile>
-
-        <profile>
-            <id>hive-3.1</id>
-            <properties>
-                <hive.main.version>3</hive.main.version>
-                <hive.version>3.1.2</hive.version>
-            </properties>
-        </profile>
-    </profiles>
 
 </project>

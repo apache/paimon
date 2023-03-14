@@ -34,7 +34,10 @@ public class TableStoreTimestampObjectInspector extends AbstractPrimitiveJavaObj
 
     @Override
     public Timestamp getPrimitiveJavaObject(Object o) {
-        return o == null ? null : Timestamp.ofEpochMilli(((org.apache.flink.table.store.data.Timestamp) o).getMillisecond());
+        return o == null
+                ? null
+                : Timestamp.ofEpochMilli(
+                        ((org.apache.flink.table.store.data.Timestamp) o).getMillisecond());
     }
 
     @Override
