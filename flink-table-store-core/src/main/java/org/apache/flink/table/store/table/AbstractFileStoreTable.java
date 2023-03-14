@@ -32,8 +32,10 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.sink.TableCommitImpl;
 import org.apache.flink.table.store.table.source.BatchDataTableScan;
+import org.apache.flink.table.store.table.source.BatchDataTableScanImpl;
 import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.table.source.StreamDataTableScan;
+import org.apache.flink.table.store.table.source.StreamDataTableScanImpl;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReader;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReaderImpl;
 
@@ -63,17 +65,16 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public BatchDataTableScan newScan() {
-        return new BatchDataTableScan(options(), newDataSplitReader(), snapshotManager()) {};
+        return new BatchDataTableScanImpl(options(), newDataSplitReader(), snapshotManager());
     }
 
     @Override
     public StreamDataTableScan newStreamScan() {
-        return new StreamDataTableScan(options(), newDataSplitReader(), snapshotManager()) {
-            @Override
-            public boolean supportStreamingReadOverwrite() {
-                return AbstractFileStoreTable.this.supportStreamingReadOverwrite();
-            }
-        };
+        return new StreamDataTableScanImpl(
+                options(),
+                newDataSplitReader(),
+                snapshotManager(),
+                supportStreamingReadOverwrite());
     }
 
     @Override

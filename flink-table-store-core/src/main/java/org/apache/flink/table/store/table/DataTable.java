@@ -22,17 +22,18 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.BatchDataTableScan;
+import org.apache.flink.table.store.table.source.StreamDataTableScan;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReader;
 
 /** A {@link Table} for data. */
 public interface DataTable extends InnerTable {
 
     @Override
-    DataTableScan newScan();
+    BatchDataTableScan newScan();
 
     @Override
-    DataTableScan newStreamScan();
+    StreamDataTableScan newStreamScan();
 
     SnapshotSplitReader newDataSplitReader();
 

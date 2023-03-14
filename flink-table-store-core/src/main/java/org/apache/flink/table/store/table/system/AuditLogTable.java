@@ -34,11 +34,15 @@ import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.source.BatchDataTableScan;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.StreamDataTableScan;
+import org.apache.flink.table.store.table.source.snapshot.FollowUpScanner;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReader;
+import org.apache.flink.table.store.table.source.snapshot.StartingScanner;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
@@ -47,6 +51,8 @@ import org.apache.flink.table.store.utils.Filter;
 import org.apache.flink.table.store.utils.ProjectedRow;
 
 import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -99,13 +105,13 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public DataTableScan newScan() {
-        return new AuditLogScan(dataTable.newScan());
+    public BatchDataTableScan newScan() {
+        return new AuditLogBatchScan(dataTable.newScan());
     }
 
     @Override
-    public DataTableScan newStreamScan() {
-        return new AuditLogScan(dataTable.newStreamScan());
+    public StreamDataTableScan newStreamScan() {
+        return new AuditLogStreamScan(dataTable.newStreamScan());
     }
 
     @Override
@@ -157,41 +163,109 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         return Optional.of(PredicateBuilder.and(result));
     }
 
-    private class AuditLogScan implements DataTableScan {
+    private class AuditLogBatchScan implements BatchDataTableScan {
 
-        private final DataTableScan dataScan;
+        private final BatchDataTableScan batchScan;
 
-        private AuditLogScan(DataTableScan dataScan) {
-            this.dataScan = dataScan;
+        private AuditLogBatchScan(BatchDataTableScan batchScan) {
+            this.batchScan = batchScan;
         }
 
         @Override
         public DataTableScan withFilter(Predicate predicate) {
-            convert(predicate).ifPresent(dataScan::withFilter);
+            convert(predicate).ifPresent(batchScan::withFilter);
             return this;
         }
 
         @Override
         public DataTableScan withKind(ScanKind kind) {
-            dataScan.withKind(kind);
+            batchScan.withKind(kind);
             return this;
         }
 
         @Override
         public DataTableScan withSnapshot(long snapshotId) {
-            dataScan.withSnapshot(snapshotId);
+            batchScan.withSnapshot(snapshotId);
             return this;
         }
 
         @Override
         public DataTableScan withLevelFilter(Filter<Integer> levelFilter) {
-            dataScan.withLevelFilter(levelFilter);
+            batchScan.withLevelFilter(levelFilter);
             return this;
         }
 
         @Override
         public DataTableScan.DataFilePlan plan() {
-            return dataScan.plan();
+            return batchScan.plan();
+        }
+
+        @Override
+        public BatchDataTableScan withStartingScanner(StartingScanner startingScanner) {
+            return batchScan.withStartingScanner(startingScanner);
+        }
+    }
+
+    private class AuditLogStreamScan implements StreamDataTableScan {
+
+        private final StreamDataTableScan streamScan;
+
+        private AuditLogStreamScan(StreamDataTableScan streamScan) {
+            this.streamScan = streamScan;
+        }
+
+        @Override
+        public DataTableScan withFilter(Predicate predicate) {
+            convert(predicate).ifPresent(streamScan::withFilter);
+            return this;
+        }
+
+        @Override
+        public DataTableScan withKind(ScanKind kind) {
+            streamScan.withKind(kind);
+            return this;
+        }
+
+        @Override
+        public DataTableScan withSnapshot(long snapshotId) {
+            streamScan.withSnapshot(snapshotId);
+            return this;
+        }
+
+        @Override
+        public DataTableScan withLevelFilter(Filter<Integer> levelFilter) {
+            streamScan.withLevelFilter(levelFilter);
+            return this;
+        }
+
+        @Override
+        public DataTableScan.DataFilePlan plan() {
+            return streamScan.plan();
+        }
+
+        @Override
+        public boolean supportStreamingReadOverwrite() {
+            return streamScan.supportStreamingReadOverwrite();
+        }
+
+        @Override
+        public StreamDataTableScan withStartingScanner(StartingScanner startingScanner) {
+            return streamScan.withStartingScanner(startingScanner);
+        }
+
+        @Override
+        public StreamDataTableScan withFollowUpScanner(FollowUpScanner followUpScanner) {
+            return streamScan.withFollowUpScanner(followUpScanner);
+        }
+
+        @Override
+        public StreamDataTableScan withNextSnapshotId(@Nullable Long nextSnapshotId) {
+            return streamScan.withNextSnapshotId(nextSnapshotId);
+        }
+
+        @Override
+        public StreamDataTableScan withSnapshotStarting() {
+            return streamScan.withSnapshotStarting();
         }
     }
 

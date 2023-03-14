@@ -48,7 +48,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit) {
-        this(table, projectedFields, predicate, limit, StreamDataTableScan::create);
+        this(table, projectedFields, predicate, limit, new StreamDataTableScan.DefaultFactory());
     }
 
     public ContinuousFileStoreSource(

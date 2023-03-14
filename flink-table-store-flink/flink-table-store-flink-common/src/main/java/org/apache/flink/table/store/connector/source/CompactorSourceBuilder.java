@@ -28,8 +28,6 @@ import org.apache.flink.table.store.connector.LogicalTypeConversion;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.source.BatchDataTableScan;
-import org.apache.flink.table.store.table.source.StreamDataTableScan;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousCompactorFollowUpScanner;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousCompactorStartingScanner;
 import org.apache.flink.table.store.table.source.snapshot.FullStartingScanner;
@@ -98,22 +96,18 @@ public class CompactorSourceBuilder {
                     null,
                     partitionPredicate,
                     null,
-                    (table, nextSnapshotId) -> {
-                        StreamDataTableScan scan = (StreamDataTableScan) table.newStreamScan();
-                        return scan.withStartingScanner(new ContinuousCompactorStartingScanner())
-                                .withFollowUpScanner(new ContinuousCompactorFollowUpScanner())
-                                .withNextSnapshotId(nextSnapshotId);
-                    });
+                    (table, nextSnapshotId) ->
+                            table.newStreamScan()
+                                    .withStartingScanner(new ContinuousCompactorStartingScanner())
+                                    .withFollowUpScanner(new ContinuousCompactorFollowUpScanner())
+                                    .withNextSnapshotId(nextSnapshotId));
         } else {
             return new StaticFileStoreSource(
                     bucketsTable,
                     null,
                     partitionPredicate,
                     null,
-                    table -> {
-                        BatchDataTableScan scan = (BatchDataTableScan) table.newScan();
-                        return scan.withStartingScanner(new FullStartingScanner());
-                    });
+                    table -> table.newScan().withStartingScanner(new FullStartingScanner()));
         }
     }
 

@@ -34,10 +34,11 @@ import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
+import org.apache.flink.table.store.table.source.BatchDataTableScan;
 import org.apache.flink.table.store.table.source.DataSplit;
-import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.Split;
+import org.apache.flink.table.store.table.source.StreamDataTableScan;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReader;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
@@ -104,12 +105,12 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public DataTableScan newScan() {
+    public BatchDataTableScan newScan() {
         return wrapped.newScan();
     }
 
     @Override
-    public DataTableScan newStreamScan() {
+    public StreamDataTableScan newStreamScan() {
         return wrapped.newStreamScan();
     }
 

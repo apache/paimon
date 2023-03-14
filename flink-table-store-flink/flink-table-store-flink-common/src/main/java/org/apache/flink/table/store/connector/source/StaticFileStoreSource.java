@@ -47,7 +47,7 @@ public class StaticFileStoreSource extends FlinkSource {
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit) {
-        this(table, projectedFields, predicate, limit, BatchDataTableScan::create);
+        this(table, projectedFields, predicate, limit, DataTable::newScan);
     }
 
     public StaticFileStoreSource(
