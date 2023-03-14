@@ -24,7 +24,6 @@ import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.table.source.DataSplit;
-import org.apache.flink.table.store.table.source.InnerSnapshotSplitReader;
 import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.utils.Filter;
 
@@ -33,7 +32,7 @@ import java.util.List;
 import java.util.Map;
 
 /** Read splits from specified {@link Snapshot} with given configuration. */
-public interface SnapshotSplitReader extends InnerSnapshotSplitReader {
+public interface SnapshotSplitReader {
 
     SnapshotSplitReader withSnapshot(long snapshotId);
 

@@ -22,7 +22,6 @@ import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReader;
 import org.apache.flink.table.store.types.RowType;
 
 import java.io.Serializable;
@@ -30,8 +29,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * An interface for building the {@link SnapshotSplitReader}, {@link TableScan} and {@link
- * TableRead}.
+ * An interface for building the {@link TableScan} and {@link TableRead}.
  *
  * <p>Example of distributed reading:
  *
@@ -42,8 +40,8 @@ import java.util.List;
  *     .withFilter(...)
  *     .withProjection(...);
  *
- * // 2. Get splits in 'Coordinator' (or named 'Driver'):
- * List<Split> splits = builder.newSnapshotSplitReader.splits();
+ * // 2. Plan splits in 'Coordinator' (or named 'Driver'):
+ * List<Split> splits = builder.newScan().plan().splits();
  *
  * // 3. Distribute these splits to different tasks
  *
@@ -51,18 +49,6 @@ import java.util.List;
  * TableRead read = builder.newRead();
  * RecordReader<InternalRow> reader = read.createReader(split);
  * reader.forEachRemaining(...);
- *
- * }</pre>
- *
- * <p>Also, you can use {@link #newScan()} and {@link #newStreamScan()} to create a TableScan that
- * can perform planning. The scan will plan according to the table's configuration.
- *
- * <p>{@link #newScan()} will create a batch scan, witch can only plan once:
- *
- * <pre>{@code
- * TableScan scan = builder.newScan();
- * List<Split> splits = builder.newScan().plan().splits();
- * ...
  *
  * }</pre>
  *
@@ -128,9 +114,6 @@ public interface ReadBuilder extends Serializable {
      * field of the 3rd field of the 1st field in the top-level row.
      */
     ReadBuilder withProjection(int[][] projection);
-
-    /** Create a {@link SnapshotSplitReader} to generate {@link DataSplit}s. */
-    InnerSnapshotSplitReader newSnapshotSplitReader();
 
     /** Create a {@link TableScan} to perform batch planning. */
     TableScan newScan();

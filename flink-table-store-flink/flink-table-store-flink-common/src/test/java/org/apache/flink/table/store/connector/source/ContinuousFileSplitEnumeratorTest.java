@@ -23,7 +23,7 @@ import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumerator
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan.DataFilePlan;
-import org.apache.flink.table.store.table.source.EndOfStreamException;
+import org.apache.flink.table.store.table.source.EndOfScanException;
 
 import org.junit.jupiter.api.Test;
 
@@ -153,7 +153,7 @@ public class ContinuousFileSplitEnumeratorTest {
                 () -> {
                     DataFilePlan plan = results.poll();
                     if (plan == null) {
-                        throw new EndOfStreamException("Artificial end.");
+                        throw new EndOfScanException();
                     }
                     return plan;
                 };

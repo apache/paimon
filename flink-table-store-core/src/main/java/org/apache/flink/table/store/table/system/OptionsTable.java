@@ -31,6 +31,7 @@ import org.apache.flink.table.store.table.ReadonlyTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.InnerTableScan;
+import org.apache.flink.table.store.table.source.ReadOnceTableScan;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowType;
@@ -94,7 +95,7 @@ public class OptionsTable implements ReadonlyTable {
         return new OptionsTable(fileIO, location);
     }
 
-    private class OptionsScan implements InnerTableScan {
+    private class OptionsScan extends ReadOnceTableScan {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
@@ -102,7 +103,7 @@ public class OptionsTable implements ReadonlyTable {
         }
 
         @Override
-        public Plan plan() {
+        public Plan innerPlan() {
             return () -> Collections.singletonList(new OptionsSplit(fileIO, location));
         }
     }

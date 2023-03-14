@@ -18,19 +18,20 @@
 
 package org.apache.flink.table.store.table.source;
 
-/** This exception is thrown when reading from a stream that has already ended. */
-public class EndOfStreamException extends RuntimeException {
-    private static final long serialVersionUID = 1L;
+/** An {@link InnerTableScan} for reading only once, this is for batch scan. */
+public abstract class ReadOnceTableScan implements InnerTableScan {
 
-    public EndOfStreamException(String message) {
-        super(message);
+    private boolean hasNext = true;
+
+    @Override
+    public Plan plan() {
+        if (hasNext) {
+            hasNext = false;
+            return innerPlan();
+        } else {
+            throw new EndOfScanException();
+        }
     }
 
-    public EndOfStreamException(String message, Throwable t) {
-        super(message, t);
-    }
-
-    public EndOfStreamException(Throwable t) {
-        super(t);
-    }
+    protected abstract Plan innerPlan();
 }

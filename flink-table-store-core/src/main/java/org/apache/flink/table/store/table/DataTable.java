@@ -29,7 +29,6 @@ import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReader;
 /** A {@link Table} for data. */
 public interface DataTable extends InnerTable {
 
-    @Override
     SnapshotSplitReader newSnapshotSplitReader();
 
     @Override

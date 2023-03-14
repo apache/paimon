@@ -92,7 +92,7 @@ public class TableStreamingReader {
         try {
             DataFilePlan plan = scan.plan();
             return plan == null ? null : read(plan);
-        } catch (EndOfStreamException e) {
+        } catch (EndOfScanException e) {
             throw new IllegalArgumentException(
                     "TableStreamingReader does not support finished enumerator.", e);
         }

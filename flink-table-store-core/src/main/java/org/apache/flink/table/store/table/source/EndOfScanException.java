@@ -18,13 +18,19 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.annotation.Experimental;
 
-import java.util.List;
+/**
+ * Signals that an end of scanning has been reached unexpectedly during input.
+ *
+ * @since 0.4.0
+ */
+@Experimental
+public class EndOfScanException extends RuntimeException {
 
-/** Generate splits from {@link Snapshot}. */
-public interface InnerSnapshotSplitReader {
-    List<? extends Split> splits();
+    private static final long serialVersionUID = 1L;
 
-    List<? extends Split> overwriteSplits();
+    public EndOfScanException() {
+        super();
+    }
 }

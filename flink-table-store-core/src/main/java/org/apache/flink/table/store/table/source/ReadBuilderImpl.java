@@ -67,11 +67,6 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
-    public InnerSnapshotSplitReader newSnapshotSplitReader() {
-        return table.newSnapshotSplitReader();
-    }
-
-    @Override
     public TableScan newScan() {
         return table.newScan().withFilter(filter);
     }

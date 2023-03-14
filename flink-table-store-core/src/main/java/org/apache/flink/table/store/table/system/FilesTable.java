@@ -40,6 +40,7 @@ import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan;
 import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.InnerTableScan;
+import org.apache.flink.table.store.table.source.ReadOnceTableScan;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
@@ -130,7 +131,7 @@ public class FilesTable implements ReadonlyTable {
         return new FilesTable(storeTable.copy(dynamicOptions));
     }
 
-    private static class FilesScan implements InnerTableScan {
+    private static class FilesScan extends ReadOnceTableScan {
 
         private final FileStoreTable storeTable;
 
@@ -145,7 +146,7 @@ public class FilesTable implements ReadonlyTable {
         }
 
         @Override
-        public Plan plan() {
+        public Plan innerPlan() {
             return () -> Collections.singletonList(new FilesSplit(storeTable));
         }
     }

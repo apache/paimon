@@ -24,7 +24,7 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.SplitsAssignment;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.DataTableScan.DataFilePlan;
-import org.apache.flink.table.store.table.source.EndOfStreamException;
+import org.apache.flink.table.store.table.source.EndOfScanException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -152,7 +152,7 @@ public class ContinuousFileSplitEnumerator
 
     private void processDiscoveredSplits(DataFilePlan plan, Throwable error) {
         if (error != null) {
-            if (error instanceof EndOfStreamException) {
+            if (error instanceof EndOfScanException) {
                 // finished
                 LOG.debug("Catching EndOfStreamException, the stream is finished.");
                 finished = true;

@@ -60,7 +60,7 @@ public class BatchDataTableScanImpl extends AbstractDataTableScan implements Bat
             hasNext = false;
             return startingScanner.getPlan(snapshotManager, snapshotSplitReader);
         } else {
-            return null;
+            throw new EndOfScanException();
         }
     }
 }

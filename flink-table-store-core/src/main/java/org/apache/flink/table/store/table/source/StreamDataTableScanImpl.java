@@ -128,7 +128,7 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
             Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);
 
             if (followUpScanner.shouldEndInput(snapshot)) {
-                throw new EndOfStreamException("This stream has ended.");
+                throw new EndOfScanException();
             }
 
             // first check changes of overwrite
