@@ -28,7 +28,7 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.format.FieldStats;
-import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.DataSplit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -79,7 +79,7 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
 
     @Override
     @Test
-    public void testTableScanFilterNormalFields() throws Exception {
+    public void testTableSplitFilterNormalFields() throws Exception {
         writeAndCheckFileResultForColumnType(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -90,9 +90,10 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
                     Predicate predicate =
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(6, 200L, 500L);
-                    DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
-                    checkFilterRowCount(plan, 3L);
-                    return plan.splits.stream()
+                    List<DataSplit> splits =
+                            table.newSnapshotSplitReader().withFilter(predicate).splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 3L);
+                    return splits.stream()
                             .flatMap(s -> s.files().stream())
                             .collect(Collectors.toList());
                 },
@@ -103,13 +104,13 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
                      * Changelog with key table doesn't support filter in value, it will scan all
                      * data. TODO support filter value in future.
                      */
-                    DataTableScan.DataFilePlan plan =
-                            table.newScan()
+                    List<DataSplit> splits =
+                            table.newSnapshotSplitReader()
                                     .withFilter(
                                             new PredicateBuilder(table.schema().logicalRowType())
                                                     .between(6, 200F, 500F))
-                                    .plan();
-                    checkFilterRowCount(plan, 6L);
+                                    .splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 6L);
                 },
                 getPrimaryKeyNames(),
                 tableConfig,

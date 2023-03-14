@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -25,10 +26,7 @@ import org.apache.flink.table.store.table.source.DataTableScan;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * {@link FollowUpScanner} for {@link
- * org.apache.flink.table.store.CoreOptions.ChangelogProducer#NONE} changelog producer.
- */
+/** {@link FollowUpScanner} for {@link CoreOptions.ChangelogProducer#NONE} changelog producer. */
 public class DeltaFollowUpScanner implements FollowUpScanner {
 
     private static final Logger LOG = LoggerFactory.getLogger(DeltaFollowUpScanner.class);
@@ -47,7 +45,10 @@ public class DeltaFollowUpScanner implements FollowUpScanner {
     }
 
     @Override
-    public DataTableScan.DataFilePlan getPlan(long snapshotId, DataTableScan scan) {
-        return scan.withKind(ScanKind.DELTA).withSnapshot(snapshotId).plan();
+    public DataTableScan.DataFilePlan getPlan(
+            long snapshotId, SnapshotSplitReader snapshotSplitReader) {
+        return new DataTableScan.DataFilePlan(
+                snapshotId,
+                snapshotSplitReader.withKind(ScanKind.DELTA).withSnapshot(snapshotId).splits());
     }
 }

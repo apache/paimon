@@ -45,7 +45,10 @@ public class ContinuousCompactorFollowUpScanner implements FollowUpScanner {
     }
 
     @Override
-    public DataTableScan.DataFilePlan getPlan(long snapshotId, DataTableScan scan) {
-        return scan.withKind(ScanKind.DELTA).withSnapshot(snapshotId).plan();
+    public DataTableScan.DataFilePlan getPlan(
+            long snapshotId, SnapshotSplitReader snapshotSplitReader) {
+        return new DataTableScan.DataFilePlan(
+                snapshotId,
+                snapshotSplitReader.withKind(ScanKind.DELTA).withSnapshot(snapshotId).splits());
     }
 }

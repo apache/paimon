@@ -24,9 +24,8 @@ import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.table.DataTable;
-import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.StreamDataTableScan;
 import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
 
 import javax.annotation.Nullable;
 
@@ -41,19 +40,15 @@ public class ContinuousFileStoreSource extends FlinkSource {
     private static final long serialVersionUID = 3L;
 
     private final DataTable table;
-    private final ContinuousDataFileSnapshotEnumerator.Factory enumeratorFactory;
+    private final StreamDataTableScan.Factory scanFactory;
+    private final Predicate predicate;
 
     public ContinuousFileStoreSource(
             DataTable table,
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit) {
-        this(
-                table,
-                projectedFields,
-                predicate,
-                limit,
-                new ContinuousDataFileSnapshotEnumerator.DefaultFactory());
+        this(table, projectedFields, predicate, limit, new StreamDataTableScan.DefaultFactory());
     }
 
     public ContinuousFileStoreSource(
@@ -61,24 +56,22 @@ public class ContinuousFileStoreSource extends FlinkSource {
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit,
-            ContinuousDataFileSnapshotEnumerator.Factory enumeratorFactory) {
+            StreamDataTableScan.Factory scanFactory) {
         super(table.newReadBuilder().withProjection(projectedFields).withFilter(predicate), limit);
         this.table = table;
-        this.enumeratorFactory = enumeratorFactory;
+        this.scanFactory = scanFactory;
+        this.predicate = predicate;
     }
 
     @Override
     public Boundedness getBoundedness() {
-        return enumeratorFactory.isBounded(table)
-                ? Boundedness.BOUNDED
-                : Boundedness.CONTINUOUS_UNBOUNDED;
+        return isBounded() ? Boundedness.BOUNDED : Boundedness.CONTINUOUS_UNBOUNDED;
     }
 
     @Override
     public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> restoreEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
-        DataTableScan scan = (DataTableScan) readBuilder.newScan();
         Long nextSnapshotId = null;
         Collection<FileStoreSourceSplit> splits = new ArrayList<>();
         if (checkpoint != null) {
@@ -91,7 +84,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 splits,
                 nextSnapshotId,
                 table.options().continuousDiscoveryInterval().toMillis(),
-                enumeratorFactory.create(table, scan, nextSnapshotId));
+                scanFactory.create(table, nextSnapshotId).withFilter(predicate)::plan);
     }
 
     @Override
@@ -100,5 +93,9 @@ public class ContinuousFileStoreSource extends FlinkSource {
         return table.options().toConfiguration().get(STREAMING_READ_ATOMIC)
                 ? new FileStoreSourceReader<>(RecordsFunction.forSingle(), context, read, limit)
                 : new FileStoreSourceReader<>(RecordsFunction.forIterate(), context, read, limit);
+    }
+
+    private boolean isBounded() {
+        return table.options().scanBoundedWatermark() != null;
     }
 }

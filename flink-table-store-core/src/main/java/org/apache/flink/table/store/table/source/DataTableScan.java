@@ -40,11 +40,6 @@ public interface DataTableScan extends InnerTableScan {
 
     DataTableScan.DataFilePlan plan();
 
-    /** to extract plan from overwrite changes. */
-    DataTableScan.DataFilePlan planOverwriteChanges();
-
-    boolean supportStreamingReadOverwrite();
-
     /** Scanning plan containing snapshot ID and input splits. */
     class DataFilePlan implements Plan {
 

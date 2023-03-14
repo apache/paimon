@@ -19,11 +19,9 @@
 package org.apache.flink.table.store.table.source.snapshot;
 
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.StreamTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.DataTableScan;
-import org.apache.flink.table.store.table.system.BucketsTable;
 import org.apache.flink.table.store.types.RowKind;
 
 import org.junit.jupiter.api.Test;
@@ -31,11 +29,10 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ContinuousCompactorStartingScanner}. */
-public class ContinuousCompactorStartingScannerTest extends SnapshotEnumeratorTestBase {
+public class ContinuousCompactorStartingScannerTest extends ScannerTestBase {
 
     @Test
     public void testGetPlan() throws Exception {
-        FileStoreTable table = createFileStoreTable();
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -62,9 +59,8 @@ public class ContinuousCompactorStartingScannerTest extends SnapshotEnumeratorTe
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(5);
 
-        BucketsTable bucketsTable = new BucketsTable(table, true);
         ContinuousCompactorStartingScanner scanner = new ContinuousCompactorStartingScanner();
-        DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, bucketsTable.newScan());
+        DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, snapshotSplitReader);
         assertThat(plan.snapshotId).isEqualTo(3);
         assertThat(plan.splits()).isEmpty();
 
@@ -73,11 +69,9 @@ public class ContinuousCompactorStartingScannerTest extends SnapshotEnumeratorTe
     }
 
     @Test
-    public void testNoSnapshot() throws Exception {
-        FileStoreTable table = createFileStoreTable();
+    public void testNoSnapshot() {
         SnapshotManager snapshotManager = table.snapshotManager();
-        BucketsTable bucketsTable = new BucketsTable(table, true);
         ContinuousCompactorStartingScanner scanner = new ContinuousCompactorStartingScanner();
-        assertThat(scanner.getPlan(snapshotManager, bucketsTable.newScan())).isNull();
+        assertThat(scanner.getPlan(snapshotManager, snapshotSplitReader)).isNull();
     }
 }

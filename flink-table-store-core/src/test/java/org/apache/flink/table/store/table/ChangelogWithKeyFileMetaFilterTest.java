@@ -26,11 +26,12 @@ import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
-import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.DataSplit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -45,20 +46,20 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
 
     @Test
     @Override
-    public void testTableScan() throws Exception {
+    public void testTableSplit() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    DataTableScan.DataFilePlan plan = table.newScan().plan();
-                    checkFilterRowCount(plan, 6L);
-                    return plan.splits.stream()
+                    List<DataSplit> splits = table.newSnapshotSplitReader().splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 6L);
+                    return splits.stream()
                             .flatMap(s -> s.files().stream())
                             .collect(Collectors.toList());
                 },
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    DataTableScan.DataFilePlan plan = table.newScan().plan();
-                    checkFilterRowCount(plan, 12L);
+                    List<DataSplit> splits = table.newSnapshotSplitReader().splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 12L);
 
                     /**
                      * TODO ChangelogWithKeyFileStoreTable doesn't support value predicate and can't
@@ -73,7 +74,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
 
     @Test
     @Override
-    public void testTableScanFilterExistFields() throws Exception {
+    public void testTableSplitFilterExistFields() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -82,9 +83,10 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     Predicate predicate =
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(2, 14, 19);
-                    DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
-                    checkFilterRowCount(plan, 6L);
-                    return plan.splits.stream()
+                    List<DataSplit> splits =
+                            table.newSnapshotSplitReader().withFilter(predicate).splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 6L);
+                    return splits.stream()
                             .flatMap(s -> s.files().stream())
                             .collect(Collectors.toList());
                 },
@@ -94,8 +96,9 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                             new PredicateBuilder(table.schema().logicalRowType());
                     // results of field "d" in [14, 19] in SCHEMA_1_FIELDS
                     Predicate predicate = builder.between(1, 14, 19);
-                    DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
-                    checkFilterRowCount(plan, 12L);
+                    List<DataSplit> splits =
+                            table.newSnapshotSplitReader().withFilter(predicate).splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 12L);
 
                     /**
                      * TODO ChangelogWithKeyFileStoreTable doesn't support value predicate and can't
@@ -110,13 +113,13 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
 
     @Test
     @Override
-    public void testTableScanFilterNewFields() throws Exception {
+    public void testTableSplitFilterNewFields() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    DataTableScan.DataFilePlan plan = table.newScan().plan();
-                    checkFilterRowCount(plan, 6L);
-                    return plan.splits.stream()
+                    List<DataSplit> splits = table.newSnapshotSplitReader().splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 6L);
+                    return splits.stream()
                             .flatMap(s -> s.files().stream())
                             .collect(Collectors.toList());
                 },
@@ -127,8 +130,9 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     // results of field "a" in (1120, -] in SCHEMA_1_FIELDS, "a" is not existed in
                     // SCHEMA_0_FIELDS
                     Predicate predicate = builder.greaterThan(3, 1120);
-                    DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
-                    checkFilterRowCount(plan, 12L);
+                    List<DataSplit> splits =
+                            table.newSnapshotSplitReader().withFilter(predicate).splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 12L);
 
                     /**
                      * TODO ChangelogWithKeyFileStoreTable doesn't support value predicate and can't

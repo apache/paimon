@@ -25,15 +25,13 @@ import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.DataTable;
+import org.apache.flink.table.store.table.source.BatchDataTableScan;
 import org.apache.flink.table.store.table.source.DataTableScan;
-import org.apache.flink.table.store.table.source.DataTableScan.DataFilePlan;
-import org.apache.flink.table.store.table.source.snapshot.StaticDataFileSnapshotEnumerator;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.List;
 
 /** Bounded {@link FlinkSource} for reading records. It does not monitor new snapshots. */
 public class StaticFileStoreSource extends FlinkSource {
@@ -41,14 +39,15 @@ public class StaticFileStoreSource extends FlinkSource {
     private static final long serialVersionUID = 3L;
 
     private final DataTable table;
-    private final StaticDataFileSnapshotEnumerator.Factory enumeratorFactory;
+    private final BatchDataTableScan.Factory scanFactory;
+    private final Predicate predicate;
 
     public StaticFileStoreSource(
             DataTable table,
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit) {
-        this(table, projectedFields, predicate, limit, StaticDataFileSnapshotEnumerator::create);
+        this(table, projectedFields, predicate, limit, DataTable::newScan);
     }
 
     public StaticFileStoreSource(
@@ -56,10 +55,11 @@ public class StaticFileStoreSource extends FlinkSource {
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit,
-            StaticDataFileSnapshotEnumerator.Factory enumeratorFactory) {
+            BatchDataTableScan.Factory scanFactory) {
         super(table.newReadBuilder().withFilter(predicate).withProjection(projectedFields), limit);
         this.table = table;
-        this.enumeratorFactory = enumeratorFactory;
+        this.scanFactory = scanFactory;
+        this.predicate = predicate;
     }
 
     @Override
@@ -72,7 +72,6 @@ public class StaticFileStoreSource extends FlinkSource {
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
         SnapshotManager snapshotManager = table.snapshotManager();
-        DataTableScan scan = (DataTableScan) readBuilder.newScan();
 
         Long snapshotId = null;
         Collection<FileStoreSourceSplit> splits;
@@ -80,9 +79,10 @@ public class StaticFileStoreSource extends FlinkSource {
             splits = new ArrayList<>();
             FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
 
-            // read all splits from the enumerator in one go
-            List<DataFilePlan> plans = enumeratorFactory.create(table, scan).enumerateAll();
-            for (DataFilePlan plan : plans) {
+            // read all splits from scan
+            DataTableScan.DataFilePlan plan =
+                    scanFactory.create(table).withFilter(predicate).plan();
+            if (plan != null) {
                 snapshotId = plan.snapshotId;
                 splits.addAll(splitGenerator.createSplits(plan));
             }

@@ -36,11 +36,10 @@ import java.util.Arrays;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link InputChangelogFollowUpScanner}. */
-public class InputChangelogFollowUpScannerTest extends SnapshotEnumeratorTestBase {
+public class InputChangelogFollowUpScannerTest extends ScannerTestBase {
 
     @Test
     public void testGetPlan() throws Exception {
-        FileStoreTable table = createFileStoreTable();
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -59,14 +58,13 @@ public class InputChangelogFollowUpScannerTest extends SnapshotEnumeratorTestBas
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(3);
 
-        DataTableScan scan = table.newScan();
         TableRead read = table.newRead();
         InputChangelogFollowUpScanner scanner = new InputChangelogFollowUpScanner();
 
         Snapshot snapshot = snapshotManager.snapshot(1);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        DataTableScan.DataFilePlan plan = scanner.getPlan(1, scan);
+        DataTableScan.DataFilePlan plan = scanner.getPlan(1, snapshotSplitReader);
         assertThat(plan.snapshotId).isEqualTo(1);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|100", "+I 1|20|200", "+I 1|40|400"));
@@ -74,7 +72,7 @@ public class InputChangelogFollowUpScannerTest extends SnapshotEnumeratorTestBas
         snapshot = snapshotManager.snapshot(2);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        plan = scanner.getPlan(2, scan);
+        plan = scanner.getPlan(2, snapshotSplitReader);
         assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(

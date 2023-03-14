@@ -26,7 +26,7 @@ import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.format.FieldStats;
-import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.flink.table.store.table.source.DataSplit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,34 +45,34 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
     }
 
     @Test
-    public void testTableScan() throws Exception {
+    public void testTableSplit() throws Exception {
         writeAndCheckFileResultForColumnType(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    DataTableScan.DataFilePlan plan = table.newScan().plan();
-                    checkFilterRowCount(plan, 3L);
-                    return plan.splits.stream()
+                    List<DataSplit> splits = table.newSnapshotSplitReader().splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 3L);
+                    return splits.stream()
                             .flatMap(s -> s.files().stream())
                             .collect(Collectors.toList());
                 },
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     // Scan all data files
-                    DataTableScan.DataFilePlan plan =
-                            table.newScan()
+                    List<DataSplit> splits =
+                            table.newSnapshotSplitReader()
                                     .withFilter(
                                             new PredicateBuilder(table.schema().logicalRowType())
                                                     .greaterOrEqual(
                                                             1, BinaryString.fromString("0")))
-                                    .plan();
-                    checkFilterRowCount(plan, 6L);
+                                    .splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 6L);
 
                     List<String> filesName =
                             files.stream().map(DataFileMeta::fileName).collect(Collectors.toList());
                     assertThat(filesName.size()).isGreaterThan(0);
 
                     List<DataFileMeta> fileMetaList =
-                            plan.splits.stream()
+                            splits.stream()
                                     .flatMap(s -> s.files().stream())
                                     .collect(Collectors.toList());
                     assertThat(
@@ -103,7 +103,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
     }
 
     @Test
-    public void testTableScanFilterNormalFields() throws Exception {
+    public void testTableSplitFilterNormalFields() throws Exception {
         writeAndCheckFileResultForColumnType(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -121,9 +121,10 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                     Predicate predicate =
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(6, 200L, 500L);
-                    DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
-                    checkFilterRowCount(plan, 2L);
-                    return plan.splits.stream()
+                    List<DataSplit> splits =
+                            table.newSnapshotSplitReader().withFilter(predicate).splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 2L);
+                    return splits.stream()
                             .flatMap(s -> s.files().stream())
                             .collect(Collectors.toList());
                 },
@@ -140,20 +141,20 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                      *
                      * <p>Then we can check the results of the two result files.
                      */
-                    DataTableScan.DataFilePlan plan =
-                            table.newScan()
+                    List<DataSplit> splits =
+                            table.newSnapshotSplitReader()
                                     .withFilter(
                                             new PredicateBuilder(table.schema().logicalRowType())
                                                     .between(6, 200F, 500F))
-                                    .plan();
-                    checkFilterRowCount(plan, 3L);
+                                    .splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 3L);
 
                     List<String> filesName =
                             files.stream().map(DataFileMeta::fileName).collect(Collectors.toList());
                     assertThat(filesName.size()).isGreaterThan(0);
 
                     List<DataFileMeta> fileMetaList =
-                            plan.splits.stream()
+                            splits.stream()
                                     .flatMap(s -> s.files().stream())
                                     .collect(Collectors.toList());
                     assertThat(
@@ -170,7 +171,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
     }
 
     @Test
-    public void testTableScanFilterPrimaryKeyFields() throws Exception {
+    public void testTableSplitFilterPrimaryKeyFields() throws Exception {
         writeAndCheckFileResultForColumnType(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -178,9 +179,10 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                     Predicate predicate =
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(4, (short) 200, (short) 500);
-                    DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
-                    checkFilterRowCount(plan, 2L);
-                    return plan.splits.stream()
+                    List<DataSplit> splits =
+                            table.newSnapshotSplitReader().withFilter(predicate).splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 2L);
+                    return splits.stream()
                             .flatMap(s -> s.files().stream())
                             .collect(Collectors.toList());
                 },
@@ -188,20 +190,20 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                     FileStoreTable table = createFileStoreTable(schemas);
                     // results of field "e" in [200, 500] in SCHEMA_FIELDS which is updated from
                     // bigint to int
-                    DataTableScan.DataFilePlan plan =
-                            table.newScan()
+                    List<DataSplit> splits =
+                            table.newSnapshotSplitReader()
                                     .withFilter(
                                             new PredicateBuilder(table.schema().logicalRowType())
                                                     .between(4, 200, 500))
-                                    .plan();
-                    checkFilterRowCount(plan, 3L);
+                                    .splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 3L);
 
                     List<String> filesName =
                             files.stream().map(DataFileMeta::fileName).collect(Collectors.toList());
                     assertThat(filesName.size()).isGreaterThan(0);
 
                     List<DataFileMeta> fileMetaList =
-                            plan.splits.stream()
+                            splits.stream()
                                     .flatMap(s -> s.files().stream())
                                     .collect(Collectors.toList());
                     assertThat(

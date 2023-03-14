@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
+import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.table.source.DataTableScan;
 
@@ -27,8 +28,8 @@ import org.slf4j.LoggerFactory;
 import java.util.Collections;
 
 /**
- * {@link StartingScanner} for the {@link
- * org.apache.flink.table.store.CoreOptions.StartupMode#LATEST} startup mode of a streaming read.
+ * {@link StartingScanner} for the {@link CoreOptions.StartupMode#LATEST} startup mode of a
+ * streaming read.
  */
 public class ContinuousLatestStartingScanner implements StartingScanner {
 
@@ -36,7 +37,8 @@ public class ContinuousLatestStartingScanner implements StartingScanner {
             LoggerFactory.getLogger(ContinuousLatestStartingScanner.class);
 
     @Override
-    public DataTableScan.DataFilePlan getPlan(SnapshotManager snapshotManager, DataTableScan scan) {
+    public DataTableScan.DataFilePlan getPlan(
+            SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
         Long startingSnapshotId = snapshotManager.latestSnapshotId();
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");

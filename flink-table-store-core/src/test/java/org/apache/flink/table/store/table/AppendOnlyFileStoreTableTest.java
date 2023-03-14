@@ -34,7 +34,6 @@ import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.sink.StreamTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;
-import org.apache.flink.table.store.table.source.AbstractDataTableScan;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
@@ -63,7 +62,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().plan().splits();
+        List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
@@ -87,7 +86,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().plan().splits();
+        List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_PROJECTED_ROW_TO_STRING))
                 .hasSameElementsAs(Arrays.asList("100|10", "101|11", "102|12", "101|11", "102|12"));
@@ -102,7 +101,8 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
 
         Predicate predicate = builder.equal(2, 201L);
-        List<Split> splits = table.newScan().withFilter(predicate).plan().splits();
+        List<Split> splits =
+                toSplits(table.newSnapshotSplitReader().withFilter(predicate).splits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
@@ -115,7 +115,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
-    public void testBatchPlanOrder() throws Exception {
+    public void testSplitOrder() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
         StreamTableWrite write = table.newWrite(commitUser);
@@ -131,7 +131,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         commit.commit(2, write.prepareCommit(true, 2));
         write.close();
 
-        List<Split> splits = table.newScan().plan().splits();
+        List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
         int[] partitions =
                 splits.stream()
                         .map(split -> ((DataSplit) split).partition().getInt(0))
@@ -141,7 +141,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
-    public void testBatchPlanOrderByPartition() throws Exception {
+    public void testBatchSplitOrderByPartition() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         options -> options.set(CoreOptions.SCAN_PLAN_SORT_PARTITION, true));
@@ -160,7 +160,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
 
         write.close();
 
-        List<Split> splits = table.newScan().plan().splits();
+        List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
         int[] partitions =
                 splits.stream()
                         .map(split -> ((DataSplit) split).partition().getInt(0))
@@ -174,7 +174,8 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = table.newScan().withKind(ScanKind.DELTA).plan().splits();
+        List<Split> splits =
+                toSplits(table.newSnapshotSplitReader().withKind(ScanKind.DELTA).splits());
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("+101|11", "+102|12"));
@@ -190,7 +191,11 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
 
         Predicate predicate = builder.equal(2, 101L);
         List<Split> splits =
-                table.newScan().withKind(ScanKind.DELTA).withFilter(predicate).plan().splits();
+                toSplits(
+                        table.newSnapshotSplitReader()
+                                .withKind(ScanKind.DELTA)
+                                .withFilter(predicate)
+                                .splits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
@@ -244,11 +249,11 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         Predicate partitionFilter =
                 new PredicateBuilder(table.schema().logicalRowType()).equal(0, partition);
         List<Split> splits =
-                ((AbstractDataTableScan) table.newScan())
-                        .withFilter(partitionFilter)
-                        .withBucket(bucket)
-                        .plan()
-                        .splits();
+                toSplits(
+                        table.newSnapshotSplitReader()
+                                .withFilter(partitionFilter)
+                                .withBucket(bucket)
+                                .splits());
         TableRead read = table.newRead();
 
         assertThat(getResult(read, splits, binaryRow(partition), bucket, STREAMING_ROW_TO_STRING))

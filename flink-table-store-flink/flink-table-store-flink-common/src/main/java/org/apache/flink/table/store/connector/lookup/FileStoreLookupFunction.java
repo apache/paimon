@@ -31,8 +31,8 @@ import org.apache.flink.table.store.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.flink.table.store.table.source.StreamDataTableScan;
 import org.apache.flink.table.store.table.source.TableStreamingReader;
-import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.FileIOUtils;
 import org.apache.flink.table.store.utils.TypeUtils;
@@ -94,7 +94,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         checkArgument(
                 schema.partitionKeys().isEmpty(), "Currently only support non-partitioned table.");
         checkArgument(schema.primaryKeys().size() > 0, "Currently only support primary key table.");
-        ContinuousDataFileSnapshotEnumerator.validate(table.schema());
+        StreamDataTableScan.validate(table.schema());
 
         this.table = table;
 

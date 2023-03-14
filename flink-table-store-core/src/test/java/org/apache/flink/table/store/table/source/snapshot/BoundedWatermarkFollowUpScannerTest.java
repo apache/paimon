@@ -21,7 +21,6 @@ package org.apache.flink.table.store.table.source.snapshot;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.TableCommitImpl;
 
 import org.junit.jupiter.api.Test;
@@ -29,11 +28,10 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link BoundedWatermarkFollowUpScanner}. */
-public class BoundedWatermarkFollowUpScannerTest extends SnapshotEnumeratorTestBase {
+public class BoundedWatermarkFollowUpScannerTest extends ScannerTestBase {
 
     @Test
-    public void testBounded() throws Exception {
-        FileStoreTable table = createFileStoreTable();
+    public void testBounded() {
         SnapshotManager snapshotManager = table.snapshotManager();
         TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
         FollowUpScanner scanner =
@@ -42,12 +40,12 @@ public class BoundedWatermarkFollowUpScannerTest extends SnapshotEnumeratorTestB
         commit.commit(new ManifestCommittable(0, 1024L));
         Snapshot snapshot = snapshotManager.latestSnapshot();
         assertThat(scanner.shouldEndInput(snapshot)).isFalse();
-        assertThat(scanner.getPlan(snapshot.id(), table.newScan()).splits()).isEmpty();
+        assertThat(scanner.getPlan(snapshot.id(), snapshotSplitReader).splits()).isEmpty();
 
         commit.commit(new ManifestCommittable(0, 2000L));
         snapshot = snapshotManager.latestSnapshot();
         assertThat(scanner.shouldEndInput(snapshot)).isFalse();
-        assertThat(scanner.getPlan(snapshot.id(), table.newScan()).splits()).isEmpty();
+        assertThat(scanner.getPlan(snapshot.id(), snapshotSplitReader).splits()).isEmpty();
 
         commit.commit(new ManifestCommittable(0, 2001L));
         snapshot = snapshotManager.latestSnapshot();

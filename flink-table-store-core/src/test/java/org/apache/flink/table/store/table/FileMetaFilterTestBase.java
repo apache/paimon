@@ -24,7 +24,6 @@ import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.table.source.DataSplit;
-import org.apache.flink.table.store.table.source.DataTableScan;
 
 import org.junit.jupiter.api.Test;
 
@@ -39,32 +38,32 @@ import static org.assertj.core.api.Assertions.assertThat;
 public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBase {
 
     @Test
-    public void testTableScan() throws Exception {
+    public void testTableSplit() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    DataTableScan.DataFilePlan plan = table.newScan().plan();
-                    checkFilterRowCount(plan, 6L);
-                    return plan.splits.stream()
+                    List<DataSplit> splits = table.newSnapshotSplitReader().splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 6L);
+                    return splits.stream()
                             .flatMap(s -> s.files().stream())
                             .collect(Collectors.toList());
                 },
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    DataTableScan.DataFilePlan plan =
-                            table.newScan()
+                    List<DataSplit> splits =
+                            table.newSnapshotSplitReader()
                                     .withFilter(
                                             new PredicateBuilder(table.schema().logicalRowType())
                                                     .greaterOrEqual(1, 0))
-                                    .plan();
-                    checkFilterRowCount(plan, 12L);
+                                    .splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 12L);
 
                     List<String> filesName =
                             files.stream().map(DataFileMeta::fileName).collect(Collectors.toList());
                     assertThat(filesName.size()).isGreaterThan(0);
 
                     List<DataFileMeta> fileMetaList =
-                            plan.splits.stream()
+                            splits.stream()
                                     .flatMap(s -> s.files().stream())
                                     .collect(Collectors.toList());
                     assertThat(
@@ -112,7 +111,7 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     @Test
-    public void testTableScanFilterExistFields() throws Exception {
+    public void testTableSplitFilterExistFields() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -122,7 +121,7 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(2, 14, 19);
                     List<DataFileMeta> files =
-                            table.newScan().withFilter(predicate).plan().splits.stream()
+                            table.newSnapshotSplitReader().withFilter(predicate).splits().stream()
                                     .flatMap(s -> s.files().stream())
                                     .collect(Collectors.toList());
                     assertThat(files.size()).isGreaterThan(0);
@@ -135,10 +134,10 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                             new PredicateBuilder(table.schema().logicalRowType());
                     // results of field "d" in [14, 19] in SCHEMA_1_FIELDS
                     Predicate predicate = builder.between(1, 14, 19);
-                    DataTableScan.DataFilePlan filterFilePlan =
-                            table.newScan().withFilter(predicate).plan();
+                    List<DataSplit> filterSplits =
+                            table.newSnapshotSplitReader().withFilter(predicate).splits();
                     List<DataFileMeta> filterFileMetas =
-                            filterFilePlan.splits.stream()
+                            filterSplits.stream()
                                     .flatMap(s -> s.files().stream())
                                     .collect(Collectors.toList());
                     checkFilterRowCount(filterFileMetas, 6L);
@@ -155,10 +154,12 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
 
                     builder = new PredicateBuilder(table.schema().logicalRowType());
                     // get all meta files with filter
-                    DataTableScan.DataFilePlan filterAllFilePlan =
-                            table.newScan().withFilter(builder.greaterOrEqual(1, 0)).plan();
+                    List<DataSplit> filterAllSplits =
+                            table.newSnapshotSplitReader()
+                                    .withFilter(builder.greaterOrEqual(1, 0))
+                                    .splits();
                     assertThat(
-                                    filterAllFilePlan.splits.stream()
+                                    filterAllSplits.stream()
                                             .flatMap(
                                                     s ->
                                                             s.files().stream()
@@ -170,11 +171,11 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                                             .collect(Collectors.toList()));
 
                     // get all meta files without filter
-                    DataTableScan.DataFilePlan allFilePlan = table.newScan().plan();
-                    assertThat(filterAllFilePlan.splits).isEqualTo(allFilePlan.splits);
+                    List<DataSplit> allSplits = table.newSnapshotSplitReader().splits();
+                    assertThat(filterAllSplits).isEqualTo(allSplits);
 
                     Set<String> filterFileNames = new HashSet<>();
-                    for (DataSplit dataSplit : filterAllFilePlan.splits) {
+                    for (DataSplit dataSplit : filterAllSplits) {
                         for (DataFileMeta dataFileMeta : dataSplit.files()) {
                             FieldStats[] fieldStats = getTableValueStats(dataFileMeta).fields(null);
                             int minValue = (Integer) fieldStats[1].minValue();
@@ -195,12 +196,12 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     @Test
-    public void testTableScanFilterNewFields() throws Exception {
+    public void testTableSplitFilterNewFields() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<DataFileMeta> files =
-                            table.newScan().plan().splits.stream()
+                            table.newSnapshotSplitReader().splits().stream()
                                     .flatMap(s -> s.files().stream())
                                     .collect(Collectors.toList());
                     assertThat(files.size()).isGreaterThan(0);
@@ -215,12 +216,12 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                     // results of field "a" in (1120, -] in SCHEMA_1_FIELDS, "a" is not existed in
                     // SCHEMA_0_FIELDS
                     Predicate predicate = builder.greaterThan(3, 1120);
-                    DataTableScan.DataFilePlan filterFilePlan =
-                            table.newScan().withFilter(predicate).plan();
-                    checkFilterRowCount(filterFilePlan, 2L);
+                    List<DataSplit> filterSplits =
+                            table.newSnapshotSplitReader().withFilter(predicate).splits();
+                    checkFilterRowCount(toDataFileMetas(filterSplits), 2L);
 
                     List<DataFileMeta> filterFileMetas =
-                            filterFilePlan.splits.stream()
+                            filterSplits.stream()
                                     .flatMap(s -> s.files().stream())
                                     .collect(Collectors.toList());
                     List<String> fileNameList =
@@ -237,12 +238,14 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                             files.stream().map(DataFileMeta::fileName).collect(Collectors.toList());
                     assertThat(fileNameList).doesNotContainAnyElementsOf(filesName);
 
-                    DataTableScan.DataFilePlan allFilePlan =
-                            table.newScan().withFilter(builder.greaterOrEqual(1, 0)).plan();
-                    checkFilterRowCount(allFilePlan, 12L);
+                    List<DataSplit> allSplits =
+                            table.newSnapshotSplitReader()
+                                    .withFilter(builder.greaterOrEqual(1, 0))
+                                    .splits();
+                    checkFilterRowCount(toDataFileMetas(allSplits), 12L);
 
                     Set<String> filterFileNames = new HashSet<>();
-                    for (DataSplit dataSplit : allFilePlan.splits) {
+                    for (DataSplit dataSplit : allSplits) {
                         for (DataFileMeta dataFileMeta : dataSplit.files()) {
                             FieldStats[] fieldStats = getTableValueStats(dataFileMeta).fields(null);
                             Integer minValue = (Integer) fieldStats[3].minValue();
@@ -263,7 +266,7 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     @Test
-    public void testTableScanFilterPartition() throws Exception {
+    public void testTableSplitFilterPartition() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
@@ -282,15 +285,16 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
     }
 
     @Test
-    public void testTableScanFilterPrimaryKey() throws Exception {
+    public void testTableSplitFilterPrimaryKey() throws Exception {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     PredicateBuilder builder =
                             new PredicateBuilder(table.schema().logicalRowType());
                     Predicate predicate = builder.between(4, 115L, 120L);
-                    DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
-                    checkFilterRowCount(plan, 2L);
+                    List<DataSplit> splits =
+                            table.newSnapshotSplitReader().withFilter(predicate).splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 2L);
                     return null;
                 },
                 (files, schemas) -> {
@@ -298,8 +302,9 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                     PredicateBuilder builder =
                             new PredicateBuilder(table.schema().logicalRowType());
                     Predicate predicate = builder.between(2, 115L, 120L);
-                    DataTableScan.DataFilePlan plan = table.newScan().withFilter(predicate).plan();
-                    checkFilterRowCount(plan, 6L);
+                    List<DataSplit> splits =
+                            table.newSnapshotSplitReader().withFilter(predicate).splits();
+                    checkFilterRowCount(toDataFileMetas(splits), 6L);
                 },
                 getPrimaryKeyNames(),
                 tableConfig,
@@ -311,8 +316,8 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
     protected static void checkFilterRowCount(
             FileStoreTable table, int index, int value, long expectedRowCount) {
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
-        DataTableScan.DataFilePlan plan =
-                table.newScan().withFilter(builder.equal(index, value)).plan();
-        checkFilterRowCount(plan, expectedRowCount);
+        List<DataSplit> splits =
+                table.newSnapshotSplitReader().withFilter(builder.equal(index, value)).splits();
+        checkFilterRowCount(toDataFileMetas(splits), expectedRowCount);
     }
 }

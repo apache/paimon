@@ -25,10 +25,6 @@ import org.apache.flink.table.store.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.reader.RecordReaderIterator;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.DataTableScan.DataFilePlan;
-import org.apache.flink.table.store.table.source.snapshot.ContinuousDataFileSnapshotEnumerator;
-import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator;
-import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator.FinishedResult;
-import org.apache.flink.table.store.table.source.snapshot.SnapshotEnumerator.Result;
 import org.apache.flink.table.store.utils.TypeUtils;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
@@ -52,7 +48,7 @@ public class TableStreamingReader {
     private final int[] projection;
     @Nullable private final Predicate predicate;
     @Nullable private final PredicateFilter recordFilter;
-    private final SnapshotEnumerator enumerator;
+    private final StreamDataTableScan scan;
 
     public TableStreamingReader(
             FileStoreTable table, int[] projection, @Nullable Predicate predicate) {
@@ -85,22 +81,21 @@ public class TableStreamingReader {
             recordFilter = null;
         }
 
-        DataTableScan scan = table.newScan();
+        scan = table.newStreamScan().withSnapshotStarting();
         if (predicate != null) {
             scan.withFilter(predicate);
         }
-        enumerator = ContinuousDataFileSnapshotEnumerator.createWithSnapshotStarting(table, scan);
     }
 
     @Nullable
     public Iterator<InternalRow> nextBatch() throws Exception {
-        Result result = enumerator.enumerate();
-        if (result instanceof FinishedResult) {
+        try {
+            DataFilePlan plan = scan.plan();
+            return plan == null ? null : read(plan);
+        } catch (EndOfScanException e) {
             throw new IllegalArgumentException(
-                    "TableStreamingReader dose not support finished enumerator.");
+                    "TableStreamingReader does not support finished enumerator.", e);
         }
-        DataFilePlan plan = result.plan();
-        return plan == null ? null : read(plan);
     }
 
     private Iterator<InternalRow> read(DataFilePlan plan) throws IOException {
