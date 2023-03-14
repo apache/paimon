@@ -57,7 +57,7 @@ To build from source code, either [download the source of a release](https://fli
 Build bundled jar with the following command.
 - `mvn clean install -DskipTests`
 
-For Flink 1.16, you can find the bundled jar in `./flink-table-store-flink/flink-table-store-flink-1.16/target/flink-table-store-flink-1.16-{{< version >}}.jar`.
+You can find the bundled jar in `./flink-table-store-flink/flink-table-store-flink-<flink-version>/target/flink-table-store-flink-<flink-version>-{{< version >}}.jar`.
 
 ## Quick Start
 
