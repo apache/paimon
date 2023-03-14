@@ -293,7 +293,7 @@ public class UniversalCompactionTest {
         return new LevelSortedRun(level, SortedRun.fromSingle(file(size)));
     }
 
-    private DataFileMeta file(long size) {
+    static DataFileMeta file(long size) {
         return new DataFileMeta("", size, 1, null, null, null, null, 0, 0, 0, 0);
     }
 }
