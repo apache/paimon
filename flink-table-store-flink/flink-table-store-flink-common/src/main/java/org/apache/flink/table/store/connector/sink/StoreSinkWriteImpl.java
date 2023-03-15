@@ -25,6 +25,7 @@ import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.disk.IOManagerImpl;
 import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.operation.AbstractFileStoreWrite;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.SinkRecord;
@@ -36,15 +37,15 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 /** Default implementation of {@link StoreSinkWrite}. This writer does not have states. */
 public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     private static final Logger LOG = LoggerFactory.getLogger(StoreSinkWriteImpl.class);
 
-    protected final FileStoreTable table;
     protected final String commitUser;
-    protected final TableWriteImpl<?> write;
+    protected TableWriteImpl<?> write;
 
     public StoreSinkWriteImpl(
             FileStoreTable table,
@@ -53,8 +54,6 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             IOManager ioManager,
             boolean isOverwrite)
             throws Exception {
-        this.table = table;
-
         // Each job can only have one user name and this name must be consistent across restarts.
         // We cannot use job id as commit user name here because user may change job id by creating
         // a savepoint, stop the job and then resume from savepoint.
@@ -135,5 +134,17 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         if (write != null) {
             write.close();
         }
+    }
+
+    @Override
+    public void replace(Function<String, TableWriteImpl<?>> newWriteProvider) throws Exception {
+        if (commitUser == null) {
+            return;
+        }
+
+        List<AbstractFileStoreWrite.State> states = write.checkpoint();
+        write.close();
+        write = newWriteProvider.apply(commitUser);
+        write.restore(states);
     }
 }

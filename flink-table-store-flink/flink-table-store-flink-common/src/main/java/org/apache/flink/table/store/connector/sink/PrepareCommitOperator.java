@@ -23,23 +23,19 @@ import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.apache.flink.table.data.RowData;
 
 import java.io.IOException;
 import java.util.List;
 
 /** Prepare commit operator to emit {@link Committable}s. */
-public abstract class PrepareCommitOperator extends AbstractStreamOperator<Committable>
-        implements OneInputStreamOperator<RowData, Committable>, BoundedOneInput {
+public abstract class PrepareCommitOperator<T> extends AbstractStreamOperator<Committable>
+        implements OneInputStreamOperator<T, Committable>, BoundedOneInput {
 
     private boolean endOfInput = false;
 
     public PrepareCommitOperator() {
         setChainingStrategy(ChainingStrategy.ALWAYS);
     }
-
-    @Override
-    public void processElement(StreamRecord<RowData> element) throws Exception {}
 
     @Override
     public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {

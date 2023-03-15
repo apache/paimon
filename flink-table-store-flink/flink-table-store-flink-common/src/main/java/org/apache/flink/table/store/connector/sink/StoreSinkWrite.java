@@ -26,13 +26,15 @@ import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.SinkRecord;
+import org.apache.flink.table.store.table.sink.TableWriteImpl;
 
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.List;
+import java.util.function.Function;
 
-/** Helper class of {@link StoreWriteOperator} for different types of table store sinks. */
-interface StoreSinkWrite {
+/** Helper class of {@link AbstractStoreWriteOperator} for different types of table store sinks. */
+public interface StoreSinkWrite {
 
     SinkRecord write(InternalRow rowData) throws Exception;
 
@@ -48,6 +50,9 @@ interface StoreSinkWrite {
 
     void close() throws Exception;
 
+    void replace(Function<String, TableWriteImpl<?>> newWriteProvider) throws Exception;
+
+    /** Provider of {@link StoreSinkWrite}. */
     @FunctionalInterface
     interface Provider extends Serializable {
 

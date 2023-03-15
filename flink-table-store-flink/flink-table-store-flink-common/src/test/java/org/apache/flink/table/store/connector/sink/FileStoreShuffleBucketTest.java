@@ -34,6 +34,7 @@ import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.sink.SinkRecord;
+import org.apache.flink.table.store.table.sink.TableWriteImpl;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +46,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 import static org.apache.flink.table.store.connector.LogicalTypeConversion.toLogicalType;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -159,5 +161,9 @@ public class FileStoreShuffleBucketTest extends CatalogITCaseBase {
 
         @Override
         public void close() throws Exception {}
+
+        @Override
+        public void replace(Function<String, TableWriteImpl<?>> newWriteProvider)
+                throws Exception {}
     }
 }
