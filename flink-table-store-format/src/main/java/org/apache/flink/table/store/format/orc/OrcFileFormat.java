@@ -42,6 +42,7 @@ import org.apache.flink.table.store.types.MultisetType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Projection;
 
+import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.orc.TypeDescription;
 
 import javax.annotation.Nullable;
@@ -99,7 +100,8 @@ public class OrcFileFormat extends FileFormat {
                 (RowType) refineDataType(type),
                 Projection.of(projection).toTopLevelIndexes(),
                 orcPredicates,
-                2048);
+                // same as the default value to avoid the orc bug
+                VectorizedRowBatch.DEFAULT_SIZE);
     }
 
     /**
