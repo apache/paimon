@@ -16,20 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.mergetree.compact;
+package org.apache.flink.table.store.io;
 
-import org.apache.flink.table.store.file.compact.CompactResult;
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.mergetree.SortedRun;
+/**
+ * Interface marking a {@link DataInputView} as seekable. Seekable views can set the position where
+ * they read from.
+ */
+public interface SeekableDataInputView extends DataInputView {
 
-import java.io.Closeable;
-import java.util.List;
-
-/** Rewrite sections to the files. */
-public interface CompactRewriter extends Closeable {
-
-    CompactResult rewrite(int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
-            throws Exception;
-
-    CompactResult upgrade(int outputLevel, DataFileMeta file) throws Exception;
+    /**
+     * Sets the read pointer to the given position.
+     *
+     * @param position The new read position.
+     */
+    void setReadPosition(long position);
 }

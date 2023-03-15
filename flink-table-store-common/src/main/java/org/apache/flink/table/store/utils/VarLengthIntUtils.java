@@ -17,7 +17,6 @@ package org.apache.flink.table.store.utils;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 
 /** Utils for encoding int/long to var length bytes. */
 public final class VarLengthIntUtils {
@@ -99,31 +98,9 @@ public final class VarLengthIntUtils {
         return i;
     }
 
-    public static int decodeInt(SimpleReadBuffer is) {
-        for (int offset = 0, result = 0; offset < 32; offset += 7) {
-            int b = is.readUnsignedByte();
-            result |= (b & 0x7F) << offset;
-            if ((b & 0x80) == 0) {
-                return result;
-            }
-        }
-        throw new Error("Malformed integer.");
-    }
-
     public static int decodeInt(DataInput is) throws IOException {
         for (int offset = 0, result = 0; offset < 32; offset += 7) {
             int b = is.readUnsignedByte();
-            result |= (b & 0x7F) << offset;
-            if ((b & 0x80) == 0) {
-                return result;
-            }
-        }
-        throw new Error("Malformed integer.");
-    }
-
-    public static int decodeInt(ByteBuffer bb) {
-        for (int offset = 0, result = 0; offset < 32; offset += 7) {
-            int b = bb.get() & 0xffff;
             result |= (b & 0x7F) << offset;
             if ((b & 0x80) == 0) {
                 return result;

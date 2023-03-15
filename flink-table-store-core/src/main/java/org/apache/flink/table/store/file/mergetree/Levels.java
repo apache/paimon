@@ -27,6 +27,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
@@ -41,6 +42,8 @@ public class Levels {
     private final TreeSet<DataFileMeta> level0;
 
     private final List<SortedRun> levels;
+
+    private final List<DropFileCallback> dropFileCallbacks = new ArrayList<>();
 
     public Levels(
             Comparator<InternalRow> keyComparator, List<DataFileMeta> inputFiles, int numLevels) {
@@ -81,6 +84,10 @@ public class Levels {
                 level0.size() + levels.stream().mapToInt(r -> r.files().size()).sum()
                         == inputFiles.size(),
                 "Number of files stored in Levels does not equal to the size of inputFiles. This is unexpected.");
+    }
+
+    public void addDropFileCallback(DropFileCallback callback) {
+        dropFileCallbacks.add(callback);
     }
 
     public void addLevel0File(DataFileMeta file) {
@@ -148,6 +155,16 @@ public class Levels {
                     groupedBefore.getOrDefault(i, emptyList()),
                     groupedAfter.getOrDefault(i, emptyList()));
         }
+
+        if (dropFileCallbacks.size() > 0) {
+            Set<String> droppedFiles =
+                    before.stream().map(DataFileMeta::fileName).collect(Collectors.toSet());
+            // exclude upgrade files
+            after.stream().map(DataFileMeta::fileName).forEach(droppedFiles::remove);
+            for (DropFileCallback callback : dropFileCallbacks) {
+                droppedFiles.forEach(callback::notifyDropFile);
+            }
+        }
     }
 
     private void updateLevel(int level, List<DataFileMeta> before, List<DataFileMeta> after) {
@@ -169,5 +186,11 @@ public class Levels {
     private Map<Integer, List<DataFileMeta>> groupByLevel(List<DataFileMeta> files) {
         return files.stream()
                 .collect(Collectors.groupingBy(DataFileMeta::level, Collectors.toList()));
+    }
+
+    /** A callback to notify dropping file. */
+    public interface DropFileCallback {
+
+        void notifyDropFile(String file);
     }
 }

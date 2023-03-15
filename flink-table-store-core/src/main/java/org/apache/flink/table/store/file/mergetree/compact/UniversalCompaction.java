@@ -162,6 +162,7 @@ public class UniversalCompaction implements CompactStrategy {
         if (runCount == runs.size()) {
             outputLevel = maxLevel;
         } else {
+            // level of next run - 1
             outputLevel = Math.max(0, runs.get(runCount).level() - 1);
         }
 

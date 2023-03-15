@@ -27,6 +27,7 @@ import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.utils.Preconditions;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -176,6 +177,9 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     LinkedList<DataFileMeta> getToCompact() {
         return toCompact;
     }
+
+    @Override
+    public void close() throws IOException {}
 
     /**
      * A {@link CompactTask} impl for full compaction of append-only table.

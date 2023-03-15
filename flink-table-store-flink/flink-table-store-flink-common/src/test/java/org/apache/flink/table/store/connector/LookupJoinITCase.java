@@ -466,7 +466,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> sEnv.executeSql(query))
                 .hasRootCauseMessage(
                         "Partial update continuous reading is not supported. "
-                                + "You can use full compaction changelog producer to support streaming reading.");
+                                + "You can use 'lookup' or 'full-compaction' changelog producer to support streaming reading.");
     }
 
     @Test

@@ -85,12 +85,19 @@ public class SchemaValidation {
                         + " should not be larger than "
                         + SNAPSHOT_NUM_RETAINED_MAX.key());
 
-        // Only changelog tables with primary keys support full compaction
-        if (options.changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION
-                && options.writeMode() == WriteMode.CHANGE_LOG
-                && schema.primaryKeys().isEmpty()) {
-            throw new UnsupportedOperationException(
-                    "Changelog table with full compaction must have primary keys");
+        // Only changelog tables with primary keys support full compaction or lookup changelog
+        // producer
+        if (options.writeMode() == WriteMode.CHANGE_LOG) {
+            switch (options.changelogProducer()) {
+                case FULL_COMPACTION:
+                case LOOKUP:
+                    if (schema.primaryKeys().isEmpty()) {
+                        throw new UnsupportedOperationException(
+                                "Changelog table with full compaction must have primary keys");
+                    }
+                    break;
+                default:
+            }
         }
 
         // Check column names in schema

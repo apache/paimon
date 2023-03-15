@@ -149,18 +149,26 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
     private FollowUpScanner createFollowUpScanner() {
         CoreOptions.ChangelogProducer changelogProducer = options.changelogProducer();
         FollowUpScanner followUpScanner;
-        if (changelogProducer == CoreOptions.ChangelogProducer.NONE) {
-            followUpScanner = new DeltaFollowUpScanner();
-        } else if (changelogProducer == CoreOptions.ChangelogProducer.INPUT) {
-            followUpScanner = new InputChangelogFollowUpScanner();
-        } else if (changelogProducer == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
-            // this change in data split reader will affect both starting scanner and follow-up
-            // scanner
-            snapshotSplitReader.withLevelFilter(level -> level == options.numLevels() - 1);
-            followUpScanner = new CompactionChangelogFollowUpScanner();
-        } else {
-            throw new UnsupportedOperationException(
-                    "Unknown changelog producer " + changelogProducer.name());
+        switch (changelogProducer) {
+            case NONE:
+                followUpScanner = new DeltaFollowUpScanner();
+                break;
+            case INPUT:
+                followUpScanner = new InputChangelogFollowUpScanner();
+                break;
+            case FULL_COMPACTION:
+                // this change in data split reader will affect both starting scanner and follow-up
+                snapshotSplitReader.withLevelFilter(level -> level == options.numLevels() - 1);
+                followUpScanner = new CompactionChangelogFollowUpScanner();
+                break;
+            case LOOKUP:
+                // this change in data split reader will affect both starting scanner and follow-up
+                snapshotSplitReader.withLevelFilter(level -> level > 0);
+                followUpScanner = new CompactionChangelogFollowUpScanner();
+                break;
+            default:
+                throw new UnsupportedOperationException(
+                        "Unknown changelog producer " + changelogProducer.name());
         }
 
         Long boundedWatermark = options.scanBoundedWatermark();

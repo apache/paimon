@@ -19,8 +19,10 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.NoopCompactManager;
@@ -28,10 +30,13 @@ import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
 import org.apache.flink.table.store.file.mergetree.Levels;
+import org.apache.flink.table.store.file.mergetree.LookupLevels;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.CompactStrategy;
 import org.apache.flink.table.store.file.mergetree.compact.FullChangelogMergeTreeCompactRewriter;
+import org.apache.flink.table.store.file.mergetree.compact.LookupCompaction;
+import org.apache.flink.table.store.file.mergetree.compact.LookupMergeTreeCompactRewriter;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManager;
 import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactRewriter;
@@ -43,6 +48,7 @@ import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.store.fs.FileIO;
+import org.apache.flink.table.store.lookup.hash.HashLookupStoreFactory;
 import org.apache.flink.table.store.types.RowType;
 
 import org.slf4j.Logger;
@@ -67,6 +73,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final CoreOptions options;
     private final FileIO fileIO;
+    private final RowType keyType;
+    private final RowType valueType;
 
     public KeyValueFileStoreWrite(
             FileIO fileIO,
@@ -84,6 +92,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             KeyValueFieldsExtractor extractor) {
         super(commitUser, snapshotManager, scan, options);
         this.fileIO = fileIO;
+        this.keyType = keyType;
+        this.valueType = valueType;
         this.readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
                         fileIO,
@@ -147,17 +157,18 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 writerFactoryBuilder.build(partition, bucket, options.fileCompressionPerLevel());
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
+        UniversalCompaction universalCompaction =
+                new UniversalCompaction(
+                        options.maxSizeAmplificationPercent(),
+                        options.sortedRunSizeRatio(),
+                        options.numSortedRunCompactionTrigger(),
+                        options.maxSortedRunNum());
+        CompactStrategy compactStrategy =
+                options.changelogProducer() == ChangelogProducer.LOOKUP
+                        ? new LookupCompaction(universalCompaction)
+                        : universalCompaction;
         CompactManager compactManager =
-                createCompactManager(
-                        partition,
-                        bucket,
-                        new UniversalCompaction(
-                                options.maxSizeAmplificationPercent(),
-                                options.sortedRunSizeRatio(),
-                                options.numSortedRunCompactionTrigger(),
-                                options.maxSortedRunNum()),
-                        compactExecutor,
-                        levels);
+                createCompactManager(partition, bucket, compactStrategy, compactExecutor, levels);
         return new MergeTreeWriter(
                 bufferSpillable(),
                 options.localSortMaxNumFileHandles(),
@@ -185,7 +196,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             return new NoopCompactManager();
         } else {
             Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
-            CompactRewriter rewriter = createRewriter(partition, bucket, keyComparator);
+            CompactRewriter rewriter = createRewriter(partition, bucket, keyComparator, levels);
             return new MergeTreeCompactManager(
                     compactExecutor,
                     levels,
@@ -198,21 +209,47 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     private MergeTreeCompactRewriter createRewriter(
-            BinaryRow partition, int bucket, Comparator<InternalRow> keyComparator) {
+            BinaryRow partition, int bucket, Comparator<InternalRow> keyComparator, Levels levels) {
         KeyValueFileReaderFactory readerFactory = readerFactoryBuilder.build(partition, bucket);
         KeyValueFileWriterFactory writerFactory =
                 writerFactoryBuilder.build(partition, bucket, options.fileCompressionPerLevel());
-
-        if (options.changelogProducer() == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
-            return new FullChangelogMergeTreeCompactRewriter(
-                    options.numLevels() - 1,
-                    readerFactory,
-                    writerFactory,
-                    keyComparator,
-                    mfFactory);
-        } else {
-            return new MergeTreeCompactRewriter(
-                    readerFactory, writerFactory, keyComparator, mfFactory);
+        switch (options.changelogProducer()) {
+            case FULL_COMPACTION:
+                return new FullChangelogMergeTreeCompactRewriter(
+                        options.numLevels() - 1,
+                        readerFactory,
+                        writerFactory,
+                        keyComparator,
+                        mfFactory);
+            case LOOKUP:
+                LookupLevels lookupLevels = createLookupLevels(levels, readerFactory);
+                return new LookupMergeTreeCompactRewriter(
+                        lookupLevels, readerFactory, writerFactory, keyComparator, mfFactory);
+            default:
+                return new MergeTreeCompactRewriter(
+                        readerFactory, writerFactory, keyComparator, mfFactory);
         }
+    }
+
+    private LookupLevels createLookupLevels(
+            Levels levels, KeyValueFileReaderFactory readerFactory) {
+        if (ioManager == null) {
+            throw new RuntimeException(
+                    "Can not use lookup, there is no temp disk directory to use.");
+        }
+        return new LookupLevels(
+                levels,
+                keyComparatorSupplier.get(),
+                new InternalRowSerializer(keyType),
+                new InternalRowSerializer(valueType),
+                file ->
+                        readerFactory.createRecordReader(
+                                file.schemaId(), file.fileName(), file.level()),
+                () -> ioManager.createChannel().getPathFile(),
+                new HashLookupStoreFactory(
+                        cacheManager,
+                        options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR)),
+                options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
+                options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
     }
 }

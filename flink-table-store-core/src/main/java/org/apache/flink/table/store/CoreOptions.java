@@ -496,6 +496,34 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Define partition by table options, cannot define partition on DDL and table options at the same time.");
 
+    public static final ConfigOption<Float> LOOKUP_HASH_LOAD_FACTOR =
+            key("lookup.hash-load-factor")
+                    .floatType()
+                    .defaultValue(0.75F)
+                    .withDescription("The index load factor for lookup.");
+
+    public static final ConfigOption<Duration> LOOKUP_CACHE_FILE_RETENTION =
+            key("lookup.cache-file-retention")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
+                    .withDescription(
+                            "The cached files retention time for lookup. After the file expires,"
+                                    + " if there is a need for access, it will be re-read from the DFS to build"
+                                    + " an index on the local disk.");
+
+    public static final ConfigOption<MemorySize> LOOKUP_CACHE_MAX_DISK_SIZE =
+            key("lookup.cache-max-disk-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.MAX_VALUE)
+                    .withDescription(
+                            "Max disk size for lookup cache, you can use this option to limit the use of local disks.");
+
+    public static final ConfigOption<MemorySize> LOOKUP_CACHE_MAX_MEMORY_SIZE =
+            key("lookup.cache-max-memory-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("256 mb"))
+                    .withDescription("Max memory size for lookup cache.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -885,7 +913,11 @@ public class CoreOptions implements Serializable {
                 "input",
                 "Double write to a changelog file when flushing memory table, the changelog is from input."),
 
-        FULL_COMPACTION("full-compaction", "Generate changelog files with each full compaction.");
+        FULL_COMPACTION("full-compaction", "Generate changelog files with each full compaction."),
+
+        LOOKUP(
+                "lookup",
+                "Generate changelog files through 'lookup' before committing the data writing.");
 
         private final String value;
         private final String description;

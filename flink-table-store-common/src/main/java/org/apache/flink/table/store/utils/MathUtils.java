@@ -22,6 +22,17 @@ package org.apache.flink.table.store.utils;
 public class MathUtils {
 
     /**
+     * Decrements the given number down to the closest power of two. If the argument is a power of
+     * two, it remains unchanged.
+     *
+     * @param value The value to round down.
+     * @return The closest value that is a power of two and less or equal than the given value.
+     */
+    public static int roundDownToPowerOf2(int value) {
+        return Integer.highestOneBit(value);
+    }
+
+    /**
      * Computes the logarithm of the given value to the base of 2. This method throws an error, if
      * the given argument is not a power of 2.
      *
