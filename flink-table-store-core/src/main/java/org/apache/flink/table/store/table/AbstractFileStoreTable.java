@@ -41,6 +41,7 @@ import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReaderImp
 
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.BiConsumer;
 
 import static org.apache.flink.table.store.CoreOptions.PATH;
@@ -125,6 +126,21 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         SchemaValidation.validateTableSchema(newTableSchema);
 
         return copy(newTableSchema);
+    }
+
+    @Override
+    public FileStoreTable copyWithLatestSchema() {
+        Map<String, String> options = tableSchema.options();
+        SchemaManager schemaManager = new SchemaManager(fileIO(), location());
+        Optional<TableSchema> optionalLatestSchema = schemaManager.latest();
+        if (optionalLatestSchema.isPresent()) {
+            TableSchema newTableSchema = optionalLatestSchema.get();
+            newTableSchema = newTableSchema.copy(options);
+            SchemaValidation.validateTableSchema(newTableSchema);
+            return copy(newTableSchema);
+        } else {
+            return this;
+        }
     }
 
     protected SchemaManager schemaManager() {
