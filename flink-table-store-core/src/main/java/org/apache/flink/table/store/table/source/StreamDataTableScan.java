@@ -32,15 +32,13 @@ import java.util.HashMap;
 import static org.apache.flink.table.store.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 
 /** {@link DataTableScan} for streaming planning. */
-public interface StreamDataTableScan extends DataTableScan {
+public interface StreamDataTableScan extends DataTableScan, InnerStreamTableScan {
 
     boolean supportStreamingReadOverwrite();
 
     StreamDataTableScan withStartingScanner(StartingScanner startingScanner);
 
     StreamDataTableScan withFollowUpScanner(FollowUpScanner followUpScanner);
-
-    StreamDataTableScan withNextSnapshotId(@Nullable Long nextSnapshotId);
 
     StreamDataTableScan withSnapshotStarting();
 
@@ -79,7 +77,9 @@ public interface StreamDataTableScan extends DataTableScan {
 
         @Override
         public StreamDataTableScan create(DataTable dataTable, @Nullable Long nextSnapshotId) {
-            return dataTable.newStreamScan().withNextSnapshotId(nextSnapshotId);
+            StreamDataTableScan scan = dataTable.newStreamScan();
+            scan.restore(nextSnapshotId);
+            return scan;
         }
     }
 }

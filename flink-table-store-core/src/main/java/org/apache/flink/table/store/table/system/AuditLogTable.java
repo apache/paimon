@@ -301,13 +301,19 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public StreamDataTableScan withNextSnapshotId(@Nullable Long nextSnapshotId) {
-            return streamScan.withNextSnapshotId(nextSnapshotId);
+        public StreamDataTableScan withSnapshotStarting() {
+            return streamScan.withSnapshotStarting();
+        }
+
+        @Nullable
+        @Override
+        public Long checkpoint() {
+            return streamScan.checkpoint();
         }
 
         @Override
-        public StreamDataTableScan withSnapshotStarting() {
-            return streamScan.withSnapshotStarting();
+        public void restore(@Nullable Long nextSnapshotId) {
+            streamScan.restore(nextSnapshotId);
         }
     }
 
