@@ -141,6 +141,10 @@ public class Options implements Serializable {
         return data;
     }
 
+    public synchronized void remove(ConfigOption<?> configOption) {
+        data.remove(configOption.key());
+    }
+
     public synchronized Options removePrefix(String prefix) {
         Map<String, String> newData = new HashMap<>();
         data.forEach(

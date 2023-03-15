@@ -38,6 +38,10 @@ import org.apache.flink.table.store.table.source.StreamDataTableScan;
 import org.apache.flink.table.store.table.source.StreamDataTableScanImpl;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReader;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReaderImpl;
+import org.apache.flink.table.store.utils.Preconditions;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.Objects;
@@ -51,9 +55,11 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreTable.class);
+
     protected final FileIO fileIO;
     protected final Path path;
-    protected final TableSchema tableSchema;
+    protected TableSchema tableSchema;
 
     public AbstractFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
         this.fileIO = fileIO;
@@ -119,6 +125,9 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         // set dynamic options with default values
         CoreOptions.setDefaultValues(newOptions);
 
+        // time travel if set TIME_TRAVEL_SNAPSHOT_ID
+        tryTimeTravel(newOptions);
+
         // copy a new table store to contain dynamic options
         TableSchema newTableSchema = tableSchema.copy(newOptions.toMap());
 
@@ -178,5 +187,26 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 store().newCommit(commitUser),
                 options().writeOnly() ? null : store().newExpire(),
                 options().writeOnly() ? null : store().newPartitionExpire(commitUser));
+    }
+
+    private void tryTimeTravel(Options options) {
+        if (options.contains(CoreOptions.TIME_TRAVEL_SNAPSHOT_ID)) {
+            long snapshotId = options.get(CoreOptions.TIME_TRAVEL_SNAPSHOT_ID);
+            SnapshotManager snapshotManager = snapshotManager();
+            Preconditions.checkArgument(
+                    snapshotManager.snapshotExists(snapshotId),
+                    String.format(
+                            "Target snapshot '%s' for time travel doesn't exist.", snapshotId));
+
+            long schemaId = snapshotManager.snapshot(snapshotId).schemaId();
+            LOG.info("Time traveling to snapshot {}, schemaId is {}.", snapshotId, schemaId);
+
+            tableSchema = schemaManager().schema(schemaId);
+            options.set(CoreOptions.SCAN_MODE, CoreOptions.StartupMode.FROM_SNAPSHOT)
+                    .set(CoreOptions.SCAN_SNAPSHOT_ID, snapshotId);
+
+            // clean time travel option
+            options.remove(CoreOptions.TIME_TRAVEL_SNAPSHOT_ID);
+        }
     }
 }

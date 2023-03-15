@@ -20,7 +20,6 @@ package org.apache.flink.table.store.connector;
 
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.testutils.FlinkAssertions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
@@ -40,6 +39,7 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.flink.table.store.testutils.assertj.AssertionUtils;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
@@ -813,7 +813,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                         Collections.singletonList("dt"),
                                         streamingReadOverwrite))
                 .satisfies(
-                        FlinkAssertions.anyCauseMatches(
+                        AssertionUtils.anyCauseMatches(
                                 RuntimeException.class,
                                 "Doesn't support streaming read the changes from overwrite when the primary keys are not defined."));
     }
