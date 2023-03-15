@@ -531,7 +531,6 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Define The target snapshot for time travel.");
 
-
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
