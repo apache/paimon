@@ -37,6 +37,8 @@ import java.util.function.Function;
 /** Factory to create orc input format for different Flink versions. */
 public class OrcInputFormatFactory {
 
+    public static final int BATCH_SIZE = 1024;
+
     public static BulkFormat<RowData, FileSourceSplit> create(
             Configuration conf,
             RowType type,
@@ -71,7 +73,7 @@ public class OrcInputFormatFactory {
                     null,
                     projection,
                     orcPredicates,
-                    2048,
+                    BATCH_SIZE,
                     (Function<RowType, TypeInformation<RowData>>) InternalTypeInfo::of);
         } catch (NoSuchMethodException | InvocationTargetException | IllegalAccessException e) {
             throw new RuntimeException(e);
@@ -96,7 +98,7 @@ public class OrcInputFormatFactory {
                     null,
                     projection,
                     orcPredicates,
-                    2048);
+                    BATCH_SIZE);
         } catch (NoSuchMethodException | InvocationTargetException | IllegalAccessException e) {
             throw new RuntimeException(e);
         }
