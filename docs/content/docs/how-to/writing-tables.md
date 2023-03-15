@@ -446,3 +446,6 @@ For more information of 'merge-into', see
     /path/to/flink-table-store-flink-**-{{< version >}}.jar \
     merge-into --help
 ```
+{{< /tab >}}
+
+{{< /tabs >}}

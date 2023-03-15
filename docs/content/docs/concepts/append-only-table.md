@@ -105,3 +105,5 @@ CREATE TABLE MyTable (
 ```
 
 {{< /tab >}}
+
+{{< /tabs >}}

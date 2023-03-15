@@ -259,6 +259,7 @@ CREATE TABLE MyTableLike LIKE MyTable;
 
 {{< /tab >}}
 
+{{< /tabs >}}
 
 ### Table Properties
 
