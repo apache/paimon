@@ -80,6 +80,11 @@ Produces the snapshot after the latest compaction on the table upon first startu
 <td>Produces a snapshot specified by "scan.snapshot-id".</td>
 <td>Continuously reads changes starting from a snapshot specified by "scan.snapshot-id", without producing a snapshot at the beginning.</td>
 </tr>
+<tr>
+<td>from-snapshot-full</td>
+<td>Produces a snapshot specified by "scan.snapshot-id".</td>
+<td>Produces from snapshot specified by "scan.snapshot-id" on the table upon first startup, and continuously reads changes.</td>
+</tr>
 </tbody>
 </table>
 

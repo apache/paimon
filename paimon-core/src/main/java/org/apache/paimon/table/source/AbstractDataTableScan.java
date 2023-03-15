@@ -77,15 +77,16 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                         ? new ContinuousFromTimestampStartingScanner(startupMillis)
                         : new StaticFromTimestampStartingScanner(startupMillis);
             case FROM_SNAPSHOT:
+            case FROM_SNAPSHOT_FULL:
                 Long snapshotId = options.scanSnapshotId();
                 Preconditions.checkNotNull(
                         snapshotId,
                         String.format(
                                 "%s can not be null when you use %s for %s",
                                 CoreOptions.SCAN_SNAPSHOT_ID.key(),
-                                CoreOptions.StartupMode.FROM_SNAPSHOT,
+                                startupMode,
                                 CoreOptions.SCAN_MODE.key()));
-                return isStreaming
+                return isStreaming && startupMode == CoreOptions.StartupMode.FROM_SNAPSHOT
                         ? new ContinuousFromSnapshotStartingScanner(snapshotId)
                         : new StaticFromSnapshotStartingScanner(snapshotId);
             default:
