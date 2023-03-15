@@ -82,8 +82,8 @@ By using Table Store Hive catalog, changes to the catalog will directly affect t
 
 Download the jar file with corresponding version.
 
-| Version      | Jar |
-|--------------|---|
+| Version    | Jar                                                                                                                                                                                    |
+|------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Hive 2 & 3 | [flink-table-store-hive-catalog-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}.jar) |
 
 You can also manually build bundled jar from the source code.
