@@ -76,12 +76,6 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
     }
 
     @Override
-    public StreamDataTableScan withNextSnapshotId(@Nullable Long nextSnapshotId) {
-        this.nextSnapshotId = nextSnapshotId;
-        return this;
-    }
-
-    @Override
     public StreamDataTableScan withSnapshotStarting() {
         startingScanner =
                 options.startupMode() == CoreOptions.StartupMode.COMPACTED_FULL
@@ -175,5 +169,16 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
                     new BoundedWatermarkFollowUpScanner(followUpScanner, boundedWatermark);
         }
         return followUpScanner;
+    }
+
+    @Nullable
+    @Override
+    public Long checkpoint() {
+        return nextSnapshotId;
+    }
+
+    @Override
+    public void restore(@Nullable Long nextSnapshotId) {
+        this.nextSnapshotId = nextSnapshotId;
     }
 }

@@ -119,7 +119,7 @@ public interface ReadBuilder extends Serializable {
     TableScan newScan();
 
     /** Create a {@link TableScan} to perform streaming planning. */
-    TableScan newStreamScan();
+    StreamTableScan newStreamScan();
 
     /** Create a {@link TableRead} to read {@link Split}s. */
     TableRead newRead();

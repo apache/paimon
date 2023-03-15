@@ -24,6 +24,7 @@ import org.apache.flink.table.store.table.sink.InnerTableCommit;
 import org.apache.flink.table.store.table.sink.InnerTableWrite;
 import org.apache.flink.table.store.table.sink.StreamWriteBuilder;
 import org.apache.flink.table.store.table.sink.StreamWriteBuilderImpl;
+import org.apache.flink.table.store.table.source.InnerStreamTableScan;
 import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.InnerTableScan;
 import org.apache.flink.table.store.table.source.ReadBuilder;
@@ -34,7 +35,7 @@ public interface InnerTable extends Table {
 
     InnerTableScan newScan();
 
-    InnerTableScan newStreamScan();
+    InnerStreamTableScan newStreamScan();
 
     InnerTableRead newRead();
 
