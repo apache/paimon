@@ -95,14 +95,14 @@ Streaming Source can also be bounded, you can specify 'scan.bounded.watermark' t
 
 Currently, Table Store supports time travel for Flink and Spark 3.3.
 
-For flink, you can use [dynamic table options](https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/sql/queries/hints/#dynamic-table-options) to specify scan mode and from where to start.
+For flink, you can use [dynamic table options](https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/sql/queries/hints/#dynamic-table-options) to specify scan mode and from where to start:
 
 ```sql
 -- travel to snapshot with id 1L
-SELECT * FROM t /*+ OPTIONS('scan.mode' = 'from-snapshot', 'scan.snapshot-id' = '1') */
+SELECT * FROM t /*+ OPTIONS('scan.mode' = 'from-snapshot', 'scan.snapshot-id' = '1') */;
 
 -- travel to specified timestamp with a long value in milliseconds
-SELECT * FROM t /*+ OPTIONS('scan.mode' = 'from-timestamp', 'scan.timestamp-millis' = '1678883047356') */
+SELECT * FROM t /*+ OPTIONS('scan.mode' = 'from-timestamp', 'scan.timestamp-millis' = '1678883047356') */;
 ```
 
 For Spark 3.3, you can use `VERSION AS OF` and `TIMESTAMP AS OF` in query to do time travel:
@@ -117,7 +117,6 @@ SELECT * FROM t TIMESTAMP AS OF '2023-06-01 00:00:00.123';
 -- you can also use a long value in seconds as timestamp
 SELECT * FROM t TIMESTAMP AS OF 1678883047;
 ```
-
 
 ## System Tables
 
