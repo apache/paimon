@@ -22,6 +22,7 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.utils.Preconditions;
 
+import java.io.IOException;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 
@@ -56,4 +57,7 @@ public class NoopCompactManager implements CompactManager {
 
     @Override
     public void cancelCompaction() {}
+
+    @Override
+    public void close() throws IOException {}
 }

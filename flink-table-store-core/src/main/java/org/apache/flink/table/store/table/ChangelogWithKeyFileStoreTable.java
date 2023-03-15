@@ -19,11 +19,13 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.CoreOptions;
+import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueFileStore;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.flink.table.store.file.mergetree.compact.LookupMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.aggregate.AggregateMergeFunction;
@@ -77,7 +79,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         if (lazyStore == null) {
             RowType rowType = tableSchema.logicalRowType();
             Options conf = Options.fromMap(tableSchema.options());
-            CoreOptions.MergeEngine mergeEngine = conf.get(CoreOptions.MERGE_ENGINE);
+            CoreOptions options = new CoreOptions(conf);
+            CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
             MergeFunctionFactory<KeyValue> mfFactory;
             switch (mergeEngine) {
                 case DEDUPLICATE:
@@ -102,7 +105,10 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                             "Unsupported merge engine: " + mergeEngine);
             }
 
-            CoreOptions options = new CoreOptions(conf);
+            if (options.changelogProducer() == ChangelogProducer.LOOKUP) {
+                mfFactory = LookupMergeFunction.wrap(mfFactory);
+            }
+
             KeyValueFieldsExtractor extractor = ChangelogWithKeyKeyValueFieldsExtractor.EXTRACTOR;
             lazyStore =
                     new KeyValueFileStore(

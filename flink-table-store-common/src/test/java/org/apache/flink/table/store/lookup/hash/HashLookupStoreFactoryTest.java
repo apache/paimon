@@ -23,7 +23,9 @@
 package org.apache.flink.table.store.lookup.hash;
 
 import org.apache.flink.table.store.io.DataOutputSerializer;
+import org.apache.flink.table.store.io.cache.CacheManager;
 import org.apache.flink.table.store.options.MemorySize;
+import org.apache.flink.table.store.utils.MathUtils;
 import org.apache.flink.table.store.utils.VarLengthIntUtils;
 
 import org.apache.commons.math3.random.RandomDataGenerator;
@@ -42,6 +44,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -57,7 +60,9 @@ public class HashLookupStoreFactoryTest {
 
     @BeforeEach
     public void setUp() throws IOException {
-        this.factory = new HashLookupStoreFactory(0.75d, true, MemorySize.ofMebiBytes(1024));
+        this.factory =
+                new HashLookupStoreFactory(
+                        new CacheManager(1024, MemorySize.ofMebiBytes(1)), 0.75d);
         this.file = new File(tempDir.toFile(), UUID.randomUUID().toString());
         if (!file.createNewFile()) {
             throw new IOException("Can not create file: " + file);
@@ -171,7 +176,12 @@ public class HashLookupStoreFactoryTest {
         writeStore(file, keys, values);
 
         // Read
-        factory = new HashLookupStoreFactory(0.75d, true, new MemorySize(byteSize - 100));
+        factory =
+                new HashLookupStoreFactory(
+                        new CacheManager(
+                                MathUtils.roundDownToPowerOf2(byteSize - 100),
+                                MemorySize.ofMebiBytes(1)),
+                        0.75d);
         HashLookupStoreReader reader = factory.createReader(file);
         for (int i = 0; i < keys.length; i++) {
             assertThat(reader.lookup(toBytes(keys[i]))).isEqualTo(toBytes(values[i]));
@@ -197,7 +207,12 @@ public class HashLookupStoreFactoryTest {
         writeStore(file, keys, values);
 
         // Read
-        factory = new HashLookupStoreFactory(0.75d, true, new MemorySize(byteSize + sizeSize + 3));
+        factory =
+                new HashLookupStoreFactory(
+                        new CacheManager(
+                                MathUtils.roundDownToPowerOf2(byteSize + sizeSize + 3),
+                                MemorySize.ofMebiBytes(1)),
+                        0.75d);
         HashLookupStoreReader reader = factory.createReader(file);
         for (int i = 0; i < keys.length; i++) {
             assertThat(reader.lookup(toBytes(keys[i]))).isEqualTo(toBytes(values[i]));
@@ -250,21 +265,25 @@ public class HashLookupStoreFactoryTest {
     }
 
     @Test
-    public void testReadDisk() throws IOException {
-        Integer[] keys = generateIntKeys(10000);
+    public void testCacheExpiration() throws IOException {
+        int len = 1000;
+        ThreadLocalRandom rnd = ThreadLocalRandom.current();
+        Object[] keys = new Object[len];
+        Object[] values = new Object[len];
+        for (int i = 0; i < len; i++) {
+            keys[i] = rnd.nextInt();
+            values[i] = generateStringData(100);
+        }
 
         // Write
-        Object[] values = generateStringData(keys.length, 1000);
         writeStore(file, keys, values);
 
         // Read
-        factory = new HashLookupStoreFactory(0.75d, false, MemorySize.ofMebiBytes(1024));
+        factory = new HashLookupStoreFactory(new CacheManager(1024, new MemorySize(8096)), 0.75d);
         HashLookupStoreReader reader = factory.createReader(file);
-
         for (int i = 0; i < keys.length; i++) {
             assertThat(reader.lookup(toBytes(keys[i]))).isEqualTo(toBytes(values[i]));
         }
-        reader.close();
     }
 
     @Test

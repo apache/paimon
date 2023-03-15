@@ -60,7 +60,7 @@ For example, let's say Table Store receives three records:
 If the first column is the primary key. The final result will be `<1, 25.2, 10, 'This is a book'>`.
 
 {{< hint info >}}
-For streaming queries, `partial-update` merge engine must be used together with `full-compaction` [changelog producer]({{< ref "docs/concepts/primary-key-table#changelog-producers" >}}).
+For streaming queries, `partial-update` merge engine must be used together with `lookup` or `full-compaction` [changelog producer]({{< ref "docs/concepts/primary-key-table#changelog-producers" >}}).
 {{< /hint >}}
 
 {{< hint info >}}
@@ -109,7 +109,7 @@ If you allow some functions to ignore retraction messages, you can configure:
 `'fields.${field_name}.ignore-retract'='true'`.
 
 {{< hint info >}}
-For streaming queries, `aggregation` merge engine must be used together with `full-compaction` [changelog producer]({{< ref "docs/concepts/primary-key-table#changelog-producers" >}}).
+For streaming queries, `aggregation` merge engine must be used together with `lookup` or `full-compaction` [changelog producer]({{< ref "docs/concepts/primary-key-table#changelog-producers" >}}).
 {{< /hint >}}
 
 ## Changelog Producers
@@ -144,9 +144,51 @@ By specifying `'changelog-producer' = 'input'`, Table Store writers rely on thei
 
 {{< img src="/img/changelog-producer-input.png">}}
 
+### Lookup
+
+If your input can’t produce a complete changelog but you still want to get rid of the costly normalized operator, you may consider using the `'lookup'` changelog producer.
+
+By specifying `'changelog-producer' = 'lookup'`, Table Store will generate changelog through `'lookup'` before committing the data writing.
+
+{{< img src="/img/changelog-producer-lookup.png">}}
+
+Lookup will cache data on the memory and local disk, you can use the following options to tune performance:
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 20%">Option</th>
+      <th class="text-left" style="width: 5%">Default</th>
+      <th class="text-left" style="width: 10%">Type</th>
+      <th class="text-left" style="width: 60%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+        <td><h5>lookup.cache-file-retention</h5></td>
+        <td style="word-wrap: break-word;">1 h</td>
+        <td>Duration</td>
+        <td>The cached files retention time for lookup. After the file expires, if there is a need for access, it will be re-read from the DFS to build an index on the local disk.</td>
+    </tr>
+    <tr>
+        <td><h5>lookup.cache-max-disk-size</h5></td>
+        <td style="word-wrap: break-word;">unlimited</td>
+        <td>MemorySize</td>
+        <td>Max disk size for lookup cache, you can use this option to limit the use of local disks.</td>
+    </tr>
+    <tr>
+        <td><h5>lookup.cache-max-memory-size</h5></td>
+        <td style="word-wrap: break-word;">256 mb</td>
+        <td>MemorySize</td>
+        <td>Max memory size for lookup cache.</td>
+    </tr>
+    </tbody>
+</table>
+
 ### Full Compaction
 
-If your input can’t produce a complete changelog but you still want to get rid of the costly normalized operator, you may consider using the full compaction changelog producer.
+If you think the resource consumption of 'lookup' is too large, you can consider using 'full-compaction' changelog producer,
+which can decouple data writing and changelog generation, and is more suitable for scenarios with high latency (For example, 10 minutes).
 
 By specifying `'changelog-producer' = 'full-compaction'`, Table Store will compare the results between full compactions and produce the differences as changelog. The latency of changelog is affected by the frequency of full compactions.
 

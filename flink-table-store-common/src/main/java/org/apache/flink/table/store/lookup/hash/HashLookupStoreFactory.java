@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.lookup.hash;
 
+import org.apache.flink.table.store.io.cache.CacheManager;
 import org.apache.flink.table.store.lookup.LookupStoreFactory;
-import org.apache.flink.table.store.options.MemorySize;
 
 import java.io.File;
 import java.io.IOException;
@@ -27,14 +27,12 @@ import java.io.IOException;
 /** A {@link LookupStoreFactory} which uses hash to lookup records on disk. */
 public class HashLookupStoreFactory implements LookupStoreFactory {
 
+    private final CacheManager cacheManager;
     private final double loadFactor;
-    private final boolean useMmp;
-    private final MemorySize mmpSegmentSize;
 
-    public HashLookupStoreFactory(double loadFactor, boolean useMmp, MemorySize mmpSegmentSize) {
+    public HashLookupStoreFactory(CacheManager cacheManager, double loadFactor) {
+        this.cacheManager = cacheManager;
         this.loadFactor = loadFactor;
-        this.useMmp = useMmp;
-        this.mmpSegmentSize = mmpSegmentSize;
     }
 
     @Override
@@ -44,6 +42,6 @@ public class HashLookupStoreFactory implements LookupStoreFactory {
 
     @Override
     public HashLookupStoreReader createReader(File file) throws IOException {
-        return new HashLookupStoreReader(useMmp, mmpSegmentSize.getBytes(), file);
+        return new HashLookupStoreReader(cacheManager, file);
     }
 }

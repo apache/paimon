@@ -22,9 +22,10 @@
 
 package org.apache.flink.table.store.lookup.hash;
 
+import org.apache.flink.table.store.io.cache.CacheManager;
+import org.apache.flink.table.store.io.cache.CachedRandomInputView;
 import org.apache.flink.table.store.lookup.LookupStoreReader;
 import org.apache.flink.table.store.utils.MurmurHashUtils;
-import org.apache.flink.table.store.utils.SimpleReadBuffer;
 import org.apache.flink.table.store.utils.VarLengthIntUtils;
 
 import org.slf4j.Logger;
@@ -32,15 +33,10 @@ import org.slf4j.LoggerFactory;
 
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
-import java.io.EOFException;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.nio.ByteBuffer;
-import java.nio.MappedByteBuffer;
-import java.nio.channels.FileChannel;
 import java.text.DecimalFormat;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
@@ -55,8 +51,6 @@ public class HashLookupStoreReader
     private static final Logger LOG =
             LoggerFactory.getLogger(HashLookupStoreReader.class.getName());
 
-    // Buffer segment size
-    private final long mmpSegmentSize;
     // Key count for each key length
     private final int[] keyCounts;
     // Slot size for each key length
@@ -65,44 +59,28 @@ public class HashLookupStoreReader
     private final int[] slots;
     // Offset of the index for different key length
     private final int[] indexOffsets;
-    // Offset of the data in the channel
-    private final long dataOffset;
     // Offset of the data for different key length
     private final long[] dataOffsets;
-    // Data size
-    private final long dataSize;
-    // Index and data buffers
-    private MappedByteBuffer indexBuffer;
-    private MappedByteBuffer[] dataBuffers;
-    // FileChannel
-    private RandomAccessFile mappedFile;
-    private FileChannel channel;
-    // Use MMap for data?
-    private final boolean mMapData;
+    // File input view
+    private CachedRandomInputView inputView;
     // Buffers
-    private final SimpleReadBuffer sizeBuffer = new SimpleReadBuffer(new byte[5]);
     private final byte[] slotBuffer;
 
-    HashLookupStoreReader(boolean useMmp, long mmpSegmentSize, File file) throws IOException {
+    HashLookupStoreReader(CacheManager cacheManager, File file) throws IOException {
         // File path
         if (!file.exists()) {
             throw new FileNotFoundException("File " + file.getAbsolutePath() + " not found");
         }
         LOG.info("Opening file {}", file.getName());
 
-        this.mmpSegmentSize = mmpSegmentSize;
-        // Check valid segmentSize
-        if (this.mmpSegmentSize > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException("The mmpSegmentSize can't be larger than 2GB");
-        }
-
         // Open file and read metadata
         long createdAt;
         FileInputStream inputStream = new FileInputStream(file);
         DataInputStream dataInputStream = new DataInputStream(new BufferedInputStream(inputStream));
         // Offset of the index in the channel
-        int indexOffset;
         int keyCount;
+        int indexOffset;
+        long dataOffset;
         try {
             // Time
             createdAt = dataInputStream.readLong();
@@ -136,9 +114,16 @@ public class HashLookupStoreReader
 
             slotBuffer = new byte[maxSlotSize];
 
-            // Read index and data offset
+            // Read index offset to resign indexOffsets
             indexOffset = dataInputStream.readInt();
+            for (int i = 0; i < indexOffsets.length; i++) {
+                indexOffsets[i] = indexOffset + indexOffsets[i];
+            }
+            // Read data offset to resign dataOffsets
             dataOffset = dataInputStream.readLong();
+            for (int i = 0; i < dataOffsets.length; i++) {
+                dataOffsets[i] = dataOffset + dataOffsets[i];
+            }
         } finally {
             // Close metadata
             dataInputStream.close();
@@ -146,42 +131,7 @@ public class HashLookupStoreReader
         }
 
         // Create Mapped file in read-only mode
-        mappedFile = new RandomAccessFile(file, "r");
-        channel = mappedFile.getChannel();
-        long fileSize = file.length();
-
-        // Create index buffer
-        indexBuffer =
-                channel.map(FileChannel.MapMode.READ_ONLY, indexOffset, dataOffset - indexOffset);
-
-        // Create data buffers
-        dataSize = fileSize - dataOffset;
-
-        // Check if data size fits in memory map limit
-        if (!useMmp) {
-            // Use classical disk read
-            mMapData = false;
-            dataBuffers = null;
-        } else {
-            // Use Mmap
-            mMapData = true;
-
-            // Build data buffers
-            int bufArraySize =
-                    (int) (dataSize / this.mmpSegmentSize)
-                            + ((dataSize % this.mmpSegmentSize != 0) ? 1 : 0);
-            dataBuffers = new MappedByteBuffer[bufArraySize];
-            int bufIdx = 0;
-            for (long offset = 0; offset < dataSize; offset += this.mmpSegmentSize) {
-                long remainingFileSize = dataSize - offset;
-                long thisSegmentSize = Math.min(this.mmpSegmentSize, remainingFileSize);
-                dataBuffers[bufIdx++] =
-                        channel.map(
-                                FileChannel.MapMode.READ_ONLY,
-                                dataOffset + offset,
-                                thisSegmentSize);
-            }
-        }
+        inputView = new CachedRandomInputView(file, cacheManager);
 
         // logging
         DecimalFormat integerFormat = new DecimalFormat("#,##0.00");
@@ -201,13 +151,8 @@ public class HashLookupStoreReader
                 .append(integerFormat.format((dataOffset - indexOffset) / (1024.0 * 1024.0)))
                 .append(" Mb\n");
         statMsg.append("  Data size: ")
-                .append(integerFormat.format((fileSize - dataOffset) / (1024.0 * 1024.0)))
+                .append(integerFormat.format((file.length() - dataOffset) / (1024.0 * 1024.0)))
                 .append(" Mb\n");
-        if (mMapData) {
-            statMsg.append("  Number of memory mapped data buffers: ").append(dataBuffers.length);
-        } else {
-            statMsg.append("  Memory mapped data disabled, using disk");
-        }
         LOG.info(statMsg.toString());
     }
 
@@ -217,25 +162,23 @@ public class HashLookupStoreReader
         if (keyLength >= slots.length || keyCounts[keyLength] == 0) {
             return null;
         }
-        long hash = MurmurHashUtils.hashBytesPositive(key);
+        int hash = MurmurHashUtils.hashBytesPositive(key);
         int numSlots = slots[keyLength];
         int slotSize = slotSizes[keyLength];
         int indexOffset = indexOffsets[keyLength];
         long dataOffset = dataOffsets[keyLength];
 
         for (int probe = 0; probe < numSlots; probe++) {
-            int slot = (int) ((hash + probe) % numSlots);
-            indexBuffer.position(indexOffset + slot * slotSize);
-            indexBuffer.get(slotBuffer, 0, slotSize);
+            long slot = (hash + probe) % numSlots;
+            inputView.setReadPosition(indexOffset + slot * slotSize);
+            inputView.readFully(slotBuffer, 0, slotSize);
 
             long offset = VarLengthIntUtils.decodeLong(slotBuffer, keyLength);
             if (offset == 0) {
                 return null;
             }
             if (isKey(slotBuffer, key)) {
-                return mMapData
-                        ? getMMapBytes(dataOffset + offset)
-                        : getDiskBytes(dataOffset + offset);
+                return getValue(dataOffset + offset);
             }
         }
         return null;
@@ -250,83 +193,16 @@ public class HashLookupStoreReader
         return true;
     }
 
-    // Read the data at the given offset, the data can be spread over multiple data buffers
-    private byte[] getMMapBytes(long offset) {
-        // Read the first 4 bytes to get the size of the data
-        ByteBuffer buf = getDataBuffer(offset);
-        int maxLen = (int) Math.min(5, dataSize - offset);
-
-        int size;
-        if (buf.remaining() >= maxLen) {
-            // Continuous read
-            int pos = buf.position();
-            size = VarLengthIntUtils.decodeInt(buf);
-
-            // Used in case of data is spread over multiple buffers
-            offset += buf.position() - pos;
-        } else {
-            // The size of the data is spread over multiple buffers
-            int len = maxLen;
-            int off = 0;
-            sizeBuffer.reset();
-            while (len > 0) {
-                buf = getDataBuffer(offset + off);
-                int count = Math.min(len, buf.remaining());
-                buf.get(sizeBuffer.getBuf(), off, count);
-                off += count;
-                len -= count;
-            }
-            size = VarLengthIntUtils.decodeInt(sizeBuffer);
-            offset += sizeBuffer.getPos();
-            buf = getDataBuffer(offset);
-        }
-
-        // Create output bytes
-        byte[] res = new byte[size];
-
-        // Check if the data is one buffer
-        if (buf.remaining() >= size) {
-            // Continuous read
-            buf.get(res, 0, size);
-        } else {
-            int len = size;
-            int off = 0;
-            while (len > 0) {
-                buf = getDataBuffer(offset);
-                int count = Math.min(len, buf.remaining());
-                buf.get(res, off, count);
-                offset += count;
-                off += count;
-                len -= count;
-            }
-        }
-
-        return res;
-    }
-
-    // Get data from disk
-    private byte[] getDiskBytes(long offset) throws IOException {
-        mappedFile.seek(dataOffset + offset);
+    private byte[] getValue(long offset) throws IOException {
+        inputView.setReadPosition(offset);
 
         // Get size of data
-        int size = VarLengthIntUtils.decodeInt(mappedFile);
+        int size = VarLengthIntUtils.decodeInt(inputView);
 
         // Create output bytes
         byte[] res = new byte[size];
-
-        // Read data
-        if (mappedFile.read(res) == -1) {
-            throw new EOFException();
-        }
-
+        inputView.readFully(res);
         return res;
-    }
-
-    // Return the data buffer for the given position
-    private ByteBuffer getDataBuffer(long index) {
-        ByteBuffer buf = dataBuffers[(int) (index / mmpSegmentSize)];
-        buf.position((int) (index % mmpSegmentSize));
-        return buf;
     }
 
     private String formatCreatedAt(long createdAt) {
@@ -338,12 +214,8 @@ public class HashLookupStoreReader
 
     @Override
     public void close() throws IOException {
-        channel.close();
-        mappedFile.close();
-        indexBuffer = null;
-        dataBuffers = null;
-        mappedFile = null;
-        channel = null;
+        inputView.close();
+        inputView = null;
     }
 
     @Override
@@ -393,11 +265,11 @@ public class HashLookupStoreReader
         @Override
         public FastEntry next() {
             try {
-                indexBuffer.position(currentIndexOffset);
+                inputView.setReadPosition(currentIndexOffset);
 
                 long offset = 0;
                 while (offset == 0) {
-                    indexBuffer.get(currentSlotBuffer);
+                    inputView.readFully(currentSlotBuffer);
                     offset = VarLengthIntUtils.decodeLong(currentSlotBuffer, currentKeyLength);
                     currentIndexOffset += currentSlotBuffer.length;
                 }
@@ -407,7 +279,7 @@ public class HashLookupStoreReader
 
                 if (withValue) {
                     long valueOffset = currentDataOffset + offset;
-                    value = mMapData ? getMMapBytes(valueOffset) : getDiskBytes(valueOffset);
+                    value = getValue(valueOffset);
                 }
 
                 entry.set(key, value);

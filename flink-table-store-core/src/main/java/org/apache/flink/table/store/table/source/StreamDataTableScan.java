@@ -29,8 +29,6 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.HashMap;
 
-import static org.apache.flink.table.store.CoreOptions.ChangelogProducer.FULL_COMPACTION;
-
 /** {@link DataTableScan} for streaming planning. */
 public interface StreamDataTableScan extends DataTableScan, InnerStreamTableScan {
 
@@ -52,13 +50,16 @@ public interface StreamDataTableScan extends DataTableScan, InnerStreamTableScan
                         put(CoreOptions.MergeEngine.AGGREGATE, "Pre-aggregate");
                     }
                 };
-        if (schema.primaryKeys().size() > 0
-                && mergeEngineDesc.containsKey(mergeEngine)
-                && options.changelogProducer() != FULL_COMPACTION) {
-            throw new RuntimeException(
-                    mergeEngineDesc.get(mergeEngine)
-                            + " continuous reading is not supported. "
-                            + "You can use full compaction changelog producer to support streaming reading.");
+        if (schema.primaryKeys().size() > 0 && mergeEngineDesc.containsKey(mergeEngine)) {
+            switch (options.changelogProducer()) {
+                case NONE:
+                case INPUT:
+                    throw new RuntimeException(
+                            mergeEngineDesc.get(mergeEngine)
+                                    + " continuous reading is not supported. You can use "
+                                    + "'lookup' or 'full-compaction' changelog producer to support streaming reading.");
+                default:
+            }
         }
     }
 

@@ -22,6 +22,7 @@ import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 
+import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -41,4 +42,7 @@ public abstract class AbstractCompactRewriter implements CompactRewriter {
                 .flatMap(Collection::stream)
                 .collect(Collectors.toList());
     }
+
+    @Override
+    public void close() throws IOException {}
 }

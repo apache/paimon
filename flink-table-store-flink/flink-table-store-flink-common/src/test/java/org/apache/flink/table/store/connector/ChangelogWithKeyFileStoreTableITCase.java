@@ -43,6 +43,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +51,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -95,79 +97,10 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
 
     @Test
     public void testFullCompactionTriggerInterval() throws Exception {
-        TableEnvironment sEnv =
-                createStreamingTableEnvironment(ThreadLocalRandom.current().nextInt(900) + 100);
-        sEnv.getConfig()
-                .getConfiguration()
-                .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
-
-        sEnv.executeSql(
-                String.format(
-                        "CREATE CATALOG testCatalog WITH ('type'='table-store', 'warehouse'='%s/warehouse')",
-                        path));
-        sEnv.executeSql("USE CATALOG testCatalog");
-        sEnv.executeSql(
-                "CREATE TABLE T ( k INT, v STRING, PRIMARY KEY (k) NOT ENFORCED ) "
-                        + "WITH ( "
-                        + "'bucket' = '2', "
-                        + "'changelog-producer' = 'full-compaction', "
-                        + "'changelog-producer.compaction-interval' = '1s' )");
-
-        Path inputPath = new Path(path, "input");
-        sEnv.executeSql(
-                "CREATE TABLE `default_catalog`.`default_database`.`S` ( i INT, g STRING ) "
-                        + "WITH ( 'connector' = 'filesystem', 'format' = 'testcsv', 'path' = '"
-                        + inputPath
-                        + "', 'source.monitor-interval' = '500ms' )");
-
-        sEnv.executeSql(
-                "INSERT INTO T SELECT SUM(i) AS k, g AS v FROM `default_catalog`.`default_database`.`S` GROUP BY g");
-        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM T").collect();
-
-        // write initial data
-        sEnv.executeSql(
-                        "INSERT INTO `default_catalog`.`default_database`.`S` "
-                                + "VALUES (1, 'A'), (2, 'B'), (3, 'C'), (4, 'D')")
-                .await();
-
-        // read initial data
-        List<String> actual = new ArrayList<>();
-        for (int i = 0; i < 4; i++) {
-            actual.add(it.next().toString());
-        }
-        actual.sort(String::compareTo);
-
-        List<String> expected =
-                new ArrayList<>(Arrays.asList("+I[1, A]", "+I[2, B]", "+I[3, C]", "+I[4, D]"));
-        expected.sort(String::compareTo);
-        assertEquals(expected, actual);
-
-        // write update data
-        sEnv.executeSql(
-                        "INSERT INTO `default_catalog`.`default_database`.`S` "
-                                + "VALUES (1, 'A'), (1, 'B'), (1, 'C'), (1, 'D')")
-                .await();
-
-        // read update data
-        actual.clear();
-        for (int i = 0; i < 8; i++) {
-            actual.add(it.next().toString());
-        }
-        actual.sort(String::compareTo);
-
-        expected =
-                new ArrayList<>(
-                        Arrays.asList(
-                                "-D[1, A]",
-                                "-U[2, B]",
-                                "+U[2, A]",
-                                "-U[3, C]",
-                                "+U[3, B]",
-                                "-U[4, D]",
-                                "+U[4, C]",
-                                "+I[5, D]"));
-        expected.sort(String::compareTo);
-        assertEquals(expected, actual);
+        innerTestChangelogProducing(
+                Arrays.asList(
+                        "'changelog-producer' = 'full-compaction'",
+                        "'changelog-producer.compaction-interval' = '1s'"));
     }
 
     @Test
@@ -233,6 +166,80 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
         it.close();
     }
 
+    @Test
+    public void testLookupChangelog() throws Exception {
+        innerTestChangelogProducing(Collections.singletonList("'changelog-producer' = 'lookup'"));
+    }
+
+    private void innerTestChangelogProducing(List<String> options) throws Exception {
+        TableEnvironment sEnv =
+                createStreamingTableEnvironment(ThreadLocalRandom.current().nextInt(900) + 100);
+        sEnv.getConfig()
+                .getConfiguration()
+                .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
+
+        sEnv.executeSql(
+                String.format(
+                        "CREATE CATALOG testCatalog WITH ('type'='table-store', 'warehouse'='%s/warehouse')",
+                        path));
+        sEnv.executeSql("USE CATALOG testCatalog");
+        sEnv.executeSql(
+                "CREATE TABLE T ( k INT, v STRING, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( "
+                        + "'bucket' = '2', "
+                        + String.join(",", options)
+                        + ")");
+
+        Path inputPath = new Path(path, "input");
+        sEnv.executeSql(
+                "CREATE TABLE `default_catalog`.`default_database`.`S` ( i INT, g STRING ) "
+                        + "WITH ( 'connector' = 'filesystem', 'format' = 'testcsv', 'path' = '"
+                        + inputPath
+                        + "', 'source.monitor-interval' = '500ms' )");
+
+        sEnv.executeSql(
+                "INSERT INTO T SELECT SUM(i) AS k, g AS v FROM `default_catalog`.`default_database`.`S` GROUP BY g");
+        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM T").collect();
+
+        // write initial data
+        sEnv.executeSql(
+                        "INSERT INTO `default_catalog`.`default_database`.`S` "
+                                + "VALUES (1, 'A'), (2, 'B'), (3, 'C'), (4, 'D')")
+                .await();
+
+        // read initial data
+        List<String> actual = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            actual.add(it.next().toString());
+        }
+
+        assertThat(actual)
+                .containsExactlyInAnyOrder("+I[1, A]", "+I[2, B]", "+I[3, C]", "+I[4, D]");
+
+        // write update data
+        sEnv.executeSql(
+                        "INSERT INTO `default_catalog`.`default_database`.`S` "
+                                + "VALUES (1, 'A'), (1, 'B'), (1, 'C'), (1, 'D')")
+                .await();
+
+        // read update data
+        actual.clear();
+        for (int i = 0; i < 8; i++) {
+            actual.add(it.next().toString());
+        }
+
+        assertThat(actual)
+                .containsExactlyInAnyOrder(
+                        "-D[1, A]",
+                        "-U[2, B]",
+                        "+U[2, A]",
+                        "-U[3, C]",
+                        "+U[3, B]",
+                        "-U[4, D]",
+                        "+U[4, C]",
+                        "+I[5, D]");
+    }
+
     // ------------------------------------------------------------------------
     //  Random Tests
     // ------------------------------------------------------------------------
@@ -275,6 +282,29 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
         testStandAloneFullCompactJobRandom(sEnv, random.nextInt(1, 3), random.nextBoolean());
     }
 
+    @Test
+    @Timeout(600000)
+    public void testLookupChangelogProducerBatchRandom() throws Exception {
+        TableEnvironment bEnv = createBatchTableEnvironment();
+        testLookupChangelogProducerRandom(bEnv, 1, false);
+    }
+
+    @Test
+    @Timeout(600000)
+    public void testLookupChangelogProducerStreamingRandom() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
+        testLookupChangelogProducerRandom(sEnv, random.nextInt(1, 3), random.nextBoolean());
+    }
+
+    @Test
+    @Timeout(600000)
+    public void testStandAloneLookupJobRandom() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
+        testStandAloneLookupJobRandom(sEnv, random.nextInt(1, 3), random.nextBoolean());
+    }
+
     private static final int NUM_PARTS = 4;
     private static final int NUM_KEYS = 64;
     private static final int NUM_VALUES = 1024;
@@ -308,7 +338,28 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
         // if we can first read complete records then read incremental records correctly
         Thread.sleep(random.nextInt(5000));
 
-        checkFullCompactionTestResult(numProducers);
+        checkChangelogTestResult(numProducers);
+    }
+
+    private void testLookupChangelogProducerRandom(
+            TableEnvironment tEnv, int numProducers, boolean enableFailure) throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+
+        testRandom(
+                tEnv,
+                numProducers,
+                enableFailure,
+                "'bucket' = '4',"
+                        + String.format(
+                                "'write-buffer-size' = '%s',",
+                                random.nextBoolean() ? "512kb" : "1mb")
+                        + "'changelog-producer' = 'lookup'");
+
+        // sleep for a random amount of time to check
+        // if we can first read complete records then read incremental records correctly
+        Thread.sleep(random.nextInt(5000));
+
+        checkChangelogTestResult(numProducers);
     }
 
     private void testStandAloneFullCompactJobRandom(
@@ -343,10 +394,44 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
         // if we can first read complete records then read incremental records correctly
         Thread.sleep(random.nextInt(2500));
 
-        checkFullCompactionTestResult(numProducers);
+        checkChangelogTestResult(numProducers);
     }
 
-    private void checkFullCompactionTestResult(int numProducers) throws Exception {
+    private void testStandAloneLookupJobRandom(
+            TableEnvironment tEnv, int numProducers, boolean enableConflicts) throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+
+        testRandom(
+                tEnv,
+                numProducers,
+                false,
+                "'bucket' = '4',"
+                        + String.format(
+                                "'write-buffer-size' = '%s',",
+                                random.nextBoolean() ? "512kb" : "1mb")
+                        + "'changelog-producer' = 'lookup',"
+                        + "'write-only' = 'true'");
+
+        // sleep for a random amount of time to check
+        // if dedicated compactor job can find first snapshot to compact correctly
+        Thread.sleep(random.nextInt(2500));
+
+        for (int i = enableConflicts ? 2 : 1; i > 0; i--) {
+            StreamExecutionEnvironment env =
+                    createStreamExecutionEnvironment(random.nextInt(1900) + 100);
+            env.setParallelism(2);
+            FlinkActions.compact(path, "default", "T").build(env);
+            env.executeAsync();
+        }
+
+        // sleep for a random amount of time to check
+        // if we can first read complete records then read incremental records correctly
+        Thread.sleep(random.nextInt(2500));
+
+        checkChangelogTestResult(numProducers);
+    }
+
+    private void checkChangelogTestResult(int numProducers) throws Exception {
         TableEnvironment sEnv = createStreamingTableEnvironment(100);
         sEnv.getConfig()
                 .getConfiguration()
@@ -436,7 +521,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
         List<TableResult> results = new ArrayList<>();
 
         if (enableFailure) {
-            FailingFileIO.reset(failingName, 100, 1000);
+            FailingFileIO.reset(failingName, 100, 10000);
         }
         for (int i = 0; i < numProducers; i++) {
             // for the last `NUM_PARTS * NUM_KEYS` records, we update every key to a specific value

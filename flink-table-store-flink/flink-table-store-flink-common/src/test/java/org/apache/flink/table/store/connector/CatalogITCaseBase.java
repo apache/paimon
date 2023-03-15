@@ -32,6 +32,7 @@ import org.apache.flink.table.operations.Operation;
 import org.apache.flink.table.operations.ddl.CreateCatalogOperation;
 import org.apache.flink.table.store.connector.util.AbstractTestBase;
 import org.apache.flink.table.store.file.Snapshot;
+import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
@@ -123,6 +124,10 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
 
     protected CloseableIterator<Row> streamSqlIter(String query, Object... args) {
         return sEnv.executeSql(String.format(query, args)).collect();
+    }
+
+    protected BlockingIterator<Row, Row> streamSqlBlockIter(String query, Object... args) {
+        return BlockingIterator.of(sEnv.executeSql(String.format(query, args)).collect());
     }
 
     protected CatalogTable table(String tableName) throws TableNotExistException {
