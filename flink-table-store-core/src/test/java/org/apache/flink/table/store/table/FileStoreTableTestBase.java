@@ -24,11 +24,14 @@ import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.data.GenericMap;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalRow;
+import org.apache.flink.table.store.data.JoinedRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
+import org.apache.flink.table.store.file.schema.SchemaChange;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.utils.TraceableFileIO;
 import org.apache.flink.table.store.fs.FileIOFinder;
@@ -364,6 +367,43 @@ public abstract class FileStoreTableTestBase {
             Snapshot snapshot = snapshotManager.snapshot(i);
             assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         }
+    }
+
+    @Test
+    public void testCopyWithLatestSchema() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.set(SNAPSHOT_NUM_RETAINED_MAX, 100));
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(1, 20, 200L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        schemaManager.commitChanges(SchemaChange.addColumn("added", DataTypes.INT()));
+        table = table.copyWithLatestSchema();
+        assertThat(table.options().snapshotNumRetainMax()).isEqualTo(100);
+        write = table.newWrite(commitUser);
+
+        write.write(new JoinedRow(rowData(1, 30, 300L), GenericRow.of(3000)));
+        write.write(new JoinedRow(rowData(1, 40, 400L), GenericRow.of(4000)));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        List<Split> splits = table.newScan().plan().splits();
+        TableRead read = table.newRead();
+        Function<InternalRow, String> toString =
+                rowData ->
+                        BATCH_ROW_TO_STRING.apply(rowData)
+                                + "|"
+                                + (rowData.isNullAt(7) ? "null" : rowData.getInt(7));
+        assertThat(getResult(read, splits, binaryRow(1), 0, toString))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "1|10|100|binary|varbinary|mapKey:mapVal|multiset|null",
+                                "1|20|200|binary|varbinary|mapKey:mapVal|multiset|null",
+                                "1|30|300|binary|varbinary|mapKey:mapVal|multiset|3000",
+                                "1|40|400|binary|varbinary|mapKey:mapVal|multiset|4000"));
     }
 
     protected List<String> getResult(
