@@ -52,14 +52,6 @@ under the License.
                 </exclusion>
             </exclusions>
         </dependency>
-
-        <!-- Test -->
-        <!--<dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-test-utils</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-        </dependency>-->
     </dependencies>
 
 </project>
