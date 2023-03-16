@@ -313,4 +313,30 @@ public class SchemaManagerTest {
         manager.deleteSchema(manager.latest().get().id());
         assertThat(manager.latest().get().toString()).isEqualTo(schemaContent);
     }
+
+    @Test
+    public void testExpireSchema() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        partitionKeys,
+                        primaryKeys,
+                        options,
+                        "append-only table with primary key");
+        // use non-failing manager
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        for (int i = 0; i < 10; i++) {
+            manager.commitChanges(SchemaChange.setOption("key" + i, "val" + 1));
+        }
+
+        assertThat(manager.listAllIds().size()).isEqualTo(11);
+        manager.expireSchema(5);
+        assertThat(manager.listAllIds()).containsExactlyInAnyOrder(5L, 6L, 7L, 8L, 9L, 10L);
+
+        manager.expireSchema(10);
+        assertThat(manager.listAllIds()).containsExactlyInAnyOrder(5L, 6L, 7L, 8L, 9L, 10L);
+    }
 }

@@ -48,6 +48,7 @@ import java.io.Serializable;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -425,6 +426,31 @@ public class SchemaManager implements Serializable {
      */
     public void deleteSchema(long schemaId) {
         fileIO.deleteQuietly(toSchemaPath(schemaId));
+    }
+
+    /**
+     * Delete schema with id less than given schema id.
+     *
+     * @param schemaId the given schema id
+     */
+    public void expireSchema(long schemaId) {
+        List<Long> ids = this.listAllIds();
+        if (ids.size() <= 1) {
+            return;
+        }
+
+        Collections.sort(ids);
+        if (ids.get(ids.size() - 1) < schemaId) {
+            return;
+        }
+
+        for (Long id : ids) {
+            if (id < schemaId) {
+                deleteSchema(id);
+            } else {
+                return;
+            }
+        }
     }
 
     public static void checkAlterTableOption(String key) {

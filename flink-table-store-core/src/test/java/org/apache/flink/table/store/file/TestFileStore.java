@@ -92,6 +92,7 @@ public class TestFileStore extends KeyValueFileStore {
     private long commitIdentifier;
 
     private TestFileStore(
+            long schemaId,
             String root,
             CoreOptions options,
             RowType partitionType,
@@ -102,7 +103,7 @@ public class TestFileStore extends KeyValueFileStore {
         super(
                 FileIOFinder.find(new Path(root)),
                 new SchemaManager(FileIOFinder.find(new Path(root)), options.path()),
-                0L,
+                schemaId,
                 options,
                 partitionType,
                 keyType,
@@ -132,6 +133,7 @@ public class TestFileStore extends KeyValueFileStore {
                 millisRetained,
                 pathFactory(),
                 snapshotManager(),
+                schemaManager,
                 manifestFileFactory(),
                 manifestListFactory());
     }
@@ -504,6 +506,7 @@ public class TestFileStore extends KeyValueFileStore {
         private final MergeFunctionFactory<KeyValue> mfFactory;
 
         private CoreOptions.ChangelogProducer changelogProducer;
+        private long schemaId = 0L;
 
         public Builder(
                 String format,
@@ -531,6 +534,11 @@ public class TestFileStore extends KeyValueFileStore {
             return this;
         }
 
+        public Builder schemaId(long schemaId) {
+            this.schemaId = schemaId;
+            return this;
+        }
+
         public TestFileStore build() {
             Options conf = new Options();
 
@@ -550,6 +558,7 @@ public class TestFileStore extends KeyValueFileStore {
             conf.set(CoreOptions.CHANGELOG_PRODUCER, changelogProducer);
 
             return new TestFileStore(
+                    schemaId,
                     root,
                     new CoreOptions(conf),
                     partitionType,

@@ -26,6 +26,7 @@ import org.apache.flink.table.store.file.TestFileStore;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.schema.Schema;
+import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
@@ -51,13 +52,12 @@ public class FileStoreExpireTestBase {
     @TempDir java.nio.file.Path tempDir;
     protected TestFileStore store;
     protected SnapshotManager snapshotManager;
+    protected SchemaManager schemaManager;
 
     @BeforeEach
     public void beforeEach() throws Exception {
         gen = new TestKeyValueGenerator();
-        store = createStore();
-        snapshotManager = store.snapshotManager();
-        SchemaManager schemaManager = new SchemaManager(fileIO, new Path(tempDir.toUri()));
+        schemaManager = new SchemaManager(fileIO, new Path(tempDir.toUri()));
         schemaManager.createTable(
                 new Schema(
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
@@ -66,6 +66,11 @@ public class FileStoreExpireTestBase {
                                 TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
                         Collections.emptyMap(),
                         null));
+        for (int i = 0; i < 10; i++) {
+            schemaManager.commitChanges(SchemaChange.setOption("key" + i, "val" + i));
+        }
+        store = createStore();
+        snapshotManager = store.snapshotManager();
     }
 
     private TestFileStore createStore() {
@@ -88,6 +93,7 @@ public class FileStoreExpireTestBase {
                         TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
                         DeduplicateMergeFunction.factory())
                 .changelogProducer(changelogProducer)
+                .schemaId(schemaManager.latest().get().id())
                 .build();
     }
 

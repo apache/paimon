@@ -24,6 +24,7 @@ import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;
+import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
@@ -68,6 +69,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
     private final FileStorePathFactory pathFactory;
     private final SnapshotManager snapshotManager;
+    private final SchemaManager schemaManager;
     private final ManifestFile manifestFile;
     private final ManifestList manifestList;
 
@@ -80,6 +82,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             long millisRetained,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
+            SchemaManager schemaManager,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory) {
         this.fileIO = fileIO;
@@ -88,6 +91,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         this.millisRetained = millisRetained;
         this.pathFactory = pathFactory;
         this.snapshotManager = snapshotManager;
+        this.schemaManager = schemaManager;
         this.manifestFile = manifestFileFactory.create();
         this.manifestList = manifestListFactory.create();
     }
@@ -123,12 +127,43 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                 // within time threshold, can assume that all snapshots after it are also within
                 // the threshold
                 expireUntil(earliest, id);
+                expireSchema();
                 return;
             }
         }
 
         // no snapshot can be retained, expire until there are only numRetainedMin snapshots left
         expireUntil(earliest, latestSnapshotId - numRetainedMin + 1);
+        expireSchema();
+    }
+
+    private void expireSchema() {
+        Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+        if (earliestSnapshotId != null) {
+            Snapshot snapshot = snapshotManager.snapshot(earliestSnapshotId);
+            Long minSchemaId = getMinSchemaId(snapshot);
+            if (minSchemaId != null) {
+                schemaManager.expireSchema(minSchemaId);
+            }
+        }
+    }
+
+    private Long getMinSchemaId(Snapshot snapshot) {
+        Long minSchemaId = null;
+        for (ManifestEntry entry :
+                getManifestEntriesFromManifestList(snapshot.baseManifestList())) {
+            if (minSchemaId == null || entry.file().schemaId() < minSchemaId) {
+                minSchemaId = entry.file().schemaId();
+            }
+        }
+        for (ManifestEntry entry :
+                getManifestEntriesFromManifestList(snapshot.deltaManifestList())) {
+            if (minSchemaId == null || entry.file().schemaId() < minSchemaId) {
+                minSchemaId = entry.file().schemaId();
+            }
+        }
+
+        return minSchemaId;
     }
 
     private void expireUntil(long earliestId, long endExclusiveId) {

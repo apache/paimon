@@ -128,6 +128,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.snapshotTimeRetain().toMillis(),
                 pathFactory(),
                 snapshotManager(),
+                schemaManager,
                 manifestFileFactory(),
                 manifestListFactory());
     }
