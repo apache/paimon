@@ -29,3 +29,47 @@ This documentation is a guide for using Table Store in Presto.
 ## Version
 
 Table Store currently supports versions above Presto 0.236.
+
+## Deploy Table Store Presto Connector
+
+Build bundled jar with the following command.
+
+|     Version      | Command                                                                                                                                                                                                            |
+|------------------|-------------------------------------------------------------------------|
+| [0.236,0.268)    | mvn clean install -Dmaven.test.skip=true -Ppresto-0.236                 |
+| [0.268,0.273)    | mvn clean install -Dmaven.test.skip=true -Ppresto-0.268                 |
+| [0.273,0.279]    | mvn clean install -Dmaven.test.skip=true -Ppresto-0.273                 |
+
+You can find Hive connector jar in `./flink-table-store-presto/flink-table-store-presto-<presto-version>/target/flink-table-store-presto-*.jar`.
+
+Then, copy `flink-table-store-presto-*.jar and flink-shaded-hadoop-*-uber-*.jar` to plugin/paimon.
+
+:::tip
+if
+## Configure Table Store Catalog
+
+Catalogs are registered by creating a catalog properties file in the etc/catalog directory. For example, create etc/catalog/paimon.properties with the following contents to mount the paimon connector as the paimon catalog:
+
+```
+connector.name=paimon
+warehouse=file:/tmp/warehouse
+```
+
+If you are using HDFS, choose one of the following ways to configure your HDFS:
+
+- set environment variable HADOOP_HOME.
+- set environment variable HADOOP_CONF_DIR.
+- configure fs.hdfs.hadoopconf in the properties.
+
+You can configure kerberos keytag file when using KERBEROS authentication in the properties.
+
+```
+security.kerberos.login.principal=hadoop-user
+security.kerberos.login.keytab=/etc/trino/hdfs.keytab
+```
+
+## Query
+
+```
+SELECT * FROM paimon.default.MyTable
+```
