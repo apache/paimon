@@ -28,7 +28,7 @@ This documentation is a guide for using Table Store in Presto.
 
 ## Version
 
-Table Store currently supports versions above Presto 0.236.
+Table Store currently supports Presto 0.236 and above.
 
 ## Deploy Table Store Presto Connector
 
