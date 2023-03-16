@@ -57,9 +57,9 @@ Table Store adapts the LSM tree (log-structured merge-tree) as the data structur
 
 ### Sorted Runs
 
-LSM tree organizes files into several sorted runs. A sorted run consists of one or multiple [data file]({{< ref "docs/concepts/file-layouts#data-files" >}})s and each data file belongs to exactly one sorted run.
+LSM tree organizes files into several sorted runs. A sorted run consists of one or multiple [data files]({{< ref "docs/concepts/file-layouts#data-files" >}}) and each data file belongs to exactly one sorted run.
 
-Records within a data file are sorted by their primary keys. WIthin a sorted run, ranges of primary keys of data files never overlap.
+Records within a data file are sorted by their primary keys. Within a sorted run, ranges of primary keys of data files never overlap.
 
 {{< img src="/img/sorted-runs.png">}}
 
