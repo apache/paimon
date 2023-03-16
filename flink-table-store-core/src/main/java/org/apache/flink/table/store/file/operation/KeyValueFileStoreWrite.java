@@ -43,6 +43,7 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactRewri
 import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.format.FileFormatDiscover;
@@ -52,6 +53,8 @@ import org.apache.flink.table.store.types.RowType;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.util.Comparator;
 import java.util.List;
@@ -121,6 +124,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoreFiles,
+            @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor) {
         if (LOG.isDebugEnabled()) {
             LOG.debug(
@@ -156,7 +160,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 mfFactory.create(),
                 writerFactory,
                 options.commitForceCompact(),
-                options.changelogProducer());
+                options.changelogProducer(),
+                restoreIncrement);
     }
 
     private boolean bufferSpillable() {

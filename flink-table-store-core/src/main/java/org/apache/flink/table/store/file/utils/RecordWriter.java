@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.operation.Recoverable;
 
 import java.util.List;
 
@@ -30,7 +29,7 @@ import java.util.List;
  *
  * @param <T> type of record to write.
  */
-public interface RecordWriter<T> extends Recoverable<CommitIncrement> {
+public interface RecordWriter<T> {
 
     /** Add a key-value element to the writer. */
     void write(T record) throws Exception;
@@ -50,8 +49,8 @@ public interface RecordWriter<T> extends Recoverable<CommitIncrement> {
      */
     void addNewFiles(List<DataFileMeta> files);
 
-    /** Get all files maintained by this writer. */
-    List<DataFileMeta> allFiles();
+    /** Get all data files maintained by this writer. */
+    List<DataFileMeta> dataFiles();
 
     /**
      * Prepare for a commit.

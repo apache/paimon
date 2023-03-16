@@ -328,7 +328,8 @@ public class MergeTreeTest {
                         DeduplicateMergeFunction.factory().create(),
                         writerFactory,
                         options.commitForceCompact(),
-                        ChangelogProducer.NONE);
+                        ChangelogProducer.NONE,
+                        null);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return writer;

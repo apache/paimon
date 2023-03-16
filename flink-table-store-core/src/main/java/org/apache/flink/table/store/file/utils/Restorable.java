@@ -16,25 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.file.operation;
+package org.apache.flink.table.store.file.utils;
 
 /**
- * Operations implementing this interface can extract and recover their states between different
+ * Operations implementing this interface can checkpoint and restore their states between different
  * instances.
  *
  * @param <S> type of state
  */
-public interface Recoverable<S> {
+public interface Restorable<S> {
 
-    /**
-     * Extract state of the current operation instance. After calling this method, the operation
-     * instance must be closed and should no longer be used.
-     */
-    S extractStateAndClose() throws Exception;
+    /** Extract state of the current operation instance. */
+    S checkpoint();
 
-    /**
-     * Recover state of a previous operation instance into the current operation instance. This
-     * method must be called right after the current instance is constructed.
-     */
-    void recoverFromState(S state);
+    /** Restore state of a previous operation instance into the current operation instance. */
+    void restore(S state);
 }

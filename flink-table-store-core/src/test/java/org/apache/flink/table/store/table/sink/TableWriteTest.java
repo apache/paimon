@@ -127,9 +127,10 @@ public class TableWriteTest {
                             commitId++;
                             break;
                         case EXTRACT_STATE:
-                            List<AbstractFileStoreWrite.State> state = write.extractStateAndClose();
+                            List<AbstractFileStoreWrite.State> state = write.checkpoint();
+                            write.close();
                             write = table.newWrite(commitUser);
-                            write.recoverFromState(state);
+                            write.restore(state);
                             break;
                     }
                 }

@@ -79,7 +79,8 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                                 null,
                                 dataFilePathFactory), // not used
                         false,
-                        dataFilePathFactory);
+                        dataFilePathFactory,
+                        null);
         appendOnlyWriter.write(
                 GenericRow.of(1, BinaryString.fromString("aaa"), BinaryString.fromString("1")));
         CommitIncrement increment = appendOnlyWriter.prepareCommit(true);

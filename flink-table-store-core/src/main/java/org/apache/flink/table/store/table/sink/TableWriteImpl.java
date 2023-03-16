@@ -24,7 +24,7 @@ import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.operation.AbstractFileStoreWrite;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
-import org.apache.flink.table.store.file.operation.Recoverable;
+import org.apache.flink.table.store.file.utils.Restorable;
 
 import java.util.List;
 
@@ -36,7 +36,7 @@ import static org.apache.flink.table.store.utils.Preconditions.checkState;
  * @param <T> type of record to write into {@link org.apache.flink.table.store.file.FileStore}.
  */
 public class TableWriteImpl<T>
-        implements InnerTableWrite, Recoverable<List<AbstractFileStoreWrite.State>> {
+        implements InnerTableWrite, Restorable<List<AbstractFileStoreWrite.State>> {
 
     private final AbstractFileStoreWrite<T> write;
     private final SinkRecordConverter recordConverter;
@@ -125,13 +125,13 @@ public class TableWriteImpl<T>
     }
 
     @Override
-    public List<AbstractFileStoreWrite.State> extractStateAndClose() throws Exception {
-        return write.extractStateAndClose();
+    public List<AbstractFileStoreWrite.State> checkpoint() {
+        return write.checkpoint();
     }
 
     @Override
-    public void recoverFromState(List<AbstractFileStoreWrite.State> state) {
-        write.recoverFromState(state);
+    public void restore(List<AbstractFileStoreWrite.State> state) {
+        write.restore(state);
     }
 
     /** Extractor to extract {@link T} from the {@link SinkRecord}. */

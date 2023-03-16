@@ -37,6 +37,8 @@ import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.types.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -81,7 +83,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             MergeFunction<KeyValue> mergeFunction,
             KeyValueFileWriterFactory writerFactory,
             boolean commitForceCompact,
-            ChangelogProducer changelogProducer) {
+            ChangelogProducer changelogProducer,
+            @Nullable CommitIncrement increment) {
         this.writeBufferSpillable = writeBufferSpillable;
         this.sortMaxFan = sortMaxFan;
         this.ioManager = ioManager;
@@ -100,6 +103,16 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.compactBefore = new LinkedHashMap<>();
         this.compactAfter = new LinkedHashSet<>();
         this.compactChangelog = new LinkedHashSet<>();
+        if (increment != null) {
+            newFiles.addAll(increment.newFilesIncrement().newFiles());
+            newFilesChangelog.addAll(increment.newFilesIncrement().changelogFiles());
+            increment
+                    .compactIncrement()
+                    .compactBefore()
+                    .forEach(f -> compactBefore.put(f.fileName(), f));
+            compactAfter.addAll(increment.compactIncrement().compactAfter());
+            compactChangelog.addAll(increment.compactIncrement().changelogFiles());
+        }
     }
 
     private long newSequenceNumber() {
@@ -150,7 +163,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
-    public List<DataFileMeta> allFiles() {
+    public List<DataFileMeta> dataFiles() {
         return compactManager.allFiles();
     }
 
@@ -302,21 +315,5 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         for (DataFileMeta file : delete) {
             writerFactory.deleteFile(file.fileName());
         }
-    }
-
-    @Override
-    public CommitIncrement extractStateAndClose() throws Exception {
-        CommitIncrement state = prepareCommit(false);
-        close();
-        return state;
-    }
-
-    @Override
-    public void recoverFromState(CommitIncrement state) {
-        newFiles.addAll(state.newFilesIncrement().newFiles());
-        newFilesChangelog.addAll(state.newFilesIncrement().changelogFiles());
-        state.compactIncrement().compactBefore().forEach(f -> compactBefore.put(f.fileName(), f));
-        compactAfter.addAll(state.compactIncrement().compactAfter());
-        compactChangelog.addAll(state.compactIncrement().changelogFiles());
     }
 }

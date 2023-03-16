@@ -19,8 +19,7 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.store.annotation.Experimental;
-
-import javax.annotation.Nullable;
+import org.apache.flink.table.store.file.utils.Restorable;
 
 /**
  * {@link TableScan} for streaming, supports {@link #checkpoint} and {@link #restore}.
@@ -28,12 +27,4 @@ import javax.annotation.Nullable;
  * @since 0.4.0
  */
 @Experimental
-public interface StreamTableScan extends TableScan {
-
-    /** Checkpoint this stream table scan, return next snapshot id. */
-    @Nullable
-    Long checkpoint();
-
-    /** Restore this stream table scan, read incremental from {@code nextSnapshotId}. */
-    void restore(@Nullable Long nextSnapshotId);
-}
+public interface StreamTableScan extends TableScan, Restorable<Long> {}

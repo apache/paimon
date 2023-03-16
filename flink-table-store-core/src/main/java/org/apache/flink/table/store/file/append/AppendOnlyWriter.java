@@ -35,6 +35,8 @@ import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.LongCounter;
 import org.apache.flink.table.store.utils.Preconditions;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -72,7 +74,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
             long maxSequenceNumber,
             CompactManager compactManager,
             boolean forceCompact,
-            DataFilePathFactory pathFactory) {
+            DataFilePathFactory pathFactory,
+            @Nullable CommitIncrement increment) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -87,6 +90,12 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
         this.seqNumCounter = new LongCounter(maxSequenceNumber + 1);
 
         this.writer = createRollingRowWriter();
+
+        if (increment != null) {
+            newFiles.addAll(increment.newFilesIncrement().newFiles());
+            compactBefore.addAll(increment.compactIncrement().compactBefore());
+            compactAfter.addAll(increment.compactIncrement().compactAfter());
+        }
     }
 
     @Override
@@ -109,7 +118,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
     }
 
     @Override
-    public List<DataFileMeta> allFiles() {
+    public List<DataFileMeta> dataFiles() {
         return compactManager.allFiles();
     }
 
@@ -193,19 +202,5 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
         compactAfter.clear();
 
         return new CommitIncrement(newFilesIncrement, compactIncrement);
-    }
-
-    @Override
-    public CommitIncrement extractStateAndClose() throws Exception {
-        CommitIncrement state = prepareCommit(false);
-        close();
-        return state;
-    }
-
-    @Override
-    public void recoverFromState(CommitIncrement state) {
-        newFiles.addAll(state.newFilesIncrement().newFiles());
-        compactBefore.addAll(state.compactIncrement().compactBefore());
-        compactAfter.addAll(state.compactIncrement().compactAfter());
     }
 }

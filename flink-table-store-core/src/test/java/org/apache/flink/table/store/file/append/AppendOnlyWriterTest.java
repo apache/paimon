@@ -329,7 +329,8 @@ public class AppendOnlyWriterTest {
                                                         generateCompactAfter(compactBefore)),
                                 pathFactory),
                         forceCompact,
-                        pathFactory),
+                        pathFactory,
+                        null),
                 toCompact);
     }
 
