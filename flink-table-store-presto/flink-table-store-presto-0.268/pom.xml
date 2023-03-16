@@ -28,11 +28,11 @@ under the License.
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-presto-0.270</artifactId>
-    <name>Flink Table Store : Presto : 0.270</name>
+    <artifactId>flink-table-store-presto-0.268</artifactId>
+    <name>Flink Table Store : Presto : 0.268</name>
 
     <properties>
-        <presto.version>0.270</presto.version>
+        <presto.version>0.268</presto.version>
         <hadoop.apache2.version>2.7.4-9</hadoop.apache2.version>
         <slf4j.version>1.7.25</slf4j.version>
     </properties>

@@ -127,14 +127,11 @@ public class PrestoTableHandle implements ConnectorTableHandle {
         return table().rowType().getFields().stream()
                 .map(
                         column ->
-                                ColumnMetadata.builder()
-                                        .setName(column.name())
-                                        .setType(
+                                new ColumnMetadata(
+                                        column.name(),
+                                        Objects.requireNonNull(
                                                 PrestoTypeUtils.toPrestoType(
-                                                        column.type(), typeManager))
-                                        .setNullable(column.type().isNullable())
-                                        .setComment(Optional.ofNullable(column.description()))
-                                        .build())
+                                                        column.type(), typeManager))))
                 .collect(Collectors.toList());
     }
 

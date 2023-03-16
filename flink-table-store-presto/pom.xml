@@ -24,7 +24,8 @@ under the License.
     <modules>
         <module>flink-table-store-presto-common</module>
         <module>flink-table-store-presto-0.273</module>
-        <module>flink-table-store-presto-0.270</module>
+        <module>flink-table-store-presto-0.268</module>
+        <module>flink-table-store-presto-0.236</module>
     </modules>
 
     <parent>
