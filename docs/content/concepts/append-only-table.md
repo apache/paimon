@@ -33,7 +33,7 @@ This type of table is suitable for use cases that do not require updates (such a
 
 ## Bucketing
 
-You can also define bucket number for Append-only table, see [Bucket]({{< ref "docs/concepts/basic-concepts#bucket" >}}).
+You can also define bucket number for Append-only table, see [Bucket]({{< ref "concepts/basic-concepts#bucket" >}}).
 
 It is recommended that you set the `bucket-key` field. Otherwise, the data will be hashed according to the whole row,
 and the performance will be poor.

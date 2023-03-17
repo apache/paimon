@@ -68,7 +68,7 @@ If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or 
 
 **Step 1: Prepare Test Data**
 
-Table Store currently only supports reading tables through Spark2. To create a Table Store table with records, please follow our [Flink quick start guide]({{< ref "docs/engines/flink#quick-start" >}}).
+Table Store currently only supports reading tables through Spark2. To create a Table Store table with records, please follow our [Flink quick start guide]({{< ref "engines/flink#quick-start" >}}).
 
 After the guide, all table files should be stored under the path `/tmp/table_store`, or the warehouse path you've specified.
 

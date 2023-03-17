@@ -26,7 +26,7 @@ under the License.
 
 # Expiring Snapshots
 
-Table Store writers generates one or two [snapshots]({{< ref "docs/concepts/basic-concepts#snapshots" >}}) per commit. Each snapshot may add some new data files or mark some old data files as deleted. However, the marked data files are not truly deleted because Table Store also supports time traveling to an earlier snapshot. They are only deleted when the snapshot expires.
+Table Store writers generates one or two [snapshots]({{< ref "concepts/basic-concepts#snapshots" >}}) per commit. Each snapshot may add some new data files or mark some old data files as deleted. However, the marked data files are not truly deleted because Table Store also supports time traveling to an earlier snapshot. They are only deleted when the snapshot expires.
 
 Currently, expiration is automatically performed by Table Store writers when committing new changes. By expiring old snapshots, old data files and metadata files that are no longer used can be deleted to release disk space.
 

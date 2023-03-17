@@ -275,7 +275,7 @@ Table Store supports "MERGE INTO" via submitting the 'merge-into' job through `f
 
 {{< hint info >}}
 Important table properties setting:
-1. Only [primary key table]({{< ref "docs/concepts/primary-key-table" >}}) supports this feature.
+1. Only [primary key table]({{< ref "concepts/primary-key-table" >}}) supports this feature.
 2. The action won't produce UPDATE_BEFORE, so it's not recommended to set 'changelog-producer' = 'input'.
 {{< /hint >}}
 

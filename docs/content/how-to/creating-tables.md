@@ -28,7 +28,7 @@ under the License.
 
 ## Creating Catalog Managed Tables
 
-Tables created in Table Store [catalogs]({{< ref "docs/how-to/creating-catalogs" >}}) are managed by the catalog. When the table is dropped from catalog, its table files will also be deleted.
+Tables created in Table Store [catalogs]({{< ref "how-to/creating-catalogs" >}}) are managed by the catalog. When the table is dropped from catalog, its table files will also be deleted.
 
 The following SQL assumes that you have registered and are using a Table Store catalog. It creates a managed table named `MyTable` with five columns in the catalog's `default` database, where `dt`, `hh` and `user_id` are the primary keys.
 
@@ -111,7 +111,7 @@ Partition keys must be a subset of primary keys if primary keys are defined.
 {{< /hint >}}
 
 {{< hint info >}}
-By configuring [partition.expiration-time]({{< ref "docs/maintenance/manage-partition" >}}), expired partitions can be automatically deleted.
+By configuring [partition.expiration-time]({{< ref "maintenance/manage-partition" >}}), expired partitions can be automatically deleted.
 {{< /hint >}}
 
 ## Create Table As
@@ -263,7 +263,7 @@ CREATE TABLE MyTableLike LIKE MyTable;
 
 ### Table Properties
 
-Users can specify table properties to enable features or improve performance of Table Store. For a complete list of such properties, see [configurations]({{< ref "docs/maintenance/configurations" >}}).
+Users can specify table properties to enable features or improve performance of Table Store. For a complete list of such properties, see [configurations]({{< ref "maintenance/configurations" >}}).
 
 The following SQL creates a table named `MyTable` with five columns partitioned by `dt` and `hh`, where `dt`, `hh` and `user_id` are the primary keys. This table has two properties: `'bucket' = '2'` and `'bucket-key' = 'user_id'`.
 
