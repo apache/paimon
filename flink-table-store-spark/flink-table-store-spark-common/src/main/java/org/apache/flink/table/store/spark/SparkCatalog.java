@@ -46,6 +46,7 @@ import org.apache.spark.sql.connector.catalog.TableChange.RenameColumn;
 import org.apache.spark.sql.connector.catalog.TableChange.SetProperty;
 import org.apache.spark.sql.connector.catalog.TableChange.UpdateColumnComment;
 import org.apache.spark.sql.connector.catalog.TableChange.UpdateColumnNullability;
+import org.apache.spark.sql.connector.catalog.TableChange.UpdateColumnPosition;
 import org.apache.spark.sql.connector.catalog.TableChange.UpdateColumnType;
 import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.NamedReference;
@@ -288,6 +289,19 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         } else if (change instanceof UpdateColumnComment) {
             UpdateColumnComment update = (UpdateColumnComment) change;
             return SchemaChange.updateColumnComment(update.fieldNames(), update.newComment());
+        } else if (change instanceof UpdateColumnPosition) {
+            UpdateColumnPosition update = (UpdateColumnPosition) change;
+            TableChange.ColumnPosition columnPosition = update.position();
+            SchemaChange.Move move = null;
+            if (columnPosition instanceof TableChange.First) {
+                move = SchemaChange.Move.first(update.fieldNames()[0]);
+            } else if (columnPosition instanceof TableChange.After) {
+                move =
+                        SchemaChange.Move.after(
+                                update.fieldNames()[0],
+                                ((TableChange.After) columnPosition).column());
+            }
+            return SchemaChange.updateColumnPosition(move);
         } else {
             throw new UnsupportedOperationException(
                     "Change is not supported: " + change.getClass());

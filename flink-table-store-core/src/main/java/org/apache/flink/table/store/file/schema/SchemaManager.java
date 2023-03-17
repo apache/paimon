@@ -29,6 +29,7 @@ import org.apache.flink.table.store.file.schema.SchemaChange.RenameColumn;
 import org.apache.flink.table.store.file.schema.SchemaChange.SetOption;
 import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnComment;
 import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnNullability;
+import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnPosition;
 import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnType;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.flink.table.store.fs.FileIO;
@@ -310,6 +311,31 @@ public class SchemaManager implements Serializable {
                                             field.name(),
                                             field.type(),
                                             update.newDescription()));
+                } else if (change instanceof UpdateColumnPosition) {
+                    UpdateColumnPosition update = (UpdateColumnPosition) change;
+                    SchemaChange.Move move = update.move();
+
+                    // key: name ; value : index
+                    Map<String, Integer> map = new HashMap<>();
+                    for (int i = 0; i < newFields.size(); i++) {
+                        map.put(newFields.get(i).name(), i);
+                    }
+
+                    int fieldIndex = map.get(move.fieldName());
+                    int refIndex = 0;
+                    if (move.type().equals(SchemaChange.Move.MoveType.FIRST)) {
+                        checkMoveIndexEqual(move, fieldIndex, refIndex);
+                        newFields.add(refIndex, newFields.remove(fieldIndex));
+                    } else if (move.type().equals(SchemaChange.Move.MoveType.AFTER)) {
+                        refIndex = map.get(move.referenceFieldName());
+                        checkMoveIndexEqual(move, fieldIndex, refIndex);
+                        if (fieldIndex > refIndex) {
+                            newFields.add(refIndex + 1, newFields.remove(fieldIndex));
+                        } else {
+                            newFields.add(refIndex, newFields.remove(fieldIndex));
+                        }
+                    }
+
                 } else {
                     throw new UnsupportedOperationException(
                             "Unsupported change: " + change.getClass());
@@ -330,6 +356,13 @@ public class SchemaManager implements Serializable {
             if (success) {
                 return newSchema;
             }
+        }
+    }
+
+    private static void checkMoveIndexEqual(SchemaChange.Move move, int fieldIndex, int refIndex) {
+        if (refIndex == fieldIndex) {
+            throw new UnsupportedOperationException(
+                    String.format("Cannot move itself for column %s", move.fieldName()));
         }
     }
 
