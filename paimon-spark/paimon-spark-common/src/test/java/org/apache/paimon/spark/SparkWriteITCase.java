@@ -41,10 +41,10 @@ public class SparkWriteITCase {
     public static void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
         Path warehousePath = new Path("file:" + tempDir.toString());
         spark = SparkSession.builder().master("local[2]").getOrCreate();
-        spark.conf().set("spark.sql.catalog.tablestore", SparkCatalog.class.getName());
-        spark.conf().set("spark.sql.catalog.tablestore.warehouse", warehousePath.toString());
-        spark.sql("CREATE DATABASE tablestore.db");
-        spark.sql("USE tablestore.db");
+        spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
+        spark.conf().set("spark.sql.catalog.paimon.warehouse", warehousePath.toString());
+        spark.sql("CREATE DATABASE paimon.db");
+        spark.sql("USE paimon.db");
     }
 
     @AfterAll

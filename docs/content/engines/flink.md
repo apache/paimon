@@ -71,7 +71,7 @@ tar -xzf flink-*.tgz
 
 **Step 2: Copy Table Store Bundled Jar**
 
-Copy table store bundled jar to the `lib` directory of your Flink home.
+Copy paimon bundled jar to the `lib` directory of your Flink home.
 
 ```bash
 cp paimon-flink-*.jar <FLINK_HOME>/lib/
@@ -138,7 +138,7 @@ CREATE TEMPORARY TABLE word_table (
     'fields.word.length' = '1'
 );
 
--- table store requires checkpoint interval in streaming mode
+-- paimon requires checkpoint interval in streaming mode
 SET 'execution.checkpointing.interval' = '10 s';
 
 -- write streaming data to dynamic table

@@ -47,6 +47,12 @@ under the License.
             <scope>provided</scope>
         </dependency>
 
+        <dependency>
+            <groupId>org.xerial.snappy</groupId>
+            <artifactId>snappy-java</artifactId>
+            <version>${snappy.version}</version>
+        </dependency>
+
         <!-- Hadoop -->
 
         <dependency>
@@ -138,6 +144,12 @@ under the License.
             <groupId>org.apache.parquet</groupId>
             <artifactId>parquet-hadoop</artifactId>
             <version>${parquet.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.xerial.snappy</groupId>
+                    <artifactId>snappy-java</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -286,49 +298,49 @@ under the License.
                                 <!-- Relocate Orc -->
                                 <relocation>
                                     <pattern>org.apache.orc</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.orc</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.org.apache.orc</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.hive</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hive</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.org.apache.hive</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.hadoop.hive</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.hive</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.org.apache.hadoop.hive</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>io.airlift</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.io.airlift</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.io.airlift</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>com.google.protobuf</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.com.google.protobuf</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.com.google.protobuf</shadedPattern>
                                 </relocation>
 
                                 <!-- Relocate Avro. -->
                                 <relocation>
                                     <pattern>org.apache.avro</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.avro</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.org.apache.avro</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>com.fasterxml.jackson</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.com.fasterxml.jackson</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.com.fasterxml.jackson</shadedPattern>
                                 </relocation>
 
                                 <!-- Relocate parquet. -->
                                 <relocation>
                                     <pattern>org.apache.parquet</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.parquet</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.org.apache.parquet</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>shaded.parquet</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.parquet</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.parquet</shadedPattern>
                                 </relocation>
 
                                 <!-- Relocate Common. -->
                                 <relocation>
                                     <pattern>org.apache.commons</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.commons</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.org.apache.commons</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>

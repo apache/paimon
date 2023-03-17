@@ -29,7 +29,7 @@ import org.apache.spark.sql.sources.v2.reader.InputPartitionReader;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 
-/** A Spark {@link InputPartition} for table store. */
+/** A Spark {@link InputPartition} for paimon. */
 public class SparkInputPartition
         implements InputPartition<org.apache.spark.sql.catalyst.InternalRow> {
 

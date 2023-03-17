@@ -45,7 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** A spark {@link org.apache.spark.sql.connector.catalog.Table} for table store. */
+/** A spark {@link org.apache.spark.sql.connector.catalog.Table} for paimon. */
 public class SparkTable
         implements org.apache.spark.sql.connector.catalog.Table,
                 SupportsRead,

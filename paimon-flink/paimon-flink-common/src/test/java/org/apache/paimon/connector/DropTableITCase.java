@@ -95,7 +95,7 @@ public class DropTableITCase extends TableStoreTestBase {
             // check catalog
             assertThat(((TableEnvironmentImpl) tEnv).getCatalogManager().getTable(tableIdentifier))
                     .isNotPresent();
-            // check table store
+            // check paimon
             assertThat(Paths.get(rootPath, relativeTablePath(tableIdentifier)).toFile())
                     .doesNotExist();
         } else {

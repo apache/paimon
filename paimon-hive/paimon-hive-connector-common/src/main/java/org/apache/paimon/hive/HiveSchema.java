@@ -18,8 +18,6 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.flink.table.store.catalog.CatalogContext;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.serde.serdeConstants;
@@ -27,6 +25,7 @@ import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
@@ -74,7 +73,7 @@ public class HiveSchema {
             throw new UnsupportedOperationException(
                     "Location property is missing for table "
                             + tableName
-                            + ". Currently Flink table store only supports external table for Hive "
+                            + ". Currently Flink paimon only supports external table for Hive "
                             + "so location property must be set.");
         }
         Path path = new Path(location);
@@ -152,9 +151,9 @@ public class HiveSchema {
 
         if (mismatched.size() > 0) {
             throw new IllegalArgumentException(
-                    "Hive DDL and table store schema mismatched! "
+                    "Hive DDL and paimon schema mismatched! "
                             + "It is recommended not to write any column definition "
-                            + "as Flink table store external table can read schema from the specified location.\n"
+                            + "as Flink paimon external table can read schema from the specified location.\n"
                             + "Mismatched fields are:\n"
                             + String.join("--------------------\n", mismatched));
         }

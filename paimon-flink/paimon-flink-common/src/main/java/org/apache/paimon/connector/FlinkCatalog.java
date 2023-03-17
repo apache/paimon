@@ -67,7 +67,7 @@ import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.connector.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.connector.LogicalTypeConversion.toLogicalType;
 
-/** Catalog for table store. */
+/** Catalog for paimon. */
 public class FlinkCatalog extends AbstractCatalog {
 
     private final Catalog catalog;
@@ -204,7 +204,7 @@ public class FlinkCatalog extends AbstractCatalog {
         if (options.containsKey(CONNECTOR.key())) {
             throw new CatalogException(
                     String.format(
-                            "Table Store Catalog only supports table store tables, not '%s' connector."
+                            "Table Store Catalog only supports paimon tables, not '%s' connector."
                                     + " You can create TEMPORARY table instead.",
                             options.get(CONNECTOR.key())));
         }

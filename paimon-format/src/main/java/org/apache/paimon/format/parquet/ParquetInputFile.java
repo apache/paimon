@@ -26,7 +26,7 @@ import org.apache.parquet.io.SeekableInputStream;
 
 import java.io.IOException;
 
-/** A {@link InputFile} for table store. */
+/** A {@link InputFile} for paimon. */
 public class ParquetInputFile implements InputFile {
 
     private final FileIO fileIO;

@@ -26,7 +26,7 @@ import org.apache.paimon.hive.mapred.TableStoreOutputFormat;
 import org.apache.paimon.utils.Preconditions;
 
 /**
- * {@link HiveMetaHook} for table store. Currently this class is only used to set input and output
+ * {@link HiveMetaHook} for paimon. Currently this class is only used to set input and output
  * formats.
  */
 public class TableStoreHiveMetaHook implements HiveMetaHook {

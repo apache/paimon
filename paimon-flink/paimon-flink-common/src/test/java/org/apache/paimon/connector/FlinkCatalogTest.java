@@ -35,9 +35,9 @@ import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
-import org.apache.flink.table.store.catalog.CatalogContext;
 
 import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.junit.jupiter.api.BeforeEach;
@@ -212,7 +212,7 @@ public class FlinkCatalogTest {
         assertThatThrownBy(() -> catalog.createTable(this.path1, newTable, false))
                 .isInstanceOf(CatalogException.class)
                 .hasMessageContaining(
-                        "Table Store Catalog only supports table store tables,"
+                        "Table Store Catalog only supports paimon tables,"
                                 + " not 'filesystem' connector. You can create TEMPORARY table instead.");
     }
 

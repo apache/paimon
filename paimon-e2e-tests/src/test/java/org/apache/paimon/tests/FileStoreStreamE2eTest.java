@@ -78,7 +78,7 @@ public class FileStoreStreamE2eTest extends E2eTestBase {
                         + "    'bucket' = '3'\n"
                         + ");";
 
-        // insert data into table store
+        // insert data into paimon
         runSql(
                 "SET 'execution.checkpointing.interval' = '5s';\n"
                         + "INSERT INTO ts_table SELECT a, b, rn FROM (\n"
@@ -89,7 +89,7 @@ public class FileStoreStreamE2eTest extends E2eTestBase {
                 tableDdl,
                 testDataSourceDdl);
 
-        // read all data from table store
+        // read all data from paimon
         runSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,

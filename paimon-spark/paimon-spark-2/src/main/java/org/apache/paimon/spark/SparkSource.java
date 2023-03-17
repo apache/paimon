@@ -18,8 +18,7 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.catalog.CatalogContext;
-
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.spark.sql.SparkSession;
@@ -30,11 +29,11 @@ import org.apache.spark.sql.sources.v2.SessionConfigSupport;
 import org.apache.spark.sql.sources.v2.reader.DataSourceReader;
 import org.apache.spark.sql.types.StructType;
 
-/** The Spark source for table store. */
+/** The Spark source for paimon. */
 public class SparkSource implements DataSourceRegister, ReadSupport, SessionConfigSupport {
 
     /** Not use 'paimon' here, the '-' is not allowed in SQL. */
-    private static final String SHORT_NAME = "tablestore";
+    private static final String SHORT_NAME = "paimon";
 
     @Override
     public String shortName() {

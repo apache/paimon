@@ -41,7 +41,7 @@ import static org.apache.paimon.connector.util.ReadWriteTableTestUtil.insertOver
 import static org.apache.paimon.connector.util.ReadWriteTableTestUtil.insertOverwritePartition;
 import static org.apache.paimon.connector.util.ReadWriteTableTestUtil.testBatchRead;
 
-/** Table store IT case when the table has composite primary keys and multiple partition fields. */
+/** Paimon IT case when the table has composite primary keys and multiple partition fields. */
 public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase {
 
     @BeforeEach

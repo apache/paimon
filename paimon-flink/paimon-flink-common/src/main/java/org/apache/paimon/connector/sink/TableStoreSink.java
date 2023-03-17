@@ -116,7 +116,7 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
         if (overwrite && !context.isBounded()) {
             throw new UnsupportedOperationException(
-                    "Table store doesn't support streaming INSERT OVERWRITE.");
+                    "Paimon doesn't support streaming INSERT OVERWRITE.");
         }
 
         LogSinkProvider logSinkProvider = null;

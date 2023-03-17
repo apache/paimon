@@ -88,7 +88,7 @@ public class FlinkActionsE2eTest extends E2eTestBase {
                         + "    'write-only' = 'true'\n"
                         + ");";
 
-        // insert data into table store
+        // insert data into paimon
         runSql(
                 "SET 'execution.checkpointing.interval' = '1s';\n"
                         + "INSERT INTO ts_table SELECT * FROM test_source;",
@@ -123,7 +123,7 @@ public class FlinkActionsE2eTest extends E2eTestBase {
         LOG.info(execResult.getStdout());
         LOG.info(execResult.getStderr());
 
-        // read all data from table store
+        // read all data from paimon
         runSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,
@@ -185,7 +185,7 @@ public class FlinkActionsE2eTest extends E2eTestBase {
         LOG.info(execResult.getStdout());
         LOG.info(execResult.getStderr());
 
-        // read all data from table store
+        // read all data from paimon
         runSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,
@@ -244,7 +244,7 @@ public class FlinkActionsE2eTest extends E2eTestBase {
         LOG.info(execResult.getStdout());
         LOG.info(execResult.getStderr());
 
-        // read all data from table store
+        // read all data from paimon
         runSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,
@@ -318,7 +318,7 @@ public class FlinkActionsE2eTest extends E2eTestBase {
         LOG.info(execResult.getStdout());
         LOG.info(execResult.getStderr());
 
-        // read all data from table store
+        // read all data from paimon
         runSql(
                 "INSERT INTO result1 SELECT * FROM T;",
                 catalogDdl,

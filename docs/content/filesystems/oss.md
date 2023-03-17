@@ -31,7 +31,7 @@ under the License.
 ## Download
 
 [Download](https://repo.maven.apache.org/maven2/org/apache/flink/paimon-oss/{{< version >}}/paimon-oss-{{< version >}}.jar)
-flink table store shaded jar.
+flink paimon shaded jar.
 
 {{< /stable >}}
 
@@ -78,11 +78,11 @@ Place `paimon-oss-{{< version >}}.jar` together with `paimon-spark-{{< version >
 
 ```shell
 spark-sql \ 
-  --conf spark.sql.catalog.tablestore=org.apache.paimon.spark.SparkCatalog \
-  --conf spark.sql.catalog.tablestore.warehouse=oss://<bucket-name>/ \
-  --conf spark.sql.catalog.tablestore.fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com \
-  --conf spark.sql.catalog.tablestore.fs.oss.accessKeyId=xxx \
-  --conf spark.sql.catalog.tablestore.fs.oss.accessKeySecret=yyy
+  --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
+  --conf spark.sql.catalog.paimon.warehouse=oss://<bucket-name>/ \
+  --conf spark.sql.catalog.paimon.fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com \
+  --conf spark.sql.catalog.paimon.fs.oss.accessKeyId=xxx \
+  --conf spark.sql.catalog.paimon.fs.oss.accessKeySecret=yyy
 ```
 
 {{< /tab >}}
@@ -94,9 +94,9 @@ NOTE: You need to ensure that Hive metastore can access `oss`.
 Place `paimon-oss-{{< version >}}.jar` together with `paimon-hive-connector-{{< version >}}.jar` under Hive's auxlib directory, and start like
 
 ```sql
-SET tablestore.fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com;
-SET tablestore.fs.oss.accessKeyId=xxx;
-SET tablestore.fs.oss.accessKeySecret=yyy;
+SET paimon.fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com;
+SET paimon.fs.oss.accessKeyId=xxx;
+SET paimon.fs.oss.accessKeySecret=yyy;
 ```
 
 And read table from hive metastore, table can be created by Flink or Spark, see [Catalog with Hive Metastore]({{< ref "how-to/creating-catalogs" >}})
@@ -109,9 +109,9 @@ SELECT COUNT(1) FROM test_table;
 
 {{< tab "Trino" >}}
 
-Place `paimon-oss-{{< version >}}.jar` together with `paimon-trino-{{< version >}}.jar` under `plugin/tablestore` directory.
+Place `paimon-oss-{{< version >}}.jar` together with `paimon-trino-{{< version >}}.jar` under `plugin/paimon` directory.
 
-Add options in `etc/catalog/tablestore.properties`.
+Add options in `etc/catalog/paimon.properties`.
 ```shell
 fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com
 fs.oss.accessKeyId=xxx

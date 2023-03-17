@@ -30,7 +30,7 @@ import org.apache.spark.sql.types.StructType;
 import java.util.ArrayList;
 import java.util.List;
 
-/** A Spark {@link ScanBuilder} for table store. */
+/** A Spark {@link ScanBuilder} for paimon. */
 public class SparkScanBuilder
         implements ScanBuilder, SupportsPushDownFilters, SupportsPushDownRequiredColumns {
 

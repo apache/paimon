@@ -51,13 +51,13 @@ public class SparkS3ITCase {
         String path = MINIO_CONTAINER.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
         Path warehousePath = new Path(path);
         spark = SparkSession.builder().master("local[2]").getOrCreate();
-        spark.conf().set("spark.sql.catalog.tablestore", SparkCatalog.class.getName());
-        spark.conf().set("spark.sql.catalog.tablestore.warehouse", warehousePath.toString());
+        spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
+        spark.conf().set("spark.sql.catalog.paimon.warehouse", warehousePath.toString());
         MINIO_CONTAINER
                 .getS3ConfigOptions()
-                .forEach((k, v) -> spark.conf().set("spark.sql.catalog.tablestore." + k, v));
-        spark.sql("CREATE DATABASE tablestore.db");
-        spark.sql("USE tablestore.db");
+                .forEach((k, v) -> spark.conf().set("spark.sql.catalog.paimon." + k, v));
+        spark.sql("CREATE DATABASE paimon.db");
+        spark.sql("USE paimon.db");
     }
 
     @AfterAll

@@ -34,7 +34,7 @@ case $STARTSTOP in
     (start)
         log=$BENCHMARK_LOG_DIR/metric-client.log
         log_setting=(-Dlog.file="$log" -Dlog4j.configuration=file:"$BENCHMARK_CONF_DIR"/log4j.properties -Dlog4j.configurationFile=file:"$BENCHMARK_CONF_DIR"/log4j.properties)
-        java "${log_setting[@]}" -cp "$BENCHMARK_HOME/lib/*:$FLINK_HOME/lib/*" org.apache.flink.table.store.benchmark.metric.cpu.CpuMetricSender &
+        java "${log_setting[@]}" -cp "$BENCHMARK_HOME/lib/*:$FLINK_HOME/lib/*" org.apache.paimon.benchmark.metric.cpu.CpuMetricSender &
     ;;
 
     (stop)

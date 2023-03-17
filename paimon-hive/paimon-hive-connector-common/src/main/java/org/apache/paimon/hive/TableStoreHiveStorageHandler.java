@@ -38,7 +38,7 @@ import org.apache.paimon.hive.mapred.TableStoreOutputFormat;
 import java.util.Map;
 import java.util.Properties;
 
-/** {@link HiveStorageHandler} for table store. This is the entrance class of Hive API. */
+/** {@link HiveStorageHandler} for paimon. This is the entrance class of Hive API. */
 public class TableStoreHiveStorageHandler
         implements HiveStoragePredicateHandler, HiveStorageHandler {
 

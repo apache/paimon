@@ -23,7 +23,7 @@ import org.apache.parquet.io.DelegatingSeekableInputStream;
 
 import java.io.IOException;
 
-/** A {@link SeekableInputStream} for table store. */
+/** A {@link SeekableInputStream} for paimon. */
 public class ParquetInputStream extends DelegatingSeekableInputStream {
 
     private final SeekableInputStream in;

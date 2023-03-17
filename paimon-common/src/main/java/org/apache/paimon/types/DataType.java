@@ -32,7 +32,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Describes the data type in the table store ecosystem.
+ * Describes the data type in the paimon ecosystem.
  *
  * @see DataTypes
  * @since 0.4.0

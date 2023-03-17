@@ -28,7 +28,7 @@ import org.apache.spark.sql.connector.read.PartitionReaderFactory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 
-/** A Spark {@link PartitionReaderFactory} for table store. */
+/** A Spark {@link PartitionReaderFactory} for paimon. */
 public class SparkReaderFactory implements PartitionReaderFactory {
 
     private static final long serialVersionUID = 1L;

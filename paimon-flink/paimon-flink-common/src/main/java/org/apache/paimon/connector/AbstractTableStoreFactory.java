@@ -28,12 +28,12 @@ import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.DynamicTableSourceFactory;
-import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.connector.log.LogStoreTableFactory;
 import org.apache.paimon.connector.sink.TableStoreSink;
 import org.apache.paimon.connector.source.SystemTableSource;
@@ -59,7 +59,7 @@ import static org.apache.paimon.connector.FlinkConnectorOptions.NONE;
 import static org.apache.paimon.connector.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.connector.log.LogStoreTableFactory.discoverLogStoreFactory;
 
-/** Abstract table store factory to create table source and table sink. */
+/** Abstract paimon factory to create table source and table sink. */
 public abstract class AbstractTableStoreFactory
         implements DynamicTableSourceFactory, DynamicTableSinkFactory {
 

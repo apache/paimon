@@ -51,8 +51,7 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
     public void before() throws IOException {
         path = getTempDirPath();
         tEnv.executeSql(
-                String.format(
-                        "CREATE CATALOG fs WITH ('type'='paimon', 'warehouse'='%s')", path));
+                String.format("CREATE CATALOG fs WITH ('type'='paimon', 'warehouse'='%s')", path));
         tEnv.useCatalog("fs");
         env.setParallelism(1);
     }

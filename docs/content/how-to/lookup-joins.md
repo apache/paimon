@@ -33,7 +33,7 @@ Table Store supports lookup joins on unpartitioned tables with primary keys in F
 First, let's create a Table Store table and update it in real-time.
 
 ```sql
--- Create a table store catalog
+-- Create a paimon catalog
 CREATE CATALOG my_catalog WITH (
   'type'='paimon',
   'warehouse'='hdfs://nn:8020/warehouse/path' -- or 'file://tmp/foo/bar'

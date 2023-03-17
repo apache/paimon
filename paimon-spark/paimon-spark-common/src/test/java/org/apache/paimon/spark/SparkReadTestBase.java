@@ -61,9 +61,9 @@ public abstract class SparkReadTestBase {
     public static void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
         warehousePath = new Path("file:" + tempDir.toString());
         spark = SparkSession.builder().master("local[2]").getOrCreate();
-        spark.conf().set("spark.sql.catalog.tablestore", SparkCatalog.class.getName());
-        spark.conf().set("spark.sql.catalog.tablestore.warehouse", warehousePath.toString());
-        spark.sql("USE tablestore");
+        spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
+        spark.conf().set("spark.sql.catalog.paimon.warehouse", warehousePath.toString());
+        spark.sql("USE paimon");
         spark.sql("CREATE NAMESPACE default");
     }
 
@@ -93,7 +93,7 @@ public abstract class SparkReadTestBase {
         // c row<row<double, array<boolean> not null> not null, bigint> not null
         tablePath2 = new Path(warehousePath, "default.db/t2");
         spark.sql(
-                "CREATE TABLE tablestore.default.t2 ("
+                "CREATE TABLE paimon.default.t2 ("
                         + "a INT NOT NULL COMMENT 'comment about a', "
                         + "b ARRAY<STRING> NOT NULL, "
                         + "c STRUCT<c1: STRUCT<c11: DOUBLE, c12: ARRAY<BOOLEAN> NOT NULL> NOT NULL, "
@@ -161,7 +161,7 @@ public abstract class SparkReadTestBase {
     protected static void createTable(String tableName) {
         spark.sql(
                 String.format(
-                        "CREATE TABLE tablestore.default.%s (a INT NOT NULL, b BIGINT, c STRING) TBLPROPERTIES ('file.format'='avro')",
+                        "CREATE TABLE paimon.default.%s (a INT NOT NULL, b BIGINT, c STRING) TBLPROPERTIES ('file.format'='avro')",
                         tableName));
     }
 
@@ -182,7 +182,7 @@ public abstract class SparkReadTestBase {
     protected static void writeTable(String tableName, String... values) {
         spark.sql(
                 String.format(
-                        "INSERT INTO tablestore.default.%s VALUES %s",
+                        "INSERT INTO paimon.default.%s VALUES %s",
                         tableName, StringUtils.join(values, ",")));
     }
 }

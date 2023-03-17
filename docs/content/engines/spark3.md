@@ -72,7 +72,7 @@ If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or 
 
 **Step 1: Specify Table Store Jar File**
 
-Append path to table store jar file to the `--jars` argument when starting `spark-sql`.
+Append path to paimon jar file to the `--jars` argument when starting `spark-sql`.
 
 ```bash
 spark-sql ... --jars /path/to/paimon-spark-3.3-{{< version >}}.jar
@@ -82,19 +82,19 @@ Alternatively, you can copy `paimon-spark-3.3-{{< version >}}.jar` under `spark/
 
 **Step 2: Specify Table Store Catalog**
 
-When starting `spark-sql`, use the following command to register Table Store’s Spark catalog with the name `tablestore`. Table files of the warehouse is stored under `/tmp/table_store`.
+When starting `spark-sql`, use the following command to register Table Store’s Spark catalog with the name `paimon`. Table files of the warehouse is stored under `/tmp/table_store`.
 
 ```bash
 spark-sql ... \
-    --conf spark.sql.catalog.tablestore=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.tablestore.warehouse=file:/tmp/table_store
+    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
+    --conf spark.sql.catalog.paimon.warehouse=file:/tmp/table_store
 ```
 
-After `spark-sql` command line has started, run the following SQL to create and switch to database `tablestore.default`.
+After `spark-sql` command line has started, run the following SQL to create and switch to database `paimon.default`.
 
 ```sql
-CREATE DATABASE tablestore.default;
-USE tablestore.default;
+CREATE DATABASE paimon.default;
+USE paimon.default;
 ```
 
 **Step 3: Create a table and Write Some Records**
@@ -142,7 +142,7 @@ spark-shell ... --jars /path/to/paimon-spark-3.3-{{< version >}}.jar
 ```
 
 ```scala
-val dataset = spark.read.format("tablestore").load("file:/tmp/table_store/default.db/my_table")
+val dataset = spark.read.format("paimon").load("file:/tmp/table_store/default.db/my_table")
 dataset.createOrReplaceTempView("my_table")
 spark.sql("SELECT * FROM my_table").show()
 ```

@@ -32,7 +32,7 @@ import java.util.List;
 import java.util.OptionalLong;
 
 /**
- * A Spark {@link Scan} for table store.
+ * A Spark {@link Scan} for paimon.
  *
  * <p>TODO Introduce a SparkRFScan to implement SupportsRuntimeFiltering.
  */
@@ -49,7 +49,7 @@ public class SparkScan implements Scan, SupportsReportStatistics {
     @Override
     public String description() {
         // TODO add filters
-        return String.format("tablestore(%s)", readBuilder.tableName());
+        return String.format("paimon(%s)", readBuilder.tableName());
     }
 
     @Override

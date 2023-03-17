@@ -23,12 +23,12 @@ import org.apache.paimon.options.description.InlineElement;
 
 import static org.apache.paimon.options.description.TextElement.text;
 
-/** Defines the write mode for flink table store. */
+/** Defines the write mode for flink paimon. */
 public enum WriteMode implements DescribedEnum {
     APPEND_ONLY(
             "append-only",
             "The table can only accept append-only insert operations. Neither data deduplication nor any "
-                    + "primary key constraints will be done when inserting rows into table store."),
+                    + "primary key constraints will be done when inserting rows into paimon."),
     CHANGE_LOG("change-log", "The table can accept insert/delete/update operations.");
 
     private final String value;
