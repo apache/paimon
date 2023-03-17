@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataType;

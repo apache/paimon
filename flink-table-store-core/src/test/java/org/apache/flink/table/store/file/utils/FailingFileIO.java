@@ -18,15 +18,15 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.FileIOLoader;
-import org.apache.flink.table.store.fs.FileStatus;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.PositionOutputStream;
-import org.apache.flink.table.store.fs.PositionOutputStreamWrapper;
-import org.apache.flink.table.store.fs.SeekableInputStream;
-import org.apache.flink.table.store.fs.SeekableInputStreamWrapper;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileIOLoader;
+import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.PositionOutputStreamWrapper;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.SeekableInputStreamWrapper;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.flink.table.store.utils.ExceptionUtils;
 
 import java.io.File;

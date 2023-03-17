@@ -19,11 +19,11 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.file.operation.ScanKind;
-import org.apache.flink.table.store.file.predicate.Equal;
-import org.apache.flink.table.store.file.predicate.IsNull;
-import org.apache.flink.table.store.file.predicate.LeafPredicate;
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateBuilder;
+import org.apache.paimon.file.predicate.Equal;
+import org.apache.paimon.file.predicate.IsNull;
+import org.apache.paimon.file.predicate.LeafPredicate;
+import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.types.DataTypes;

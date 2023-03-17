@@ -24,7 +24,7 @@ import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.memory.MemoryPoolFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.io.cache.CacheManager;
+import org.apache.paimon.io.cache.CacheManager;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 

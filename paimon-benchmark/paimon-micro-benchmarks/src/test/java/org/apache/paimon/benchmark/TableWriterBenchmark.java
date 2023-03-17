@@ -19,7 +19,7 @@
 package org.apache.paimon.benchmark;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.StreamTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;

@@ -31,8 +31,8 @@ import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnNullabi
 import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnPosition;
 import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnType;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.Path;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypeCasts;

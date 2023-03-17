@@ -18,8 +18,8 @@
 
 package org.apache.paimon.format.orc.filter;
 
-import org.apache.flink.table.store.file.predicate.FieldRef;
-import org.apache.flink.table.store.file.predicate.FunctionVisitor;
+import org.apache.paimon.file.predicate.FieldRef;
+import org.apache.paimon.file.predicate.FunctionVisitor;
 import org.apache.flink.table.store.types.DataType;
 
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
@@ -35,7 +35,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Convert {@link org.apache.flink.table.store.file.predicate.Predicate} to {@link
+ * Convert {@link org.apache.paimon.file.predicate.Predicate} to {@link
  * OrcFilters.Predicate} for orc.
  */
 public class OrcPredicateFunctionVisitor

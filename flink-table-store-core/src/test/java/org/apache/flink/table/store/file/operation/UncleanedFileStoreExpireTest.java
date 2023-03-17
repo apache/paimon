@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.fs.Path;
+import org.apache.paimon.fs.Path;
 
 import org.junit.jupiter.api.Test;
 

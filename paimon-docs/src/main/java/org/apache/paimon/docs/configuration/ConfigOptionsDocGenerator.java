@@ -18,13 +18,13 @@
 
 package org.apache.paimon.docs.configuration;
 
-import org.apache.flink.table.store.options.ConfigOption;
-import org.apache.flink.table.store.options.description.DescribedEnum;
-import org.apache.flink.table.store.options.description.Description;
-import org.apache.flink.table.store.options.description.Formatter;
-import org.apache.flink.table.store.options.description.HtmlFormatter;
-import org.apache.flink.table.store.options.description.InlineElement;
-import org.apache.flink.table.store.options.description.TextElement;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.description.DescribedEnum;
+import org.apache.paimon.options.description.Description;
+import org.apache.paimon.options.description.Formatter;
+import org.apache.paimon.options.description.HtmlFormatter;
+import org.apache.paimon.options.description.InlineElement;
+import org.apache.paimon.options.description.TextElement;
 import org.apache.flink.table.store.utils.Pair;
 import org.apache.flink.table.store.utils.ThrowingConsumer;
 import org.apache.flink.table.store.utils.TimeUtils;
@@ -61,7 +61,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.options.description.TextElement.text;
+import static org.apache.paimon.options.description.TextElement.text;
 import static org.apache.paimon.docs.util.Utils.escapeCharacters;
 
 /** Class used for generating code based documentation of configuration parameters. */
@@ -72,7 +72,7 @@ public class ConfigOptionsDocGenerator {
     static final OptionsClassLocation[] LOCATIONS =
             new OptionsClassLocation[] {
                 new OptionsClassLocation(
-                        "flink-table-store-common", "org.apache.flink.table.store.options"),
+                        "flink-table-store-common", "org.apache.paimon.options"),
                 new OptionsClassLocation("flink-table-store-core", "org.apache.flink.table.store"),
                 new OptionsClassLocation(
                         "flink-table-store-flink/flink-table-store-flink-common",

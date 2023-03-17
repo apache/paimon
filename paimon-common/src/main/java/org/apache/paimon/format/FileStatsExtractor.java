@@ -18,8 +18,8 @@
 
 package org.apache.paimon.format;
 
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.Path;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 
 import java.io.IOException;
 

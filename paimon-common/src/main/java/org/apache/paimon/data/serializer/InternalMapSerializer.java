@@ -18,10 +18,10 @@
 
 package org.apache.paimon.data.serializer;
 
-import org.apache.flink.table.store.io.DataInputView;
-import org.apache.flink.table.store.io.DataOutputView;
-import org.apache.flink.table.store.memory.MemorySegment;
-import org.apache.flink.table.store.memory.MemorySegmentUtils;
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataOutputView;
+import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.flink.table.store.types.DataType;
 
 import org.apache.paimon.data.BinaryArray;

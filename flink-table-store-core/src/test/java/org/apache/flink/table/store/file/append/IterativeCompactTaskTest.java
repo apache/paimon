@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.append;
 
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.paimon.fs.local.LocalFileIO;
 
 import org.junit.jupiter.api.Test;
 

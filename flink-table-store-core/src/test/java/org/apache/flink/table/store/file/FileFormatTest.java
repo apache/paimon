@@ -19,10 +19,10 @@
 package org.apache.flink.table.store.file;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.PositionOutputStream;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.Options;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;

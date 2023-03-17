@@ -21,7 +21,7 @@ package org.apache.flink.table.store.table.source;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.ScanKind;
-import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.table.source.snapshot.CompactedStartingScanner;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousFromSnapshotStartingScanner;
 import org.apache.flink.table.store.table.source.snapshot.ContinuousFromTimestampStartingScanner;

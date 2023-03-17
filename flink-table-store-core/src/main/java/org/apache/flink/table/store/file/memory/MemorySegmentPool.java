@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.memory;
 
-import org.apache.flink.table.store.memory.MemorySegment;
-import org.apache.flink.table.store.memory.MemorySegmentSource;
-import org.apache.flink.table.store.options.MemorySize;
+import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySegmentSource;
+import org.apache.paimon.options.MemorySize;
 
 import org.apache.paimon.annotation.Experimental;
 

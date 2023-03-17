@@ -20,12 +20,12 @@ package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.io.DataOutputSerializer;
-import org.apache.flink.table.store.lookup.LookupStoreFactory;
-import org.apache.flink.table.store.lookup.LookupStoreReader;
-import org.apache.flink.table.store.lookup.LookupStoreWriter;
-import org.apache.flink.table.store.memory.MemorySegment;
-import org.apache.flink.table.store.options.MemorySize;
+import org.apache.paimon.io.DataOutputSerializer;
+import org.apache.paimon.lookup.LookupStoreFactory;
+import org.apache.paimon.lookup.LookupStoreReader;
+import org.apache.paimon.lookup.LookupStoreWriter;
+import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.options.MemorySize;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;

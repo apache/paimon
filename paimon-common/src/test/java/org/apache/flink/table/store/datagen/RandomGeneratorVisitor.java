@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.datagen;
 
-import org.apache.flink.table.store.options.ConfigOption;
-import org.apache.flink.table.store.options.ConfigOptions;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.Options;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.BinaryType;
@@ -59,7 +59,7 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.options.ConfigOptions.key;
+import static org.apache.paimon.options.ConfigOptions.key;
 
 /** Creates a random {@link DataGeneratorContainer} for a particular logical type. */
 @SuppressWarnings("unchecked")

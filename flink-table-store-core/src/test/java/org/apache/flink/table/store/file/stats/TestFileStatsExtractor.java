@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.stats;
 
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.Path;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.flink.table.store.types.RowType;
 
 import org.apache.paimon.data.InternalRow;

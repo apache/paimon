@@ -18,13 +18,13 @@
 
 package org.apache.paimon.docs.configuration;
 
-import org.apache.flink.table.store.options.ConfigOption;
-import org.apache.flink.table.store.options.ConfigOptions;
-import org.apache.flink.table.store.options.MemorySize;
-import org.apache.flink.table.store.options.description.DescribedEnum;
-import org.apache.flink.table.store.options.description.Formatter;
-import org.apache.flink.table.store.options.description.HtmlFormatter;
-import org.apache.flink.table.store.options.description.InlineElement;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.description.DescribedEnum;
+import org.apache.paimon.options.description.Formatter;
+import org.apache.paimon.options.description.HtmlFormatter;
+import org.apache.paimon.options.description.InlineElement;
 import org.apache.flink.table.store.utils.Pair;
 
 import org.apache.paimon.annotation.ConfigGroup;
@@ -43,7 +43,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.flink.table.store.options.description.TextElement.text;
+import static org.apache.paimon.options.description.TextElement.text;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for the {@link ConfigOptionsDocGenerator}. */

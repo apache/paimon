@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySegment;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
@@ -26,7 +26,7 @@ import org.apache.paimon.data.Timestamp;
 
 import java.nio.ByteOrder;
 
-import static org.apache.flink.table.store.memory.MemorySegment.UNSAFE;
+import static org.apache.paimon.memory.MemorySegment.UNSAFE;
 
 /** Util for sort. */
 public class SortUtil {

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format.orc;
 
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 
 import org.apache.paimon.format.FileFormatFactory;
 

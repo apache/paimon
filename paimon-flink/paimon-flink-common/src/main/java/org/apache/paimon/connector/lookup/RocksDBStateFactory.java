@@ -40,7 +40,7 @@ public class RocksDBStateFactory implements Closeable {
 
     private final ColumnFamilyOptions columnFamilyOptions;
 
-    public RocksDBStateFactory(String path, org.apache.flink.table.store.options.Options conf)
+    public RocksDBStateFactory(String path, org.apache.paimon.options.Options conf)
             throws IOException {
         DBOptions dbOptions =
                 RocksDBOptions.createDBOptions(

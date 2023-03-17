@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.fs.Path;
+import org.apache.paimon.fs.Path;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

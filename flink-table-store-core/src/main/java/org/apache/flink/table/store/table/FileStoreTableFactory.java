@@ -23,9 +23,9 @@ import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

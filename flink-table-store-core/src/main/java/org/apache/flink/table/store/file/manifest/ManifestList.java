@@ -21,9 +21,9 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.PositionOutputStream;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.flink.table.store.types.RowType;
 
 import org.apache.paimon.format.FileFormat;

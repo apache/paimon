@@ -19,7 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.SupportsPartition;
 import org.apache.flink.table.store.table.Table;

@@ -20,7 +20,7 @@ package org.apache.paimon.spark;
 
 import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 
 import org.apache.spark.sql.SparkSession;

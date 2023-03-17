@@ -18,7 +18,7 @@
 
 package org.apache.paimon.annotation;
 
-import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.paimon.options.ConfigOption;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;

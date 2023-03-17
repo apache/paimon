@@ -19,17 +19,17 @@
 package org.apache.paimon.connector;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.options.ConfigOption;
-import org.apache.flink.table.store.options.ConfigOptions;
-import org.apache.flink.table.store.options.description.Description;
-import org.apache.flink.table.store.options.description.TextElement;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.description.Description;
+import org.apache.paimon.options.description.TextElement;
 
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.flink.table.store.options.ConfigOptions.key;
+import static org.apache.paimon.options.ConfigOptions.key;
 
 /** Options for flink connector. */
 public class FlinkConnectorOptions {
