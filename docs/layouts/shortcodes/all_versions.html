@@ -23,7 +23,7 @@ under the License.
     {{ range $docs := .Site.Params.PreviousDocs }}
         <li>
             <a href="{{ index $docs 1 }}">
-                v{{ index $docs 0}}
+                {{ index $docs 0}}
             </a>
         </li>
     {{ end }}

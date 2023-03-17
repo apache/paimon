@@ -14,9 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-baseURL = '//nightlies.apache.org/flink/flink-table-store-docs-master'
+baseURL = '//paimon.apache.org/docs/master'
 languageCode = 'en-us'
-title = 'Apache Flink Table Store'
+title = 'Apache Paimon'
 enableGitInfo = false
 theme = "book"
 pygmentsUseClasses = true
@@ -30,7 +30,7 @@ pygmentsUseClasses = true
   ShowOutDatedWarning = false
 
   # This is the version referenced in the docs. Please only use these variables
-  # to reference a specific Flink version, because this is the only place where
+  # to reference a specific Paimon version, because this is the only place where
   # we change the version for the complete docs when forking of a release branch
   # etc.
   # The full version string as referenced in Maven (e.g. 1.2.1)
@@ -40,29 +40,29 @@ pygmentsUseClasses = true
   # release this should be the same as the regular version
   VersionTitle = "0.4-SNAPSHOT"
 
-  # The branch for this version of Apache Flink Table Store
+  # The branch for this version of Apache Paimon
   Branch = "master"
 
-  # The github repository for Apache Flink Table Store
-  Repo = "//github.com/apache/flink-table-store"
+  # The github repository for Apache Paimon
+  Repo = "//github.com/apache/incubator-paimon"
 
-  GithubRepo = "https://github.com/apache/flink-table-store.git"
+  GithubRepo = "https://github.com/apache/incubator-paimon.git"
 
   # This suffix is appended to the Scala-dependent Maven artifact names
   ScalaVersion = "_2.12"
 
-  ProjectHomepage = "//flink.apache.org"
+  ProjectHomepage = "//paimon.apache.org"
 
   # External links at the bottom
   # of the menu
   MenuLinks = [
-    ["Project Homepage", "//flink.apache.org"],
-    ["JavaDocs", "//nightlies.apache.org/flink/flink-table-store-docs-master/api/java/"],
+    ["Project Homepage", "//paimon.apache.org"],
+    ["JavaDocs", "//paimon.apache.org/docs/master/api/java/"],
   ]
 
   PreviousDocs = [
-    ["0.3", "https://nightlies.apache.org/flink/flink-table-store-docs-release-0.3"],
-    ["0.2", "https://nightlies.apache.org/flink/flink-table-store-docs-release-0.2"],
+    ["latest", "https://paimon.apache.org/docs/latest"],
+    ["0.3", "https://paimon.apache.org/docs/0.3"],
   ]
 
 [markup]
