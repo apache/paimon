@@ -21,6 +21,13 @@ package org.apache.paimon.file.mergetree;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.codegen.NormalizedKeyComputer;
 import org.apache.flink.table.store.codegen.RecordComparator;
+
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.BinaryRowSerializer;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.KeyValueSerializer;
 import org.apache.paimon.file.disk.IOManager;
@@ -35,13 +42,6 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.serializer.BinaryRowSerializer;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.data.serializer.InternalSerializers;
 
 import javax.annotation.Nullable;
 

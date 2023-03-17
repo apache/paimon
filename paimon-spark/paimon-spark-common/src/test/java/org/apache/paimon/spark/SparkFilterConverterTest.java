@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataField;
@@ -25,8 +26,6 @@ import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
-
-import org.apache.paimon.data.Timestamp;
 import org.apache.spark.sql.sources.EqualTo;
 import org.apache.spark.sql.sources.GreaterThan;
 import org.apache.spark.sql.sources.GreaterThanOrEqual;

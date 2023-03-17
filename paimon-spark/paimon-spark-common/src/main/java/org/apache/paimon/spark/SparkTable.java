@@ -19,12 +19,12 @@
 package org.apache.paimon.spark;
 
 import org.apache.flink.table.store.file.operation.Lock;
+
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.SupportsPartition;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableUtils;
-
 import org.apache.spark.sql.connector.catalog.SupportsDelete;
 import org.apache.spark.sql.connector.catalog.SupportsRead;
 import org.apache.spark.sql.connector.catalog.SupportsWrite;

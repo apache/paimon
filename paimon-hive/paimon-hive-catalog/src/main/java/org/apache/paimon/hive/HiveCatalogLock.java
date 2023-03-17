@@ -19,7 +19,6 @@
 package org.apache.paimon.hive;
 
 import org.apache.flink.table.store.file.catalog.CatalogLock;
-import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
@@ -29,6 +28,7 @@ import org.apache.hadoop.hive.metastore.api.LockRequest;
 import org.apache.hadoop.hive.metastore.api.LockResponse;
 import org.apache.hadoop.hive.metastore.api.LockState;
 import org.apache.hadoop.hive.metastore.api.LockType;
+import org.apache.paimon.utils.TimeUtils;
 import org.apache.thrift.TException;
 
 import java.net.InetAddress;

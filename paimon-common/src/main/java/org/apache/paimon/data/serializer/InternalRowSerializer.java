@@ -18,11 +18,6 @@
 
 package org.apache.paimon.data.serializer;
 
-import org.apache.paimon.io.DataInputView;
-import org.apache.paimon.io.DataOutputView;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.RowType;
-
 import org.apache.paimon.data.AbstractPagedInputView;
 import org.apache.paimon.data.AbstractPagedOutputView;
 import org.apache.paimon.data.BinaryRow;
@@ -31,6 +26,10 @@ import org.apache.paimon.data.BinaryWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.NestedRow;
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataOutputView;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
 import java.util.Arrays;

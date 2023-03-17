@@ -19,6 +19,8 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.KeyValueFileStore;
 import org.apache.paimon.file.WriteMode;
@@ -45,9 +47,6 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 
 import java.util.Collections;
 import java.util.List;

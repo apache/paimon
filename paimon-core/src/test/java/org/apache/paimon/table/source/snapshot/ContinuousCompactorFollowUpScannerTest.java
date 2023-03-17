@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source.snapshot;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.Snapshot;
 import org.apache.paimon.file.io.DataFileMetaSerializer;
 import org.apache.paimon.file.utils.SnapshotManager;
@@ -27,8 +28,6 @@ import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.system.BucketsTable;
 import org.apache.paimon.types.RowKind;
-
-import org.apache.paimon.data.InternalRow;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;

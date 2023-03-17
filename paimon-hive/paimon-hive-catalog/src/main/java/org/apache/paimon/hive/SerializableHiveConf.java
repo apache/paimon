@@ -17,10 +17,9 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
-
-import org.apache.hadoop.hive.conf.HiveConf;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;

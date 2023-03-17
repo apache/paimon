@@ -18,6 +18,11 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
+
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.schema.SchemaManager;
 import org.apache.paimon.file.schema.TableSchema;
@@ -38,12 +43,6 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
-
-import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
-
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 
 import java.io.IOException;
 import java.util.Arrays;

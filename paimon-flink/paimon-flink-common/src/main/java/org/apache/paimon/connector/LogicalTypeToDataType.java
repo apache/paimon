@@ -18,8 +18,6 @@
 
 package org.apache.paimon.connector;
 
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.BinaryType;
@@ -43,6 +41,9 @@ import org.apache.flink.table.types.logical.VarBinaryType;
 import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.table.types.logical.utils.LogicalTypeDefaultVisitor;
 
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -58,8 +59,7 @@ public class LogicalTypeToDataType extends LogicalTypeDefaultVisitor<DataType> {
 
     @Override
     public DataType visit(CharType charType) {
-        return new org.apache.paimon.types.CharType(
-                charType.isNullable(), charType.getLength());
+        return new org.apache.paimon.types.CharType(charType.isNullable(), charType.getLength());
     }
 
     @Override
@@ -128,8 +128,7 @@ public class LogicalTypeToDataType extends LogicalTypeDefaultVisitor<DataType> {
 
     @Override
     public DataType visit(TimeType timeType) {
-        return new org.apache.paimon.types.TimeType(
-                timeType.isNullable(), timeType.getPrecision());
+        return new org.apache.paimon.types.TimeType(timeType.isNullable(), timeType.getPrecision());
     }
 
     @Override

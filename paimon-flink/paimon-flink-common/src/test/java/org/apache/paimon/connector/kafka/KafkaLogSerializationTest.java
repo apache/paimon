@@ -21,13 +21,13 @@ package org.apache.paimon.connector.kafka;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.paimon.CoreOptions.LogChangelogMode;
-import org.apache.paimon.table.sink.SinkRecord;
-import org.apache.paimon.types.RowKind;
 import org.apache.flink.util.Collector;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.paimon.CoreOptions.LogChangelogMode;
+import org.apache.paimon.table.sink.SinkRecord;
+import org.apache.paimon.types.RowKind;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 

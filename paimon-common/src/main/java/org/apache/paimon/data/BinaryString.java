@@ -18,10 +18,9 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
-
-import org.apache.paimon.annotation.Experimental;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;

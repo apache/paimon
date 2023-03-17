@@ -18,11 +18,10 @@
 
 package org.apache.paimon.file.mergetree;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.mergetree.compact.MergeFunction;
 import org.apache.paimon.types.RowKind;
-
-import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 

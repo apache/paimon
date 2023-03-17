@@ -19,11 +19,11 @@
 package org.apache.paimon.file.mergetree.compact;
 
 import org.apache.flink.table.store.codegen.RecordComparator;
+
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.utils.ReusingTestData;
 import org.apache.paimon.file.utils.TestReusingRecordReader;
 import org.apache.paimon.reader.RecordReader;
-
 import org.junit.jupiter.api.RepeatedTest;
 
 import java.io.IOException;

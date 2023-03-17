@@ -18,10 +18,9 @@
 
 package org.apache.paimon.file.stats;
 
+import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.format.FieldStats;
 
 import java.util.ArrayList;
 import java.util.List;

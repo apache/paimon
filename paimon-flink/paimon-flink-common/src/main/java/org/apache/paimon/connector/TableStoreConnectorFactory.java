@@ -23,14 +23,14 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.file.catalog.CatalogLock;
-import org.apache.paimon.file.schema.SchemaManager;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.paimon.options.Options;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.connector.sink.TableStoreSink;
+import org.apache.paimon.file.catalog.CatalogLock;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.options.Options;
 
 import javax.annotation.Nullable;
 

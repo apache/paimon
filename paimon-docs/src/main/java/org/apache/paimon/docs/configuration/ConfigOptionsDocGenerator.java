@@ -18,6 +18,10 @@
 
 package org.apache.paimon.docs.configuration;
 
+import org.apache.paimon.annotation.ConfigGroup;
+import org.apache.paimon.annotation.ConfigGroups;
+import org.apache.paimon.annotation.Documentation;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
@@ -28,11 +32,6 @@ import org.apache.paimon.options.description.TextElement;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ThrowingConsumer;
 import org.apache.paimon.utils.TimeUtils;
-
-import org.apache.paimon.annotation.ConfigGroup;
-import org.apache.paimon.annotation.ConfigGroups;
-import org.apache.paimon.annotation.Documentation;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,8 +60,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.options.description.TextElement.text;
 import static org.apache.paimon.docs.util.Utils.escapeCharacters;
+import static org.apache.paimon.options.description.TextElement.text;
 
 /** Class used for generating code based documentation of configuration parameters. */
 public class ConfigOptionsDocGenerator {
@@ -71,8 +70,7 @@ public class ConfigOptionsDocGenerator {
 
     static final OptionsClassLocation[] LOCATIONS =
             new OptionsClassLocation[] {
-                new OptionsClassLocation(
-                        "flink-table-store-common", "org.apache.paimon.options"),
+                new OptionsClassLocation("flink-table-store-common", "org.apache.paimon.options"),
                 new OptionsClassLocation("flink-table-store-core", "org.apache.flink.table.store"),
                 new OptionsClassLocation(
                         "flink-table-store-flink/flink-table-store-flink-common",

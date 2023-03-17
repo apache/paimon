@@ -18,18 +18,17 @@
 
 package org.apache.paimon.file.io;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.KeyValueSerializer;
 import org.apache.paimon.file.utils.FileStorePathFactory;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 

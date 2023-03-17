@@ -18,9 +18,8 @@
 
 package org.apache.paimon.file.schema;
 
-import org.apache.paimon.types.DataType;
-
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.types.DataType;
 
 import javax.annotation.Nullable;
 

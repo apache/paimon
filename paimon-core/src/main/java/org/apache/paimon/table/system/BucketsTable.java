@@ -19,6 +19,9 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.io.DataFileMetaSerializer;
 import org.apache.paimon.file.predicate.Predicate;
@@ -42,10 +45,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarBinaryType;
-
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.JoinedRow;
 
 import java.io.IOException;
 import java.util.ArrayList;

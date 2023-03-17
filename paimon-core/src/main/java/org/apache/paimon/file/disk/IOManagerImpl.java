@@ -21,7 +21,6 @@ package org.apache.paimon.file.disk;
 import org.apache.paimon.file.disk.FileIOChannel.Enumerator;
 import org.apache.paimon.file.disk.FileIOChannel.ID;
 import org.apache.paimon.utils.Preconditions;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

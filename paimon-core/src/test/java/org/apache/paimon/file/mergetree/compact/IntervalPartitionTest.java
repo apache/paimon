@@ -19,13 +19,13 @@
 package org.apache.paimon.file.mergetree.compact;
 
 import org.apache.flink.table.store.codegen.RecordComparator;
-import org.apache.paimon.file.io.DataFileMeta;
-import org.apache.paimon.file.mergetree.SortedRun;
-import org.apache.paimon.file.stats.StatsTestUtils;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.file.io.DataFileMeta;
+import org.apache.paimon.file.mergetree.SortedRun;
+import org.apache.paimon.file.stats.StatsTestUtils;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 

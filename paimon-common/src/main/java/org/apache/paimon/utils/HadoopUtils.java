@@ -18,10 +18,9 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.options.Options;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.HdfsConfiguration;
+import org.apache.paimon.options.Options;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

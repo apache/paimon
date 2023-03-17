@@ -15,9 +15,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.flink.table.store.codegen
+package org.apache.paimon.codegen
 
-import org.apache.flink.table.store.codegen.GenerateUtils.{newName, ROW_DATA, SEGMENT}
+import org.apache.paimon.codegen.GenerateUtils.{newName, ROW_DATA, SEGMENT}
 import org.apache.paimon.data.{BinaryRow, Decimal, Timestamp}
 import org.apache.paimon.types.{DataType, DecimalType, RowType, TimestampType}
 import org.apache.paimon.types.DataTypeRoot._

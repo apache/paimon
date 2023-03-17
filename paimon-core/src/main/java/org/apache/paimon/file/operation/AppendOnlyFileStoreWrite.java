@@ -19,6 +19,8 @@
 package org.apache.paimon.file.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.append.AppendOnlyCompactManager;
 import org.apache.paimon.file.append.AppendOnlyWriter;
 import org.apache.paimon.file.compact.CompactManager;
@@ -30,15 +32,12 @@ import org.apache.paimon.file.utils.CommitIncrement;
 import org.apache.paimon.file.utils.FileStorePathFactory;
 import org.apache.paimon.file.utils.RecordWriter;
 import org.apache.paimon.file.utils.SnapshotManager;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
-
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FileFormat;
 
 import javax.annotation.Nullable;
 

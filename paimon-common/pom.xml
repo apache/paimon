@@ -221,7 +221,7 @@ under the License.
                             <goal>antlr4</goal>
                         </goals>
                         <configuration>
-                            <outputDirectory>${project.build.directory}/generated-sources/antlr4/org/apache/flink/table/store/codegen/codesplit</outputDirectory>
+                            <outputDirectory>${project.build.directory}/generated-sources/antlr4/org/apache/paimon/codegen/codesplit</outputDirectory>
                             <visitor>true</visitor>
                         </configuration>
                     </execution>
@@ -255,15 +255,15 @@ under the License.
                             <relocations>
                                 <relocation>
                                     <pattern>org.antlr.v4.runtime</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.antlr.v4.runtime</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.org.antlr.v4.runtime</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.codehaus.janino</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.codehaus.janino</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.org.codehaus.janino</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.codehaus.commons</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.codehaus.commons</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.org.codehaus.commons</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>

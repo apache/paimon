@@ -18,6 +18,7 @@
 
 package org.apache.paimon.file.operation;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.TestFileStore;
 import org.apache.paimon.file.TestKeyValueGenerator;
@@ -27,8 +28,6 @@ import org.apache.paimon.file.mergetree.MergeTreeWriter;
 import org.apache.paimon.file.utils.CommitIncrement;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.data.BinaryRow;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

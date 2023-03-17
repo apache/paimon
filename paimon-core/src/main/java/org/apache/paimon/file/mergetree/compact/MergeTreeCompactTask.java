@@ -18,13 +18,12 @@
 
 package org.apache.paimon.file.mergetree.compact;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.compact.CompactResult;
 import org.apache.paimon.file.compact.CompactTask;
 import org.apache.paimon.file.compact.CompactUnit;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.mergetree.SortedRun;
-
-import org.apache.paimon.data.InternalRow;
 
 import java.util.ArrayList;
 import java.util.Comparator;

@@ -18,11 +18,10 @@
 
 package org.apache.paimon.fs;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.HadoopUtils;
-
-import org.apache.hadoop.conf.Configuration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

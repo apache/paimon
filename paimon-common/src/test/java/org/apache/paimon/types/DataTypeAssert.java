@@ -19,7 +19,6 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.utils.InstantiationUtil;
-
 import org.assertj.core.api.AbstractAssert;
 import org.assertj.core.api.Condition;
 

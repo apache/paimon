@@ -18,8 +18,9 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.catalog.CatalogContext;
+
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.WriteMode;
 import org.apache.paimon.file.schema.SchemaManager;
 import org.apache.paimon.file.schema.TableSchema;

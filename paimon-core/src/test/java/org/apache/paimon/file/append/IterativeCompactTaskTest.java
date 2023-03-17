@@ -21,7 +21,6 @@ package org.apache.paimon.file.append;
 import org.apache.paimon.file.compact.CompactResult;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.fs.local.LocalFileIO;
-
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

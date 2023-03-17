@@ -18,14 +18,13 @@
 
 package org.apache.paimon.file.stats;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.file.casting.CastExecutor;
 import org.apache.paimon.file.schema.SchemaEvolutionUtil;
 import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
-
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.format.FieldStats;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

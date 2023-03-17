@@ -18,9 +18,8 @@
 
 package org.apache.paimon.connector.lookup;
 
-import org.apache.paimon.types.RowType;
-
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
 import java.util.HashSet;

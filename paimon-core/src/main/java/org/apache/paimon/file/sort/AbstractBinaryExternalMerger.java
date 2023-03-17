@@ -18,6 +18,7 @@
 
 package org.apache.paimon.file.sort;
 
+import org.apache.paimon.data.AbstractPagedOutputView;
 import org.apache.paimon.file.compression.BlockCompressionFactory;
 import org.apache.paimon.file.disk.ChannelReaderInputView;
 import org.apache.paimon.file.disk.ChannelWithMeta;
@@ -26,8 +27,6 @@ import org.apache.paimon.file.disk.FileChannelUtil;
 import org.apache.paimon.file.disk.FileIOChannel;
 import org.apache.paimon.file.disk.IOManager;
 import org.apache.paimon.file.utils.MutableObjectIterator;
-
-import org.apache.paimon.data.AbstractPagedOutputView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

@@ -18,11 +18,10 @@
 
 package org.apache.paimon.file.mergetree.compact;
 
-import org.apache.paimon.file.io.DataFileMeta;
-import org.apache.paimon.file.mergetree.SortedRun;
-
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.file.io.DataFileMeta;
+import org.apache.paimon.file.mergetree.SortedRun;
 
 import java.util.ArrayList;
 import java.util.Comparator;

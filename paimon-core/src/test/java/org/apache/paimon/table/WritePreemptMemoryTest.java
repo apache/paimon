@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.file.WriteMode;
 import org.apache.paimon.file.schema.Schema;
 import org.apache.paimon.file.schema.SchemaManager;
@@ -31,8 +32,6 @@ import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-
-import org.apache.paimon.data.GenericRow;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

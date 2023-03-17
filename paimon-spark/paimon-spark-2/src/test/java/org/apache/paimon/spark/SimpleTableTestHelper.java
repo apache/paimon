@@ -18,19 +18,19 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.data.InternalRow;
 
 import java.util.Collections;
 import java.util.HashMap;

@@ -20,6 +20,7 @@ package org.apache.paimon.connector.sink;
 
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
+
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.table.FileStoreTable;
 

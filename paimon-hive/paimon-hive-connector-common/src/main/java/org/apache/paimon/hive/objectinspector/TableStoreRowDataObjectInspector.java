@@ -18,14 +18,13 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.RowDataUtils;
-
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
 import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.hive.HiveTypeUtils;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.RowDataUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;

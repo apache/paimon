@@ -18,10 +18,9 @@
 
 package org.apache.paimon.data.serializer;
 
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
-
-import org.apache.paimon.data.Timestamp;
 
 import java.io.IOException;
 

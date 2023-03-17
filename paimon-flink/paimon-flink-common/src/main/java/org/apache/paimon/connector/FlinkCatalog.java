@@ -42,15 +42,15 @@ import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
+import org.apache.flink.table.types.logical.RowType;
+
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.file.catalog.Catalog;
 import org.apache.paimon.file.catalog.Identifier;
 import org.apache.paimon.file.schema.Schema;
 import org.apache.paimon.file.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.flink.table.types.logical.RowType;
-
-import org.apache.paimon.annotation.VisibleForTesting;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -62,8 +62,8 @@ import java.util.Optional;
 
 import static org.apache.flink.table.descriptors.Schema.SCHEMA;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
-import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
+import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.connector.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.connector.LogicalTypeConversion.toLogicalType;
 

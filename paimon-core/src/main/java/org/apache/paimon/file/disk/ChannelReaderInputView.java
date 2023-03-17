@@ -18,12 +18,11 @@
 
 package org.apache.paimon.file.disk;
 
+import org.apache.paimon.data.AbstractPagedInputView;
 import org.apache.paimon.file.compression.BlockCompressionFactory;
 import org.apache.paimon.file.compression.BlockDecompressor;
 import org.apache.paimon.file.memory.Buffer;
 import org.apache.paimon.memory.MemorySegment;
-
-import org.apache.paimon.data.AbstractPagedInputView;
 
 import java.io.EOFException;
 import java.io.IOException;

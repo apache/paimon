@@ -15,9 +15,9 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen.codesplit;
+package org.apache.paimon.codegen.codesplit;
 
-import org.apache.flink.table.store.codegen.codesplit.JavaParser.StatementContext;
+import org.apache.paimon.codegen.codesplit.JavaParser.StatementContext;
 
 /** Simple parser that counts combined number of 'return', 'continue' and 'break' kay words. */
 public class ReturnAndJumpCounter extends JavaParserBaseVisitor<Void> {

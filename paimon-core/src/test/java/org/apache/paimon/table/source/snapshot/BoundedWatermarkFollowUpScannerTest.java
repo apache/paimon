@@ -22,7 +22,6 @@ import org.apache.paimon.file.Snapshot;
 import org.apache.paimon.file.manifest.ManifestCommittable;
 import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.table.sink.TableCommitImpl;
-
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

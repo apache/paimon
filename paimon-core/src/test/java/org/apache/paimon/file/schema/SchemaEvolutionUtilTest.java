@@ -18,6 +18,8 @@
 
 package org.apache.paimon.file.schema;
 
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.predicate.Equal;
 import org.apache.paimon.file.predicate.IsNotNull;
 import org.apache.paimon.file.predicate.IsNull;
@@ -32,9 +34,6 @@ import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Projection;
-
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

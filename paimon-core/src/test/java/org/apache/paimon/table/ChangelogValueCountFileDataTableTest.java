@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.WriteMode;
 import org.apache.paimon.file.schema.SchemaManager;
 import org.apache.paimon.file.schema.TableSchema;
-
 import org.junit.jupiter.api.BeforeEach;
 
 import java.util.Collections;

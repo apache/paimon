@@ -18,6 +18,7 @@
 
 package org.apache.paimon.file.manifest;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.utils.FileStorePathFactory;
 import org.apache.paimon.types.DataField;
@@ -25,8 +26,6 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.utils.Preconditions;
-
-import org.apache.paimon.data.BinaryRow;
 
 import java.util.ArrayList;
 import java.util.Collection;

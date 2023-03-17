@@ -20,11 +20,6 @@ package org.apache.paimon.format.orc;
 
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.paimon.reader.RecordReader.RecordIterator;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Pool;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
@@ -42,15 +37,20 @@ import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.fs.HadoopReadOnlyFileSystem;
 import org.apache.paimon.format.orc.filter.OrcFilters;
+import org.apache.paimon.reader.RecordReader.RecordIterator;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Pool;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
 
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.format.orc.reader.AbstractOrcColumnVector.createFlinkVector;
 import static org.apache.paimon.format.orc.reader.OrcSplitReaderUtil.toOrcType;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** An ORC reader that produces a stream of {@link ColumnarRow} records. */
 public class OrcReaderFactory implements FormatReaderFactory {

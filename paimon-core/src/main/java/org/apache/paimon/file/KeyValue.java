@@ -18,16 +18,15 @@
 
 package org.apache.paimon.file;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.utils.RowDataUtils;
-
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -149,9 +148,7 @@ public class KeyValue {
                         new org.apache.paimon.types.BigIntType(false)));
         fields.add(
                 new DataField(
-                        maxKeyId + 2,
-                        VALUE_KIND,
-                        new org.apache.paimon.types.TinyIntType(false)));
+                        maxKeyId + 2, VALUE_KIND, new org.apache.paimon.types.TinyIntType(false)));
         for (DataField valueField : valueFields) {
             DataField newValueField =
                     new DataField(

@@ -30,8 +30,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Parser for creating instances of {@link org.apache.paimon.types.DataType} from a
- * serialized string created with {@link org.apache.paimon.types.DataType#serializeJson}.
+ * Parser for creating instances of {@link org.apache.paimon.types.DataType} from a serialized
+ * string created with {@link org.apache.paimon.types.DataType#serializeJson}.
  */
 public final class DataTypeJsonParser {
 

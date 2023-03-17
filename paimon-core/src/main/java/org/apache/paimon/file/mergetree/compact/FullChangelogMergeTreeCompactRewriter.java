@@ -18,14 +18,13 @@
 
 package org.apache.paimon.file.mergetree.compact;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.io.KeyValueFileReaderFactory;
 import org.apache.paimon.file.io.KeyValueFileWriterFactory;
 import org.apache.paimon.file.mergetree.SortedRun;
 import org.apache.paimon.utils.Preconditions;
-
-import org.apache.paimon.data.InternalRow;
 
 import java.io.IOException;
 import java.util.Comparator;

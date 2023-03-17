@@ -17,8 +17,6 @@
 
 package org.apache.paimon.file.utils;
 
-import org.apache.paimon.types.RowKind;
-
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryArrayWriter;
 import org.apache.paimon.data.BinaryMap;
@@ -30,6 +28,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.types.RowKind;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

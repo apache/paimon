@@ -19,11 +19,11 @@
 package org.apache.paimon.hive;
 
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
-import org.apache.paimon.options.Options;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.mapred.JobConf;
+import org.apache.paimon.options.Options;
 
 import java.util.HashMap;
 import java.util.Map;

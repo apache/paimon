@@ -18,14 +18,6 @@
 
 package org.apache.paimon.data.serializer;
 
-import org.apache.paimon.io.DataInputView;
-import org.apache.paimon.io.DataOutputView;
-import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.RowKind;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.VarLengthIntUtils;
-
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryMap;
@@ -37,6 +29,13 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataOutputView;
+import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.VarLengthIntUtils;
 
 import javax.annotation.Nullable;
 
@@ -45,12 +44,12 @@ import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Objects;
 
+import static org.apache.paimon.data.BinaryRow.HEADER_SIZE_IN_BITS;
 import static org.apache.paimon.memory.MemorySegmentUtils.bitGet;
 import static org.apache.paimon.memory.MemorySegmentUtils.bitSet;
 import static org.apache.paimon.types.DataTypeChecks.getPrecision;
 import static org.apache.paimon.types.DataTypeChecks.getScale;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.data.BinaryRow.HEADER_SIZE_IN_BITS;
 
 /** A {@link Serializer} for {@link InternalRow} using compacted binary. */
 public class RowCompactedSerializer implements Serializer<InternalRow> {

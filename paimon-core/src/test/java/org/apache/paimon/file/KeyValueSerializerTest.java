@@ -18,10 +18,9 @@
 
 package org.apache.paimon.file;
 
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.file.utils.ObjectSerializer;
 import org.apache.paimon.file.utils.ObjectSerializerTestBase;
-
-import org.apache.paimon.data.serializer.InternalRowSerializer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

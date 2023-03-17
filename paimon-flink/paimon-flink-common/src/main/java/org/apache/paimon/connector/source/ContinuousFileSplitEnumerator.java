@@ -22,10 +22,10 @@ import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.SplitsAssignment;
+
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan.DataFilePlan;
 import org.apache.paimon.table.source.EndOfScanException;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

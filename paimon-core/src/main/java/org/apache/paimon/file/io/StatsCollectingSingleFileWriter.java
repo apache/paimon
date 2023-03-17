@@ -19,16 +19,15 @@
 
 package org.apache.paimon.file.io;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Preconditions;
-
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FieldStatsCollector;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 

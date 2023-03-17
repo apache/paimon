@@ -19,16 +19,16 @@
 package org.apache.paimon.spark;
 
 import org.apache.flink.table.store.fs.Path;
+
+import org.apache.commons.io.FileUtils;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
-
-import org.apache.commons.io.FileUtils;
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericRow;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;

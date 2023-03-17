@@ -23,13 +23,12 @@ import org.apache.paimon.file.schema.SchemaManager;
 import org.apache.paimon.file.stats.StatsTestUtils;
 import org.apache.paimon.file.utils.FailingFileIO;
 import org.apache.paimon.file.utils.FileStorePathFactory;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
-
-import org.apache.paimon.format.FileFormat;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.io.TempDir;
 

@@ -18,15 +18,8 @@
 
 package org.apache.paimon.hive.mapred;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.catalog.CatalogContext;
-import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.source.DataTableScan;
-import org.apache.paimon.table.source.ReadBuilder;
 
 import org.apache.hadoop.hive.ql.io.sarg.ConvertAstToSearchArg;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
@@ -36,9 +29,16 @@ import org.apache.hadoop.mapred.InputSplit;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.RecordReader;
 import org.apache.hadoop.mapred.Reporter;
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.hive.RowDataContainer;
 import org.apache.paimon.hive.SearchArgumentToPredicateConverter;
 import org.apache.paimon.hive.TableStoreJobConf;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.ReadBuilder;
 
 import java.io.IOException;
 import java.util.Arrays;

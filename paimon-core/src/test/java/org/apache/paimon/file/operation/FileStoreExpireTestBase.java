@@ -19,6 +19,7 @@
 package org.apache.paimon.file.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.Snapshot;
 import org.apache.paimon.file.TestFileStore;
@@ -30,8 +31,6 @@ import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-
-import org.apache.paimon.data.BinaryRow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 

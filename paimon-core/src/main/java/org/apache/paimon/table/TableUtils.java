@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.operation.Lock;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateFilter;
@@ -30,8 +31,6 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.CloseableIterator;
-
-import org.apache.paimon.data.InternalRow;
 
 import java.util.List;
 

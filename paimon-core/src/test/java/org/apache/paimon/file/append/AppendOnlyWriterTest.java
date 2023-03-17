@@ -20,12 +20,18 @@
 package org.apache.paimon.file.append;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.io.DataFilePathFactory;
 import org.apache.paimon.file.stats.FieldStatsArraySerializer;
 import org.apache.paimon.file.utils.CommitIncrement;
 import org.apache.paimon.file.utils.ExecutorThreadFactory;
 import org.apache.paimon.file.utils.RecordWriter;
+import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -34,13 +40,6 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.Pair;
-
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FieldStats;
-import org.apache.paimon.format.FileFormat;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

@@ -17,9 +17,8 @@
 
 package org.apache.paimon.format.parquet.reader;
 
-import org.apache.paimon.types.DataType;
-
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.types.DataType;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.bytes.BytesUtils;

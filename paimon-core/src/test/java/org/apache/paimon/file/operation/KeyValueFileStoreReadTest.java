@@ -18,6 +18,9 @@
 
 package org.apache.paimon.file.operation;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.TestFileStore;
 import org.apache.paimon.file.TestKeyValueGenerator;
@@ -41,10 +44,6 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
-
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -126,8 +125,7 @@ public class KeyValueFileStoreReadTest {
                                         new DataField(
                                                 0,
                                                 "count",
-                                                new org.apache.paimon.types
-                                                        .BigIntType()));
+                                                new org.apache.paimon.types.BigIntType()));
                             }
                         },
                         ValueCountMergeFunction.factory());

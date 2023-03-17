@@ -16,11 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
-
-import org.apache.paimon.memory.MemorySegment;
+package org.apache.paimon.codegen;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.memory.MemorySegment;
 
 /**
  * Normalized key computer for {@code SortBuffer}. For performance, subclasses are usually

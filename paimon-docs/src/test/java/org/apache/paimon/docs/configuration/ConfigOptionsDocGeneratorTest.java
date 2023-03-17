@@ -18,6 +18,10 @@
 
 package org.apache.paimon.docs.configuration;
 
+import org.apache.paimon.annotation.ConfigGroup;
+import org.apache.paimon.annotation.ConfigGroups;
+import org.apache.paimon.annotation.Documentation;
+import org.apache.paimon.docs.configuration.data.TestCommonOptions;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.MemorySize;
@@ -26,11 +30,6 @@ import org.apache.paimon.options.description.Formatter;
 import org.apache.paimon.options.description.HtmlFormatter;
 import org.apache.paimon.options.description.InlineElement;
 import org.apache.paimon.utils.Pair;
-
-import org.apache.paimon.annotation.ConfigGroup;
-import org.apache.paimon.annotation.ConfigGroups;
-import org.apache.paimon.annotation.Documentation;
-import org.apache.paimon.docs.configuration.data.TestCommonOptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

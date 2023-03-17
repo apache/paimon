@@ -18,6 +18,8 @@
 
 package org.apache.paimon.file.operation;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.file.Snapshot;
 import org.apache.paimon.file.disk.IOManager;
 import org.apache.paimon.file.io.DataFileMeta;
@@ -29,9 +31,6 @@ import org.apache.paimon.file.utils.Restorable;
 import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
-
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.data.BinaryRow;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

@@ -18,9 +18,8 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.file.io.DataFileMeta;
-
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.file.io.DataFileMeta;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

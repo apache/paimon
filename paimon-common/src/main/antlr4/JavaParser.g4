@@ -43,7 +43,7 @@
 parser grammar JavaParser;
 
 @header {
-    package org.apache.flink.table.store.codegen.codesplit;
+    package org.apache.paimon.codegen.codesplit;
 }
 
 options { tokenVocab=JavaLexer; }

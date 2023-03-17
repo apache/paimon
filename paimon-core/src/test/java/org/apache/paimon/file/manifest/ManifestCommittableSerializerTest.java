@@ -18,13 +18,12 @@
 
 package org.apache.paimon.file.manifest;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.file.io.CompactIncrement;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.io.NewFilesIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
-
-import org.apache.paimon.data.BinaryRow;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;

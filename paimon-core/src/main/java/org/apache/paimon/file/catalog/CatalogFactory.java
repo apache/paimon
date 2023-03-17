@@ -19,11 +19,11 @@
 package org.apache.paimon.file.catalog;
 
 import org.apache.flink.table.store.catalog.CatalogContext;
+
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.Preconditions;
-
-import org.apache.paimon.annotation.Experimental;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

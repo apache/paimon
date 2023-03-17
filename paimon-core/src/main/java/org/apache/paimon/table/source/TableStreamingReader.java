@@ -18,6 +18,10 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
+import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
+
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateFilter;
@@ -25,11 +29,6 @@ import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataTableScan.DataFilePlan;
 import org.apache.paimon.utils.TypeUtils;
-
-import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
-import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
-
-import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 

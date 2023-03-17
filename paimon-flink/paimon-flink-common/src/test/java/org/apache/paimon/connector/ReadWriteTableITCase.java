@@ -33,7 +33,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
-import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.table.store.fs.Path;
@@ -43,6 +42,7 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.Row;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.connector.sink.TableStoreSink;
 import org.apache.paimon.connector.util.AbstractTestBase;
 import org.junit.jupiter.api.BeforeEach;

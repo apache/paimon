@@ -15,19 +15,18 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen.codesplit;
+package org.apache.paimon.codegen.codesplit;
 
 import org.apache.paimon.utils.FileIOUtils;
-
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
 
-import static org.apache.flink.table.store.codegen.codesplit.CodeSplitTestUtil.trimLines;
+import static org.apache.paimon.codegen.codesplit.CodeSplitTestUtil.trimLines;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link org.apache.flink.table.store.codegen.codesplit.JavaCodeSplitter}. */
+/** Tests for {@link org.apache.paimon.codegen.codesplit.JavaCodeSplitter}. */
 class JavaCodeSplitterTest {
 
     @Test

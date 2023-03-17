@@ -18,6 +18,9 @@
 
 package org.apache.paimon.format.orc;
 
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileStatsExtractorTestBase;
+import org.apache.paimon.format.orc.filter.OrcFileStatsExtractor;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -37,10 +40,6 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
-
-import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FileStatsExtractorTestBase;
-import org.apache.paimon.format.orc.filter.OrcFileStatsExtractor;
 
 /** Tests for {@link OrcFileStatsExtractor}. */
 public class OrcFileStatsExtractorTest extends FileStatsExtractorTestBase {

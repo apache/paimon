@@ -18,10 +18,9 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.types.RowKind;
-
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.RowKind;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 

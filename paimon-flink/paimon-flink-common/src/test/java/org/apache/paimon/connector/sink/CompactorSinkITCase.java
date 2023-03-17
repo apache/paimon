@@ -29,6 +29,11 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+
+import org.apache.paimon.connector.source.CompactorSourceBuilder;
+import org.apache.paimon.connector.util.AbstractTestBase;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -38,11 +43,6 @@ import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.connector.source.CompactorSourceBuilder;
-import org.apache.paimon.connector.util.AbstractTestBase;
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericRow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

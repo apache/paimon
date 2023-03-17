@@ -18,13 +18,12 @@
 
 package org.apache.paimon.data.serializer;
 
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowType;
-
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.data.serializer.InternalRowSerializerTest.createArray;

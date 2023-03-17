@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.flink.table.store.codegen
+package org.apache.paimon.codegen
 
 import org.apache.paimon.data.{BinaryRow, InternalRow}
 import org.apache.paimon.types.{RowType, TimestampType}

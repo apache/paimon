@@ -18,14 +18,13 @@
 
 package org.apache.paimon.file;
 
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.file.utils.ObjectSerializer;
 import org.apache.paimon.file.utils.OffsetRow;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.JoinedRow;
 
 /**
  * Serializer for {@link KeyValue}.

@@ -18,14 +18,13 @@
 
 package org.apache.paimon.file.mergetree.compact;
 
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.file.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.file.mergetree.compact.aggregate.FieldSumAgg;
 import org.apache.paimon.types.DataTypes;
-
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;

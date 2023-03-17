@@ -18,9 +18,8 @@
 
 package org.apache.paimon.data;
 
-import org.apache.paimon.types.DecimalType;
-
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.types.DecimalType;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;

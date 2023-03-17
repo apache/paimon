@@ -15,15 +15,14 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen.codesplit;
-
-import org.apache.paimon.utils.Preconditions;
+package org.apache.paimon.codegen.codesplit;
 
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.TokenStreamRewriter;
 import org.antlr.v4.runtime.atn.PredictionMode;
+import org.apache.paimon.utils.Preconditions;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -35,8 +34,7 @@ import java.util.Stack;
  * Extract and rename local variables into member variables.
  *
  * <p>This rewriter only deals with functions without return values. Functions with return values
- * should have been converted by {@link
- * org.apache.flink.table.store.codegen.codesplit.ReturnValueRewriter}.
+ * should have been converted by {@link org.apache.paimon.codegen.codesplit.ReturnValueRewriter}.
  *
  * <p><i>Before</i>
  *

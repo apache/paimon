@@ -18,9 +18,8 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.table.Table;
-
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.table.Table;
 
 /**
  * Create and commit snapshots of a {@link Table}. Snapshots are produced from {@link

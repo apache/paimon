@@ -24,6 +24,8 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
+
+import org.apache.paimon.connector.LogicalTypeConversion;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
@@ -33,8 +35,6 @@ import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanne
 import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.system.BucketsTable;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.connector.LogicalTypeConversion;
 
 import javax.annotation.Nullable;
 

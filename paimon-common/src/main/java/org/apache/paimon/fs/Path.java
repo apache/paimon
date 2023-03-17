@@ -22,9 +22,8 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.utils.StringUtils;
-
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.utils.StringUtils;
 
 import java.io.Serializable;
 import java.net.URI;

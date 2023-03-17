@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen.codesplit;
+package org.apache.paimon.codegen.codesplit;
 
 import org.junit.jupiter.api.Test;
 
@@ -24,7 +24,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link org.apache.flink.table.store.codegen.codesplit.AddBoolBeforeReturnRewriter}. */
+/** Tests for {@link org.apache.paimon.codegen.codesplit.AddBoolBeforeReturnRewriter}. */
 class AddBooleanBeforeReturnRewriterTest extends CodeRewriterTestBase<AddBoolBeforeReturnRewriter> {
 
     public AddBooleanBeforeReturnRewriterTest() {

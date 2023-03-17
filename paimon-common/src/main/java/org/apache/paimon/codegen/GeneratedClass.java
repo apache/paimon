@@ -16,10 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.paimon.codegen;
 
-import org.apache.flink.table.store.codegen.codesplit.JavaCodeSplitter;
-
+import org.apache.paimon.codegen.codesplit.JavaCodeSplitter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

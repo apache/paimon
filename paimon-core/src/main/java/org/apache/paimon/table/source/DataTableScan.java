@@ -18,11 +18,10 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.file.operation.ScanKind;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.utils.Filter;
-
-import org.apache.paimon.annotation.VisibleForTesting;
 
 import javax.annotation.Nullable;
 

@@ -34,18 +34,18 @@ import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
 import org.apache.flink.table.runtime.connector.source.ScanRuntimeProviderContext;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.paimon.CoreOptions.LogChangelogMode;
-import org.apache.paimon.CoreOptions.LogConsistency;
-import org.apache.paimon.table.sink.SinkRecord;
-import org.apache.paimon.types.RowKind;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.utils.TypeConversions;
 
+import org.apache.paimon.CoreOptions.LogChangelogMode;
+import org.apache.paimon.CoreOptions.LogConsistency;
 import org.apache.paimon.connector.log.LogStoreTableFactory;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.table.sink.SinkRecord;
+import org.apache.paimon.types.RowKind;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -56,9 +56,9 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
-import static org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.apache.paimon.connector.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.paimon.connector.kafka.KafkaLogOptions.TOPIC;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;

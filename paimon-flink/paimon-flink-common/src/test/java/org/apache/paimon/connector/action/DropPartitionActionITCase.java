@@ -19,13 +19,13 @@
 package org.apache.paimon.connector.action;
 
 import org.apache.flink.table.store.file.Snapshot;
+
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.data.BinaryString;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 

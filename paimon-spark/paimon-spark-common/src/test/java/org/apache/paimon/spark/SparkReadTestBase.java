@@ -21,16 +21,16 @@ package org.apache.paimon.spark;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+
+import org.apache.commons.lang3.StringUtils;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
-
-import org.apache.commons.lang3.StringUtils;
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericRow;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
