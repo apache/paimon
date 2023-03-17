@@ -524,6 +524,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("256 mb"))
                     .withDescription("Max memory size for lookup cache.");
 
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<Long> TIME_TRAVEL_SNAPSHOT_ID =
+            key("time-travel.snapshot-id")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription("Define The target snapshot for time travel.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
