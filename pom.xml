@@ -53,9 +53,9 @@ under the License.
 
     <modules>
         <module>paimon-benchmark</module>
-        <module>flink-table-store-codegen</module>
-        <module>flink-table-store-codegen-loader</module>
-        <module>flink-table-store-common</module>
+        <module>paimon-codegen</module>
+        <module>paimon-codegen-loader</module>
+        <module>paimon-common</module>
         <module>flink-table-store-core</module>
         <module>paimon-flink</module>
         <module>paimon-docs</module>
@@ -396,9 +396,9 @@ under the License.
                         <!-- artifacts created during release process -->
                         <exclude>release/**</exclude>
                         <!-- antlr grammar files -->
-                        <exclude>flink-table-store-common/src/main/antlr4/**</exclude>
+                        <exclude>paimon-common/src/main/antlr4/**</exclude>
                         <!-- Test files -->
-                        <exclude>flink-table-store-common/src/test/resources/codesplit/**</exclude>
+                        <exclude>paimon-common/src/test/resources/codesplit/**</exclude>
                     </excludes>
                 </configuration>
             </plugin>
