@@ -23,43 +23,43 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-parent</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-parent</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-shade</artifactId>
-    <name>Flink Table Store : Shade</name>
+    <artifactId>paimon-shade</artifactId>
+    <name>Paimon : Shade</name>
 
     <packaging>jar</packaging>
 
     <dependencies>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-common</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-common</artifactId>
             <version>${project.version}</version>
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-core</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-core</artifactId>
             <version>${project.version}</version>
         </dependency>
 
         <!-- codegen runtime dependencies -->
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-codegen-loader</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-codegen-loader</artifactId>
             <version>${project.version}</version>
         </dependency>
 
         <!-- format runtime dependencies -->
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-format</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-format</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -117,10 +117,10 @@ under the License.
                                     <include>org.apache.flink:flink-shaded-asm-9</include>
 
                                     <!-- Flink Table Store -->
-                                    <include>org.apache.flink:flink-table-store-common</include>
-                                    <include>org.apache.flink:flink-table-store-core</include>
-                                    <include>org.apache.flink:flink-table-store-format</include>
-                                    <include>org.apache.flink:flink-table-store-codegen-loader</include>
+                                    <include>org.apache.flink:paimon-common</include>
+                                    <include>org.apache.flink:paimon-core</include>
+                                    <include>org.apache.flink:paimon-format</include>
+                                    <include>org.apache.flink:paimon-codegen-loader</include>
 
                                     <!-- Others, not shade to reduce conflicting -->
                                     <!-- <include>org.xerial.snappy:snappy-java</include> -->

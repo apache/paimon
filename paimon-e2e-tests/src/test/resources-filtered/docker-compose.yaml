@@ -28,8 +28,8 @@ services:
     image: apache/flink:${test.flink.version}-java8
     volumes:
       - testdata:/test-data
-      - /tmp/flink-table-store-e2e-tests-jars:/jars
-    entrypoint: /bin/bash -c "cp /jars/flink-table-store.jar /jars/bundled-hadoop.jar /jars/flink-table-store-hive-catalog.jar /jars/flink-sql-connector-kafka.jar /opt/flink/lib && /docker-entrypoint.sh jobmanager"
+      - /tmp/paimon-e2e-tests-jars:/jars
+    entrypoint: /bin/bash -c "cp /jars/paimon-flink.jar /jars/bundled-hadoop.jar /jars/paimon-hive-catalog.jar /jars/flink-sql-connector-kafka.jar /opt/flink/lib && /docker-entrypoint.sh jobmanager"
     env_file:
       - ./flink.env
     networks:
@@ -43,8 +43,8 @@ services:
     image: apache/flink:${test.flink.version}-java8
     volumes:
       - testdata:/test-data
-      - /tmp/flink-table-store-e2e-tests-jars:/jars
-    entrypoint: /bin/bash -c "cp /jars/flink-table-store.jar /jars/bundled-hadoop.jar /jars/flink-table-store-hive-catalog.jar /jars/flink-sql-connector-kafka.jar /opt/flink/lib && /docker-entrypoint.sh taskmanager"
+      - /tmp/paimon-e2e-tests-jars:/jars
+    entrypoint: /bin/bash -c "cp /jars/paimon-flink.jar /jars/bundled-hadoop.jar /jars/paimon-hive-catalog.jar /jars/flink-sql-connector-kafka.jar /opt/flink/lib && /docker-entrypoint.sh taskmanager"
     env_file:
       - ./flink.env
     networks:
@@ -132,7 +132,7 @@ services:
     image: bde2020/hive:2.3.2-postgresql-metastore
     volumes:
       - testdata:/test-data
-      - /tmp/flink-table-store-e2e-tests-jars:/jars
+      - /tmp/paimon-e2e-tests-jars:/jars
     networks:
       testnetwork:
         aliases:
@@ -178,11 +178,11 @@ services:
     image: bde2020/spark-master:3.3.0-hadoop3.3
     volumes:
       - testdata:/test-data
-      - /tmp/flink-table-store-e2e-tests-jars:/jars
+      - /tmp/paimon-e2e-tests-jars:/jars
     ports:
       - "8080:8080"
       - "7077:7077"
-    entrypoint: /bin/bash -c "cp /jars/flink-table-store.jar /jars/flink-table-store-spark.jar /spark/jars/ && sh /master.sh"
+    entrypoint: /bin/bash -c "cp /jars/paimon-flink.jar /jars/paimon-spark.jar /spark/jars/ && sh /master.sh"
     environment:
       - INIT_DAEMON_STEP=setup_spark
 
@@ -192,10 +192,10 @@ services:
       - spark-master
     volumes:
       - testdata:/test-data
-      - /tmp/flink-table-store-e2e-tests-jars:/jars
+      - /tmp/paimon-e2e-tests-jars:/jars
     ports:
       - "8081:8081"
-    entrypoint: /bin/bash -c "cp /jars/flink-table-store.jar /jars/flink-table-store-spark.jar /spark/jars/ && sh /worker.sh"
+    entrypoint: /bin/bash -c "cp /jars/paimon-flink.jar /jars/paimon-spark.jar /spark/jars/ && sh /worker.sh"
     environment:
       - "SPARK_MASTER=spark://spark-master:7077"
 

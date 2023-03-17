@@ -23,15 +23,15 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-flink</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-flink</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
 
-    <artifactId>flink-table-store-flink-common</artifactId>
-    <name>Flink Table Store : Flink : Common</name>
+    <artifactId>paimon-flink-common</artifactId>
+    <name>Paimon : Flink : Common</name>
 
     <properties>
         <flink.version>1.16.1</flink.version>
@@ -125,8 +125,8 @@ under the License.
         <!-- test dependencies -->
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-common</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-common</artifactId>
             <version>${project.version}</version>
             <type>test-jar</type>
             <scope>test</scope>
@@ -256,10 +256,10 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <include>org.apache.flink:flink-table-store-common</include>
-                                    <include>org.apache.flink:flink-table-store-core</include>
-                                    <include>org.apache.flink:flink-table-store-format</include>
-                                    <include>org.apache.flink:flink-table-store-codegen-loader</include>
+                                    <include>org.apache.flink:paimon-common</include>
+                                    <include>org.apache.flink:paimon-core</include>
+                                    <include>org.apache.flink:paimon-format</include>
+                                    <include>org.apache.flink:paimon-codegen-loader</include>
                                 </includes>
                             </artifactSet>
                             <relocations>

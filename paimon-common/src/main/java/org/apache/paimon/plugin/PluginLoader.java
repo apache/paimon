@@ -85,8 +85,7 @@ public class PluginLoader {
                             OWNER_CLASSPATH,
                             COMPONENT_CLASSPATH);
         } catch (IOException e) {
-            throw new RuntimeException(
-                    "Could not initialize the flink-table-store-codegen loader.", e);
+            throw new RuntimeException("Could not initialize the paimon-codegen loader.", e);
         }
     }
 

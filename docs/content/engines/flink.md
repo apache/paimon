@@ -38,9 +38,9 @@ Download the jar file with corresponding version.
 
 | Version | Jar                                                                                                                                                                                |
 |---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Flink 1.16 | [flink-table-store-flink-1.16-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-flink-1.16-{{< version >}}.jar) |
-| Flink 1.15 | [flink-table-store-flink-1.15-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-flink-1.15-{{< version >}}.jar) |
-| Flink 1.14 | [flink-table-store-flink-1.14-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-flink-1.14-{{< version >}}.jar) |
+| Flink 1.16 | [paimon-flink-1.16-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.16-{{< version >}}.jar) |
+| Flink 1.15 | [paimon-flink-1.15-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.15-{{< version >}}.jar) |
+| Flink 1.14 | [paimon-flink-1.14-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.14-{{< version >}}.jar) |
 
 You can also manually build bundled jar from the source code.
 
@@ -57,7 +57,7 @@ To build from source code, either [download the source of a release](https://fli
 Build bundled jar with the following command.
 - `mvn clean install -DskipTests`
 
-You can find the bundled jar in `./flink-table-store-flink/flink-table-store-flink-<flink-version>/target/flink-table-store-flink-<flink-version>-{{< version >}}.jar`.
+You can find the bundled jar in `./paimon-flink/paimon-flink-<flink-version>/target/paimon-flink-<flink-version>-{{< version >}}.jar`.
 
 ## Quick Start
 
@@ -74,7 +74,7 @@ tar -xzf flink-*.tgz
 Copy table store bundled jar to the `lib` directory of your Flink home.
 
 ```bash
-cp flink-table-store-flink-*.jar <FLINK_HOME>/lib/
+cp paimon-flink-*.jar <FLINK_HOME>/lib/
 ```
 
 **Step 3: Copy Hadoop Bundled Jar**

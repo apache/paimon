@@ -23,15 +23,15 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-spark</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-spark</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
 
-    <artifactId>flink-table-store-spark-common</artifactId>
-    <name>Flink Table Store : Spark : Common</name>
+    <artifactId>paimon-spark-common</artifactId>
+    <name>Paimon : Spark : Common</name>
 
     <properties>
         <spark.version>3.2.2</spark.version>
@@ -74,7 +74,7 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <include>org.apache.flink:flink-table-store-shade</include>
+                                    <include>org.apache.flink:paimon-shade</include>
                                 </includes>
                             </artifactSet>
                         </configuration>

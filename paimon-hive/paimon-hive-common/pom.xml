@@ -23,20 +23,20 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-hive</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-hive</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-hive-common</artifactId>
-    <name>Flink Table Store : Hive Common</name>
+    <artifactId>paimon-hive-common</artifactId>
+    <name>Paimon : Hive Common</name>
 
     <packaging>jar</packaging>
 
     <dependencies>
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-common</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-common</artifactId>
             <version>${project.version}</version>
             <scope>provided</scope>
         </dependency>

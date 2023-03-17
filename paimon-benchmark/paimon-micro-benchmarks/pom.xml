@@ -23,13 +23,13 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-benchmark</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-benchmark</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-micro-benchmarks</artifactId>
-    <name>Flink Table Store : Benchmark : Micro</name>
+    <artifactId>paimon-micro-benchmarks</artifactId>
+    <name>Paimon : Benchmark : Micro</name>
 
     <dependencies>
 
@@ -119,8 +119,8 @@ under the License.
         <!-- Flink Table Store dependencies -->
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-shade</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-shade</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>

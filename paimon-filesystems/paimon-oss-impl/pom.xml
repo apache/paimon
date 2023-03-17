@@ -22,13 +22,13 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-filesystems</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-filesystems</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-oss-impl</artifactId>
-    <name>Flink Table Store : FileSystems : OSS : Impl</name>
+    <artifactId>paimon-oss-impl</artifactId>
+    <name>Paimon : FileSystems : OSS : Impl</name>
     <packaging>jar</packaging>
 
     <properties>
@@ -37,15 +37,15 @@
 
     <dependencies>
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-common</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-common</artifactId>
             <version>${project.version}</version>
             <scope>provided</scope>
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-hadoop-shaded</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-hadoop-shaded</artifactId>
             <version>${project.version}</version>
         </dependency>
 

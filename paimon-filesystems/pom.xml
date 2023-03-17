@@ -22,13 +22,13 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-parent</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-parent</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-filesystems</artifactId>
-    <name>Flink Table Store : FileSystems : </name>
+    <artifactId>paimon-filesystems</artifactId>
+    <name>Paimon : FileSystems : </name>
     <packaging>pom</packaging>
 
     <modules>

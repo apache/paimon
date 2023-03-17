@@ -38,9 +38,9 @@ Download the jar file with corresponding version.
 
 | Version   | Jar                                                                                                                                                                              |
 |-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Spark 3.3 | [flink-table-store-spark-3.3-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-spark-3.3-{{< version >}}.jar) |
-| Spark 3.2 | [flink-table-store-spark-3.2-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-spark-3.2-{{< version >}}.jar) |
-| Spark 3.1 | [flink-table-store-spark-3.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-spark-3.1-{{< version >}}.jar) |
+| Spark 3.3 | [paimon-spark-3.3-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-spark-3.3-{{< version >}}.jar) |
+| Spark 3.2 | [paimon-spark-3.2-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-spark-3.2-{{< version >}}.jar) |
+| Spark 3.1 | [paimon-spark-3.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-spark-3.1-{{< version >}}.jar) |
 
 You can also manually build bundled jar from the source code.
 
@@ -60,7 +60,7 @@ Build bundled jar with the following command.
 mvn clean install -DskipTests
 ```
 
-For Spark 3.3, you can find the bundled jar in `./flink-table-store-spark/flink-table-store-spark-3.3/target/flink-table-store-spark-3.3-{{< version >}}.jar`.
+For Spark 3.3, you can find the bundled jar in `./paimon-spark/paimon-spark-3.3/target/paimon-spark-3.3-{{< version >}}.jar`.
 
 ## Quick Start
 
@@ -75,10 +75,10 @@ If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or 
 Append path to table store jar file to the `--jars` argument when starting `spark-sql`.
 
 ```bash
-spark-sql ... --jars /path/to/flink-table-store-spark-3.3-{{< version >}}.jar
+spark-sql ... --jars /path/to/paimon-spark-3.3-{{< version >}}.jar
 ```
 
-Alternatively, you can copy `flink-table-store-spark-3.3-{{< version >}}.jar` under `spark/jars` in your Spark installation directory.
+Alternatively, you can copy `paimon-spark-3.3-{{< version >}}.jar` under `spark/jars` in your Spark installation directory.
 
 **Step 2: Specify Table Store Catalog**
 
@@ -138,7 +138,7 @@ SELECT * FROM my_table;
 If you don't want to use Table Store catalog, you can also run `spark-shell` and query the table with Scala API.
 
 ```bash
-spark-shell ... --jars /path/to/flink-table-store-spark-3.3-{{< version >}}.jar
+spark-shell ... --jars /path/to/paimon-spark-3.3-{{< version >}}.jar
 ```
 
 ```scala

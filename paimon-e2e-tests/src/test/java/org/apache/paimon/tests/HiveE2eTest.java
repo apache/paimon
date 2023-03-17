@@ -35,8 +35,7 @@ import java.util.UUID;
 @DisabledIfSystemProperty(named = "test.flink.version", matches = "1.14.*")
 public class HiveE2eTest extends E2eReaderTestBase {
 
-    private static final String TABLE_STORE_HIVE_CONNECTOR_JAR_NAME =
-            "flink-table-store-hive-connector.jar";
+    private static final String TABLE_STORE_HIVE_CONNECTOR_JAR_NAME = "paimon-hive-connector.jar";
 
     public HiveE2eTest() {
         super(false, true, false);

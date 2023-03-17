@@ -26,12 +26,12 @@ under the License.
     </formats>
 
     <includeBaseDirectory>true</includeBaseDirectory>
-    <baseDirectory>flink-table-store-benchmark</baseDirectory>
+    <baseDirectory>paimon-benchmark</baseDirectory>
 
     <files>
         <!-- copy jars -->
         <file>
-            <source>target/flink-table-store-cluster-benchmark-${project.version}-jar-with-dependencies.jar</source>
+            <source>target/paimon-cluster-benchmark-${project.version}-jar-with-dependencies.jar</source>
             <outputDirectory>lib/</outputDirectory>
             <fileMode>0644</fileMode>
         </file>

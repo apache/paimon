@@ -206,7 +206,7 @@ Run the following command to submit a drop-partition job for the table.
 <FLINK_HOME>/bin/flink run \
     -c org.apache.paimon.connector.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
-    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-**-{{< version >}}.jar \
     drop-partition \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -224,7 +224,7 @@ For more information of drop-partition, see
 <FLINK_HOME>/bin/flink run \
     -c org.apache.paimon.connector.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
-    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-**-{{< version >}}.jar \
     drop-partition --help
 ```
 
@@ -246,7 +246,7 @@ Run the following command to submit a 'delete' job for the table.
 <FLINK_HOME>/bin/flink run \
     -c org.apache.paimon.connector.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
-    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-**-{{< version >}}.jar \
     delete \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -265,7 +265,7 @@ For more information of 'delete', see
 <FLINK_HOME>/bin/flink run \
     -c org.apache.paimon.connector.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
-    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-**-{{< version >}}.jar \
     delete --help
 ```
 
@@ -314,7 +314,7 @@ Run the following command to submit a 'merge-into' job for the table.
 <FLINK_HOME>/bin/flink run \
     -c org.apache.paimon.connector.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
-    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-**-{{< version >}}.jar \
     merge-into \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -341,7 +341,7 @@ Alternatively, you can use '--source-sql <sql> [, --source-sql <sql> ...]' to cr
 ./flink run \
     -c org.apache.paimon.connector.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
-    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-**-{{< version >}}.jar \
     merge-into \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -359,7 +359,7 @@ Alternatively, you can use '--source-sql <sql> [, --source-sql <sql> ...]' to cr
 ./flink run \
     -c org.apache.paimon.connector.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
-    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-**-{{< version >}}.jar \
     merge-into \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -376,7 +376,7 @@ Alternatively, you can use '--source-sql <sql> [, --source-sql <sql> ...]' to cr
 ./flink run \
     -c org.apache.paimon.connector.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
-    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-**-{{< version >}}.jar \
     merge-into \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -394,7 +394,7 @@ Alternatively, you can use '--source-sql <sql> [, --source-sql <sql> ...]' to cr
 ./flink run \
     -c org.apache.paimon.connector.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
-    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-**-{{< version >}}.jar \
     merge-into \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -453,7 +453,7 @@ For more information of 'merge-into', see
 <FLINK_HOME>/bin/flink run \
     -c org.apache.paimon.connector.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
-    /path/to/flink-table-store-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-**-{{< version >}}.jar \
     merge-into --help
 ```
 {{< /tab >}}
