@@ -80,6 +80,11 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     }
 
     @Override
+    public List<DataFileMeta> allFiles() {
+        return levels.allFiles();
+    }
+
+    @Override
     public void triggerCompaction(boolean fullCompaction) {
         Optional<CompactUnit> optionalUnit;
         List<LevelSortedRun> runs = levels.levelSortedRuns();

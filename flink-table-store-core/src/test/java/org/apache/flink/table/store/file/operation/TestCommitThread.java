@@ -25,7 +25,7 @@ import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
-import org.apache.flink.table.store.file.utils.RecordWriter;
+import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.table.sink.CommitMessageImpl;
 import org.apache.flink.table.store.types.RowType;
 
@@ -41,8 +41,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
@@ -139,7 +137,7 @@ public class TestCommitThread extends Thread {
         }
         ManifestCommittable committable = new ManifestCommittable(commitIdentifier++);
         for (Map.Entry<BinaryRow, MergeTreeWriter> entry : writers.entrySet()) {
-            RecordWriter.CommitIncrement inc = entry.getValue().prepareCommit(true);
+            CommitIncrement inc = entry.getValue().prepareCommit(true);
             committable.addFileCommittable(
                     new CommitMessageImpl(
                             entry.getKey(), 0, inc.newFilesIncrement(), inc.compactIncrement()));
@@ -151,7 +149,7 @@ public class TestCommitThread extends Thread {
     private void doOverwrite() throws Exception {
         BinaryRow partition = overwriteData();
         ManifestCommittable committable = new ManifestCommittable(commitIdentifier++);
-        RecordWriter.CommitIncrement inc = writers.get(partition).prepareCommit(true);
+        CommitIncrement inc = writers.get(partition).prepareCommit(true);
         committable.addFileCommittable(
                 new CommitMessageImpl(
                         partition, 0, inc.newFilesIncrement(), inc.compactIncrement()));
@@ -174,7 +172,7 @@ public class TestCommitThread extends Thread {
                     MergeTreeWriter writer =
                             writers.computeIfAbsent(partition, p -> createWriter(p, false));
                     writer.compact(true);
-                    RecordWriter.CommitIncrement inc = writer.prepareCommit(true);
+                    CommitIncrement inc = writer.prepareCommit(true);
                     committable.addFileCommittable(
                             new CommitMessageImpl(
                                     partition, 0, inc.newFilesIncrement(), inc.compactIncrement()));
@@ -275,19 +273,8 @@ public class TestCommitThread extends Thread {
     }
 
     private MergeTreeWriter createWriter(BinaryRow partition, boolean empty) {
-        ExecutorService service =
-                Executors.newSingleThreadExecutor(
-                        r -> {
-                            Thread t = new Thread(r);
-                            t.setName(Thread.currentThread().getName() + "-writer-service-pool");
-                            return t;
-                        });
         MergeTreeWriter writer =
-                empty
-                        ? (MergeTreeWriter)
-                                write.createEmptyWriterContainer(partition, 0, service).writer
-                        : (MergeTreeWriter)
-                                write.createWriterContainer(partition, 0, service).writer;
+                (MergeTreeWriter) write.createWriterContainer(partition, 0, empty).writer;
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(
                         WRITE_BUFFER_SIZE.getBytes(), (int) PAGE_SIZE.getBytes()));

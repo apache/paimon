@@ -23,6 +23,8 @@ import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.utils.Preconditions;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 
@@ -38,6 +40,11 @@ public class NoopCompactManager implements CompactManager {
 
     @Override
     public void addNewFile(DataFileMeta file) {}
+
+    @Override
+    public List<DataFileMeta> allFiles() {
+        return Collections.emptyList();
+    }
 
     @Override
     public void triggerCompaction(boolean fullCompaction) {

@@ -22,7 +22,9 @@ import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.flink.table.store.file.operation.AbstractFileStoreWrite;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
+import org.apache.flink.table.store.file.utils.Restorable;
 
 import java.util.List;
 
@@ -33,9 +35,10 @@ import static org.apache.flink.table.store.utils.Preconditions.checkState;
  *
  * @param <T> type of record to write into {@link org.apache.flink.table.store.file.FileStore}.
  */
-public class TableWriteImpl<T> implements InnerTableWrite {
+public class TableWriteImpl<T>
+        implements InnerTableWrite, Restorable<List<AbstractFileStoreWrite.State>> {
 
-    private final FileStoreWrite<T> write;
+    private final AbstractFileStoreWrite<T> write;
     private final SinkRecordConverter recordConverter;
     private final RecordExtractor<T> recordExtractor;
 
@@ -45,7 +48,7 @@ public class TableWriteImpl<T> implements InnerTableWrite {
             FileStoreWrite<T> write,
             SinkRecordConverter recordConverter,
             RecordExtractor<T> recordExtractor) {
-        this.write = write;
+        this.write = (AbstractFileStoreWrite<T>) write;
         this.recordConverter = recordConverter;
         this.recordExtractor = recordExtractor;
     }
@@ -119,6 +122,16 @@ public class TableWriteImpl<T> implements InnerTableWrite {
     @Override
     public void close() throws Exception {
         write.close();
+    }
+
+    @Override
+    public List<AbstractFileStoreWrite.State> checkpoint() {
+        return write.checkpoint();
+    }
+
+    @Override
+    public void restore(List<AbstractFileStoreWrite.State> state) {
+        write.restore(state);
     }
 
     /** Extractor to extract {@link T} from the {@link SinkRecord}. */

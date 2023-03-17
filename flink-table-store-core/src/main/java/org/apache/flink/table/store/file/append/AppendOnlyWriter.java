@@ -26,6 +26,7 @@ import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.io.NewFilesIncrement;
 import org.apache.flink.table.store.file.io.RowDataRollingFileWriter;
+import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.fs.FileIO;
@@ -33,6 +34,8 @@ import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.LongCounter;
 import org.apache.flink.table.store.utils.Preconditions;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -71,7 +74,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
             long maxSequenceNumber,
             CompactManager compactManager,
             boolean forceCompact,
-            DataFilePathFactory pathFactory) {
+            DataFilePathFactory pathFactory,
+            @Nullable CommitIncrement increment) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -86,6 +90,12 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
         this.seqNumCounter = new LongCounter(maxSequenceNumber + 1);
 
         this.writer = createRollingRowWriter();
+
+        if (increment != null) {
+            newFiles.addAll(increment.newFilesIncrement().newFiles());
+            compactBefore.addAll(increment.compactIncrement().compactBefore());
+            compactAfter.addAll(increment.compactIncrement().compactAfter());
+        }
     }
 
     @Override
@@ -105,6 +115,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
     @Override
     public void addNewFiles(List<DataFileMeta> files) {
         files.forEach(compactManager::addNewFile);
+    }
+
+    @Override
+    public List<DataFileMeta> dataFiles() {
+        return compactManager.allFiles();
     }
 
     @Override
@@ -186,16 +201,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
         compactBefore.clear();
         compactAfter.clear();
 
-        return new CommitIncrement() {
-            @Override
-            public NewFilesIncrement newFilesIncrement() {
-                return newFilesIncrement;
-            }
-
-            @Override
-            public CompactIncrement compactIncrement() {
-                return compactIncrement;
-            }
-        };
+        return new CommitIncrement(newFilesIncrement, compactIncrement);
     }
 }

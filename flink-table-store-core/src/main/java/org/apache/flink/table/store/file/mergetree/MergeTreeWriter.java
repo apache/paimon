@@ -33,8 +33,11 @@ import org.apache.flink.table.store.file.io.RollingFileWriter;
 import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.memory.MemorySegmentPool;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
+import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.types.RowType;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -80,7 +83,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             MergeFunction<KeyValue> mergeFunction,
             KeyValueFileWriterFactory writerFactory,
             boolean commitForceCompact,
-            ChangelogProducer changelogProducer) {
+            ChangelogProducer changelogProducer,
+            @Nullable CommitIncrement increment) {
         this.writeBufferSpillable = writeBufferSpillable;
         this.sortMaxFan = sortMaxFan;
         this.ioManager = ioManager;
@@ -99,6 +103,16 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.compactBefore = new LinkedHashMap<>();
         this.compactAfter = new LinkedHashSet<>();
         this.compactChangelog = new LinkedHashSet<>();
+        if (increment != null) {
+            newFiles.addAll(increment.newFilesIncrement().newFiles());
+            newFilesChangelog.addAll(increment.newFilesIncrement().changelogFiles());
+            increment
+                    .compactIncrement()
+                    .compactBefore()
+                    .forEach(f -> compactBefore.put(f.fileName(), f));
+            compactAfter.addAll(increment.compactIncrement().compactAfter());
+            compactChangelog.addAll(increment.compactIncrement().changelogFiles());
+        }
     }
 
     private long newSequenceNumber() {
@@ -146,6 +160,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     @Override
     public void addNewFiles(List<DataFileMeta> files) {
         files.forEach(compactManager::addNewFile);
+    }
+
+    @Override
+    public List<DataFileMeta> dataFiles() {
+        return compactManager.allFiles();
     }
 
     @Override
@@ -232,17 +251,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         compactAfter.clear();
         compactChangelog.clear();
 
-        return new CommitIncrement() {
-            @Override
-            public NewFilesIncrement newFilesIncrement() {
-                return newFilesIncrement;
-            }
-
-            @Override
-            public CompactIncrement compactIncrement() {
-                return compactIncrement;
-            }
-        };
+        return new CommitIncrement(newFilesIncrement, compactIncrement);
     }
 
     private void updateCompactResult(CompactResult result) {
