@@ -56,7 +56,7 @@ under the License.
         <module>paimon-codegen</module>
         <module>paimon-codegen-loader</module>
         <module>paimon-common</module>
-        <module>flink-table-store-core</module>
+        <module>paimon-core</module>
         <module>paimon-flink</module>
         <module>paimon-docs</module>
         <module>paimon-e2e-tests</module>
