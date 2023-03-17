@@ -18,14 +18,6 @@
 
 package org.apache.paimon.format;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.Decimal;
-import org.apache.flink.table.store.data.GenericArray;
-import org.apache.flink.table.store.data.GenericMap;
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalArray;
-import org.apache.flink.table.store.data.InternalMap;
-import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.PositionOutputStream;
@@ -44,6 +36,14 @@ import org.apache.flink.table.store.types.TimestampType;
 import org.apache.flink.table.store.types.VarBinaryType;
 import org.apache.flink.table.store.types.VarCharType;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.data.Timestamp;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
@@ -27,6 +26,8 @@ import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.store.table.system.SystemTableLoader;
 import org.apache.flink.table.store.utils.StringUtils;
+
+import org.apache.paimon.annotation.VisibleForTesting;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {

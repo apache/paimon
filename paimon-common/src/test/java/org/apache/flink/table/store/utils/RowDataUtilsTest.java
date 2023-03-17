@@ -18,11 +18,6 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.Decimal;
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.Timestamp;
-import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.datagen.DataGenerator;
 import org.apache.flink.table.store.datagen.RandomGeneratorVisitor;
 import org.apache.flink.table.store.datagen.RowDataGenerator;
@@ -31,6 +26,11 @@ import org.apache.flink.table.store.types.DataTypeRoot;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

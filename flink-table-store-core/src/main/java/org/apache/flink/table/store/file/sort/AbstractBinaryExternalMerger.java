@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.sort;
 
-import org.apache.flink.table.store.data.AbstractPagedOutputView;
 import org.apache.flink.table.store.file.compression.BlockCompressionFactory;
 import org.apache.flink.table.store.file.disk.ChannelReaderInputView;
 import org.apache.flink.table.store.file.disk.ChannelWithMeta;
@@ -28,6 +27,7 @@ import org.apache.flink.table.store.file.disk.FileIOChannel;
 import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.utils.MutableObjectIterator;
 
+import org.apache.paimon.data.AbstractPagedOutputView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

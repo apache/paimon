@@ -17,8 +17,7 @@
 
 package org.apache.paimon.format.parquet.reader;
 
-import org.apache.flink.table.store.data.Timestamp;
-
+import org.apache.paimon.data.Timestamp;
 import org.apache.parquet.bytes.ByteBufferInputStream;
 import org.apache.parquet.column.Dictionary;
 

@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.io.RollingFileWriter;
 import org.apache.flink.table.store.file.io.SingleFileWriter;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -30,6 +29,7 @@ import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FieldStatsCollector;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;

@@ -18,13 +18,12 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.flink.table.store.data.BinaryString;
-
 import org.apache.hadoop.hive.common.type.HiveChar;
 import org.apache.hadoop.hive.serde2.io.HiveCharWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.HiveCharObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
+import org.apache.paimon.data.BinaryString;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for CHAR type. */
 public class TableStoreCharObjectInspector extends AbstractPrimitiveJavaObjectInspector

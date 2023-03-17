@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.memory;
 
-import org.apache.flink.table.store.annotation.Experimental;
+import org.apache.paimon.annotation.Experimental;
 
 /**
  * Interface describing entities that can provide memory segments.

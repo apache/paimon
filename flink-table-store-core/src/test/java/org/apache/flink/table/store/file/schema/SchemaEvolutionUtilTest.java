@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Equal;
 import org.apache.flink.table.store.file.predicate.IsNotNull;
 import org.apache.flink.table.store.file.predicate.IsNull;
@@ -35,6 +33,8 @@ import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.utils.ProjectedRow;
 import org.apache.flink.table.store.utils.Projection;
 
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

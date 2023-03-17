@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.types;
 
-import org.apache.flink.table.store.annotation.Experimental;
+import org.apache.paimon.annotation.Experimental;
 
 /**
  * Data type of a 4-byte single precision floating point number. Compared to the SQL standard, the

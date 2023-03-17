@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store;
 
-import org.apache.flink.table.store.annotation.Documentation.ExcludeFromDocumentation;
-import org.apache.flink.table.store.annotation.Documentation.Immutable;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.ConfigOption;
@@ -29,6 +27,8 @@ import org.apache.flink.table.store.options.description.DescribedEnum;
 import org.apache.flink.table.store.options.description.Description;
 import org.apache.flink.table.store.options.description.InlineElement;
 
+import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
+import org.apache.paimon.annotation.Documentation.Immutable;
 import org.apache.paimon.format.FileFormat;
 
 import java.io.Serializable;

@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.casting.CastFieldGetter;
@@ -28,6 +27,7 @@ import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
 
 import javax.annotation.Nullable;

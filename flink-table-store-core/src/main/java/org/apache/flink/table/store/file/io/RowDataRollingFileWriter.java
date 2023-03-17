@@ -19,11 +19,11 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.LongCounter;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 
 /** {@link RollingFileWriter} for data files containing {@link InternalRow}. */

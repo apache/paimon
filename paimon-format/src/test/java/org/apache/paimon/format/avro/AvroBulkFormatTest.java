@@ -18,9 +18,6 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.reader.RecordReader;
@@ -31,6 +28,9 @@ import org.apache.avro.file.DataFileWriter;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.io.DatumWriter;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format;
 
-import org.apache.flink.table.store.data.InternalRow;
+import org.apache.paimon.data.InternalRow;
 
 import java.io.IOException;
 

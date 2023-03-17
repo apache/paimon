@@ -18,15 +18,9 @@
 
 package org.apache.flink.table.store.file.mergetree;
 
-import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.codegen.NormalizedKeyComputer;
 import org.apache.flink.table.store.codegen.RecordComparator;
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.serializer.BinaryRowSerializer;
-import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
-import org.apache.flink.table.store.data.serializer.InternalSerializers;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.disk.IOManager;
@@ -41,6 +35,13 @@ import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.BinaryRowSerializer;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.InternalSerializers;
 
 import javax.annotation.Nullable;
 

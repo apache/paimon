@@ -19,12 +19,6 @@
 package org.apache.flink.table.store.file;
 
 import org.apache.flink.table.store.codegen.RecordComparator;
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.GenericArray;
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -38,6 +32,13 @@ import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.VarCharType;
+
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 
 import javax.annotation.Nullable;
 

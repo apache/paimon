@@ -18,9 +18,10 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
+
+import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 

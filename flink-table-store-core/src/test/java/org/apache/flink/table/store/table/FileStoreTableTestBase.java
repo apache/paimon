@@ -18,13 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.BinaryRowWriter;
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.GenericMap;
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.JoinedRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
@@ -52,6 +45,13 @@ import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericMap;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

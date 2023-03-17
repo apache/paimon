@@ -18,13 +18,13 @@
 
 package org.apache.paimon.format.orc.filter;
 
-import org.apache.flink.table.store.data.Decimal;
-import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.predicate.FieldRef;
 import org.apache.flink.table.store.file.predicate.FunctionVisitor;
 import org.apache.flink.table.store.types.DataType;
 
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 
 import javax.annotation.Nullable;
 

@@ -42,7 +42,6 @@ import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
-import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.Identifier;
 import org.apache.flink.table.store.file.schema.Schema;
@@ -50,6 +49,8 @@ import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.Table;
 import org.apache.flink.table.types.logical.RowType;
+
+import org.apache.paimon.annotation.VisibleForTesting;
 
 import java.util.ArrayList;
 import java.util.Collections;

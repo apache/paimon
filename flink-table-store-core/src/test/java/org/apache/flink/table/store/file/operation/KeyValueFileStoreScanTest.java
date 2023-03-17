@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.TestFileStore;
@@ -35,6 +34,7 @@ import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.data.BinaryRow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

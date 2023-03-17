@@ -18,9 +18,6 @@
 
 package org.apache.paimon.format.orc.filter;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.Decimal;
-import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.DataField;
@@ -40,6 +37,9 @@ import org.apache.orc.Reader;
 import org.apache.orc.StringColumnStatistics;
 import org.apache.orc.TimestampColumnStatistics;
 import org.apache.orc.TypeDescription;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.orc.OrcReaderFactory;

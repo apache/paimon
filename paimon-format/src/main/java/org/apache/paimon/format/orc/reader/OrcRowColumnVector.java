@@ -18,16 +18,16 @@
 
 package org.apache.paimon.format.orc.reader;
 
-import org.apache.flink.table.store.data.columnar.ColumnVector;
-import org.apache.flink.table.store.data.columnar.ColumnarRow;
-import org.apache.flink.table.store.data.columnar.VectorizedColumnBatch;
 import org.apache.flink.table.store.types.RowType;
 
 import org.apache.hadoop.hive.ql.exec.vector.StructColumnVector;
+import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.ColumnarRow;
+import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 
 /** This column vector is used to adapt hive's StructColumnVector to Flink's RowColumnVector. */
 public class OrcRowColumnVector extends AbstractOrcColumnVector
-        implements org.apache.flink.table.store.data.columnar.RowColumnVector {
+        implements org.apache.paimon.data.columnar.RowColumnVector {
 
     private final ColumnarRow columnarRow;
 

@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.types;
 
-import org.apache.flink.table.store.annotation.Experimental;
+import org.apache.paimon.annotation.Experimental;
 
 /**
  * Data type of an 8-byte double precision floating point number.

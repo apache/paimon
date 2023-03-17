@@ -19,9 +19,6 @@
 package org.apache.paimon.connector.action;
 
 import org.apache.flink.table.store.catalog.CatalogContext;
-import org.apache.flink.table.store.data.DataFormatTestUtil;
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.file.catalog.Identifier;
@@ -37,6 +34,9 @@ import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.types.RowType;
 
 import org.apache.paimon.connector.util.AbstractTestBase;
+import org.apache.paimon.data.DataFormatTestUtil;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 

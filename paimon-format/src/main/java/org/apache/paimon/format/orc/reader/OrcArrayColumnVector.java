@@ -18,16 +18,16 @@
 
 package org.apache.paimon.format.orc.reader;
 
-import org.apache.flink.table.store.data.InternalArray;
-import org.apache.flink.table.store.data.columnar.ColumnVector;
-import org.apache.flink.table.store.data.columnar.ColumnarArray;
 import org.apache.flink.table.store.types.ArrayType;
 
 import org.apache.hadoop.hive.ql.exec.vector.ListColumnVector;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.ColumnarArray;
 
 /** This column vector is used to adapt hive's ListColumnVector to Flink's ArrayColumnVector. */
 public class OrcArrayColumnVector extends AbstractOrcColumnVector
-        implements org.apache.flink.table.store.data.columnar.ArrayColumnVector {
+        implements org.apache.paimon.data.columnar.ArrayColumnVector {
 
     private final ListColumnVector hiveVector;
     private final ColumnVector flinkVector;

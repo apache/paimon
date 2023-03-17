@@ -19,7 +19,8 @@
 package org.apache.flink.table.store.file.sort;
 
 import org.apache.flink.table.store.codegen.RecordComparator;
-import org.apache.flink.table.store.data.InternalRow;
+
+import org.apache.paimon.data.InternalRow;
 
 /** Example Int {@link RecordComparator}. */
 public class IntRecordComparator implements RecordComparator {

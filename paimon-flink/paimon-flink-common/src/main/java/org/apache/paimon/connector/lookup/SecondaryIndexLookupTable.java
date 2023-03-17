@@ -18,12 +18,13 @@
 
 package org.apache.paimon.connector.lookup;
 
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.serializer.InternalSerializers;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.KeyProjectedRow;
 import org.apache.flink.table.store.utils.TypeUtils;
+
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalSerializers;
 
 import java.io.IOException;
 import java.util.ArrayList;

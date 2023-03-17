@@ -18,7 +18,6 @@
 
 package org.apache.paimon.connector.action;
 
-import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.DataTableScan;
@@ -26,6 +25,7 @@ import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.data.BinaryString;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 

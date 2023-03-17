@@ -20,7 +20,8 @@ package org.apache.paimon.connector;
 
 import org.apache.flink.api.common.typeutils.SerializerTestBase;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.table.store.data.BinaryRow;
+
+import org.apache.paimon.data.BinaryRow;
 
 import java.util.Random;
 

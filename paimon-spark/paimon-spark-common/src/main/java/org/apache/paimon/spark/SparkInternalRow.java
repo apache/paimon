@@ -18,11 +18,6 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.InternalArray;
-import org.apache.flink.table.store.data.InternalMap;
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataType;
@@ -31,6 +26,11 @@ import org.apache.flink.table.store.types.MapType;
 import org.apache.flink.table.store.types.MultisetType;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.spark.sql.catalyst.util.ArrayBasedMapData;
 import org.apache.spark.sql.catalyst.util.ArrayData;
 import org.apache.spark.sql.catalyst.util.DateTimeUtils;
@@ -129,8 +129,7 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
 
     @Override
     public Decimal getDecimal(int ordinal, int precision, int scale) {
-        org.apache.flink.table.store.data.Decimal decimal =
-                row.getDecimal(ordinal, precision, scale);
+        org.apache.paimon.data.Decimal decimal = row.getDecimal(ordinal, precision, scale);
         return fromFlink(decimal);
     }
 
@@ -181,7 +180,7 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
             case VARCHAR:
                 return fromFlink((BinaryString) o);
             case DECIMAL:
-                return fromFlink((org.apache.flink.table.store.data.Decimal) o);
+                return fromFlink((org.apache.paimon.data.Decimal) o);
             case ARRAY:
                 return fromFlink((InternalArray) o, (ArrayType) type);
             case MAP:
@@ -198,7 +197,7 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
         return UTF8String.fromBytes(string.toBytes());
     }
 
-    public static Decimal fromFlink(org.apache.flink.table.store.data.Decimal decimal) {
+    public static Decimal fromFlink(org.apache.paimon.data.Decimal decimal) {
         return Decimal.apply(decimal.toBigDecimal());
     }
 

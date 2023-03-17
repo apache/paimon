@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.store.annotation.Experimental;
+import org.apache.paimon.annotation.Experimental;
 
 import javax.annotation.Nonnull;
 

@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.table.store.annotation.VisibleForTesting;
-import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
@@ -27,6 +25,8 @@ import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatWriterFactory;

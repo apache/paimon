@@ -24,7 +24,6 @@ import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.schema.Schema;
@@ -38,6 +37,7 @@ import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
+import org.apache.paimon.data.GenericRow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

@@ -18,10 +18,11 @@
 
 package org.apache.flink.table.store.io.cache;
 
-import org.apache.flink.table.store.data.AbstractPagedInputView;
 import org.apache.flink.table.store.io.SeekableDataInputView;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.utils.MathUtils;
+
+import org.apache.paimon.data.AbstractPagedInputView;
 
 import java.io.Closeable;
 import java.io.EOFException;

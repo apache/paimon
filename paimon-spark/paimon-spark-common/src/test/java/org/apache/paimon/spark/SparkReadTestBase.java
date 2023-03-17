@@ -18,8 +18,6 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
@@ -31,6 +29,8 @@ import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowKind;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;

@@ -19,10 +19,6 @@
 package org.apache.paimon.hive.mapred;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.StreamTableCommit;
@@ -33,6 +29,10 @@ import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.hive.FileStoreTestUtils;
 import org.apache.paimon.hive.RowDataContainer;
 import org.junit.jupiter.api.BeforeEach;

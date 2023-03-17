@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.file.operation;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.append.AppendOnlyCompactManager;
 import org.apache.flink.table.store.file.append.AppendOnlyWriter;
 import org.apache.flink.table.store.file.compact.CompactManager;
@@ -38,6 +36,8 @@ import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.LongCounter;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 
 import javax.annotation.Nullable;

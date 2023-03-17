@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreRead;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreWrite;
@@ -27,6 +26,7 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 
 import java.util.Comparator;

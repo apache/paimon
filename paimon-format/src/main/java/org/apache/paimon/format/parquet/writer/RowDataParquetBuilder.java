@@ -18,10 +18,10 @@
 
 package org.apache.paimon.format.parquet.writer;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 import org.apache.parquet.hadoop.ParquetWriter;

@@ -18,11 +18,6 @@
 
 package org.apache.paimon.format.parquet.writer;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.InternalArray;
-import org.apache.flink.table.store.data.InternalMap;
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DecimalType;
@@ -33,6 +28,11 @@ import org.apache.flink.table.store.types.MultisetType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.TimestampType;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.io.api.RecordConsumer;

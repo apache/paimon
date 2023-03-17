@@ -17,22 +17,22 @@
 
 package org.apache.paimon.format.parquet.reader;
 
-import org.apache.flink.table.store.data.Timestamp;
-import org.apache.flink.table.store.data.columnar.VectorizedColumnBatch;
-import org.apache.flink.table.store.data.columnar.heap.HeapArrayVector;
-import org.apache.flink.table.store.data.columnar.heap.HeapBooleanVector;
-import org.apache.flink.table.store.data.columnar.heap.HeapByteVector;
-import org.apache.flink.table.store.data.columnar.heap.HeapBytesVector;
-import org.apache.flink.table.store.data.columnar.heap.HeapDoubleVector;
-import org.apache.flink.table.store.data.columnar.heap.HeapFloatVector;
-import org.apache.flink.table.store.data.columnar.heap.HeapIntVector;
-import org.apache.flink.table.store.data.columnar.heap.HeapLongVector;
-import org.apache.flink.table.store.data.columnar.heap.HeapShortVector;
-import org.apache.flink.table.store.data.columnar.heap.HeapTimestampVector;
-import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.DataType;
 
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.data.columnar.heap.HeapArrayVector;
+import org.apache.paimon.data.columnar.heap.HeapBooleanVector;
+import org.apache.paimon.data.columnar.heap.HeapByteVector;
+import org.apache.paimon.data.columnar.heap.HeapBytesVector;
+import org.apache.paimon.data.columnar.heap.HeapDoubleVector;
+import org.apache.paimon.data.columnar.heap.HeapFloatVector;
+import org.apache.paimon.data.columnar.heap.HeapIntVector;
+import org.apache.paimon.data.columnar.heap.HeapLongVector;
+import org.apache.paimon.data.columnar.heap.HeapShortVector;
+import org.apache.paimon.data.columnar.heap.HeapTimestampVector;
+import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.schema.PrimitiveType;

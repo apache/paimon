@@ -19,7 +19,6 @@
 package org.apache.paimon.spark;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.fs.Path;
@@ -30,6 +29,8 @@ import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.sink.StreamTableCommit;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.data.InternalRow;
 
 import java.util.Collections;
 import java.util.HashMap;

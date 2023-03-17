@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueFileStore;
 import org.apache.flink.table.store.file.WriteMode;
@@ -47,6 +45,9 @@ import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 
 import java.util.Collections;
 import java.util.List;

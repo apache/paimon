@@ -18,12 +18,12 @@
 
 package org.apache.paimon.connector;
 
-import org.apache.flink.table.store.annotation.Documentation;
 import org.apache.flink.table.store.options.ConfigOption;
 import org.apache.flink.table.store.options.MemorySize;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.options.description.Description;
 
+import org.apache.paimon.annotation.Documentation;
 import org.rocksdb.BlockBasedTableConfig;
 import org.rocksdb.BloomFilter;
 import org.rocksdb.ColumnFamilyOptions;

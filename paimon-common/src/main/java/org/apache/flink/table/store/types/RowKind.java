@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.types;
 
-import org.apache.flink.table.store.annotation.Experimental;
+import org.apache.paimon.annotation.Experimental;
 
 /**
  * Lists all kinds of changes that a row can describe in a changelog.

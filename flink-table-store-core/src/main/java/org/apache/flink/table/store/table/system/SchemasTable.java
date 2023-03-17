@@ -18,9 +18,6 @@
 
 package org.apache.flink.table.store.table.system;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -43,6 +40,10 @@ import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.ProjectedRow;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
+
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 
 import java.io.IOException;
 import java.util.Arrays;

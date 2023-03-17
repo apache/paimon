@@ -18,8 +18,6 @@
 
 package org.apache.paimon.format.orc;
 
-import org.apache.flink.table.store.annotation.VisibleForTesting;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.ArrayType;
@@ -34,6 +32,8 @@ import org.apache.flink.table.store.utils.Projection;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.orc.TypeDescription;
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatReaderFactory;

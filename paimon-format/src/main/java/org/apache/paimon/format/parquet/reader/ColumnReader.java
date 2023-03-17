@@ -17,7 +17,7 @@
 
 package org.apache.paimon.format.parquet.reader;
 
-import org.apache.flink.table.store.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 
 import java.io.IOException;
 

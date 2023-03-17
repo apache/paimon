@@ -18,9 +18,8 @@
 
 package org.apache.paimon.format.orc.reader;
 
-import org.apache.flink.table.store.data.Decimal;
-
 import org.apache.hadoop.hive.ql.exec.vector.DecimalColumnVector;
+import org.apache.paimon.data.Decimal;
 
 import java.math.BigDecimal;
 
@@ -28,7 +27,7 @@ import java.math.BigDecimal;
  * This column vector is used to adapt hive's DecimalColumnVector to Flink's DecimalColumnVector.
  */
 public class OrcDecimalColumnVector extends AbstractOrcColumnVector
-        implements org.apache.flink.table.store.data.columnar.DecimalColumnVector {
+        implements org.apache.paimon.data.columnar.DecimalColumnVector {
 
     private final DecimalColumnVector vector;
 

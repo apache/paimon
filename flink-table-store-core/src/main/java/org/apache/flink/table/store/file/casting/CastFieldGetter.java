@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.casting;
 
-import org.apache.flink.table.store.data.InternalRow;
+import org.apache.paimon.data.InternalRow;
 
 /**
  * Get field value from row with given pos and cast it according to specific {@link CastExecutor}.

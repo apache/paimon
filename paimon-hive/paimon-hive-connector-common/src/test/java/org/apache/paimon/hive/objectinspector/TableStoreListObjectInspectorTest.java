@@ -18,11 +18,11 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.GenericArray;
 import org.apache.flink.table.store.types.DataTypes;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

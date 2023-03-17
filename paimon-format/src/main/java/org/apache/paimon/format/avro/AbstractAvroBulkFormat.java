@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
@@ -31,6 +30,7 @@ import org.apache.avro.file.DataFileReader;
 import org.apache.avro.file.SeekableInput;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.io.DatumReader;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
 
 import javax.annotation.Nullable;

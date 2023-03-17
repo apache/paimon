@@ -18,16 +18,17 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.Decimal;
-import org.apache.flink.table.store.data.GenericArray;
-import org.apache.flink.table.store.data.GenericMap;
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.Timestamp;
 
 import java.math.BigDecimal;
 import java.util.Arrays;

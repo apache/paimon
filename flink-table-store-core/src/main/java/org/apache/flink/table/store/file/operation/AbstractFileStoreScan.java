@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
@@ -37,6 +36,8 @@ import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Filter;
 import org.apache.flink.table.store.utils.Preconditions;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
+
+import org.apache.paimon.data.BinaryRow;
 
 import javax.annotation.Nullable;
 

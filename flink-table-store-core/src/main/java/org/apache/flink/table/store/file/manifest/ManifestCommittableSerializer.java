@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.table.store.data.serializer.VersionedSerializer;
 import org.apache.flink.table.store.io.DataInputDeserializer;
 import org.apache.flink.table.store.io.DataOutputViewStreamWrapper;
 import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.CommitMessageSerializer;
+
+import org.apache.paimon.data.serializer.VersionedSerializer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;

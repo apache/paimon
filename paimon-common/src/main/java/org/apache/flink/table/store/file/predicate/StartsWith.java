@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.types.DataType;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.format.FieldStats;
 
 import java.util.List;

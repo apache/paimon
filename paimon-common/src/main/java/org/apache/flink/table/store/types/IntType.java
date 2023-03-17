@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.types;
 
-import org.apache.flink.table.store.annotation.Experimental;
+import org.apache.paimon.annotation.Experimental;
 
 /**
  * Data type of a 4-byte signed integer with values from -2,147,483,648 to 2,147,483,647.
