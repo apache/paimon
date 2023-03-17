@@ -18,7 +18,7 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.flink.table.store.types.DataTypes;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.paimon.data.BinaryString;

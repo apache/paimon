@@ -20,7 +20,7 @@ package org.apache.paimon.file.predicate;
 
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
-import org.apache.flink.table.store.types.DataType;
+import org.apache.paimon.types.DataType;
 
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.ListSerializer;

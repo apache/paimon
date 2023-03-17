@@ -19,9 +19,9 @@
 package org.apache.paimon.hive.mapred;
 
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.reader.RecordReaderIterator;
-import org.apache.flink.table.store.table.source.ReadBuilder;
-import org.apache.flink.table.store.utils.ProjectedRow;
+import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.utils.ProjectedRow;
 
 import org.apache.hadoop.mapred.RecordReader;
 import org.apache.paimon.data.InternalRow;

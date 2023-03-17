@@ -18,15 +18,15 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-import org.apache.flink.table.store.types.BigIntType;
-import org.apache.flink.table.store.types.BooleanType;
-import org.apache.flink.table.store.types.DecimalType;
-import org.apache.flink.table.store.types.DoubleType;
-import org.apache.flink.table.store.types.FloatType;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.SmallIntType;
-import org.apache.flink.table.store.types.TinyIntType;
-import org.apache.flink.table.store.types.VarCharType;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BooleanType;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.SmallIntType;
+import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.types.VarCharType;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;

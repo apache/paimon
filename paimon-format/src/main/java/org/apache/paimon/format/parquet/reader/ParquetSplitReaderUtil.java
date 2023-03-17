@@ -18,14 +18,14 @@
 
 package org.apache.paimon.format.parquet.reader;
 
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DataTypeChecks;
-import org.apache.flink.table.store.types.DecimalType;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.MapType;
-import org.apache.flink.table.store.types.MultisetType;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.columnar.heap.HeapArrayVector;
 import org.apache.paimon.data.columnar.heap.HeapBooleanVector;

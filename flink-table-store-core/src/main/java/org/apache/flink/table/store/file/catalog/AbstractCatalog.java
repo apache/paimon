@@ -21,11 +21,11 @@ package org.apache.flink.table.store.file.catalog;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.FileStoreTableFactory;
-import org.apache.flink.table.store.table.Table;
-import org.apache.flink.table.store.table.system.SystemTableLoader;
-import org.apache.flink.table.store.utils.StringUtils;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 

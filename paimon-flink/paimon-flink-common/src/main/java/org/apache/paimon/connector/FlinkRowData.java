@@ -312,7 +312,7 @@ public class FlinkRowData implements RowData {
         }
     }
 
-    public static RowKind toFlinkRowKind(org.apache.flink.table.store.types.RowKind rowKind) {
+    public static RowKind toFlinkRowKind(org.apache.paimon.types.RowKind rowKind) {
         switch (rowKind) {
             case INSERT:
                 return RowKind.INSERT;

@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.types.RowKind;
+import org.apache.paimon.types.RowKind;
 
 import org.apache.paimon.data.GenericRow;
 import org.junit.jupiter.api.BeforeEach;

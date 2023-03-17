@@ -25,9 +25,9 @@ import org.apache.flink.table.store.file.schema.IndexCastMapping;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.Projection;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Projection;
 
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;

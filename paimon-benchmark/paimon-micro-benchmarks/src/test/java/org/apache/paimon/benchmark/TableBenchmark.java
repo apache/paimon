@@ -26,10 +26,10 @@ import org.apache.flink.table.store.file.catalog.Identifier;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.table.Table;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DataTypes;
-import org.apache.flink.table.store.types.IntType;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.IntType;
 
 import org.apache.commons.math3.random.RandomDataGenerator;
 import org.apache.paimon.data.BinaryString;

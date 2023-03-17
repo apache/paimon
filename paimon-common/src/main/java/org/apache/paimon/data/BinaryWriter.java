@@ -17,10 +17,10 @@
 
 package org.apache.paimon.data;
 
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DecimalType;
-import org.apache.flink.table.store.types.LocalZonedTimestampType;
-import org.apache.flink.table.store.types.TimestampType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
 
 import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
@@ -30,7 +30,7 @@ import org.apache.paimon.data.serializer.Serializer;
 
 import java.io.Serializable;
 
-import static org.apache.flink.table.store.types.DataTypeChecks.getPrecision;
+import static org.apache.paimon.types.DataTypeChecks.getPrecision;
 
 /**
  * Writer to write a composite data format, like row, array. 1. Invoke {@link #reset()}. 2. Write

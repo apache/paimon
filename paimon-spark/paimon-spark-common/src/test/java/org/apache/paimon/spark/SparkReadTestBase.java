@@ -21,12 +21,12 @@ package org.apache.paimon.spark;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.FileStoreTableFactory;
-import org.apache.flink.table.store.table.sink.StreamTableCommit;
-import org.apache.flink.table.store.table.sink.StreamTableWrite;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.RowKind;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowKind;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.paimon.data.BinaryString;
@@ -145,9 +145,9 @@ public abstract class SparkReadTestBase {
     }
 
     protected DataField getNestedField(DataField field, int index) {
-        if (field.type() instanceof org.apache.flink.table.store.types.RowType) {
-            org.apache.flink.table.store.types.RowType rowDataType =
-                    (org.apache.flink.table.store.types.RowType) field.type();
+        if (field.type() instanceof org.apache.paimon.types.RowType) {
+            org.apache.paimon.types.RowType rowDataType =
+                    (org.apache.paimon.types.RowType) field.type();
             return rowDataType.getFields().get(index);
         }
         throw new IllegalArgumentException();

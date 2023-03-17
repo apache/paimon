@@ -18,13 +18,13 @@
 
 package org.apache.paimon.format.orc.writer;
 
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DecimalType;
-import org.apache.flink.table.store.types.LocalZonedTimestampType;
-import org.apache.flink.table.store.types.MapType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.types.TimestampType;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimestampType;
 
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;

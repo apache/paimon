@@ -19,9 +19,9 @@
 package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.utils.Projection;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.Projection;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -30,7 +30,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 
-import static org.apache.flink.table.store.utils.RowDataUtils.createFieldGetters;
+import static org.apache.paimon.utils.RowDataUtils.createFieldGetters;
 
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record, update

@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.disk;
 
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

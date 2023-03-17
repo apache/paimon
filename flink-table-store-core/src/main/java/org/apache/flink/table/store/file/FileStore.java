@@ -26,7 +26,7 @@ import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.FileStoreWrite;
 import org.apache.flink.table.store.file.operation.PartitionExpire;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 

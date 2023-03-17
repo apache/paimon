@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaChange;
-import org.apache.flink.table.store.table.Table;
+import org.apache.paimon.table.Table;
 
 import org.apache.paimon.annotation.Experimental;
 

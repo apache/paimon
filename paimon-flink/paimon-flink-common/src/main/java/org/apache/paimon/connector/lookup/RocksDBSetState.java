@@ -30,7 +30,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Rocksdb state for key -> Set values. */
 public class RocksDBSetState extends RocksDBState<List<byte[]>> {

@@ -31,10 +31,10 @@ import org.apache.flink.table.store.CoreOptions.MergeEngine;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.table.AppendOnlyFileStoreTable;
-import org.apache.flink.table.store.table.ChangelogValueCountFileStoreTable;
-import org.apache.flink.table.store.table.ChangelogWithKeyFileStoreTable;
-import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
+import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.flink.types.RowKind;
 
 import org.apache.paimon.connector.FlinkCatalog;

@@ -18,11 +18,11 @@
 
 package org.apache.paimon.data;
 
-import org.apache.flink.table.store.types.RowKind;
+import org.apache.paimon.types.RowKind;
 
 import java.util.function.Supplier;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** A {@link InternalRow} which lazy init fields. */
 public class LazyGenericRow implements InternalRow {

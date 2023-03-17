@@ -18,12 +18,12 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.types.CharType;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DecimalType;
-import org.apache.flink.table.store.types.MapType;
-import org.apache.flink.table.store.types.VarCharType;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.VarCharType;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;

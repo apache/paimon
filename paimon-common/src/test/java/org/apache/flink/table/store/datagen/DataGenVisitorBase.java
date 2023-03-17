@@ -19,10 +19,10 @@
 package org.apache.flink.table.store.datagen;
 
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DataTypeDefaultVisitor;
-import org.apache.flink.table.store.types.DateType;
-import org.apache.flink.table.store.types.TimeType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeDefaultVisitor;
+import org.apache.paimon.types.DateType;
+import org.apache.paimon.types.TimeType;
 
 import java.io.Serializable;
 import java.time.LocalDate;

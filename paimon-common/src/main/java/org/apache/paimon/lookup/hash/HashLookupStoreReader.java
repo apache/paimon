@@ -25,8 +25,8 @@ package org.apache.paimon.lookup.hash;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.io.cache.CachedRandomInputView;
 import org.apache.paimon.lookup.LookupStoreReader;
-import org.apache.flink.table.store.utils.MurmurHashUtils;
-import org.apache.flink.table.store.utils.VarLengthIntUtils;
+import org.apache.paimon.utils.MurmurHashUtils;
+import org.apache.paimon.utils.VarLengthIntUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

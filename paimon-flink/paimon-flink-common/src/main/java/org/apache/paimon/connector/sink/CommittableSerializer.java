@@ -19,8 +19,8 @@
 package org.apache.paimon.connector.sink;
 
 import org.apache.flink.core.io.SimpleVersionedSerializer;
-import org.apache.flink.table.store.table.sink.CommitMessage;
-import org.apache.flink.table.store.table.sink.CommitMessageSerializer;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageSerializer;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

@@ -19,7 +19,7 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.table.store.utils.CloseableIterator;
+import org.apache.paimon.utils.CloseableIterator;
 
 import java.io.Closeable;
 import java.io.IOException;

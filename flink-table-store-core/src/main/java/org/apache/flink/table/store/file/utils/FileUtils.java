@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.utils;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
-import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.paimon.reader.RecordReader;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;

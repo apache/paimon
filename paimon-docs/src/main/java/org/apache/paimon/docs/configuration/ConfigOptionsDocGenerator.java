@@ -25,9 +25,9 @@ import org.apache.paimon.options.description.Formatter;
 import org.apache.paimon.options.description.HtmlFormatter;
 import org.apache.paimon.options.description.InlineElement;
 import org.apache.paimon.options.description.TextElement;
-import org.apache.flink.table.store.utils.Pair;
-import org.apache.flink.table.store.utils.ThrowingConsumer;
-import org.apache.flink.table.store.utils.TimeUtils;
+import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.ThrowingConsumer;
+import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.paimon.annotation.ConfigGroup;
 import org.apache.paimon.annotation.ConfigGroups;

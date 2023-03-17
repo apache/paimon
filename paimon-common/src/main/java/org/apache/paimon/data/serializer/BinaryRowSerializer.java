@@ -30,7 +30,7 @@ import org.apache.paimon.data.BinaryRow;
 
 import java.io.IOException;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Serializer for {@link BinaryRow}. */
 public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {

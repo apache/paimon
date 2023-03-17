@@ -19,8 +19,8 @@
 package org.apache.paimon.fs;
 
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.utils.CommonTestUtils;
-import org.apache.flink.table.store.utils.HadoopUtils;
+import org.apache.paimon.utils.CommonTestUtils;
+import org.apache.paimon.utils.HadoopUtils;
 
 import org.apache.hadoop.conf.Configuration;
 import org.junit.jupiter.api.Test;

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.flink.table.store.utils.DateTimeUtils;
+import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.hadoop.hive.serde2.io.DateWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;

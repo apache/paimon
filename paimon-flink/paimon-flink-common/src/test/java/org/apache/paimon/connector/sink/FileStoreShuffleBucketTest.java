@@ -27,9 +27,9 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.FileStoreTableFactory;
-import org.apache.flink.table.store.table.sink.SinkRecord;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.paimon.connector.CatalogITCaseBase;

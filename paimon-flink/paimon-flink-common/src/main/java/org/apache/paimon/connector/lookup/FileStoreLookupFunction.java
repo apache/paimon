@@ -27,12 +27,12 @@ import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.source.StreamDataTableScan;
-import org.apache.flink.table.store.table.source.TableStreamingReader;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.FileIOUtils;
-import org.apache.flink.table.store.utils.TypeUtils;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.source.TableStreamingReader;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
 
@@ -61,7 +61,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.file.predicate.PredicateBuilder.transformFieldMapping;
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.connector.RocksDBOptions.LOOKUP_CACHE_ROWS;
 
 /** A lookup {@link TableFunction} for file store. */

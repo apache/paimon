@@ -31,16 +31,16 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
-import org.apache.flink.table.store.reader.RecordReader;
-import org.apache.flink.table.store.reader.RecordReaderIterator;
-import org.apache.flink.table.store.table.source.DataSplit;
-import org.apache.flink.table.store.types.BigIntType;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.types.VarCharType;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
@@ -126,7 +126,7 @@ public class KeyValueFileStoreReadTest {
                                         new DataField(
                                                 0,
                                                 "count",
-                                                new org.apache.flink.table.store.types
+                                                new org.apache.paimon.types
                                                         .BigIntType()));
                             }
                         },

@@ -25,7 +25,7 @@ import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Formatter;
 import org.apache.paimon.options.description.HtmlFormatter;
 import org.apache.paimon.options.description.InlineElement;
-import org.apache.flink.table.store.utils.Pair;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.annotation.ConfigGroup;
 import org.apache.paimon.annotation.ConfigGroups;

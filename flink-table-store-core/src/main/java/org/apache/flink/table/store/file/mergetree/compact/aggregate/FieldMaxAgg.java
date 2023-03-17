@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DataTypeRoot;
-import org.apache.flink.table.store.utils.RowDataUtils;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.utils.RowDataUtils;
 
 /** max aggregate a field of a row. */
 public class FieldMaxAgg extends FieldAggregator {

@@ -34,9 +34,9 @@ import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.FileStoreTableFactory;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.paimon.annotation.VisibleForTesting;

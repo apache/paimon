@@ -21,8 +21,8 @@ package org.apache.flink.table.store.file.manifest;
 import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.NewFilesIncrement;
-import org.apache.flink.table.store.table.sink.CommitMessage;
-import org.apache.flink.table.store.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 
 import org.apache.paimon.data.BinaryRow;
 import org.junit.jupiter.api.Test;

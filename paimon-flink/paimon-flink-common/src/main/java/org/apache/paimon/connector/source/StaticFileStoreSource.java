@@ -24,9 +24,9 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.DataTable;
-import org.apache.flink.table.store.table.source.BatchDataTableScan;
-import org.apache.flink.table.store.table.source.DataTableScan;
+import org.apache.paimon.table.DataTable;
+import org.apache.paimon.table.source.BatchDataTableScan;
+import org.apache.paimon.table.source.DataTableScan;
 
 import javax.annotation.Nullable;
 

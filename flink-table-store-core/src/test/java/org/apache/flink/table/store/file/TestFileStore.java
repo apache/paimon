@@ -45,10 +45,10 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.reader.RecordReaderIterator;
-import org.apache.flink.table.store.table.sink.CommitMessageImpl;
-import org.apache.flink.table.store.table.source.DataSplit;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;

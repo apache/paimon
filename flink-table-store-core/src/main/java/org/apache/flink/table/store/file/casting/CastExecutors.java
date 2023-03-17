@@ -18,16 +18,16 @@
 
 package org.apache.flink.table.store.file.casting;
 
-import org.apache.flink.table.store.types.BinaryType;
-import org.apache.flink.table.store.types.CharType;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DecimalType;
-import org.apache.flink.table.store.types.TimestampType;
-import org.apache.flink.table.store.types.VarBinaryType;
-import org.apache.flink.table.store.types.VarCharType;
-import org.apache.flink.table.store.utils.DateTimeUtils;
-import org.apache.flink.table.store.utils.DecimalUtils;
-import org.apache.flink.table.store.utils.StringUtils;
+import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VarBinaryType;
+import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.DecimalUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
@@ -37,11 +37,11 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 
-import static org.apache.flink.table.store.types.DataTypeRoot.BINARY;
-import static org.apache.flink.table.store.types.DataTypeRoot.CHAR;
-import static org.apache.flink.table.store.types.DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE;
-import static org.apache.flink.table.store.types.DataTypeRoot.VARBINARY;
-import static org.apache.flink.table.store.types.DataTypeRoot.VARCHAR;
+import static org.apache.paimon.types.DataTypeRoot.BINARY;
+import static org.apache.paimon.types.DataTypeRoot.CHAR;
+import static org.apache.paimon.types.DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE;
+import static org.apache.paimon.types.DataTypeRoot.VARBINARY;
+import static org.apache.paimon.types.DataTypeRoot.VARCHAR;
 
 /** Cast executors for input type and output type. */
 public class CastExecutors {

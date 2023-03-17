@@ -18,10 +18,10 @@
 
 package org.apache.paimon.connector.lookup;
 
-import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.KeyProjectedRow;
-import org.apache.flink.table.store.utils.TypeUtils;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.KeyProjectedRow;
+import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;

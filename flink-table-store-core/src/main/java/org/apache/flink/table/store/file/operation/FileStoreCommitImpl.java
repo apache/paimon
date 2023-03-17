@@ -34,10 +34,10 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.MemorySize;
-import org.apache.flink.table.store.table.sink.CommitMessage;
-import org.apache.flink.table.store.table.sink.CommitMessageImpl;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;

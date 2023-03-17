@@ -33,7 +33,7 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.file.utils.TraceableFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.flink.table.store.types.RowKind;
+import org.apache.paimon.types.RowKind;
 
 import org.apache.paimon.data.BinaryRow;
 import org.junit.jupiter.api.AfterEach;

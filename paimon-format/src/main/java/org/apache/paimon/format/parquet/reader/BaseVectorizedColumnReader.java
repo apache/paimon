@@ -17,7 +17,7 @@
 
 package org.apache.paimon.format.parquet.reader;
 
-import org.apache.flink.table.store.types.DataType;
+import org.apache.paimon.types.DataType;
 
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.parquet.bytes.ByteBufferInputStream;

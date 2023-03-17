@@ -19,7 +19,7 @@ package org.apache.paimon.data;
 
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
-import org.apache.flink.table.store.types.RowKind;
+import org.apache.paimon.types.RowKind;
 
 /** Writer for {@link BinaryRow}. */
 public final class BinaryRowWriter extends AbstractBinaryWriter {

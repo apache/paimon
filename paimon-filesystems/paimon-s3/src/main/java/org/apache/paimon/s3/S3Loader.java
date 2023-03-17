@@ -23,7 +23,7 @@ import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileIOLoader;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.PluginFileIO;
-import org.apache.flink.table.store.plugin.PluginLoader;
+import org.apache.paimon.plugin.PluginLoader;
 
 /** A {@link PluginLoader} to load oss. */
 public class S3Loader implements FileIOLoader {

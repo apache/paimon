@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.reader.RecordReader;
-import org.apache.flink.table.store.types.RowKind;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.types.RowKind;
 
 import javax.annotation.Nullable;
 

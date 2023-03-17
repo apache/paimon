@@ -22,10 +22,10 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.LongCounter;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.LongCounter;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;

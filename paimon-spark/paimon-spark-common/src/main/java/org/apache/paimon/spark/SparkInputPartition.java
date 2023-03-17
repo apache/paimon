@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.table.source.Split;
+import org.apache.paimon.table.source.Split;
 
 import org.apache.spark.sql.connector.read.InputPartition;
 

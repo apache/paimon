@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.utils;
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.codegen.GeneratedClass;
 import org.apache.flink.table.store.codegen.RecordComparator;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.InternalRow;
 

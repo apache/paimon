@@ -26,7 +26,7 @@ import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.FieldStatsConverters;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.RowType;
 
 import java.util.List;
 

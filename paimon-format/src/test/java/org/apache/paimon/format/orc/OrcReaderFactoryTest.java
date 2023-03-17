@@ -20,12 +20,12 @@ package org.apache.paimon.format.orc;
 
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.table.store.reader.RecordReader;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DataTypes;
-import org.apache.flink.table.store.types.DecimalType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.DecimalUtils;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DecimalUtils;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.paimon.data.InternalRow;

@@ -19,7 +19,7 @@
 package org.apache.paimon.hive.mapred;
 
 import org.apache.flink.table.store.file.io.DataFileTestDataGenerator;
-import org.apache.flink.table.store.table.source.DataSplit;
+import org.apache.paimon.table.source.DataSplit;
 
 import org.apache.paimon.data.BinaryRow;
 import org.junit.jupiter.api.Test;

@@ -31,11 +31,11 @@ import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import org.apache.flink.table.store.CoreOptions.LogConsistency;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.table.AppendOnlyFileStoreTable;
-import org.apache.flink.table.store.table.ChangelogValueCountFileStoreTable;
-import org.apache.flink.table.store.table.ChangelogWithKeyFileStoreTable;
-import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.utils.Projection;
+import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
+import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.Projection;
 
 import org.apache.paimon.connector.FlinkConnectorOptions;
 import org.apache.paimon.connector.TableStoreDataStreamScanProvider;

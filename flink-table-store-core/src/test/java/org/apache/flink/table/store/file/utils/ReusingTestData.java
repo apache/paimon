@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
 import java.util.HashSet;

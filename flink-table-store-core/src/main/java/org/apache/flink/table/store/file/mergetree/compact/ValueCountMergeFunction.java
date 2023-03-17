@@ -19,14 +19,14 @@
 package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.types.RowKind;
+import org.apache.paimon.types.RowKind;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * A {@link MergeFunction} where key is the full record and value is a count which represents number

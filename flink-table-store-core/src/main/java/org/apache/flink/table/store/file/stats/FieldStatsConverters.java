@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.stats;
 
 import org.apache.flink.table.store.file.casting.CastExecutor;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;

@@ -21,12 +21,12 @@ package org.apache.flink.table.store.file.schema;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.paimon.options.ConfigOption;
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.MapType;
-import org.apache.flink.table.store.types.MultisetType;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
+import org.apache.paimon.types.RowType;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -43,8 +43,8 @@ import static org.apache.flink.table.store.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN
 import static org.apache.flink.table.store.file.WriteMode.APPEND_ONLY;
 import static org.apache.flink.table.store.file.schema.SystemColumns.KEY_FIELD_PREFIX;
 import static org.apache.flink.table.store.file.schema.SystemColumns.SYSTEM_FIELD_NAMES;
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
-import static org.apache.flink.table.store.utils.Preconditions.checkState;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Validation utils for {@link TableSchema}. */
 public class SchemaValidation {

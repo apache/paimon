@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format.orc.reader;
 
-import org.apache.flink.table.store.types.MapType;
+import org.apache.paimon.types.MapType;
 
 import org.apache.hadoop.hive.ql.exec.vector.MapColumnVector;
 import org.apache.paimon.data.InternalMap;

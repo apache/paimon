@@ -37,16 +37,16 @@ import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.reader.RecordReader;
-import org.apache.flink.table.store.table.source.KeyValueTableRead;
-import org.apache.flink.table.store.table.source.TableRead;
-import org.apache.flink.table.store.table.source.ValueContentRowDataRecordIterator;
-import org.apache.flink.table.store.table.source.ValueCountRowDataRecordIterator;
-import org.apache.flink.table.store.types.BigIntType;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.source.KeyValueTableRead;
+import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.ValueContentRowDataRecordIterator;
+import org.apache.paimon.table.source.ValueCountRowDataRecordIterator;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
@@ -79,7 +79,7 @@ public class TestChangelogDataReadWrite {
                             new DataField(
                                     0,
                                     "k",
-                                    new org.apache.flink.table.store.types.BigIntType(false)));
+                                    new org.apache.paimon.types.BigIntType(false)));
                 }
 
                 @Override
@@ -88,7 +88,7 @@ public class TestChangelogDataReadWrite {
                             new DataField(
                                     0,
                                     "v",
-                                    new org.apache.flink.table.store.types.BigIntType(false)));
+                                    new org.apache.paimon.types.BigIntType(false)));
                 }
             };
 

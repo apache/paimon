@@ -21,7 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentWritable;
 import org.apache.paimon.memory.MemoryUtils;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.utils.Preconditions;
 
 import java.io.EOFException;
 import java.io.IOException;

@@ -28,7 +28,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.util.Objects;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Utilities to compile a generated code to a Class. Copied from Flink. */
 public final class CompileUtils {

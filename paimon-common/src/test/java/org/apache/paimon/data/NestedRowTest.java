@@ -18,7 +18,7 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.memory.MemorySegment;
-import org.apache.flink.table.store.types.DataTypes;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.junit.jupiter.api.Test;

@@ -18,8 +18,8 @@
 package org.apache.flink.table.store.codegen
 
 import org.apache.paimon.data.serializer.InternalSerializers
-import org.apache.flink.table.store.types.DataType
-import org.apache.flink.table.store.utils.InstantiationUtil
+import org.apache.paimon.types.DataType
+import org.apache.paimon.utils.InstantiationUtil
 
 import GenerateUtils.{newName, newNames}
 

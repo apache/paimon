@@ -20,10 +20,10 @@ package org.apache.flink.table.store.file.manifest;
 
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.store.types.BigIntType;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.types.VarCharType;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

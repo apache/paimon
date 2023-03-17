@@ -20,9 +20,9 @@ package org.apache.paimon.format.orc;
 
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.types.BigIntType;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
 import org.apache.paimon.format.orc.filter.OrcFilters;

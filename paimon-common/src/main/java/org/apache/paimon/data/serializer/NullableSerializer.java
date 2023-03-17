@@ -27,7 +27,7 @@ import javax.annotation.Nonnull;
 
 import java.io.IOException;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Serializer wrapper to add support of {@code null} value serialization. */
 public class NullableSerializer<T> implements Serializer<T> {

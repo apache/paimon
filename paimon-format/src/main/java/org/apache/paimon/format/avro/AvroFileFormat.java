@@ -23,9 +23,9 @@ import org.apache.flink.table.store.fs.PositionOutputStream;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.Projection;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Projection;
 
 import org.apache.avro.Schema;
 import org.apache.avro.file.CodecFactory;

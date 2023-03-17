@@ -19,7 +19,7 @@ package org.apache.flink.table.store.codegen.codesplit;
 
 import java.util.Optional;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Rewrite generated java code so that the length of each method becomes smaller and can be

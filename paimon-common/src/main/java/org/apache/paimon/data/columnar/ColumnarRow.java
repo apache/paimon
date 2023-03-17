@@ -18,7 +18,7 @@
 
 package org.apache.paimon.data.columnar;
 
-import org.apache.flink.table.store.types.RowKind;
+import org.apache.paimon.types.RowKind;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataSetters;

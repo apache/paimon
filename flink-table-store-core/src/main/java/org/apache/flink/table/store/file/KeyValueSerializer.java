@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file;
 
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
 import org.apache.flink.table.store.file.utils.OffsetRow;
-import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;

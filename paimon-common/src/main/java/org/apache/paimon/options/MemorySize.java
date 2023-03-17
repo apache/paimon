@@ -34,8 +34,8 @@ import static org.apache.paimon.options.MemorySize.MemoryUnit.KILO_BYTES;
 import static org.apache.paimon.options.MemorySize.MemoryUnit.MEGA_BYTES;
 import static org.apache.paimon.options.MemorySize.MemoryUnit.TERA_BYTES;
 import static org.apache.paimon.options.MemorySize.MemoryUnit.hasUnit;
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
-import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * MemorySize is a representation of a number of bytes, viewable in different units.

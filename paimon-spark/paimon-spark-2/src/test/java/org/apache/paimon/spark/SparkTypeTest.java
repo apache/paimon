@@ -18,8 +18,8 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.types.DataTypes;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;

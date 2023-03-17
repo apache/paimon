@@ -23,12 +23,12 @@ import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.flink.table.store.table.AbstractFileStoreTable;
-import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.FileStoreTableFactory;
-import org.apache.flink.table.store.table.sink.StreamTableWrite;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.types.VarCharType;
+import org.apache.paimon.table.AbstractFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;

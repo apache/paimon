@@ -18,8 +18,8 @@
 
 package org.apache.paimon.format;
 
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;

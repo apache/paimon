@@ -18,8 +18,8 @@
 
 package org.apache.paimon.data;
 
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.utils.ArrayUtils;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.utils.ArrayUtils;
 
 import org.apache.paimon.annotation.Experimental;
 

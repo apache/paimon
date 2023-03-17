@@ -31,10 +31,10 @@ import org.apache.flink.table.store.file.sort.BinaryExternalSortBuffer;
 import org.apache.flink.table.store.file.sort.BinaryInMemorySortBuffer;
 import org.apache.flink.table.store.file.sort.SortBuffer;
 import org.apache.flink.table.store.file.utils.MutableObjectIterator;
-import org.apache.flink.table.store.types.BigIntType;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;

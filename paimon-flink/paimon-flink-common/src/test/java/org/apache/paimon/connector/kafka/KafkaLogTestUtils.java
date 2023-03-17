@@ -36,8 +36,8 @@ import org.apache.flink.table.runtime.connector.source.ScanRuntimeProviderContex
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import org.apache.flink.table.store.CoreOptions.LogConsistency;
-import org.apache.flink.table.store.table.sink.SinkRecord;
-import org.apache.flink.table.store.types.RowKind;
+import org.apache.paimon.table.sink.SinkRecord;
+import org.apache.paimon.types.RowKind;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;

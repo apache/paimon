@@ -19,9 +19,9 @@
 package org.apache.paimon.connector.sink;
 
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.table.store.table.sink.CommitMessage;
-import org.apache.flink.table.store.table.sink.TableCommit;
-import org.apache.flink.table.store.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.TableCommit;
+import org.apache.paimon.table.sink.TableCommitImpl;
 
 import java.io.IOException;
 import java.util.List;

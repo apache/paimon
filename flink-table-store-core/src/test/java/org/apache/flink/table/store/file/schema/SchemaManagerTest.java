@@ -24,13 +24,13 @@ import org.apache.flink.table.store.file.utils.FailingFileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.flink.table.store.types.BigIntType;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DoubleType;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.MapType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.types.VarCharType;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -103,11 +103,11 @@ public class SchemaManagerTest {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(
-                                0, "f0", new org.apache.flink.table.store.types.IntType(false)),
+                                0, "f0", new org.apache.paimon.types.IntType(false)),
                         new DataField(
-                                1, "f1", new org.apache.flink.table.store.types.BigIntType(false)),
+                                1, "f1", new org.apache.paimon.types.BigIntType(false)),
                         new DataField(
-                                2, "f2", new org.apache.flink.table.store.types.VarCharType()));
+                                2, "f2", new org.apache.paimon.types.VarCharType()));
 
         assertThat(latest.isPresent()).isTrue();
         assertThat(tableSchema).isEqualTo(latest.get());
@@ -235,11 +235,11 @@ public class SchemaManagerTest {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(
-                                0, "f0", new org.apache.flink.table.store.types.DoubleType(false)),
+                                0, "f0", new org.apache.paimon.types.DoubleType(false)),
                         new DataField(
-                                1, "f1", new org.apache.flink.table.store.types.BigIntType(false)),
+                                1, "f1", new org.apache.paimon.types.BigIntType(false)),
                         new DataField(
-                                2, "f2", new org.apache.flink.table.store.types.VarCharType()));
+                                2, "f2", new org.apache.paimon.types.VarCharType()));
 
         assertThat(latest.isPresent()).isTrue();
         assertThat(tableSchema).isEqualTo(latest.get());

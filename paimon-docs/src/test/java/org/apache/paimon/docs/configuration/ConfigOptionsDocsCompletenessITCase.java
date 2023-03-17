@@ -19,7 +19,7 @@
 package org.apache.paimon.docs.configuration;
 
 import org.apache.paimon.options.ConfigOption;
-import org.apache.flink.table.store.utils.Pair;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.annotation.Documentation;
 import org.jsoup.Jsoup;

@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.format;
 
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;

@@ -35,10 +35,10 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.paimon.fs.FileIO;
-import org.apache.flink.table.store.reader.RecordReader;
-import org.apache.flink.table.store.table.source.DataSplit;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.ProjectedRow;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ProjectedRow;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;

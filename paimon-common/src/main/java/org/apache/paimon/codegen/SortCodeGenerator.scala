@@ -19,9 +19,9 @@ package org.apache.flink.table.store.codegen
 
 import org.apache.flink.table.store.codegen.GenerateUtils.{newName, ROW_DATA, SEGMENT}
 import org.apache.paimon.data.{BinaryRow, Decimal, Timestamp}
-import org.apache.flink.table.store.types.{DataType, DecimalType, RowType, TimestampType}
-import org.apache.flink.table.store.types.DataTypeRoot._
-import org.apache.flink.table.store.utils.{SortUtil, TypeUtils}
+import org.apache.paimon.types.{DataType, DecimalType, RowType, TimestampType}
+import org.apache.paimon.types.DataTypeRoot._
+import org.apache.paimon.utils.{SortUtil, TypeUtils}
 
 import scala.collection.mutable
 

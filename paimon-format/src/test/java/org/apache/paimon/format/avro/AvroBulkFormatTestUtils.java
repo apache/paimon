@@ -18,9 +18,9 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DataTypes;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;

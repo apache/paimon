@@ -20,8 +20,8 @@
 package org.apache.flink.table.store.file.io;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.LongCounter;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.LongCounter;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;

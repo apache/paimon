@@ -20,7 +20,7 @@ package org.apache.paimon.data;
 
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentSource;
-import org.apache.flink.table.store.utils.MathUtils;
+import org.apache.paimon.utils.MathUtils;
 
 import java.io.EOFException;
 import java.io.IOException;

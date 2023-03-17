@@ -29,11 +29,11 @@ import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.types.VarCharType;
-import org.apache.flink.table.store.utils.Pair;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;

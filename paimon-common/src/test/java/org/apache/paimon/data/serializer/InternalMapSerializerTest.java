@@ -32,8 +32,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
-import static org.apache.flink.table.store.types.DataTypes.INT;
-import static org.apache.flink.table.store.types.DataTypes.STRING;
+import static org.apache.paimon.types.DataTypes.INT;
+import static org.apache.paimon.types.DataTypes.STRING;
 import static org.apache.paimon.data.serializer.InternalMapSerializer.convertToJavaMap;
 
 /** Test for {@link InternalMapSerializer}. */

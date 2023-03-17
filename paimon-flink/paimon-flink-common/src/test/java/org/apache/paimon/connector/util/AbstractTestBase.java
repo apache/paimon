@@ -21,7 +21,7 @@ package org.apache.paimon.connector.util;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
-import org.apache.flink.table.store.utils.FileIOUtils;
+import org.apache.paimon.utils.FileIOUtils;
 import org.apache.flink.util.TestLogger;
 
 import org.junit.jupiter.api.AfterEach;

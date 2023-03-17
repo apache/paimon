@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.disk;
 
 import org.apache.flink.table.store.file.memory.Buffer;
-import org.apache.flink.table.store.utils.FileIOUtils;
+import org.apache.paimon.utils.FileIOUtils;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
