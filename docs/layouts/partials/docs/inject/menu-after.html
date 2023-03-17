@@ -38,7 +38,7 @@ under the License.
       {{ .Site.Params.VersionTitle }} (✓)
     </a>
     <hr class="menu-break">
-    {{ range $docs := first 2 .Site.Params.PreviousDocs }}
+    {{ range $docs := first 5 .Site.Params.PreviousDocs }}
       <li>
         <a href="{{ index $docs 1 }}">
           {{ index $docs 0}}
