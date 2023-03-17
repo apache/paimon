@@ -70,14 +70,12 @@ public class ConfigOptionsDocGenerator {
 
     static final OptionsClassLocation[] LOCATIONS =
             new OptionsClassLocation[] {
-                new OptionsClassLocation("flink-table-store-common", "org.apache.paimon.options"),
-                new OptionsClassLocation("flink-table-store-core", "org.apache.flink.table.store"),
+                new OptionsClassLocation("paimon-common", "org.apache.paimon.options"),
+                new OptionsClassLocation("paimon-core", "org.apache.flink.table.store"),
                 new OptionsClassLocation(
-                        "flink-table-store-flink/flink-table-store-flink-common",
-                        "org.apache.paimon.connector"),
+                        "paimon-flink/paimon-flink-common", "org.apache.paimon.connector"),
                 new OptionsClassLocation(
-                        "flink-table-store-flink/flink-table-store-flink-common",
-                        "org.apache.paimon.connector.kafka")
+                        "paimon-flink/paimon-flink-common", "org.apache.paimon.connector.kafka")
             };
     static final String DEFAULT_PATH_PREFIX = "src/main/java";
 

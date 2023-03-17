@@ -69,7 +69,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class HiveCatalog extends AbstractCatalog {
     private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
 
-    // we don't include flink-table-store-hive-connector as dependencies because it depends on
+    // we don't include paimon-hive-connector as dependencies because it depends on
     // hive-exec
     private static final String INPUT_FORMAT_CLASS_NAME =
             "org.apache.paimon.hive.mapred.TableStoreInputFormat";

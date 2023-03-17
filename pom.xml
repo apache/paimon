@@ -28,9 +28,9 @@ under the License.
         <version>23</version>
     </parent>
 
-    <artifactId>flink-table-store-parent</artifactId>
-    <groupId>org.apache.flink</groupId>
-    <name>Flink Table Store</name>
+    <artifactId>paimon-parent</artifactId>
+    <groupId>org.apache.paimon</groupId>
+    <name>Paimon : </name>
     <version>0.4-SNAPSHOT</version>
     <packaging>pom</packaging>
 
@@ -46,9 +46,9 @@ under the License.
     </licenses>
 
     <scm>
-        <url>https://github.com/apache/flink-table-store</url>
-        <connection>git@github.com:apache/flink-table-store.git</connection>
-        <developerConnection>scm:git:https://gitbox.apache.org/repos/asf/flink-table-store.git</developerConnection>
+        <url>https://github.com/apache/incubator-paimon</url>
+        <connection>git@github.com:apache/incubator-paimon.git</connection>
+        <developerConnection>scm:git:https://gitbox.apache.org/repos/asf/incubator-paimon.git</developerConnection>
     </scm>
 
     <modules>
@@ -552,7 +552,7 @@ under the License.
                                     </includes>
                                     <message>
                                         Direct dependencies on flink-table-planner are not allowed.
-                                        You should depend on either Table API modules, flink-table-planner-loader or flink-table-store-codegen-loader.
+                                        You should depend on either Table API modules, flink-table-planner-loader or paimon-codegen-loader.
                                     </message>
                                 </bannedDependencies>
                             </rules>
@@ -659,8 +659,8 @@ under the License.
                         <configuration>
                             <property>rootDir</property>
                             <project>
-                                <groupId>org.apache.flink</groupId>
-                                <artifactId>flink-table-store-parent</artifactId>
+                                <groupId>org.apache.paimon</groupId>
+                                <artifactId>paimon-parent</artifactId>
                             </project>
                         </configuration>
                     </execution>

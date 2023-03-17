@@ -23,13 +23,13 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-benchmark</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-benchmark</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-cluster-benchmark</artifactId>
-    <name>Flink Table Store : Benchmark : Cluster</name>
+    <artifactId>paimon-cluster-benchmark</artifactId>
+    <name>Paimon : Benchmark : Cluster</name>
 
     <dependencies>
         <dependency>
@@ -116,7 +116,7 @@ under the License.
                             <descriptors>
                                 <descriptor>src/main/assemblies/bin.xml</descriptor>
                             </descriptors>
-                            <finalName>flink-table-store-benchmark-bin</finalName>
+                            <finalName>paimon-benchmark-bin</finalName>
                             <appendAssemblyId>false</appendAssemblyId>
                         </configuration>
                     </execution>

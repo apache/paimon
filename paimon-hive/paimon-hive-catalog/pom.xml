@@ -23,27 +23,27 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-hive</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-hive</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-hive-catalog</artifactId>
-    <name>Flink Table Store : Hive Catalog</name>
+    <artifactId>paimon-hive-catalog</artifactId>
+    <name>Paimon : Hive Catalog</name>
 
     <packaging>jar</packaging>
 
     <dependencies>
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-core</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-core</artifactId>
             <version>${project.version}</version>
             <scope>provided</scope>
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-hive-common</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-hive-common</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -124,15 +124,15 @@ under the License.
         <!-- test dependencies -->
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-flink-common</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-flink-common</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-hive-connector-common</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-hive-connector-common</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
@@ -489,7 +489,7 @@ under the License.
         <!--
         Why we need this test dependency:
         IDEA reads classes from the same project from target/classes of that module,
-        so even though we've packaged and shaded avro classes into flink-table-store-format.jar
+        so even though we've packaged and shaded avro classes into paimon-format.jar
         we still have to include this test dependency here.
 
         Why do we put this test dependency before the provided hive-exec:
@@ -577,7 +577,7 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes>
-                                    <include>org.apache.flink:flink-table-store-hive-common</include>
+                                    <include>org.apache.flink:paimon-hive-common</include>
                                     <include>org.apache.thrift:libthrift</include>
                                     <include>org.apache.thrift:libfb303</include>
                                     <include>com.google.guava:guava</include>

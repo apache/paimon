@@ -29,7 +29,7 @@ import org.apache.paimon.plugin.PluginLoader;
 /** A {@link PluginLoader} to load oss. */
 public class S3Loader implements FileIOLoader {
 
-    private static final String S3_JAR = "flink-table-store-plugin-s3.jar";
+    private static final String S3_JAR = "paimon-plugin-s3.jar";
 
     private static final String S3_CLASS = "org.apache.paimon.s3.S3FileIO";
 

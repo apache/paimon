@@ -84,7 +84,7 @@ Download the jar file with corresponding version.
 
 | Version    | Jar                                                                                                                                                                                    |
 |------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Hive 2 & 3 | [flink-table-store-hive-catalog-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-catalog-{{< version >}}.jar) |
+| Hive 2 & 3 | [paimon-hive-catalog-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-hive-catalog-{{< version >}}.jar) |
 
 You can also manually build bundled jar from the source code.
 
@@ -101,7 +101,7 @@ To build from source code, either [download the source of a release](https://fli
 Build bundled jar with the following command.
 `mvn clean install -Dmaven.test.skip=true`
 
-You can find Hive catalog jar in `./flink-table-store-hive/flink-table-store-hive-catalog/target/flink-table-store-hive-catalog-{{< version >}}.jar`.
+You can find Hive catalog jar in `./paimon-hive/paimon-hive-catalog/target/paimon-hive-catalog-{{< version >}}.jar`.
 
 ### Registering Hive Catalog
 
@@ -112,7 +112,7 @@ You can find Hive catalog jar in `./flink-table-store-hive/flink-table-store-hiv
 To enable Table Store Hive catalog support in Flink, you can pick one of the following two methods.
 
 * Copy Table Store Hive catalog jar file into the `lib` directory of your Flink installation directory. Note that this must be done before starting your Flink cluster.
-* If you're using Flink's SQL client, append `--jar /path/to/flink-table-store-hive-catalog-{{< version >}}.jar` to the starting command of SQL client.
+* If you're using Flink's SQL client, append `--jar /path/to/paimon-hive-catalog-{{< version >}}.jar` to the starting command of SQL client.
 
 The following Flink SQL registers and uses a Table Store Hive catalog named `my_hive`. Metadata and table files are stored under `hdfs://path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
 

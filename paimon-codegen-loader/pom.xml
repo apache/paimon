@@ -23,33 +23,33 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-parent</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-parent</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-codegen-loader</artifactId>
-    <name>Flink Table Store : Code Gen Loader</name>
+    <artifactId>paimon-codegen-loader</artifactId>
+    <name>Paimon : Code Gen Loader</name>
 
     <dependencies>
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-common</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-common</artifactId>
             <version>${project.version}</version>
             <scope>provided</scope>
         </dependency>
 
         <dependency>
-            <!-- Ensures that flink-table-store-codegen is built beforehand, in order to bundle the jar -->
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-codegen</artifactId>
+            <!-- Ensures that paimon-codegen is built beforehand, in order to bundle the jar -->
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-codegen</artifactId>
             <version>${project.version}</version>
-            <!-- We don't want any production code from flink-table-store-core to reference flink-table-store-codegen directly -->
+            <!-- We don't want any production code from paimon-core to reference paimon-codegen directly -->
             <scope>runtime</scope>
-            <!-- Prevent dependency from being accessible to modules depending on flink-table-store-core -->
+            <!-- Prevent dependency from being accessible to modules depending on paimon-core -->
             <optional>true</optional>
             <exclusions>
-                <!-- Prevent akka and scala from being visible to other modules depending on flink-table-store-core -->
+                <!-- Prevent akka and scala from being visible to other modules depending on paimon-core -->
                 <exclusion>
                     <groupId>*</groupId>
                     <artifactId>*</artifactId>
@@ -73,12 +73,12 @@ under the License.
                         <configuration>
                             <artifactItems>
                                 <artifactItem>
-                                    <groupId>org.apache.flink</groupId>
-                                    <artifactId>flink-table-store-codegen</artifactId>
+                                    <groupId>org.apache.paimon</groupId>
+                                    <artifactId>paimon-codegen</artifactId>
                                     <version>${project.version}</version>
                                     <type>jar</type>
                                     <overWrite>true</overWrite>
-                                    <destFileName>flink-table-store-codegen.jar</destFileName>
+                                    <destFileName>paimon-codegen.jar</destFileName>
                                 </artifactItem>
                             </artifactItems>
                             <outputDirectory>${project.build.directory}/classes</outputDirectory>

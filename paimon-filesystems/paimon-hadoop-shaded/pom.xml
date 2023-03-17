@@ -22,13 +22,13 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-filesystems</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-filesystems</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-hadoop-shaded</artifactId>
-    <name>Flink Table Store : FileSystems : Hadoop Shaded</name>
+    <artifactId>paimon-hadoop-shaded</artifactId>
+    <name>Paimon : FileSystems : Hadoop Shaded</name>
 
     <packaging>jar</packaging>
 

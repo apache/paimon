@@ -44,11 +44,11 @@ Download the jar file with corresponding version.
 
 |                  | Jar                                                                                                                                                                                                                |
 |------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Hive 3.1         | [flink-table-store-hive-connector-3.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-3.1-{{< version >}}.jar)                 |
-| Hive 2.3         | [flink-table-store-hive-connector-2.3-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-2.3-{{< version >}}.jar)                 |
-| Hive 2.2         | [flink-table-store-hive-connector-2.2-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-2.2-{{< version >}}.jar)                 |
-| Hive 2.1         | [flink-table-store-hive-connector-2.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-2.1-{{< version >}}.jar)                 |
-| Hive 2.1-cdh-6.3 | [flink-table-store-hive-connector-2.1-cdh-6.3-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/flink-table-store-{{< version >}}/flink-table-store-hive-connector-2.1-cdh-6.3-{{< version >}}.jar) |
+| Hive 3.1         | [paimon-hive-connector-3.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-hive-connector-3.1-{{< version >}}.jar)                 |
+| Hive 2.3         | [paimon-hive-connector-2.3-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-hive-connector-2.3-{{< version >}}.jar)                 |
+| Hive 2.2         | [paimon-hive-connector-2.2-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-hive-connector-2.2-{{< version >}}.jar)                 |
+| Hive 2.1         | [paimon-hive-connector-2.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-hive-connector-2.1-{{< version >}}.jar)                 |
+| Hive 2.1-cdh-6.3 | [paimon-hive-connector-2.1-cdh-6.3-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-hive-connector-2.1-cdh-6.3-{{< version >}}.jar) |
 
 You can also manually build bundled jar from the source code.
 
@@ -65,12 +65,12 @@ To build from source code, either [download the source of a release](https://fli
 Build bundled jar with the following command.
 `mvn clean install -Dmaven.test.skip=true`
 
-You can find Hive connector jar in `./flink-table-store-hive/flink-table-store-hive-connector-<hive-version>/target/flink-table-store-hive-connector-<hive-version>-{{< version >}}.jar`.
+You can find Hive connector jar in `./paimon-hive/paimon-hive-connector-<hive-version>/target/paimon-hive-connector-<hive-version>-{{< version >}}.jar`.
 
 There are several ways to add this jar to Hive.
 
-* You can create an `auxlib` folder under the root directory of Hive, and copy `flink-table-store-hive-connector-{{< version >}}.jar` into `auxlib`.
-* You can also copy this jar to a path accessible by Hive, then use `add jar /path/to/flink-table-store-hive-connector-{{< version >}}.jar` to enable table store support in Hive. Note that this method is not recommended. If you're using the MR execution engine and running a join statement, you may be faced with the exception `org.apache.hive.com.esotericsoftware.kryo.kryoexception: unable to find class`.
+* You can create an `auxlib` folder under the root directory of Hive, and copy `paimon-hive-connector-{{< version >}}.jar` into `auxlib`.
+* You can also copy this jar to a path accessible by Hive, then use `add jar /path/to/paimon-hive-connector-{{< version >}}.jar` to enable table store support in Hive. Note that this method is not recommended. If you're using the MR execution engine and running a join statement, you may be faced with the exception `org.apache.hive.com.esotericsoftware.kryo.kryoexception: unable to find class`.
 
 NOTE: If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
 
@@ -131,7 +131,7 @@ SELECT * FROM test_table;
 Run the following Hive SQL in Hive CLI to access the created table.
 
 ```sql
--- Assume that flink-table-store-hive-connector-<hive-version>-{{< version >}}.jar is already in auxlib directory.
+-- Assume that paimon-hive-connector-<hive-version>-{{< version >}}.jar is already in auxlib directory.
 -- List tables in Hive
 -- (you might need to switch to "default" database if you're not there by default)
 
@@ -158,7 +158,7 @@ OK
 To access existing table store table, you can also register them as external tables in Hive. Run the following Hive SQL in Hive CLI.
 
 ```sql
--- Assume that flink-table-store-hive-connector-{{< version >}}.jar is already in auxlib directory.
+-- Assume that paimon-hive-connector-{{< version >}}.jar is already in auxlib directory.
 -- Let's use the test_table created in the above section.
 -- To create an external table, you don't need to specify any column or table properties.
 -- Pointing the location to the path of table is enough.

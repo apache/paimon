@@ -23,13 +23,13 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-parent</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-parent</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-test-utils</artifactId>
-    <name>Flink Table Store : Test utils</name>
+    <artifactId>paimon-test-utils</artifactId>
+    <name>Paimon : Test utils</name>
 
     <dependencies>
         <dependency>

@@ -23,13 +23,13 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-parent</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-parent</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-e2e-tests</artifactId>
-    <name>Flink Table Store : End to End Tests</name>
+    <artifactId>paimon-e2e-tests</artifactId>
+    <name>Paimon : End to End Tests</name>
 
     <properties>
         <flink.shaded.hadoop.version>2.8.3-10.0</flink.shaded.hadoop.version>
@@ -40,29 +40,29 @@ under the License.
         <!-- Add dependencies to affect the order of mvn build -->
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-flink-${test.flink.main.version}</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-flink-${test.flink.main.version}</artifactId>
             <version>${project.version}</version>
             <scope>runtime</scope>
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-hive-catalog</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-hive-catalog</artifactId>
             <version>${project.version}</version>
             <scope>runtime</scope>
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-hive-connector-common</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-hive-connector-common</artifactId>
             <version>${project.version}</version>
             <scope>runtime</scope>
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-spark-3.2</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-spark-3.2</artifactId>
             <version>${project.version}</version>
             <scope>runtime</scope>
         </dependency>
@@ -101,43 +101,43 @@ under the License.
                 <configuration>
                     <artifactItems>
                         <artifactItem>
-                            <groupId>org.apache.flink</groupId>
-                            <artifactId>flink-table-store-flink-${test.flink.main.version}</artifactId>
+                            <groupId>org.apache.paimon</groupId>
+                            <artifactId>paimon-flink-${test.flink.main.version}</artifactId>
                             <version>${project.version}</version>
-                            <destFileName>flink-table-store.jar</destFileName>
+                            <destFileName>paimon-flink.jar</destFileName>
                             <type>jar</type>
                             <overWrite>true</overWrite>
-                            <outputDirectory>/tmp/flink-table-store-e2e-tests-jars
+                            <outputDirectory>/tmp/paimon-e2e-tests-jars
                             </outputDirectory>
                         </artifactItem>
                         <artifactItem>
-                            <groupId>org.apache.flink</groupId>
-                            <artifactId>flink-table-store-hive-catalog</artifactId>
+                            <groupId>org.apache.paimon</groupId>
+                            <artifactId>paimon-hive-catalog</artifactId>
                             <version>${project.version}</version>
-                            <destFileName>flink-table-store-hive-catalog.jar</destFileName>
+                            <destFileName>paimon-hive-catalog.jar</destFileName>
                             <type>jar</type>
                             <overWrite>true</overWrite>
-                            <outputDirectory>/tmp/flink-table-store-e2e-tests-jars
+                            <outputDirectory>/tmp/paimon-e2e-tests-jars
                             </outputDirectory>
                         </artifactItem>
                         <artifactItem>
-                            <groupId>org.apache.flink</groupId>
-                            <artifactId>flink-table-store-hive-connector-common</artifactId>
+                            <groupId>org.apache.paimon</groupId>
+                            <artifactId>paimon-hive-connector-common</artifactId>
                             <version>${project.version}</version>
-                            <destFileName>flink-table-store-hive-connector.jar</destFileName>
+                            <destFileName>paimon-hive-connector.jar</destFileName>
                             <type>jar</type>
                             <overWrite>true</overWrite>
-                            <outputDirectory>/tmp/flink-table-store-e2e-tests-jars
+                            <outputDirectory>/tmp/paimon-e2e-tests-jars
                             </outputDirectory>
                         </artifactItem>
                         <artifactItem>
-                            <groupId>org.apache.flink</groupId>
-                            <artifactId>flink-table-store-spark-3.2</artifactId>
+                            <groupId>org.apache.paimon</groupId>
+                            <artifactId>paimon-spark-3.2</artifactId>
                             <version>${project.version}</version>
-                            <destFileName>flink-table-store-spark.jar</destFileName>
+                            <destFileName>paimon-spark.jar</destFileName>
                             <type>jar</type>
                             <overWrite>true</overWrite>
-                            <outputDirectory>/tmp/flink-table-store-e2e-tests-jars
+                            <outputDirectory>/tmp/paimon-e2e-tests-jars
                             </outputDirectory>
                         </artifactItem>
                         <artifactItem>
@@ -147,7 +147,7 @@ under the License.
                             <destFileName>bundled-hadoop.jar</destFileName>
                             <type>jar</type>
                             <overWrite>true</overWrite>
-                            <outputDirectory>/tmp/flink-table-store-e2e-tests-jars
+                            <outputDirectory>/tmp/paimon-e2e-tests-jars
                             </outputDirectory>
                         </artifactItem>
                         <!-- test table store with kafka sql jar -->
@@ -158,7 +158,7 @@ under the License.
                             <destFileName>flink-sql-connector-kafka.jar</destFileName>
                             <type>jar</type>
                             <overWrite>true</overWrite>
-                            <outputDirectory>/tmp/flink-table-store-e2e-tests-jars
+                            <outputDirectory>/tmp/paimon-e2e-tests-jars
                             </outputDirectory>
                         </artifactItem>
                     </artifactItems>

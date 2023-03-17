@@ -23,13 +23,13 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-parent</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-parent</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-docs</artifactId>
-    <name>Flink Table Store : Docs</name>
+    <artifactId>paimon-docs</artifactId>
+    <name>Paimon : Docs</name>
 
     <properties>
         <generated.docs.dir>./docs/layouts/shortcodes/generated</generated.docs.dir>
@@ -39,15 +39,15 @@ under the License.
 
     <dependencies>
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-core</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-core</artifactId>
             <version>${project.version}</version>
             <scope>provided</scope>
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-flink-common</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-flink-common</artifactId>
             <version>${project.version}</version>
             <scope>provided</scope>
         </dependency>

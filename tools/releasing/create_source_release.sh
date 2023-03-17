@@ -55,7 +55,7 @@ fi
 ###########################
 
 RELEASE_DIR=${PROJECT_ROOT}/release
-CLONE_DIR=${RELEASE_DIR}/flink-table-store-tmp-clone
+CLONE_DIR=${RELEASE_DIR}/paimon-tmp-clone
 
 rm -rf ${RELEASE_DIR}
 mkdir ${RELEASE_DIR}
@@ -75,12 +75,12 @@ rsync -a \
   --exclude "target" \
   --exclude ".idea" --exclude "*.iml" \
   --exclude ".travis.yml" \
-  . flink-table-store-${RELEASE_VERSION}
+  . paimon-${RELEASE_VERSION}
 
-tar czf ${RELEASE_DIR}/flink-table-store-${RELEASE_VERSION}-src.tgz flink-table-store-${RELEASE_VERSION}
-gpg --armor --detach-sig ${RELEASE_DIR}/flink-table-store-${RELEASE_VERSION}-src.tgz
+tar czf ${RELEASE_DIR}/paimon-${RELEASE_VERSION}-src.tgz paimon-${RELEASE_VERSION}
+gpg --armor --detach-sig ${RELEASE_DIR}/paimon-${RELEASE_VERSION}-src.tgz
 cd ${RELEASE_DIR}
-${SHASUM} flink-table-store-${RELEASE_VERSION}-src.tgz > flink-table-store-${RELEASE_VERSION}-src.tgz.sha512
+${SHASUM} paimon-${RELEASE_VERSION}-src.tgz > paimon-${RELEASE_VERSION}-src.tgz.sha512
 
 rm -rf ${CLONE_DIR}
 

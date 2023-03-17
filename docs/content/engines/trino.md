@@ -26,6 +26,6 @@ under the License.
 
 # Trino
 
-Because Trino's dependency is JDK 11, it is not possible to include the trino connector in [flink-table-store](https://github.com/apache/flink-table-store).
+Because Trino's dependency is JDK 11, it is not possible to include the trino connector in [paimon](https://github.com/apache/incubator-paimon).
 
-See [flink-table-store-trino](https://github.com/JingsongLi/flink-table-store-trino).
+See [paimon-trino](https://github.com/JingsongLi/paimon-trino).

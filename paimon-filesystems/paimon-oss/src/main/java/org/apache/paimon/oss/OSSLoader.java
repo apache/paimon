@@ -29,7 +29,7 @@ import org.apache.paimon.plugin.PluginLoader;
 /** A {@link PluginLoader} to load oss. */
 public class OSSLoader implements FileIOLoader {
 
-    private static final String OSS_JAR = "flink-table-store-plugin-oss.jar";
+    private static final String OSS_JAR = "paimon-plugin-oss.jar";
 
     private static final String OSS_CLASS = "org.apache.paimon.oss.OSSFileIO";
 

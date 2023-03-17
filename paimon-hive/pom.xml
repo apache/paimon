@@ -23,13 +23,13 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-parent</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-parent</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-hive</artifactId>
-    <name>Flink Table Store : Hive</name>
+    <artifactId>paimon-hive</artifactId>
+    <name>Paimon : Hive</name>
 
     <packaging>pom</packaging>
 

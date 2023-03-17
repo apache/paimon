@@ -22,26 +22,26 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-filesystems</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-filesystems</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-s3</artifactId>
-    <name>Flink Table Store : FileSystems : S3</name>
+    <artifactId>paimon-s3</artifactId>
+    <name>Paimon : FileSystems : S3</name>
     <packaging>jar</packaging>
 
     <dependencies>
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-common</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-common</artifactId>
             <version>${project.version}</version>
             <scope>provided</scope>
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-s3-impl</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-s3-impl</artifactId>
             <version>${project.version}</version>
             <scope>runtime</scope>
             <optional>true</optional>
@@ -69,12 +69,12 @@
                         <configuration>
                             <artifactItems>
                                 <artifactItem>
-                                    <groupId>org.apache.flink</groupId>
-                                    <artifactId>flink-table-store-s3-impl</artifactId>
+                                    <groupId>org.apache.paimon</groupId>
+                                    <artifactId>paimon-s3-impl</artifactId>
                                     <version>${project.version}</version>
                                     <type>jar</type>
                                     <overWrite>true</overWrite>
-                                    <destFileName>flink-table-store-plugin-s3.jar</destFileName>
+                                    <destFileName>paimon-plugin-s3.jar</destFileName>
                                 </artifactItem>
                             </artifactItems>
                             <outputDirectory>${project.build.directory}/classes</outputDirectory>

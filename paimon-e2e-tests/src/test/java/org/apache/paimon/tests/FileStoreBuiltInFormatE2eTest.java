@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
 
-/** Test that file store supports format included in flink-table-store-format. */
+/** Test that file store supports format included in paimon-format. */
 public class FileStoreBuiltInFormatE2eTest extends E2eTestBase {
 
     @Test

@@ -6,16 +6,16 @@ Flink Table Store is developed under the umbrella of [Apache Flink](https://flin
 
 ## Documentation & Getting Started
 
-Please check out the full [documentation](https://nightlies.apache.org/flink/flink-table-store-docs-master/), hosted by the
+Please check out the full [documentation](https://nightlies.apache.org/flink/paimon-docs-master/), hosted by the
 [ASF](https://www.apache.org/), for detailed information and user guides.
 
-Check our [quick-start](https://nightlies.apache.org/flink/flink-table-store-docs-master/docs/try-table-store/quick-start/) guide for simple setup instructions to get you started with the table store.
+Check our [quick-start](https://nightlies.apache.org/flink/paimon-docs-master/docs/try-table-store/quick-start/) guide for simple setup instructions to get you started with the table store.
 
 ## Building
 
 Run the `mvn clean package -DskipTests` command to build the project.
 
-Then you will find a JAR file for Flink engine with all shaded dependencies: `flink-table-store-flink/flink-table-store-flink-**/target/flink-table-store-flink-**-<version>.jar`.
+Then you will find a JAR file for Flink engine with all shaded dependencies: `paimon-flink/paimon-flink-**/target/paimon-flink-**-<version>.jar`.
 
 ## Contributing
 

@@ -23,13 +23,13 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-flink</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-flink</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-flink-1.14</artifactId>
-    <name>Flink Table Store : Flink : 1.14</name>
+    <artifactId>paimon-flink-1.14</artifactId>
+    <name>Paimon : Flink : 1.14</name>
 
     <properties>
         <flink.version>1.14.6</flink.version>
@@ -38,8 +38,8 @@ under the License.
 
     <dependencies>
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-flink-common</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-flink-common</artifactId>
             <version>${project.version}</version>
             <exclusions>
                 <exclusion>
@@ -146,7 +146,7 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <include>org.apache.flink:flink-table-store-flink-common</include>
+                                    <include>org.apache.flink:paimon-flink-common</include>
                                 </includes>
                             </artifactSet>
                         </configuration>
