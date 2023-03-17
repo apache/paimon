@@ -36,7 +36,7 @@ import java.util.Map;
 /** The spark source for table store. */
 public class SparkSource implements DataSourceRegister, SessionConfigSupport {
 
-    /** Not use 'table-store' here, the '-' is not allowed in SQL. */
+    /** Not use 'paimon' here, the '-' is not allowed in SQL. */
     private static final String SHORT_NAME = "tablestore";
 
     @Override

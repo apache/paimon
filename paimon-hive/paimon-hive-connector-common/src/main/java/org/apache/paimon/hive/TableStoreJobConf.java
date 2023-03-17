@@ -34,8 +34,8 @@ import java.util.Properties;
  */
 public class TableStoreJobConf {
 
-    private static final String INTERNAL_LOCATION = "table-store.internal.location";
-    private static final String INTERNAL_CATALOG_CONFIG = "table-store.catalog.config";
+    private static final String INTERNAL_LOCATION = "paimon.internal.location";
+    private static final String INTERNAL_CATALOG_CONFIG = "paimon.catalog.config";
 
     private static final String TABLE_STORE_PREFIX = "tablestore.";
 

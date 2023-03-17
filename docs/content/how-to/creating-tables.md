@@ -328,7 +328,7 @@ CREATE TABLE MyTable (
     hh STRING,
     PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
 ) WITH (
-    'connector' = 'table-store',
+    'connector' = 'paimon',
     'path' = 'hdfs://path/to/table',
     'auto-create' = 'true' -- this table property creates table files for an empty table if table path does not exist
                            -- currently only supported by Flink
@@ -383,7 +383,7 @@ If you want to use Table Store catalog along with other tables but do not want t
 
 ```sql
 CREATE CATALOG my_catalog WITH (
-    'type' = 'table-store',
+    'type' = 'paimon',
     'warehouse' = 'hdfs://path/to/warehouse'
 );
 

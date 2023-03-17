@@ -66,7 +66,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
         path = getTempDirPath("table_store");
         tEnv.executeSql(
                 String.format(
-                        "CREATE CATALOG %s WITH (" + "'type'='table-store', 'warehouse'='%s')",
+                        "CREATE CATALOG %s WITH (" + "'type'='paimon', 'warehouse'='%s')",
                         catalog, path));
         tEnv.useCatalog(catalog);
 

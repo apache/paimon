@@ -91,7 +91,7 @@ public abstract class TableStoreTestBase extends AbstractTestBase {
 
         tEnv.executeSql(
                 String.format(
-                        "CREATE CATALOG %s WITH ('type' = 'table-store', 'warehouse' = '%s')",
+                        "CREATE CATALOG %s WITH ('type' = 'paimon', 'warehouse' = '%s')",
                         CURRENT_CATALOG, rootPath));
         tEnv.useCatalog(CURRENT_CATALOG);
     }
