@@ -19,9 +19,8 @@
 package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.store.annotation.VisibleForTesting;
-import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
+import org.apache.flink.table.store.data.serializer.RowCompactedSerializer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.io.DataOutputSerializer;
@@ -32,6 +31,7 @@ import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.options.MemorySize;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.types.RowKind;
+import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.FileIOUtils;
 import org.apache.flink.table.store.utils.IOFunction;
 
@@ -58,8 +58,8 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
 
     private final Levels levels;
     private final Comparator<InternalRow> keyComparator;
-    private final InternalRowSerializer keySerializer;
-    private final InternalRowSerializer valueSerializer;
+    private final RowCompactedSerializer keySerializer;
+    private final RowCompactedSerializer valueSerializer;
     private final IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory;
     private final Supplier<File> localFileFactory;
     private final LookupStoreFactory lookupStoreFactory;
@@ -69,8 +69,8 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
     public LookupLevels(
             Levels levels,
             Comparator<InternalRow> keyComparator,
-            InternalRowSerializer keySerializer,
-            InternalRowSerializer valueSerializer,
+            RowType keyType,
+            RowType valueType,
             IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory,
             Supplier<File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
@@ -78,8 +78,8 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
             MemorySize maxDiskSize) {
         this.levels = levels;
         this.keyComparator = keyComparator;
-        this.keySerializer = keySerializer;
-        this.valueSerializer = valueSerializer;
+        this.keySerializer = new RowCompactedSerializer(keyType);
+        this.valueSerializer = new RowCompactedSerializer(valueType);
         this.fileReaderFactory = fileReaderFactory;
         this.localFileFactory = localFileFactory;
         this.lookupStoreFactory = lookupStoreFactory;
@@ -164,16 +164,14 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         } catch (ExecutionException e) {
             throw new IOException(e);
         }
-        byte[] keyBytes = keySerializer.toBinaryRow(key).toBytes();
+        byte[] keyBytes = keySerializer.serializeToBytes(key);
         byte[] valueBytes = lookupFile.get(keyBytes);
         if (valueBytes == null) {
             return null;
         }
-        MemorySegment memorySegment = MemorySegment.wrap(valueBytes);
-        long sequenceNumber = memorySegment.getLong(0);
-        RowKind rowKind = RowKind.fromByteValue(valueBytes[8]);
-        BinaryRow value = new BinaryRow(valueSerializer.getArity());
-        value.pointTo(memorySegment, 9, valueBytes.length - 9);
+        InternalRow value = valueSerializer.deserialize(valueBytes);
+        long sequenceNumber = MemorySegment.wrap(valueBytes).getLong(valueBytes.length - 9);
+        RowKind rowKind = RowKind.fromByteValue(valueBytes[valueBytes.length - 1]);
         return new KeyValue()
                 .replace(key, sequenceNumber, rowKind, value)
                 .setLevel(lookupFile.remoteFile().level());
@@ -206,11 +204,11 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
             KeyValue kv;
             while ((batch = reader.readBatch()) != null) {
                 while ((kv = batch.next()) != null) {
-                    byte[] keyBytes = keySerializer.toBinaryRow(kv.key()).toBytes();
+                    byte[] keyBytes = keySerializer.serializeToBytes(kv.key());
                     valueOut.clear();
+                    valueOut.write(valueSerializer.serializeToBytes(kv.value()));
                     valueOut.writeLong(kv.sequenceNumber());
                     valueOut.writeByte(kv.valueKind().toByteValue());
-                    valueOut.write(valueSerializer.toBinaryRow(kv.value()).toBytes());
                     byte[] valueBytes = valueOut.getCopyOfBuffer();
                     kvWriter.put(keyBytes, valueBytes);
                 }

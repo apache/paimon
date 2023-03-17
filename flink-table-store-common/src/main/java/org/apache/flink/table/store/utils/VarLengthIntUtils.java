@@ -81,6 +81,23 @@ public final class VarLengthIntUtils {
     }
 
     /** @return bytes length. */
+    public static int encodeInt(byte[] bytes, int offset, int value) {
+
+        if (value < 0) {
+            throw new IllegalArgumentException("negative value: v=" + value);
+        }
+
+        int i = 1;
+        while ((value & ~0x7F) != 0) {
+            bytes[i + offset - 1] = (byte) ((value & 0x7F) | 0x80);
+            value >>>= 7;
+            i++;
+        }
+        bytes[i + offset - 1] = (byte) value;
+        return i;
+    }
+
+    /** @return bytes length. */
     public static int encodeInt(DataOutput os, int value) throws IOException {
 
         if (value < 0) {

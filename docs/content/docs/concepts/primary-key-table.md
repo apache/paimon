@@ -146,6 +146,10 @@ By specifying `'changelog-producer' = 'input'`, Table Store writers rely on thei
 
 ### Lookup
 
+{{< hint info >}}
+This is an experimental feature.
+{{< /hint >}}
+
 If your input can’t produce a complete changelog but you still want to get rid of the costly normalized operator, you may consider using the `'lookup'` changelog producer.
 
 By specifying `'changelog-producer' = 'lookup'`, Table Store will generate changelog through `'lookup'` before committing the data writing.
