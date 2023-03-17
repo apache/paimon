@@ -18,8 +18,6 @@
 
 package org.apache.paimon.format.orc;
 
-import org.apache.flink.table.store.fs.PositionOutputStream;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.orc.OrcConf;
@@ -32,6 +30,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.orc.writer.OrcBulkWriter;
 import org.apache.paimon.format.orc.writer.PhysicalWriterImpl;
 import org.apache.paimon.format.orc.writer.Vectorizer;
+import org.apache.paimon.fs.PositionOutputStream;
 
 import java.io.IOException;
 import java.util.HashMap;

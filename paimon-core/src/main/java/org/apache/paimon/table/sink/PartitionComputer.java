@@ -18,9 +18,8 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.flink.table.store.codegen.CodeGenUtils;
-import org.apache.flink.table.store.codegen.Projection;
-
+import org.apache.paimon.codegen.CodeGenUtils;
+import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.schema.TableSchema;

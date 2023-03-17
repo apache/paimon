@@ -18,9 +18,9 @@
 
 package org.apache.paimon.connector;
 
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.FileIOLoader;
-import org.apache.flink.table.store.fs.Path;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileIOLoader;
+import org.apache.paimon.fs.Path;
 
 /** Flink {@link FileIOLoader} for {@link FlinkFileIO}. */
 public class FlinkFileIOLoader implements FileIOLoader {

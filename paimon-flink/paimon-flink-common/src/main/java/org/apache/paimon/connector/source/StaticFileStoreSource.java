@@ -21,10 +21,10 @@ package org.apache.paimon.connector.source;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
-import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.utils.SnapshotManager;
 
+import org.apache.paimon.file.Snapshot;
 import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.source.BatchDataTableScan;
 import org.apache.paimon.table.source.DataTableScan;

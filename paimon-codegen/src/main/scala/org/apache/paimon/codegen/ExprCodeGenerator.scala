@@ -17,8 +17,8 @@
  */
 package org.apache.paimon.codegen
 
-import org.apache.paimon.codegen.GenerateUtils.{DEFAULT_OUT_RECORD_TERM, DEFAULT_OUT_RECORD_WRITER_TERM, generateRecordStatement, rowSetField}
 import org.apache.paimon.codegen.GeneratedExpression.{NEVER_NULL, NO_CODE}
+import org.apache.paimon.codegen.GenerateUtils.{generateRecordStatement, rowSetField, DEFAULT_OUT_RECORD_TERM, DEFAULT_OUT_RECORD_WRITER_TERM}
 import org.apache.paimon.data.{BinaryRow, InternalRow}
 import org.apache.paimon.types.{RowType, TimestampType}
 import org.apache.paimon.utils.TypeUtils.isInteroperable

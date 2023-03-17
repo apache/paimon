@@ -18,14 +18,13 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.flink.table.store.file.schema.Schema;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
-
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.file.schema.Schema;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.objectinspector.TableStoreRowDataObjectInspector;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

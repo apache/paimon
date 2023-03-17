@@ -18,8 +18,7 @@
 
 package org.apache.paimon.file;
 
-import org.apache.flink.table.store.codegen.RecordComparator;
-
+import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;

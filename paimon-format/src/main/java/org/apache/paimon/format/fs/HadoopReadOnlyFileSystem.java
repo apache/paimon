@@ -18,8 +18,6 @@
 
 package org.apache.paimon.format.fs;
 
-import org.apache.flink.table.store.fs.FileIO;
-
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileStatus;
@@ -29,6 +27,7 @@ import org.apache.hadoop.fs.PositionedReadable;
 import org.apache.hadoop.fs.Seekable;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.util.Progressable;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.utils.IOUtils;
 
 import java.io.IOException;
@@ -65,15 +64,15 @@ public class HadoopReadOnlyFileSystem extends FileSystem {
         return toHadoopStatus(fileIO.getFileStatus(toFlinkPath(path)));
     }
 
-    private static org.apache.flink.table.store.fs.Path toFlinkPath(Path path) {
-        return new org.apache.flink.table.store.fs.Path(path.toUri());
+    private static org.apache.paimon.fs.Path toFlinkPath(Path path) {
+        return new org.apache.paimon.fs.Path(path.toUri());
     }
 
-    private static Path toHadoopPath(org.apache.flink.table.store.fs.Path path) {
+    private static Path toHadoopPath(org.apache.paimon.fs.Path path) {
         return new Path(path.toUri());
     }
 
-    private static FileStatus toHadoopStatus(org.apache.flink.table.store.fs.FileStatus status) {
+    private static FileStatus toHadoopStatus(org.apache.paimon.fs.FileStatus status) {
         return new FileStatus(
                 status.getLen(),
                 status.isDir(),
@@ -139,16 +138,16 @@ public class HadoopReadOnlyFileSystem extends FileSystem {
     }
 
     /**
-     * A {@link InputStream} to wrap {@link org.apache.flink.table.store.fs.SeekableInputStream} for
-     * Flink's input streams.
+     * A {@link InputStream} to wrap {@link org.apache.paimon.fs.SeekableInputStream} for Flink's
+     * input streams.
      */
     private static class FSDataWrappedInputStream extends InputStream
             implements Seekable, PositionedReadable {
 
-        private final org.apache.flink.table.store.fs.SeekableInputStream seekableInputStream;
+        private final org.apache.paimon.fs.SeekableInputStream seekableInputStream;
 
         private FSDataWrappedInputStream(
-                org.apache.flink.table.store.fs.SeekableInputStream seekableInputStream) {
+                org.apache.paimon.fs.SeekableInputStream seekableInputStream) {
             this.seekableInputStream = seekableInputStream;
         }
 

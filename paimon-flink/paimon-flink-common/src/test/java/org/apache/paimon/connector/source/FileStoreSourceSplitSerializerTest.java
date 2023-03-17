@@ -19,10 +19,10 @@
 package org.apache.paimon.connector.source;
 
 import org.apache.flink.core.io.SimpleVersionedSerialization;
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.stats.StatsTestUtils;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.file.io.DataFileMeta;
+import org.apache.paimon.file.stats.StatsTestUtils;
 import org.apache.paimon.table.source.DataSplit;
 import org.junit.jupiter.api.Test;
 
@@ -30,7 +30,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 
-import static org.apache.flink.table.store.file.io.DataFileTestUtils.row;
+import static org.apache.paimon.file.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for the {@link FileStoreSourceSplitSerializer}. */

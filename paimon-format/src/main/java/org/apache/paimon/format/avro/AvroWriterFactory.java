@@ -18,9 +18,8 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.flink.table.store.fs.PositionOutputStream;
-
 import org.apache.avro.file.DataFileWriter;
+import org.apache.paimon.fs.PositionOutputStream;
 
 import java.io.IOException;
 

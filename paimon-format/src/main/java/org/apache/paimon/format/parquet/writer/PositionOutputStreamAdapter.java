@@ -28,14 +28,14 @@ import static org.apache.parquet.Preconditions.checkNotNull;
 class PositionOutputStreamAdapter extends PositionOutputStream {
 
     /** The Flink stream written to. */
-    private final org.apache.flink.table.store.fs.PositionOutputStream out;
+    private final org.apache.paimon.fs.PositionOutputStream out;
 
     /**
      * Create a new PositionOutputStreamAdapter.
      *
      * @param out The Flink stream written to.
      */
-    PositionOutputStreamAdapter(org.apache.flink.table.store.fs.PositionOutputStream out) {
+    PositionOutputStreamAdapter(org.apache.paimon.fs.PositionOutputStream out) {
         this.out = checkNotNull(out, "out");
     }
 

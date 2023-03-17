@@ -18,15 +18,14 @@
 
 package org.apache.paimon.oss;
 
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.FileStatus;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.PositionOutputStream;
-import org.apache.flink.table.store.fs.SeekableInputStream;
-
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 
 import java.io.IOException;
 

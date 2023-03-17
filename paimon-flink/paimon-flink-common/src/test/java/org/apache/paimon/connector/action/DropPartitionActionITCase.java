@@ -18,9 +18,8 @@
 
 package org.apache.paimon.connector.action;
 
-import org.apache.flink.table.store.file.Snapshot;
-
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.file.Snapshot;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.types.DataType;

@@ -18,10 +18,9 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
-
+import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;

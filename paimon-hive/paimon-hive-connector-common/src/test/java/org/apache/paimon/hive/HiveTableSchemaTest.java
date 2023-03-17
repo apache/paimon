@@ -18,12 +18,11 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.flink.table.store.file.schema.Schema;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
-
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
+import org.apache.paimon.file.schema.Schema;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
