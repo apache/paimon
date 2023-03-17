@@ -20,11 +20,11 @@ package org.apache.paimon.spark;
 
 import org.apache.flink.table.store.catalog.CatalogContext;
 
-import org.apache.paimon.file.catalog.Catalog;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.file.catalog.CatalogFactory;
-import org.apache.paimon.file.operation.Lock;
-import org.apache.paimon.file.schema.Schema;
-import org.apache.paimon.file.schema.SchemaChange;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;

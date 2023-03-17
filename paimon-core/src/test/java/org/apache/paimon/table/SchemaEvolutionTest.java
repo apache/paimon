@@ -21,11 +21,11 @@ package org.apache.paimon.table;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.predicate.Predicate;
-import org.apache.paimon.file.predicate.PredicateBuilder;
-import org.apache.paimon.file.schema.Schema;
-import org.apache.paimon.file.schema.SchemaChange;
-import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -50,8 +50,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
 
-import static org.apache.paimon.file.schema.SystemColumns.KEY_FIELD_PREFIX;
-import static org.apache.paimon.file.schema.SystemColumns.SYSTEM_FIELD_NAMES;
+import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
+import static org.apache.paimon.schema.SystemColumns.SYSTEM_FIELD_NAMES;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

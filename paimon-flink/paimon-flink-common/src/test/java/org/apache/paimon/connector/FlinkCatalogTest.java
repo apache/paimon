@@ -37,7 +37,7 @@ import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.store.catalog.CatalogContext;
 
-import org.apache.paimon.file.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.junit.jupiter.api.BeforeEach;

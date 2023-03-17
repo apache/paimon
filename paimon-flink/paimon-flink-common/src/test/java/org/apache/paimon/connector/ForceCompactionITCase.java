@@ -20,8 +20,8 @@ package org.apache.paimon.connector;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.Snapshot;
-import org.apache.paimon.file.manifest.ManifestFileMeta;
-import org.apache.paimon.file.manifest.ManifestList;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.file.stats.BinaryTableStats;
 import org.apache.paimon.file.utils.FileStorePathFactory;
 import org.apache.paimon.format.FileFormat;

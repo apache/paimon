@@ -22,7 +22,7 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
 
 /** A {@link PartitionComputer} to compute partition by partition keys. */

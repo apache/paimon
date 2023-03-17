@@ -21,7 +21,7 @@ package org.apache.paimon.file.stats;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.file.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;

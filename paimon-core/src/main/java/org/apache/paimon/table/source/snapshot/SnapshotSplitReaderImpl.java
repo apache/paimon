@@ -23,13 +23,13 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.file.Snapshot;
-import org.apache.paimon.file.io.DataFileMeta;
-import org.apache.paimon.file.manifest.FileKind;
-import org.apache.paimon.file.operation.FileStoreScan;
-import org.apache.paimon.file.operation.ScanKind;
-import org.apache.paimon.file.predicate.Predicate;
-import org.apache.paimon.file.predicate.PredicateBuilder;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.SplitGenerator;
@@ -42,7 +42,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiConsumer;
 
-import static org.apache.paimon.file.predicate.PredicateBuilder.transformFieldMapping;
+import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 import static org.apache.paimon.table.source.snapshot.SnapshotSplitReader.generateSplits;
 
 /** Implementation of {@link SnapshotSplitReader}. */

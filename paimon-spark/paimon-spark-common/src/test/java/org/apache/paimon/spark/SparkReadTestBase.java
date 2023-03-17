@@ -21,7 +21,7 @@ package org.apache.paimon.spark;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.table.FileStoreTable;

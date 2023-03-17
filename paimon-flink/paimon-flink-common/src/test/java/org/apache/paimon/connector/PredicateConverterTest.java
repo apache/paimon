@@ -34,8 +34,8 @@ import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.Row;
 
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.file.predicate.Predicate;
-import org.apache.paimon.file.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.format.FieldStats;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;

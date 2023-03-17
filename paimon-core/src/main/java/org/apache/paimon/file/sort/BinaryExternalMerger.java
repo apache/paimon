@@ -22,10 +22,10 @@ import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.AbstractPagedOutputView;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
-import org.apache.paimon.file.compression.BlockCompressionFactory;
-import org.apache.paimon.file.disk.ChannelReaderInputView;
-import org.apache.paimon.file.disk.ChannelReaderInputViewIterator;
-import org.apache.paimon.file.disk.IOManager;
+import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.disk.ChannelReaderInputView;
+import org.apache.paimon.disk.ChannelReaderInputViewIterator;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.file.utils.MutableObjectIterator;
 
 import java.io.IOException;

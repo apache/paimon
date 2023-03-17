@@ -33,8 +33,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.apache.paimon.file.schema.SystemColumns.SEQUENCE_NUMBER;
-import static org.apache.paimon.file.schema.SystemColumns.VALUE_KIND;
+import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
+import static org.apache.paimon.schema.SystemColumns.VALUE_KIND;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**

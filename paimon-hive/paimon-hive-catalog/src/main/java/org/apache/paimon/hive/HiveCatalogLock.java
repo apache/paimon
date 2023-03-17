@@ -26,7 +26,7 @@ import org.apache.hadoop.hive.metastore.api.LockRequest;
 import org.apache.hadoop.hive.metastore.api.LockResponse;
 import org.apache.hadoop.hive.metastore.api.LockState;
 import org.apache.hadoop.hive.metastore.api.LockType;
-import org.apache.paimon.file.catalog.CatalogLock;
+import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.utils.TimeUtils;
 import org.apache.thrift.TException;
 

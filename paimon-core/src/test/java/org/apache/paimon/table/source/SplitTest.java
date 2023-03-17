@@ -18,8 +18,8 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.file.io.DataFileMeta;
-import org.apache.paimon.file.io.DataFileTestDataGenerator;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFileTestDataGenerator;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.junit.jupiter.api.Test;

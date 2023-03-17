@@ -23,7 +23,7 @@ import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 
 import org.apache.paimon.file.Snapshot;
-import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.source.BatchDataTableScan;

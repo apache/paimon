@@ -20,10 +20,10 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.WriteMode;
-import org.apache.paimon.file.operation.ScanKind;
-import org.apache.paimon.file.predicate.PredicateBuilder;
-import org.apache.paimon.file.schema.SchemaManager;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;

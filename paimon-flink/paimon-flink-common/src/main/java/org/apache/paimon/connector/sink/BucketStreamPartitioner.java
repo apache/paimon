@@ -26,7 +26,7 @@ import org.apache.flink.table.data.RowData;
 
 import org.apache.paimon.connector.FlinkRowWrapper;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.BucketComputer;
 import org.apache.paimon.table.sink.PartitionComputer;
 

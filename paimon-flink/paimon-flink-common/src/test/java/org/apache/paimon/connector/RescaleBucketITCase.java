@@ -24,8 +24,8 @@ import org.apache.flink.runtime.jobgraph.SavepointConfigOptions;
 import org.apache.flink.types.Row;
 
 import org.apache.paimon.file.Snapshot;
-import org.apache.paimon.file.schema.SchemaManager;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.junit.jupiter.api.Test;

@@ -27,7 +27,7 @@ import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.util.function.SerializableFunction;
 
-import org.apache.paimon.file.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestCommittable;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;

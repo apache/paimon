@@ -24,16 +24,16 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.KeyValueFileStore;
 import org.apache.paimon.file.WriteMode;
-import org.apache.paimon.file.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.paimon.file.mergetree.compact.LookupMergeFunction;
-import org.apache.paimon.file.mergetree.compact.MergeFunctionFactory;
-import org.apache.paimon.file.mergetree.compact.PartialUpdateMergeFunction;
-import org.apache.paimon.file.mergetree.compact.aggregate.AggregateMergeFunction;
-import org.apache.paimon.file.operation.FileStoreScan;
-import org.apache.paimon.file.operation.KeyValueFileStoreScan;
-import org.apache.paimon.file.predicate.Predicate;
-import org.apache.paimon.file.schema.KeyValueFieldsExtractor;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.mergetree.compact.LookupMergeFunction;
+import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
+import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
+import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.KeyValueFileStoreScan;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.KeyValueFieldsExtractor;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
@@ -53,10 +53,10 @@ import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.file.predicate.PredicateBuilder.and;
-import static org.apache.paimon.file.predicate.PredicateBuilder.pickTransformFieldMapping;
-import static org.apache.paimon.file.predicate.PredicateBuilder.splitAnd;
-import static org.apache.paimon.file.schema.SystemColumns.KEY_FIELD_PREFIX;
+import static org.apache.paimon.predicate.PredicateBuilder.and;
+import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
+import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
+import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode with primary keys. */
 public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {

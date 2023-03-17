@@ -19,7 +19,7 @@
 package org.apache.paimon.file.format;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;

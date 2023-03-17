@@ -23,8 +23,8 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.util.function.SerializableFunction;
 
 import org.apache.paimon.connector.VersionedSerializerWrapper;
-import org.apache.paimon.file.manifest.ManifestCommittableSerializer;
-import org.apache.paimon.file.operation.Lock;
+import org.apache.paimon.manifest.ManifestCommittableSerializer;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
 
 import javax.annotation.Nullable;

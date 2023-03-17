@@ -20,7 +20,7 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.Snapshot;
-import org.apache.paimon.file.io.DataFileMetaSerializer;
+import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;

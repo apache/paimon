@@ -29,9 +29,9 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.connector.FlinkRowData;
 import org.apache.paimon.connector.FlinkRowWrapper;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.predicate.Predicate;
-import org.apache.paimon.file.predicate.PredicateFilter;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateFilter;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.StreamDataTableScan;
@@ -61,7 +61,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.connector.RocksDBOptions.LOOKUP_CACHE_ROWS;
-import static org.apache.paimon.file.predicate.PredicateBuilder.transformFieldMapping;
+import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A lookup {@link TableFunction} for file store. */

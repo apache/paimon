@@ -19,8 +19,8 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.file.io.DataFileMeta;
-import org.apache.paimon.file.io.DataFileMetaSerializer;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.file.utils.SerializationUtils;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
