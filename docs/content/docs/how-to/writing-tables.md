@@ -412,15 +412,15 @@ Parameters format:\
 All conditions, set changes and values should use Flink SQL syntax. Please quote them
 with \" to escape special characters.
 1. matched-upsert-changes:\
-col = <source-table>.col | expression [, ...] (Means set target.col with given value. Do not 
-add '<target-table>.' before 'col'.)\
+col = \<source-table>.col | expression [, ...] (Means setting \<target-table>.col with given value. Do not 
+add '\<target-table>.' before 'col'.)\
 Especially, you can use '*' to set columns with all source columns (require target table's 
 schema is equal to source's).
 2. not-matched-upsert-changes is similar to matched-upsert-changes, but you cannot reference 
 source table's column or use '*'.
 3. insert-values:\
-col1,col2,...,col_end\ 
-Must specify values of all columns. For each column, you can reference <source-table>.col or 
+col1, col2, ..., col_end\
+Must specify values of all columns. For each column, you can reference \<source-table>.col or 
 use an expression.\
 Especially, you can use '*' to insert with all source columns (require target table's schema 
 is equal to source's).
