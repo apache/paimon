@@ -60,7 +60,7 @@ public class SparkE2eTest extends E2eReaderTestBase {
                                             "--master",
                                             "spark://spark-master:7077",
                                             "--conf",
-                                            "spark.sql.catalog.tablestore=org.apache.flink.table.store.spark.SparkCatalog",
+                                            "spark.sql.catalog.tablestore=org.apache.paimon.spark.SparkCatalog",
                                             "--conf",
                                             "spark.sql.catalog.tablestore.warehouse=file:"
                                                     + warehousePath,
