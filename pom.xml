@@ -57,7 +57,7 @@ under the License.
         <module>flink-table-store-codegen-loader</module>
         <module>flink-table-store-common</module>
         <module>flink-table-store-core</module>
-        <module>flink-table-store-flink</module>
+        <module>paimon-flink</module>
         <module>flink-table-store-docs</module>
         <module>flink-table-store-e2e-tests</module>
         <module>flink-table-store-filesystems</module>
