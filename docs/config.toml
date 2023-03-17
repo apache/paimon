@@ -62,8 +62,8 @@ pygmentsUseClasses = true
 
   PreviousDocs = [
     ["master", "https://paimon.apache.org/docs/master"],
-    ["latest", "https://paimon.apache.org/docs/latest"],
-    ["0.3", "https://paimon.apache.org/docs/0.3"],
+    ["latest", "https://nightlies.apache.org/flink/flink-table-store-docs-release-0.3"],
+    ["0.3", "https://nightlies.apache.org/flink/flink-table-store-docs-release-0.3"],
   ]
 
 [markup]
