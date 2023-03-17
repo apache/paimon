@@ -18,8 +18,8 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.flink.table.store.file.io.CompactIncrement;
-import org.apache.flink.table.store.file.io.NewFilesIncrement;
+import org.apache.paimon.file.io.CompactIncrement;
+import org.apache.paimon.file.io.NewFilesIncrement;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 
@@ -30,8 +30,8 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.Objects;
 
-import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializedBytes;
-import static org.apache.flink.table.store.file.utils.SerializationUtils.serializeBytes;
+import static org.apache.paimon.file.utils.SerializationUtils.deserializedBytes;
+import static org.apache.paimon.file.utils.SerializationUtils.serializeBytes;
 
 /** File committable for sink. */
 public class CommitMessageImpl implements CommitMessage {

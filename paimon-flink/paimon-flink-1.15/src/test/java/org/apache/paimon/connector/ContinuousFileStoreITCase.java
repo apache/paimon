@@ -18,9 +18,9 @@
 
 package org.apache.paimon.connector;
 
-import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.utils.BlockingIterator;
-import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.paimon.file.Snapshot;
+import org.apache.paimon.file.utils.BlockingIterator;
+import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.types.Row;
 

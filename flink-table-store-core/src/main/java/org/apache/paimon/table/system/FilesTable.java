@@ -18,16 +18,16 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.io.DataFilePathFactory;
+import org.apache.paimon.file.io.DataFileMeta;
+import org.apache.paimon.file.io.DataFilePathFactory;
 import org.apache.paimon.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.stats.BinaryTableStats;
-import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.store.file.stats.FieldStatsConverters;
-import org.apache.flink.table.store.file.utils.IteratorRecordReader;
-import org.apache.flink.table.store.file.utils.SerializationUtils;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.file.stats.BinaryTableStats;
+import org.apache.paimon.file.stats.FieldStatsArraySerializer;
+import org.apache.paimon.file.stats.FieldStatsConverters;
+import org.apache.paimon.file.utils.IteratorRecordReader;
+import org.apache.paimon.file.utils.SerializationUtils;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -68,7 +68,7 @@ import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import static org.apache.flink.table.store.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing files of a snapshot in specific table. */
 public class FilesTable implements ReadonlyTable {

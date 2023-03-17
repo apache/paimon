@@ -25,10 +25,10 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.catalog.CatalogContext;
-import org.apache.flink.table.store.file.catalog.Catalog;
-import org.apache.flink.table.store.file.catalog.CatalogFactory;
-import org.apache.flink.table.store.file.catalog.Identifier;
-import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.paimon.file.catalog.Catalog;
+import org.apache.paimon.file.catalog.CatalogFactory;
+import org.apache.paimon.file.catalog.Identifier;
+import org.apache.paimon.file.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -49,7 +49,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.file.catalog.Catalog.DEFAULT_DATABASE;
+import static org.apache.paimon.file.catalog.Catalog.DEFAULT_DATABASE;
 
 /** Abstract base of {@link Action}. */
 public abstract class ActionBase implements Action {

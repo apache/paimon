@@ -18,9 +18,9 @@
 
 package org.apache.paimon.table;
 
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.stats.BinaryTableStats;
+import org.apache.paimon.file.io.DataFileMeta;
+import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.file.stats.BinaryTableStats;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.RowType;
@@ -31,7 +31,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * An abstraction layer above {@link org.apache.flink.table.store.file.FileStore} to provide reading
+ * An abstraction layer above {@link org.apache.paimon.file.FileStore} to provide reading
  * and writing of {@link InternalRow}.
  */
 public interface FileStoreTable extends DataTable, SupportsPartition {

@@ -18,11 +18,11 @@
 
 package org.apache.paimon.table.source.snapshot;
 
-import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
-import org.apache.flink.table.store.file.schema.Schema;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.utils.TraceableFileIO;
+import org.apache.paimon.file.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.file.schema.Schema;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.file.utils.TraceableFileIO;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;

@@ -20,7 +20,7 @@ package org.apache.paimon.table.sink;
 
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.codegen.Projection;
-import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.BinaryRow;

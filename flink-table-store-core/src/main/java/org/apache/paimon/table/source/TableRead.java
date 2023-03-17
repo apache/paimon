@@ -18,8 +18,8 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
-import org.apache.flink.table.store.file.operation.FileStoreRead;
+import org.apache.paimon.file.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.file.operation.FileStoreRead;
 import org.apache.paimon.reader.RecordReader;
 
 import org.apache.paimon.annotation.Experimental;

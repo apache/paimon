@@ -19,13 +19,13 @@
 package org.apache.paimon.table;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.paimon.file.WriteMode;
+import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.stats.BinaryTableStats;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.file.stats.BinaryTableStats;
 import org.apache.paimon.table.source.DataSplit;
 
 import org.apache.paimon.data.BinaryString;

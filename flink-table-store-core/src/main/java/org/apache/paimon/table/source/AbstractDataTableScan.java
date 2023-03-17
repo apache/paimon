@@ -19,8 +19,8 @@
 package org.apache.paimon.table.source;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.operation.FileStoreScan;
-import org.apache.flink.table.store.file.operation.ScanKind;
+import org.apache.paimon.file.operation.FileStoreScan;
+import org.apache.paimon.file.operation.ScanKind;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotStartingScanner;

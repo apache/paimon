@@ -23,7 +23,7 @@ import org.apache.flink.runtime.plugable.SerializationDelegate;
 import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.table.sink.BucketComputer;
 import org.apache.paimon.table.sink.PartitionComputer;
 

@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store;
 
-import org.apache.flink.table.store.file.WriteMode;
+import org.apache.paimon.file.WriteMode;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.MemorySize;

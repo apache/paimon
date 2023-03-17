@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.flink.table.store.file.operation.ScanKind;
+import org.apache.paimon.file.operation.ScanKind;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.utils.Filter;
 

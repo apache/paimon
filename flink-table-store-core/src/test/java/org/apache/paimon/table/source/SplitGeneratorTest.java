@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.paimon.file.io.DataFileMeta;
 
 import org.apache.paimon.data.InternalRow;
 import org.junit.jupiter.api.Test;
@@ -29,7 +29,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.file.io.DataFileTestUtils.fromMinMax;
+import static org.apache.paimon.file.io.DataFileTestUtils.fromMinMax;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link AppendOnlySplitGenerator} and {@link MergeTreeSplitGenerator}. */

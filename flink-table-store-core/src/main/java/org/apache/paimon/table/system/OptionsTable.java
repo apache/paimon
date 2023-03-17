@@ -19,8 +19,8 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.utils.IteratorRecordReader;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.file.utils.IteratorRecordReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
@@ -47,8 +47,8 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
 
-import static org.apache.flink.table.store.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
-import static org.apache.flink.table.store.file.utils.SerializationUtils.newStringType;
+import static org.apache.paimon.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.file.utils.SerializationUtils.newStringType;
 
 /** A {@link Table} for showing options of table. */
 public class OptionsTable implements ReadonlyTable {

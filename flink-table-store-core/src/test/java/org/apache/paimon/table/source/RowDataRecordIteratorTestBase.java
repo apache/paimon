@@ -18,9 +18,9 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.utils.ReusingTestData;
-import org.apache.flink.table.store.file.utils.TestReusingRecordReader;
+import org.apache.paimon.file.KeyValue;
+import org.apache.paimon.file.utils.ReusingTestData;
+import org.apache.paimon.file.utils.TestReusingRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowKind;
 

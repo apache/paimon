@@ -19,14 +19,14 @@
 package org.apache.paimon.table;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.AppendOnlyFileStore;
-import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreRead;
-import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
-import org.apache.flink.table.store.file.operation.FileStoreScan;
-import org.apache.flink.table.store.file.operation.ReverseReader;
+import org.apache.paimon.file.AppendOnlyFileStore;
+import org.apache.paimon.file.WriteMode;
+import org.apache.paimon.file.operation.AppendOnlyFileStoreRead;
+import org.apache.paimon.file.operation.AppendOnlyFileStoreScan;
+import org.apache.paimon.file.operation.FileStoreScan;
+import org.apache.paimon.file.operation.ReverseReader;
 import org.apache.paimon.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;

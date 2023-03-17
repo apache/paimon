@@ -19,13 +19,13 @@
 package org.apache.paimon.table;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.FileStore;
-import org.apache.flink.table.store.file.operation.FileStoreScan;
+import org.apache.paimon.file.FileStore;
+import org.apache.paimon.file.operation.FileStoreScan;
 import org.apache.paimon.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.SchemaValidation;
-import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.file.schema.SchemaValidation;
+import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;

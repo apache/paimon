@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.flink.table.store.file.disk.IOManager;
+import org.apache.paimon.file.disk.IOManager;
 import org.apache.paimon.table.Table;
 
 import org.apache.paimon.annotation.Experimental;
