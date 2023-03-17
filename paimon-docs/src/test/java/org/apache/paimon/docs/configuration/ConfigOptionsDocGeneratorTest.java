@@ -453,8 +453,7 @@ class ConfigOptionsDocGeneratorTest {
         final OptionsClassLocation[] locations =
                 new OptionsClassLocation[] {
                     new OptionsClassLocation(
-                            "flink-table-store-docs",
-                            TestCommonOptions.class.getPackage().getName())
+                            "paimon-docs", TestCommonOptions.class.getPackage().getName())
                 };
         ConfigOptionsDocGenerator.generateCommonSection(
                 projectRootDir, outputDirectory, locations, "src/test/java");
