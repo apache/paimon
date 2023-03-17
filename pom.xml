@@ -60,9 +60,9 @@ under the License.
         <module>paimon-flink</module>
         <module>flink-table-store-docs</module>
         <module>flink-table-store-e2e-tests</module>
-        <module>flink-table-store-filesystems</module>
+        <module>paimon-filesystems</module>
         <module>flink-table-store-format</module>
-        <module>flink-table-store-shade</module>
+        <module>paimon-shade</module>
         <module>paimon-hive</module>
         <module>paimon-spark</module>
         <module>paimon-test-utils</module>
