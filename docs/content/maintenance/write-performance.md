@@ -57,9 +57,9 @@ It is recommended that the parallelism of sink should be less than or equal to t
 
 ### Number of Sorted Runs to Trigger Compaction
 
-Table Store uses [LSM tree]({{< ref "docs/concepts/file-layouts#lsm-trees" >}}) which supports a large number of updates. LSM organizes files in several [sorted runs]({{< ref "docs/concepts/file-layouts#lsm-trees#sorted-runs" >}}). When querying records from an LSM tree, all sorted runs must be combined to produce a complete view of all records.
+Table Store uses [LSM tree]({{< ref "concepts/file-layouts#lsm-trees" >}}) which supports a large number of updates. LSM organizes files in several [sorted runs]({{< ref "concepts/file-layouts#lsm-trees#sorted-runs" >}}). When querying records from an LSM tree, all sorted runs must be combined to produce a complete view of all records.
 
-One can easily see that too many sorted runs will result in poor query performance. To keep the number of sorted runs in a reasonable range, Table Store writers will automatically perform [compactions]({{< ref "docs/concepts/file-layouts#lsm-trees#compactions" >}}). The following table property determines the minimum number of sorted runs to trigger a compaction.
+One can easily see that too many sorted runs will result in poor query performance. To keep the number of sorted runs in a reasonable range, Table Store writers will automatically perform [compactions]({{< ref "concepts/file-layouts#lsm-trees#compactions" >}}). The following table property determines the minimum number of sorted runs to trigger a compaction.
 
 <table class="table table-bordered">
     <thead>
@@ -116,7 +116,7 @@ Write stalls will become less frequent when `num-sorted-run.stop-trigger` become
 By default, Table Store writers will perform compaction as needed when writing records. This is sufficient for most use cases, but there are two downsides:
 
 * This may result in unstable write throughput because throughput might temporarily drop when performing a compaction.
-* Compaction will mark some data files as "deleted" (not really deleted, see [expiring snapshots]({{< ref "docs/maintenance/expiring-snapshots" >}}) for more info). If multiple writers mark the same file a conflict will occur when committing the changes. Table Store will automatically resolve the conflict, but this may result in job restarts.
+* Compaction will mark some data files as "deleted" (not really deleted, see [expiring snapshots]({{< ref "maintenance/expiring-snapshots" >}}) for more info). If multiple writers mark the same file a conflict will occur when committing the changes. Table Store will automatically resolve the conflict, but this may result in job restarts.
 
 To avoid these downsides, users can also choose to skip compactions in writers, and run a dedicated job only for compaction. As compactions are performed only by the dedicated job, writers can continuously write records without pausing and no conflicts will ever occur.
 
