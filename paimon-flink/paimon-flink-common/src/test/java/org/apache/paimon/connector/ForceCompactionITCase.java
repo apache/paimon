@@ -18,7 +18,7 @@
 
 package org.apache.paimon.connector;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestList;

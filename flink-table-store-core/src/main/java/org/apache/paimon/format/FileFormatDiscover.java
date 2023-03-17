@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 
 import java.util.HashMap;
 import java.util.Map;

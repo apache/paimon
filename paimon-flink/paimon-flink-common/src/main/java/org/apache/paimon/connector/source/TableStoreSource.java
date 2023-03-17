@@ -26,9 +26,9 @@ import org.apache.flink.table.connector.source.LookupTableSource;
 import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
-import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
-import org.apache.flink.table.store.CoreOptions.LogConsistency;
+import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.LogChangelogMode;
+import org.apache.paimon.CoreOptions.LogConsistency;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
@@ -48,10 +48,10 @@ import javax.annotation.Nullable;
 
 import java.util.stream.IntStream;
 
-import static org.apache.flink.table.store.CoreOptions.CHANGELOG_PRODUCER;
-import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
-import static org.apache.flink.table.store.CoreOptions.LOG_CONSISTENCY;
-import static org.apache.flink.table.store.CoreOptions.LOG_SCAN_REMOVE_NORMALIZE;
+import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
+import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
+import static org.apache.paimon.CoreOptions.LOG_SCAN_REMOVE_NORMALIZE;
 
 /**
  * Table source to create {@link StaticFileStoreSource} or {@link ContinuousFileStoreSource} under

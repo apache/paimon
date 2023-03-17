@@ -18,7 +18,7 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.Path;

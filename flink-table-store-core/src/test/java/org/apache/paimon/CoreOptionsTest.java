@@ -16,8 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store;
+package org.apache.paimon;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;

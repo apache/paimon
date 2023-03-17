@@ -18,7 +18,7 @@
 
 package org.apache.paimon.file.schema;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.WriteMode;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.types.ArrayType;
@@ -35,11 +35,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-import static org.apache.flink.table.store.CoreOptions.SCAN_MODE;
-import static org.apache.flink.table.store.CoreOptions.SCAN_SNAPSHOT_ID;
-import static org.apache.flink.table.store.CoreOptions.SCAN_TIMESTAMP_MILLIS;
-import static org.apache.flink.table.store.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
-import static org.apache.flink.table.store.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
+import static org.apache.paimon.CoreOptions.SCAN_MODE;
+import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
+import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
+import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
+import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.file.WriteMode.APPEND_ONLY;
 import static org.apache.paimon.file.schema.SystemColumns.KEY_FIELD_PREFIX;
 import static org.apache.paimon.file.schema.SystemColumns.SYSTEM_FIELD_NAMES;

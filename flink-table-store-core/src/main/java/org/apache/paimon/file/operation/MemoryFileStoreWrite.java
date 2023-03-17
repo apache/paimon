@@ -18,7 +18,7 @@
 
 package org.apache.paimon.file.operation;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.memory.HeapMemorySegmentPool;
 import org.apache.paimon.file.memory.MemoryOwner;
 import org.apache.paimon.file.memory.MemoryPoolFactory;
@@ -31,7 +31,7 @@ import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 import java.util.Iterator;
 import java.util.Map;
 
-import static org.apache.flink.table.store.CoreOptions.LOOKUP_CACHE_MAX_MEMORY_SIZE;
+import static org.apache.paimon.CoreOptions.LOOKUP_CACHE_MAX_MEMORY_SIZE;
 
 /**
  * Base {@link FileStoreWrite} implementation which supports using shared memory and preempting

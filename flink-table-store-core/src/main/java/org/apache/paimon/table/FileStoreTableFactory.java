@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.paimon.file.WriteMode;
 import org.apache.paimon.file.schema.SchemaManager;
@@ -30,7 +30,7 @@ import org.apache.paimon.options.Options;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 
-import static org.apache.flink.table.store.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.PATH;
 
 /** Factory to create {@link FileStoreTable}. */
 public class FileStoreTableFactory {

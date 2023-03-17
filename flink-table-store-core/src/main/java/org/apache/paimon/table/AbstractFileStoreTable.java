@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.FileStore;
 import org.apache.paimon.file.operation.FileStoreScan;
 import org.apache.paimon.file.predicate.Predicate;
@@ -45,7 +45,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiConsumer;
 
-import static org.apache.flink.table.store.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.PATH;
 
 /** Abstract {@link FileStoreTable}. */
 public abstract class AbstractFileStoreTable implements FileStoreTable {

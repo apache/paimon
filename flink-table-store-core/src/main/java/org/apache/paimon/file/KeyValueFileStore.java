@@ -18,7 +18,7 @@
 
 package org.apache.paimon.file;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.file.operation.KeyValueFileStoreRead;
 import org.apache.paimon.file.operation.KeyValueFileStoreScan;

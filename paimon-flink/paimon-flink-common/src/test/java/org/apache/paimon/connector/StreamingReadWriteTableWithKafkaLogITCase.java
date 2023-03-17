@@ -18,7 +18,7 @@
 
 package org.apache.paimon.connector;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.types.Row;
 
@@ -34,8 +34,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
-import static org.apache.flink.table.store.CoreOptions.SCAN_MODE;
-import static org.apache.flink.table.store.CoreOptions.SCAN_TIMESTAMP_MILLIS;
+import static org.apache.paimon.CoreOptions.SCAN_MODE;
+import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.connector.util.ReadWriteTableTestUtil.SCAN_LATEST;
 import static org.apache.paimon.connector.util.ReadWriteTableTestUtil.assertNoMoreRecords;
 import static org.apache.paimon.connector.util.ReadWriteTableTestUtil.buildQuery;

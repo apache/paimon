@@ -40,8 +40,8 @@ import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
 
-import static org.apache.flink.table.store.CoreOptions.LOG_FORMAT;
-import static org.apache.flink.table.store.CoreOptions.LOG_KEY_FORMAT;
+import static org.apache.paimon.CoreOptions.LOG_FORMAT;
+import static org.apache.paimon.CoreOptions.LOG_KEY_FORMAT;
 
 /**
  * Base interface for configuring a default log table connector. The log table is used by managed

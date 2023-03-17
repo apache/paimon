@@ -70,13 +70,13 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.CoreOptions.BUCKET;
-import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
-import static org.apache.flink.table.store.CoreOptions.COMPACTION_MAX_FILE_NUM;
-import static org.apache.flink.table.store.CoreOptions.FILE_FORMAT;
-import static org.apache.flink.table.store.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
-import static org.apache.flink.table.store.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
-import static org.apache.flink.table.store.CoreOptions.WRITE_ONLY;
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.COMPACTION_MAX_FILE_NUM;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
+import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
+import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base test class for {@link FileStoreTable}. */

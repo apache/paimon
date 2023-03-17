@@ -18,7 +18,7 @@
 
 package org.apache.paimon.file.io;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.stats.BinaryTableStats;
 import org.apache.paimon.file.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.ArrayType;

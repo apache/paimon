@@ -18,8 +18,8 @@
 
 package org.apache.paimon.file.mergetree;
 
-import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.compact.CompactResult;
 import org.apache.paimon.file.format.FlushingFileFormat;

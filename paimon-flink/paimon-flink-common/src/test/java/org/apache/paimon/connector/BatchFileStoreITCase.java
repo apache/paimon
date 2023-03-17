@@ -18,7 +18,7 @@
 
 package org.apache.paimon.connector;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.flink.types.Row;
 
 import org.junit.jupiter.api.Test;

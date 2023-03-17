@@ -19,7 +19,7 @@
 package org.apache.paimon.connector.source;
 
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;

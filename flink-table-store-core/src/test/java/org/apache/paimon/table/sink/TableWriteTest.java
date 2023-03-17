@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.operation.AbstractFileStoreWrite;
 import org.apache.paimon.file.schema.Schema;
 import org.apache.paimon.file.schema.SchemaManager;
