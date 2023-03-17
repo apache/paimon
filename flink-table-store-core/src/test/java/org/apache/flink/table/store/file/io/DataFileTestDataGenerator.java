@@ -22,7 +22,8 @@ import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.store.format.FieldStatsCollector;
+
+import org.apache.paimon.format.FieldStatsCollector;
 
 import java.util.ArrayList;
 import java.util.HashMap;

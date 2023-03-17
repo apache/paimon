@@ -19,11 +19,12 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileStatus;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
+
+import org.apache.paimon.format.FormatReaderFactory;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;

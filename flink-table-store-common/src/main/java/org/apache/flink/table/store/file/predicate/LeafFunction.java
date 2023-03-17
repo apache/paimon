@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.types.DataType;
+
+import org.apache.paimon.format.FieldStats;
 
 import java.io.Serializable;
 import java.util.List;

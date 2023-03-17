@@ -45,11 +45,11 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.lookup.hash.HashLookupStoreFactory;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.format.FileFormatDiscover;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

@@ -20,13 +20,13 @@
 package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.format.FormatWriter;
-import org.apache.flink.table.store.format.FormatWriterFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.PositionOutputStream;
 import org.apache.flink.table.store.utils.IOUtils;
 
+import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.FormatWriterFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

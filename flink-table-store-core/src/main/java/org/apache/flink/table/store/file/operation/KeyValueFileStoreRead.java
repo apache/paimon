@@ -35,12 +35,13 @@ import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.ProjectedRow;
+
+import org.apache.paimon.format.FileFormatDiscover;
 
 import javax.annotation.Nullable;
 

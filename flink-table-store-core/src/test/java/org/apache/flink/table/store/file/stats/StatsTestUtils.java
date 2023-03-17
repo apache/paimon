@@ -18,9 +18,10 @@
 
 package org.apache.flink.table.store.file.stats;
 
-import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.format.FieldStats;
 
 import java.util.ArrayList;
 import java.util.List;

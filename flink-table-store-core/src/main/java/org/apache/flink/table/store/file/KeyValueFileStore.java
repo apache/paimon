@@ -27,9 +27,10 @@ import org.apache.flink.table.store.file.operation.KeyValueFileStoreWrite;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.KeyComparatorSupplier;
-import org.apache.flink.table.store.format.FileFormatDiscover;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.format.FileFormatDiscover;
 
 import java.util.Comparator;
 import java.util.function.Supplier;

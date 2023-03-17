@@ -30,8 +30,6 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.file.utils.ExecutorThreadFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
-import org.apache.flink.table.store.format.FieldStats;
-import org.apache.flink.table.store.format.FileFormat;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.options.Options;
@@ -41,6 +39,8 @@ import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.VarCharType;
 import org.apache.flink.table.store.utils.Pair;
 
+import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.format.FileFormat;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

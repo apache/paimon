@@ -21,10 +21,11 @@ package org.apache.flink.table.store.file.predicate;
 import org.apache.flink.table.store.data.serializer.InternalSerializers;
 import org.apache.flink.table.store.data.serializer.ListSerializer;
 import org.apache.flink.table.store.data.serializer.NullableSerializer;
-import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.io.DataInputViewStreamWrapper;
 import org.apache.flink.table.store.io.DataOutputViewStreamWrapper;
 import org.apache.flink.table.store.types.DataType;
+
+import org.apache.paimon.format.FieldStats;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;

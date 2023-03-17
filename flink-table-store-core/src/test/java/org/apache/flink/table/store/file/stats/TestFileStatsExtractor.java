@@ -21,14 +21,15 @@ package org.apache.flink.table.store.file.stats;
 import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
-import org.apache.flink.table.store.format.FieldStats;
-import org.apache.flink.table.store.format.FieldStatsCollector;
-import org.apache.flink.table.store.format.FileFormat;
-import org.apache.flink.table.store.format.FileStatsExtractor;
-import org.apache.flink.table.store.format.FormatReaderFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.format.FieldStatsCollector;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileStatsExtractor;
+import org.apache.paimon.format.FormatReaderFactory;
 
 import java.io.IOException;
 import java.util.List;
