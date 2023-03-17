@@ -337,6 +337,6 @@ public class SchemaManagerTest {
         assertThat(manager.listAllIds()).containsExactlyInAnyOrder(5L, 6L, 7L, 8L, 9L, 10L);
 
         manager.expireSchema(10);
-        assertThat(manager.listAllIds()).containsExactlyInAnyOrder(5L, 6L, 7L, 8L, 9L, 10L);
+        assertThat(manager.listAllIds()).containsExactlyInAnyOrder(10L);
     }
 }
