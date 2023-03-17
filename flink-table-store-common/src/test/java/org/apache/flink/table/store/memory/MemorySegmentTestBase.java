@@ -18,8 +18,7 @@
 
 package org.apache.flink.table.store.memory;
 
-import org.apache.flink.table.store.testutils.junit.parameterized.Parameters;
-
+import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.junit.jupiter.api.TestTemplate;
 
 import java.io.ByteArrayInputStream;

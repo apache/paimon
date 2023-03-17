@@ -18,8 +18,7 @@
 
 package org.apache.flink.table.store.memory;
 
-import org.apache.flink.table.store.testutils.junit.parameterized.ParameterizedTestExtension;
-
+import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 

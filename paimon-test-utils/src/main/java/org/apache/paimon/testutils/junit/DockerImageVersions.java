@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.testutils.junit;
+package org.apache.paimon.testutils.junit;
 
 /**
  * Utility class for defining the image names and versions of Docker containers used during the Java
