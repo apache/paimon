@@ -18,9 +18,9 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.flink.table.store.datagen.DataGenerator;
-import org.apache.flink.table.store.datagen.RandomGeneratorVisitor;
-import org.apache.flink.table.store.datagen.RowDataGenerator;
+import org.apache.paimon.datagen.DataGenerator;
+import org.apache.paimon.datagen.RandomGeneratorVisitor;
+import org.apache.paimon.datagen.RowDataGenerator;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
