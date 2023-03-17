@@ -18,13 +18,13 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.types.BigIntType;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.MapType;
-import org.apache.flink.table.store.types.MultisetType;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalArray;
@@ -39,8 +39,8 @@ import org.apache.spark.sql.types.Decimal;
 import org.apache.spark.unsafe.types.CalendarInterval;
 import org.apache.spark.unsafe.types.UTF8String;
 
-import static org.apache.flink.table.store.utils.RowDataUtils.copyRowData;
-import static org.apache.flink.table.store.utils.TypeUtils.timestampPrecision;
+import static org.apache.paimon.utils.RowDataUtils.copyRowData;
+import static org.apache.paimon.utils.TypeUtils.timestampPrecision;
 
 /** Spark {@link org.apache.spark.sql.catalyst.InternalRow} to wrap {@link InternalRow}. */
 public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow {

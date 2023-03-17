@@ -18,7 +18,7 @@
 
 package org.apache.paimon.options;
 
-import org.apache.flink.table.store.table.TableType;
+import org.apache.paimon.table.TableType;
 
 import java.time.Duration;
 

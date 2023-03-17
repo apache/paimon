@@ -21,7 +21,7 @@ package org.apache.paimon.format;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 

@@ -18,8 +18,8 @@
 
 package org.apache.paimon.connector;
 
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DataType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.BinaryType;
@@ -58,107 +58,107 @@ public class LogicalTypeToDataType extends LogicalTypeDefaultVisitor<DataType> {
 
     @Override
     public DataType visit(CharType charType) {
-        return new org.apache.flink.table.store.types.CharType(
+        return new org.apache.paimon.types.CharType(
                 charType.isNullable(), charType.getLength());
     }
 
     @Override
     public DataType visit(VarCharType varCharType) {
-        return new org.apache.flink.table.store.types.VarCharType(
+        return new org.apache.paimon.types.VarCharType(
                 varCharType.isNullable(), varCharType.getLength());
     }
 
     @Override
     public DataType visit(BooleanType booleanType) {
-        return new org.apache.flink.table.store.types.BooleanType(booleanType.isNullable());
+        return new org.apache.paimon.types.BooleanType(booleanType.isNullable());
     }
 
     @Override
     public DataType visit(BinaryType binaryType) {
-        return new org.apache.flink.table.store.types.BinaryType(
+        return new org.apache.paimon.types.BinaryType(
                 binaryType.isNullable(), binaryType.getLength());
     }
 
     @Override
     public DataType visit(VarBinaryType varBinaryType) {
-        return new org.apache.flink.table.store.types.VarBinaryType(
+        return new org.apache.paimon.types.VarBinaryType(
                 varBinaryType.isNullable(), varBinaryType.getLength());
     }
 
     @Override
     public DataType visit(DecimalType decimalType) {
-        return new org.apache.flink.table.store.types.DecimalType(
+        return new org.apache.paimon.types.DecimalType(
                 decimalType.isNullable(), decimalType.getPrecision(), decimalType.getScale());
     }
 
     @Override
     public DataType visit(TinyIntType tinyIntType) {
-        return new org.apache.flink.table.store.types.TinyIntType(tinyIntType.isNullable());
+        return new org.apache.paimon.types.TinyIntType(tinyIntType.isNullable());
     }
 
     @Override
     public DataType visit(SmallIntType smallIntType) {
-        return new org.apache.flink.table.store.types.SmallIntType(smallIntType.isNullable());
+        return new org.apache.paimon.types.SmallIntType(smallIntType.isNullable());
     }
 
     @Override
     public DataType visit(IntType intType) {
-        return new org.apache.flink.table.store.types.IntType(intType.isNullable());
+        return new org.apache.paimon.types.IntType(intType.isNullable());
     }
 
     @Override
     public DataType visit(BigIntType bigIntType) {
-        return new org.apache.flink.table.store.types.BigIntType(bigIntType.isNullable());
+        return new org.apache.paimon.types.BigIntType(bigIntType.isNullable());
     }
 
     @Override
     public DataType visit(FloatType floatType) {
-        return new org.apache.flink.table.store.types.FloatType(floatType.isNullable());
+        return new org.apache.paimon.types.FloatType(floatType.isNullable());
     }
 
     @Override
     public DataType visit(DoubleType doubleType) {
-        return new org.apache.flink.table.store.types.DoubleType(doubleType.isNullable());
+        return new org.apache.paimon.types.DoubleType(doubleType.isNullable());
     }
 
     @Override
     public DataType visit(DateType dateType) {
-        return new org.apache.flink.table.store.types.DateType(dateType.isNullable());
+        return new org.apache.paimon.types.DateType(dateType.isNullable());
     }
 
     @Override
     public DataType visit(TimeType timeType) {
-        return new org.apache.flink.table.store.types.TimeType(
+        return new org.apache.paimon.types.TimeType(
                 timeType.isNullable(), timeType.getPrecision());
     }
 
     @Override
     public DataType visit(TimestampType timestampType) {
-        return new org.apache.flink.table.store.types.TimestampType(
+        return new org.apache.paimon.types.TimestampType(
                 timestampType.isNullable(), timestampType.getPrecision());
     }
 
     @Override
     public DataType visit(LocalZonedTimestampType localZonedTimestampType) {
-        return new org.apache.flink.table.store.types.LocalZonedTimestampType(
+        return new org.apache.paimon.types.LocalZonedTimestampType(
                 localZonedTimestampType.isNullable(), localZonedTimestampType.getPrecision());
     }
 
     @Override
     public DataType visit(ArrayType arrayType) {
-        return new org.apache.flink.table.store.types.ArrayType(
+        return new org.apache.paimon.types.ArrayType(
                 arrayType.isNullable(), arrayType.getElementType().accept(this));
     }
 
     @Override
     public DataType visit(MultisetType multisetType) {
-        return new org.apache.flink.table.store.types.MultisetType(
+        return new org.apache.paimon.types.MultisetType(
                 multisetType.isNullable(), multisetType.getElementType().accept(this));
     }
 
     @Override
     public DataType visit(MapType mapType) {
-        return new org.apache.flink.table.store.types.MapType(
+        return new org.apache.paimon.types.MapType(
                 mapType.isNullable(),
                 mapType.getKeyType().accept(this),
                 mapType.getValueType().accept(this));
@@ -175,7 +175,7 @@ public class LogicalTypeToDataType extends LogicalTypeDefaultVisitor<DataType> {
                             id, field.getName(), fieldType, field.getDescription().orElse(null)));
         }
 
-        return new org.apache.flink.table.store.types.RowType(rowType.isNullable(), dataFields);
+        return new org.apache.paimon.types.RowType(rowType.isNullable(), dataFields);
     }
 
     @Override

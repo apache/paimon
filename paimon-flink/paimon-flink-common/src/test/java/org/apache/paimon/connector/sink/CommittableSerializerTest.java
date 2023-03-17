@@ -20,9 +20,9 @@ package org.apache.paimon.connector.sink;
 
 import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.NewFilesIncrement;
-import org.apache.flink.table.store.table.sink.CommitMessage;
-import org.apache.flink.table.store.table.sink.CommitMessageImpl;
-import org.apache.flink.table.store.table.sink.CommitMessageSerializer;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.CommitMessageSerializer;
 
 import org.junit.jupiter.api.Test;
 

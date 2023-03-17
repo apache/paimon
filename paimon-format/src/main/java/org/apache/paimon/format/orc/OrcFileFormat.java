@@ -20,15 +20,15 @@ package org.apache.paimon.format.orc;
 
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DataTypes;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.MapType;
-import org.apache.flink.table.store.types.MultisetType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.Projection;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Projection;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.orc.TypeDescription;
@@ -53,7 +53,7 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.types.DataTypeChecks.getFieldTypes;
+import static org.apache.paimon.types.DataTypeChecks.getFieldTypes;
 
 /** Orc {@link FileFormat}. The main code is copied from Flink {@code OrcFileFormatFactory}. */
 public class OrcFileFormat extends FileFormat {

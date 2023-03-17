@@ -21,8 +21,8 @@ package org.apache.flink.table.store.file.io;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FieldStats;

@@ -28,10 +28,10 @@ import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFuncti
 import org.apache.flink.table.store.file.sort.BinaryInMemorySortBuffer;
 import org.apache.flink.table.store.file.utils.ReusingKeyValue;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
-import org.apache.flink.table.store.types.BigIntType;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -42,7 +42,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkState;
+import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link SortBufferWriteBuffer}. */

@@ -29,9 +29,9 @@ import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.paimon.options.OptionsUtils;
-import org.apache.flink.table.store.table.TableType;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.utils.StringUtils;
+import org.apache.paimon.table.TableType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -62,7 +62,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
-import static org.apache.flink.table.store.utils.Preconditions.checkState;
+import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
 

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.memory;
 
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.utils.Preconditions;
 
 import java.lang.reflect.Field;
 import java.nio.Buffer;

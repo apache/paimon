@@ -25,15 +25,15 @@ import org.apache.flink.table.store.file.casting.CastFieldGetter;
 import org.apache.paimon.file.predicate.LeafPredicate;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateReplaceVisitor;
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DataTypeFamily;
-import org.apache.flink.table.store.types.MapType;
-import org.apache.flink.table.store.types.MultisetType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.ProjectedRow;
-import org.apache.flink.table.store.utils.RowDataUtils;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeFamily;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.RowDataUtils;
 
 import org.apache.paimon.data.InternalRow;
 
@@ -48,8 +48,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
-import static org.apache.flink.table.store.utils.Preconditions.checkState;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Utils for schema evolution. */
 public class SchemaEvolutionUtil {

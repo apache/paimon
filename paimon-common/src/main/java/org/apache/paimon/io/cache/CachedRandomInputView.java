@@ -20,7 +20,7 @@ package org.apache.paimon.io.cache;
 
 import org.apache.paimon.io.SeekableDataInputView;
 import org.apache.paimon.memory.MemorySegment;
-import org.apache.flink.table.store.utils.MathUtils;
+import org.apache.paimon.utils.MathUtils;
 
 import org.apache.paimon.data.AbstractPagedInputView;
 

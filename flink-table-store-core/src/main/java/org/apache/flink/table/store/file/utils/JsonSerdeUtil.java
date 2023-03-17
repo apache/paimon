@@ -20,9 +20,9 @@ package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.store.file.schema.SchemaSerializer;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DataTypeJsonParser;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeJsonParser;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonParser;

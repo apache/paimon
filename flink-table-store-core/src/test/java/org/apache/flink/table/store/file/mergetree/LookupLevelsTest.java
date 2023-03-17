@@ -33,11 +33,11 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.options.MemorySize;
-import org.apache.flink.table.store.table.SchemaEvolutionTableTestBase;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DataTypes;
-import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.table.SchemaEvolutionTableTestBase;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;

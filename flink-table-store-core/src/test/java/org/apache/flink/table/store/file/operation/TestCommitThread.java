@@ -25,8 +25,8 @@ import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
 import org.apache.flink.table.store.file.mergetree.MergeTreeWriter;
 import org.apache.flink.table.store.file.utils.CommitIncrement;
-import org.apache.flink.table.store.table.sink.CommitMessageImpl;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.BinaryRow;
 import org.slf4j.Logger;

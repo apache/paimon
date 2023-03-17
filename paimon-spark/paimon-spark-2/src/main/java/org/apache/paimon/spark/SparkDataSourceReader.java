@@ -19,11 +19,11 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.file.predicate.Predicate;
-import org.apache.flink.table.store.table.Table;
-import org.apache.flink.table.store.table.source.ReadBuilder;
-import org.apache.flink.table.store.table.source.Split;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.TypeUtils;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.sources.Filter;

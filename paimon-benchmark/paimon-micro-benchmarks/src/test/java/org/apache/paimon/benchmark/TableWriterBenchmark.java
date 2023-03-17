@@ -20,10 +20,10 @@ package org.apache.paimon.benchmark;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.table.sink.CommitMessage;
-import org.apache.flink.table.store.table.sink.StreamTableCommit;
-import org.apache.flink.table.store.table.sink.StreamTableWrite;
-import org.apache.flink.table.store.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 
 import org.junit.jupiter.api.Test;
 

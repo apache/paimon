@@ -31,7 +31,7 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.table.store.table.source.TableRead;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
@@ -164,14 +164,14 @@ public class FileStoreSourceSplitReaderTest {
                     new KeyValue()
                             .replace(
                                     GenericRow.of(tuple2.f0),
-                                    org.apache.flink.table.store.types.RowKind.INSERT,
+                                    org.apache.paimon.types.RowKind.INSERT,
                                     GenericRow.of(tuple2.f1)));
         }
         writer.write(
                 new KeyValue()
                         .replace(
                                 GenericRow.of(222L),
-                                org.apache.flink.table.store.types.RowKind.DELETE,
+                                org.apache.paimon.types.RowKind.DELETE,
                                 GenericRow.of(333L)));
         List<DataFileMeta> files = writer.prepareCommit(true).newFilesIncrement().newFiles();
         writer.close();

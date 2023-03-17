@@ -31,8 +31,8 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.StartupMode;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.source.StreamDataTableScan;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 

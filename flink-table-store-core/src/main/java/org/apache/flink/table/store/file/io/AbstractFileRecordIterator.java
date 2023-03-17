@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.table.store.file.casting.CastFieldGetter;
 import org.apache.flink.table.store.file.casting.CastedRow;
-import org.apache.flink.table.store.reader.RecordReader;
-import org.apache.flink.table.store.utils.ProjectedRow;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.ProjectedRow;
 
 import org.apache.paimon.data.InternalRow;
 

@@ -21,8 +21,8 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.partition.PartitionTimeExtractor;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;

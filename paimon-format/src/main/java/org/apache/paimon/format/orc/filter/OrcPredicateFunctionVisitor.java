@@ -20,7 +20,7 @@ package org.apache.paimon.format.orc.filter;
 
 import org.apache.paimon.file.predicate.FieldRef;
 import org.apache.paimon.file.predicate.FunctionVisitor;
-import org.apache.flink.table.store.types.DataType;
+import org.apache.paimon.types.DataType;
 
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
 import org.apache.paimon.data.Decimal;

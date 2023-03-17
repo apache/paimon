@@ -17,9 +17,9 @@
 
 package org.apache.flink.table.store.codegen.codesplit;
 
-import org.apache.flink.table.store.utils.FileIOUtils;
-import org.apache.flink.table.store.utils.Pair;
-import org.apache.flink.table.store.utils.StringUtils;
+import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.StringUtils;
 
 import org.codehaus.commons.compiler.CompileException;
 import org.codehaus.janino.SimpleCompiler;
@@ -34,7 +34,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Util class for code split tests. */

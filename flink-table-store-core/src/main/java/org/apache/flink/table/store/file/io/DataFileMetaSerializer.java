@@ -27,8 +27,8 @@ import org.apache.paimon.data.InternalRow;
 
 import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.serializeBinaryRow;
-import static org.apache.flink.table.store.utils.RowDataUtils.fromStringArrayData;
-import static org.apache.flink.table.store.utils.RowDataUtils.toStringArrayData;
+import static org.apache.paimon.utils.RowDataUtils.fromStringArrayData;
+import static org.apache.paimon.utils.RowDataUtils.toStringArrayData;
 
 /** Serializer for {@link DataFileMeta}. */
 public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {

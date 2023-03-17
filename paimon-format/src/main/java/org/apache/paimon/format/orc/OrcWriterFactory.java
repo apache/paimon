@@ -39,7 +39,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * A factory that creates an ORC {@link FormatWriter}. The factory takes a user supplied {@link

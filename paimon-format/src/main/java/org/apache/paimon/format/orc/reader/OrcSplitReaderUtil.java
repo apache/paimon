@@ -18,14 +18,14 @@
 
 package org.apache.paimon.format.orc.reader;
 
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.types.CharType;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DataTypes;
-import org.apache.flink.table.store.types.DecimalType;
-import org.apache.flink.table.store.types.MapType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.types.VarCharType;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 
 import org.apache.orc.TypeDescription;
 

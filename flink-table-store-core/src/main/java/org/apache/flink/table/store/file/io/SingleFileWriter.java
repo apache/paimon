@@ -22,7 +22,7 @@ package org.apache.flink.table.store.file.io;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.flink.table.store.utils.IOUtils;
+import org.apache.paimon.utils.IOUtils;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;

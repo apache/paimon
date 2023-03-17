@@ -17,10 +17,10 @@
 
 package org.apache.paimon.data;
 
-import org.apache.flink.table.store.types.DataTypes;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;

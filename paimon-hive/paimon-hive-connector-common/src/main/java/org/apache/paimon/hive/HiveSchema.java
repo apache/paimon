@@ -23,9 +23,9 @@ import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.table.FileStoreTableFactory;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DataType;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;

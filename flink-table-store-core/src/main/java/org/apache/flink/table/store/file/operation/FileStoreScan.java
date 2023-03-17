@@ -23,7 +23,7 @@ import org.apache.flink.table.store.file.manifest.FileKind;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
 import org.apache.paimon.file.predicate.Predicate;
-import org.apache.flink.table.store.utils.Filter;
+import org.apache.paimon.utils.Filter;
 
 import org.apache.paimon.data.BinaryRow;
 

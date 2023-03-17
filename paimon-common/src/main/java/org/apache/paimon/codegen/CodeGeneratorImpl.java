@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.codegen;
 
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.TypeUtils;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.TypeUtils;
 
 import java.util.List;
 

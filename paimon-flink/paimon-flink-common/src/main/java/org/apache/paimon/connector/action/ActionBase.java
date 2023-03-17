@@ -31,10 +31,10 @@ import org.apache.flink.table.store.file.catalog.Identifier;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.Table;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DataTypeCasts;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeCasts;
 import org.apache.flink.table.types.logical.LogicalType;
 
 import org.apache.paimon.connector.FlinkCatalog;

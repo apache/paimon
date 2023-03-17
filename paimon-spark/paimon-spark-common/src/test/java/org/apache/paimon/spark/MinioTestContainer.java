@@ -19,7 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.flink.table.store.testutils.junit.DockerImageVersions;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.utils.Preconditions;
 
 import com.amazonaws.auth.AWSStaticCredentialsProvider;
 import com.amazonaws.auth.BasicAWSCredentials;

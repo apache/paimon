@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.catalog;
 import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.annotation.Experimental;
 
@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Factory to create {@link Catalog}. Each factory should have a unique identifier.

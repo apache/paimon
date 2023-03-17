@@ -19,7 +19,7 @@
 package org.apache.paimon.fs;
 
 import org.apache.paimon.fs.hadoop.HadoopFileIO;
-import org.apache.flink.table.store.utils.OperatingSystem;
+import org.apache.paimon.utils.OperatingSystem;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.MiniDFSCluster;

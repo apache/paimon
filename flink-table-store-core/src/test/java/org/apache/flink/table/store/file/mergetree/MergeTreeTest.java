@@ -45,13 +45,13 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.reader.RecordReader;
-import org.apache.flink.table.store.reader.RecordReaderIterator;
-import org.apache.flink.table.store.table.SchemaEvolutionTableTestBase;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.table.SchemaEvolutionTableTestBase;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
@@ -152,7 +152,7 @@ public class MergeTreeTest {
                                         new DataField(
                                                 0,
                                                 "k",
-                                                new org.apache.flink.table.store.types.IntType(
+                                                new org.apache.paimon.types.IntType(
                                                         false)));
                             }
 
@@ -162,7 +162,7 @@ public class MergeTreeTest {
                                         new DataField(
                                                 0,
                                                 "v",
-                                                new org.apache.flink.table.store.types.IntType(
+                                                new org.apache.paimon.types.IntType(
                                                         false)));
                             }
                         });

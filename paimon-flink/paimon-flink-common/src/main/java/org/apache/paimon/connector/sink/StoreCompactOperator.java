@@ -25,8 +25,8 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.OffsetRow;
-import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.connector.FlinkRowWrapper;
 import org.apache.paimon.data.BinaryRow;

@@ -20,8 +20,8 @@ package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.Projection;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Projection;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;

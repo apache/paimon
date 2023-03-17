@@ -32,7 +32,7 @@ import java.util.Arrays;
 
 import static org.apache.paimon.memory.MemorySegmentUtils.allocateReuseBytes;
 import static org.apache.paimon.memory.MemorySegmentUtils.allocateReuseChars;
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * A string which is backed by {@link MemorySegment}s.

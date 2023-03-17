@@ -18,12 +18,12 @@
 
 package org.apache.flink.table.store.file;
 
-import org.apache.flink.table.store.types.BigIntType;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.types.TinyIntType;
-import org.apache.flink.table.store.utils.RowDataUtils;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.utils.RowDataUtils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
@@ -36,7 +36,7 @@ import java.util.stream.IntStream;
 
 import static org.apache.flink.table.store.file.schema.SystemColumns.SEQUENCE_NUMBER;
 import static org.apache.flink.table.store.file.schema.SystemColumns.VALUE_KIND;
-import static org.apache.flink.table.store.utils.Preconditions.checkState;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * A key value, including user key, sequence number, value kind and value. This object can be
@@ -146,12 +146,12 @@ public class KeyValue {
                 new DataField(
                         maxKeyId + 1,
                         SEQUENCE_NUMBER,
-                        new org.apache.flink.table.store.types.BigIntType(false)));
+                        new org.apache.paimon.types.BigIntType(false)));
         fields.add(
                 new DataField(
                         maxKeyId + 2,
                         VALUE_KIND,
-                        new org.apache.flink.table.store.types.TinyIntType(false)));
+                        new org.apache.paimon.types.TinyIntType(false)));
         for (DataField valueField : valueFields) {
             DataField newValueField =
                     new DataField(

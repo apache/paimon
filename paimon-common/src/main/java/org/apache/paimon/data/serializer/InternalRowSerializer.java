@@ -20,8 +20,8 @@ package org.apache.paimon.data.serializer;
 
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.AbstractPagedInputView;
 import org.apache.paimon.data.AbstractPagedOutputView;

@@ -21,10 +21,10 @@ package org.apache.paimon.data.serializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.memory.MemorySegment;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.VarLengthIntUtils;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.VarLengthIntUtils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryArray;
@@ -47,9 +47,9 @@ import java.util.Objects;
 
 import static org.apache.paimon.memory.MemorySegmentUtils.bitGet;
 import static org.apache.paimon.memory.MemorySegmentUtils.bitSet;
-import static org.apache.flink.table.store.types.DataTypeChecks.getPrecision;
-import static org.apache.flink.table.store.types.DataTypeChecks.getScale;
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.types.DataTypeChecks.getPrecision;
+import static org.apache.paimon.types.DataTypeChecks.getScale;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.data.BinaryRow.HEADER_SIZE_IN_BITS;
 
 /** A {@link Serializer} for {@link InternalRow} using compacted binary. */

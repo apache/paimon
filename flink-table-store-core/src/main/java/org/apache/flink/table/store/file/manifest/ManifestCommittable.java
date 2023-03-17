@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.manifest;
 
-import org.apache.flink.table.store.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessage;
 
 import javax.annotation.Nullable;
 

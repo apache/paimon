@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.utils;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 

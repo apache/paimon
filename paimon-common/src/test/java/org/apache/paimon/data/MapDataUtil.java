@@ -18,7 +18,7 @@
 
 package org.apache.paimon.data;
 
-import org.apache.flink.table.store.types.DataType;
+import org.apache.paimon.types.DataType;
 
 import java.util.HashMap;
 import java.util.Map;

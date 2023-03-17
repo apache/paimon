@@ -28,7 +28,7 @@ import org.apache.paimon.fs.PositionOutputStreamWrapper;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.flink.table.store.utils.ThreadUtils;
+import org.apache.paimon.utils.ThreadUtils;
 
 import javax.annotation.concurrent.GuardedBy;
 
@@ -41,7 +41,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** A file system that tracks the number of concurrently open input streams, output streams. */
 public class TraceableFileIO implements FileIO {

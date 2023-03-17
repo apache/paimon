@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.stats;
 
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;

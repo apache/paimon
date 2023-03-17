@@ -18,8 +18,8 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.memory.MemorySegment;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.StringUtils;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.StringUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

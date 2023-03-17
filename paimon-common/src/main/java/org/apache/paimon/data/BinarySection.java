@@ -19,8 +19,8 @@ package org.apache.paimon.data;
 
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
-import org.apache.flink.table.store.utils.IOUtils;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;

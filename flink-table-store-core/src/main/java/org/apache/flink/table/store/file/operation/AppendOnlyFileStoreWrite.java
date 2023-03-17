@@ -31,10 +31,10 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.paimon.fs.FileIO;
-import org.apache.flink.table.store.reader.RecordReaderIterator;
-import org.apache.flink.table.store.table.source.DataSplit;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.LongCounter;
+import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.LongCounter;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;

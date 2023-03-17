@@ -20,7 +20,7 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.paimon.reader.RecordReader;
 
 import org.apache.paimon.data.InternalRow;
 

@@ -19,7 +19,7 @@
 package org.apache.paimon.connector.source;
 
 import org.apache.flink.api.connector.source.SourceSplit;
-import org.apache.flink.table.store.table.source.Split;
+import org.apache.paimon.table.source.Split;
 
 import java.util.Objects;
 

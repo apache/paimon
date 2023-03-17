@@ -22,12 +22,12 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 
-import static org.apache.flink.table.store.utils.DecimalUtils.add;
-import static org.apache.flink.table.store.utils.DecimalUtils.castFrom;
-import static org.apache.flink.table.store.utils.DecimalUtils.castToBoolean;
-import static org.apache.flink.table.store.utils.DecimalUtils.castToDecimal;
-import static org.apache.flink.table.store.utils.DecimalUtils.castToIntegral;
-import static org.apache.flink.table.store.utils.DecimalUtils.doubleValue;
+import static org.apache.paimon.utils.DecimalUtils.add;
+import static org.apache.paimon.utils.DecimalUtils.castFrom;
+import static org.apache.paimon.utils.DecimalUtils.castToBoolean;
+import static org.apache.paimon.utils.DecimalUtils.castToDecimal;
+import static org.apache.paimon.utils.DecimalUtils.castToIntegral;
+import static org.apache.paimon.utils.DecimalUtils.doubleValue;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link Decimal}. */

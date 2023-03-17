@@ -19,7 +19,7 @@
 package org.apache.paimon.memory;
 
 import org.apache.paimon.io.DataOutputView;
-import org.apache.flink.table.store.utils.MurmurHashUtils;
+import org.apache.paimon.utils.MurmurHashUtils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryArray;

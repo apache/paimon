@@ -19,7 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.table.Table;
+import org.apache.paimon.table.Table;
 
 import org.apache.spark.sql.connector.write.Write;
 import org.apache.spark.sql.connector.write.WriteBuilder;

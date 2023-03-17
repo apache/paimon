@@ -28,10 +28,10 @@ import org.apache.flink.table.store.file.io.RowDataRollingFileWriter;
 import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.paimon.fs.FileIO;
-import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.LongCounter;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.LongCounter;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;

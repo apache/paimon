@@ -21,12 +21,12 @@ package org.apache.flink.table.store.file.io;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.types.BigIntType;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DataTypes;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
@@ -38,7 +38,7 @@ import java.util.Objects;
 
 import static org.apache.flink.table.store.file.utils.SerializationUtils.newBytesType;
 import static org.apache.flink.table.store.file.utils.SerializationUtils.newStringType;
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 
 /** Metadata of a data file. */

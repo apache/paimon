@@ -17,7 +17,7 @@
 
 package org.apache.flink.table.store.codegen.codesplit;
 
-import org.apache.flink.table.store.utils.FileIOUtils;
+import org.apache.paimon.utils.FileIOUtils;
 
 import org.junit.jupiter.api.Test;
 

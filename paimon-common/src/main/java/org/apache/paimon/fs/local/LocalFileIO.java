@@ -42,7 +42,7 @@ import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
 import static org.apache.paimon.fs.local.LocalFileIOLoader.SCHEME;
-import static org.apache.flink.table.store.utils.Preconditions.checkState;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** {@link FileIO} for local file. */
 public class LocalFileIO implements FileIO {

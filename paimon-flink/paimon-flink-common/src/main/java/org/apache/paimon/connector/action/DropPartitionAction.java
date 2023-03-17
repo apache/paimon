@@ -20,7 +20,7 @@ package org.apache.paimon.connector.action;
 
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.flink.table.store.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableCommit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

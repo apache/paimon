@@ -17,7 +17,7 @@
  */
 package org.apache.flink.table.store.codegen
 
-import org.apache.flink.table.store.types.DataType
+import org.apache.paimon.types.DataType
 
 /**
  * Describes a generated expression.

@@ -17,8 +17,8 @@
 
 package org.apache.paimon.format.parquet.reader;
 
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.types.DataType;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
 
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;

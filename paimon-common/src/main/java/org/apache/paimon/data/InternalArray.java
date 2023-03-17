@@ -18,8 +18,8 @@
 
 package org.apache.paimon.data;
 
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.types.DataType;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
 
 import org.apache.paimon.annotation.Experimental;
 
@@ -27,9 +27,9 @@ import javax.annotation.Nullable;
 
 import java.io.Serializable;
 
-import static org.apache.flink.table.store.types.DataTypeChecks.getFieldCount;
-import static org.apache.flink.table.store.types.DataTypeChecks.getPrecision;
-import static org.apache.flink.table.store.types.DataTypeChecks.getScale;
+import static org.apache.paimon.types.DataTypeChecks.getFieldCount;
+import static org.apache.paimon.types.DataTypeChecks.getPrecision;
+import static org.apache.paimon.types.DataTypeChecks.getScale;
 
 /**
  * Base interface of an internal data structure representing data of {@link ArrayType}.

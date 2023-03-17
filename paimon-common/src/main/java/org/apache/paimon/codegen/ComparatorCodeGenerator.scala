@@ -18,7 +18,7 @@
 package org.apache.flink.table.store.codegen
 
 import org.apache.flink.table.store.codegen.GenerateUtils.{newName, ROW_DATA}
-import org.apache.flink.table.store.types.RowType
+import org.apache.paimon.types.RowType
 
 /** A code generator for generating [[RecordComparator]]. */
 object ComparatorCodeGenerator {

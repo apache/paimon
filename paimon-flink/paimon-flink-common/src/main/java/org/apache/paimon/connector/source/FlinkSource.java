@@ -24,8 +24,8 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.table.source.ReadBuilder;
-import org.apache.flink.table.store.table.source.TableRead;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableRead;
 
 import javax.annotation.Nullable;
 

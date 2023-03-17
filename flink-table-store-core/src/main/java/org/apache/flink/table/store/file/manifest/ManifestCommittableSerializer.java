@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.manifest;
 
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
-import org.apache.flink.table.store.table.sink.CommitMessage;
-import org.apache.flink.table.store.table.sink.CommitMessageSerializer;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageSerializer;
 
 import org.apache.paimon.data.serializer.VersionedSerializer;
 

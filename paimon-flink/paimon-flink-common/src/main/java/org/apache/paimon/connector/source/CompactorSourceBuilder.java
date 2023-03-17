@@ -26,13 +26,13 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.source.StreamDataTableScan;
-import org.apache.flink.table.store.table.source.snapshot.ContinuousCompactorFollowUpScanner;
-import org.apache.flink.table.store.table.source.snapshot.ContinuousCompactorStartingScanner;
-import org.apache.flink.table.store.table.source.snapshot.FullStartingScanner;
-import org.apache.flink.table.store.table.system.BucketsTable;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.source.snapshot.ContinuousCompactorFollowUpScanner;
+import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
+import org.apache.paimon.table.source.snapshot.FullStartingScanner;
+import org.apache.paimon.table.system.BucketsTable;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.connector.LogicalTypeConversion;
 

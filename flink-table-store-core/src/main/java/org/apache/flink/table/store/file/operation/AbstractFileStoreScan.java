@@ -32,10 +32,10 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.Filter;
-import org.apache.flink.table.store.utils.Preconditions;
-import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.apache.paimon.data.BinaryRow;
 

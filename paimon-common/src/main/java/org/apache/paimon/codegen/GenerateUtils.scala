@@ -19,9 +19,9 @@ package org.apache.flink.table.store.codegen
 
 import org.apache.paimon.data._
 import org.apache.paimon.memory.MemorySegment
-import org.apache.flink.table.store.types._
-import org.apache.flink.table.store.types.DataTypeChecks.{getFieldCount, getFieldTypes, getPrecision, getScale}
-import org.apache.flink.table.store.types.DataTypeRoot._
+import org.apache.paimon.types._
+import org.apache.paimon.types.DataTypeChecks.{getFieldCount, getFieldTypes, getPrecision, getScale}
+import org.apache.paimon.types.DataTypeRoot._
 
 import java.lang.{Boolean => JBoolean, Byte => JByte, Double => JDouble, Float => JFloat, Integer => JInt, Long => JLong, Short => JShort}
 import java.util.concurrent.atomic.AtomicLong
@@ -116,7 +116,7 @@ object GenerateUtils {
       s"($leftTerm == $rightTerm ? 0 : ($leftTerm ? 1 : -1))"
     case BINARY | VARBINARY =>
       val sortUtil =
-        classOf[org.apache.flink.table.store.utils.SortUtil].getCanonicalName
+        classOf[org.apache.paimon.utils.SortUtil].getCanonicalName
       s"$sortUtil.compareBinary($leftTerm, $rightTerm)"
     case TINYINT | SMALLINT | INTEGER | BIGINT | FLOAT | DOUBLE | DATE | TIME_WITHOUT_TIME_ZONE =>
       s"($leftTerm > $rightTerm ? 1 : $leftTerm < $rightTerm ? -1 : 0)"

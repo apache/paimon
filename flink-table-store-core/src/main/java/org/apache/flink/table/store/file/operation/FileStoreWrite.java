@@ -22,8 +22,8 @@ import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.utils.RecordWriter;
-import org.apache.flink.table.store.table.sink.CommitMessage;
-import org.apache.flink.table.store.table.sink.SinkRecord;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.SinkRecord;
 
 import org.apache.paimon.data.BinaryRow;
 

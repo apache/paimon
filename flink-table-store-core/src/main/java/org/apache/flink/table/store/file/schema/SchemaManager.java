@@ -33,13 +33,13 @@ import org.apache.flink.table.store.file.schema.SchemaChange.UpdateColumnType;
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DataTypeCasts;
-import org.apache.flink.table.store.types.DataTypeVisitor;
-import org.apache.flink.table.store.types.ReassignFieldId;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeCasts;
+import org.apache.paimon.types.DataTypeVisitor;
+import org.apache.paimon.types.ReassignFieldId;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 
@@ -60,7 +60,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.utils.FileUtils.listVersionedFiles;
-import static org.apache.flink.table.store.utils.Preconditions.checkState;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Schema Manager to manage schema versions. */
 public class SchemaManager implements Serializable {
@@ -396,7 +396,7 @@ public class SchemaManager implements Serializable {
                 } else {
                     List<DataField> nestedFields =
                             new ArrayList<>(
-                                    ((org.apache.flink.table.store.types.RowType) field.type())
+                                    ((org.apache.paimon.types.RowType) field.type())
                                             .getFields());
                     updateNestedColumn(nestedFields, updateFieldNames, index + 1, updateFunc);
                     newFields.set(
@@ -404,7 +404,7 @@ public class SchemaManager implements Serializable {
                             new DataField(
                                     field.id(),
                                     field.name(),
-                                    new org.apache.flink.table.store.types.RowType(
+                                    new org.apache.paimon.types.RowType(
                                             field.type().isNullable(), nestedFields),
                                     field.description()));
                 }

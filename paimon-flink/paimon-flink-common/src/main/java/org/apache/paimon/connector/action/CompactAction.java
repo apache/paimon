@@ -28,7 +28,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.paimon.connector.sink.CompactorSinkBuilder;
 import org.apache.paimon.connector.source.CompactorSourceBuilder;

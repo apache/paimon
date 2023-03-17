@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-import org.apache.flink.table.store.types.DataType;
+import org.apache.paimon.types.DataType;
 
 /** primary key aggregate a field of a row. */
 public class FieldPrimaryKeyAgg extends FieldAggregator {
