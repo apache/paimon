@@ -30,7 +30,6 @@ import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.DynamicTableSourceFactory;
 import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
 import org.apache.flink.table.store.CoreOptions.LogConsistency;
-import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -40,6 +39,7 @@ import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.utils.Preconditions;
 import org.apache.flink.table.types.logical.RowType;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.connector.log.LogStoreTableFactory;
 import org.apache.paimon.connector.sink.TableStoreSink;
 import org.apache.paimon.connector.source.SystemTableSource;

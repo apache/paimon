@@ -18,10 +18,11 @@
 
 package org.apache.flink.table.store.file.disk;
 
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.serializer.BinaryRowSerializer;
 import org.apache.flink.table.store.file.utils.MutableObjectIterator;
 import org.apache.flink.table.store.memory.MemorySegment;
+
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.serializer.BinaryRowSerializer;
 
 import java.io.EOFException;
 import java.io.IOException;

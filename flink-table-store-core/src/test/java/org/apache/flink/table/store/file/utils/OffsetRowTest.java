@@ -17,19 +17,19 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.data.BinaryArray;
-import org.apache.flink.table.store.data.BinaryArrayWriter;
-import org.apache.flink.table.store.data.BinaryMap;
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.BinaryRowWriter;
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.Decimal;
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.JoinedRow;
-import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.types.RowKind;
 
+import org.apache.paimon.data.BinaryArray;
+import org.apache.paimon.data.BinaryArrayWriter;
+import org.apache.paimon.data.BinaryMap;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
+import org.apache.paimon.data.Timestamp;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

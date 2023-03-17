@@ -18,11 +18,6 @@
 
 package org.apache.flink.table.store.datagen;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.Decimal;
-import org.apache.flink.table.store.data.GenericArray;
-import org.apache.flink.table.store.data.GenericMap;
-import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.options.ConfigOption;
 import org.apache.flink.table.store.options.ConfigOptions;
 import org.apache.flink.table.store.options.Options;
@@ -46,6 +41,12 @@ import org.apache.flink.table.store.types.TinyIntType;
 import org.apache.flink.table.store.types.VarBinaryType;
 import org.apache.flink.table.store.types.VarCharType;
 import org.apache.flink.table.store.utils.Preconditions;
+
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
+import org.apache.paimon.data.Timestamp;
 
 import java.math.BigDecimal;
 import java.math.MathContext;

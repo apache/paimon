@@ -18,10 +18,11 @@
 
 package org.apache.paimon.format;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.reader.RecordReader;
+
+import org.apache.paimon.data.InternalRow;
 
 import java.io.IOException;
 import java.io.Serializable;

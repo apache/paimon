@@ -18,13 +18,13 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.utils.RowDataUtils;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
 import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.hive.HiveTypeUtils;
 
 import java.util.ArrayList;

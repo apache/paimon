@@ -18,14 +18,14 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.Decimal;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 
-import static org.apache.flink.table.store.data.Decimal.fromBigDecimal;
-import static org.apache.flink.table.store.data.Decimal.fromUnscaledLong;
+import static org.apache.paimon.data.Decimal.fromBigDecimal;
+import static org.apache.paimon.data.Decimal.fromUnscaledLong;
 
 /** Utilities for {@link Decimal}. */
 public class DecimalUtils {

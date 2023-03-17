@@ -18,13 +18,14 @@
 
 package org.apache.flink.table.store.file.operation;
 
-import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.table.sink.CommitMessage;
 import org.apache.flink.table.store.table.sink.SinkRecord;
+
+import org.apache.paimon.data.BinaryRow;
 
 import java.util.List;
 

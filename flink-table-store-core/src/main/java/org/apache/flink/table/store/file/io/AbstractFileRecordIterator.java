@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.casting.CastFieldGetter;
 import org.apache.flink.table.store.file.casting.CastedRow;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.utils.ProjectedRow;
+
+import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 

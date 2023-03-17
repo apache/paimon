@@ -18,10 +18,11 @@
 
 package org.apache.flink.table.store.file.mergetree;
 
-import org.apache.flink.table.store.annotation.VisibleForTesting;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.utils.Preconditions;
+
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.InternalRow;
 
 import java.util.Collections;
 import java.util.Comparator;

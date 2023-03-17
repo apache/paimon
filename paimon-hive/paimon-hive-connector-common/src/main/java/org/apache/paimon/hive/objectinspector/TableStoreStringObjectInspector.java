@@ -18,12 +18,11 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.flink.table.store.data.BinaryString;
-
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.StringObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.apache.hadoop.io.Text;
+import org.apache.paimon.data.BinaryString;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for STRING type. */
 public class TableStoreStringObjectInspector extends AbstractPrimitiveJavaObjectInspector

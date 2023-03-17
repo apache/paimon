@@ -18,10 +18,11 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.data.InternalRow;
 
 import java.lang.reflect.Array;
 import java.util.ArrayList;

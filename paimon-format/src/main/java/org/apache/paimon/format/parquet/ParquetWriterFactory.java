@@ -18,9 +18,9 @@
 
 package org.apache.paimon.format.parquet;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.fs.PositionOutputStream;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.parquet.writer.ParquetBuilder;

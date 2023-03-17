@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -34,6 +33,8 @@ import org.apache.flink.table.store.table.source.snapshot.StaticFromSnapshotStar
 import org.apache.flink.table.store.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.flink.table.store.utils.Filter;
 import org.apache.flink.table.store.utils.Preconditions;
+
+import org.apache.paimon.annotation.VisibleForTesting;
 
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
 public abstract class AbstractDataTableScan implements DataTableScan {

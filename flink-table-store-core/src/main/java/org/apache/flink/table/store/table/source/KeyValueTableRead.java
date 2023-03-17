@@ -18,10 +18,11 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.reader.RecordReader;
+
+import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 

@@ -18,9 +18,10 @@
 
 package org.apache.flink.table.store.file;
 
-import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.utils.ObjectSerializer;
 import org.apache.flink.table.store.file.utils.ObjectSerializerTestBase;
+
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

@@ -18,9 +18,6 @@
 
 package org.apache.flink.table.store.file.mergetree;
 
-import org.apache.flink.table.store.annotation.VisibleForTesting;
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.serializer.RowCompactedSerializer;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.io.DataOutputSerializer;
@@ -39,6 +36,10 @@ import org.apache.flink.shaded.guava30.com.google.common.cache.Cache;
 import org.apache.flink.shaded.guava30.com.google.common.cache.CacheBuilder;
 import org.apache.flink.shaded.guava30.com.google.common.cache.RemovalNotification;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.RowCompactedSerializer;
+
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
@@ -50,8 +51,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Supplier;
-
-import static org.apache.flink.table.store.options.ConfigOptions.key;
 
 /** Provide lookup by key. */
 public class LookupLevels implements Levels.DropFileCallback, Closeable {

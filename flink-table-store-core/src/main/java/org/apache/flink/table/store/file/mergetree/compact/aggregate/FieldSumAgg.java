@@ -18,9 +18,10 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.utils.DecimalUtils;
+
+import org.apache.paimon.data.Decimal;
 
 /** sum aggregate a field of a row. */
 public class FieldSumAgg extends FieldAggregator {

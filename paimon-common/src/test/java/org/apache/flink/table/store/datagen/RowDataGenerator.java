@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.datagen;
 
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalRow;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 
 /** Data generator for Flink's internal {@link InternalRow} type. */
 public class RowDataGenerator implements DataGenerator<InternalRow> {

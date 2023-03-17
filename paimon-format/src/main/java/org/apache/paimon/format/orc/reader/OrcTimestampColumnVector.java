@@ -18,17 +18,16 @@
 
 package org.apache.paimon.format.orc.reader;
 
-import org.apache.flink.table.store.data.Timestamp;
-
 import org.apache.hadoop.hive.ql.exec.vector.ColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.TimestampColumnVector;
+import org.apache.paimon.data.Timestamp;
 
 /**
  * This column vector is used to adapt hive's TimestampColumnVector to Flink's
  * TimestampColumnVector.
  */
 public class OrcTimestampColumnVector extends AbstractOrcColumnVector
-        implements org.apache.flink.table.store.data.columnar.TimestampColumnVector {
+        implements org.apache.paimon.data.columnar.TimestampColumnVector {
 
     private final TimestampColumnVector vector;
 

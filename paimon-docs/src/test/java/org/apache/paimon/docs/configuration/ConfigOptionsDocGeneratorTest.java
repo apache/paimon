@@ -18,9 +18,6 @@
 
 package org.apache.paimon.docs.configuration;
 
-import org.apache.flink.table.store.annotation.ConfigGroup;
-import org.apache.flink.table.store.annotation.ConfigGroups;
-import org.apache.flink.table.store.annotation.Documentation;
 import org.apache.flink.table.store.options.ConfigOption;
 import org.apache.flink.table.store.options.ConfigOptions;
 import org.apache.flink.table.store.options.MemorySize;
@@ -30,6 +27,9 @@ import org.apache.flink.table.store.options.description.HtmlFormatter;
 import org.apache.flink.table.store.options.description.InlineElement;
 import org.apache.flink.table.store.utils.Pair;
 
+import org.apache.paimon.annotation.ConfigGroup;
+import org.apache.paimon.annotation.ConfigGroups;
+import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.docs.configuration.data.TestCommonOptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.store.data.Timestamp;
+import org.apache.paimon.data.Timestamp;
 
 import java.time.DateTimeException;
 import java.time.LocalDate;

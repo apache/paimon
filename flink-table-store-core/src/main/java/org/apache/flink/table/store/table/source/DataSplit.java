@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.SerializationUtils;
@@ -26,6 +25,8 @@ import org.apache.flink.table.store.io.DataInputView;
 import org.apache.flink.table.store.io.DataInputViewStreamWrapper;
 import org.apache.flink.table.store.io.DataOutputView;
 import org.apache.flink.table.store.io.DataOutputViewStreamWrapper;
+
+import org.apache.paimon.data.BinaryRow;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;

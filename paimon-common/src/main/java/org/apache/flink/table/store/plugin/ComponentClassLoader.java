@@ -17,10 +17,11 @@
 
 package org.apache.flink.table.store.plugin;
 
-import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.utils.FunctionWithException;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
+
+import org.apache.paimon.annotation.VisibleForTesting;
 
 import java.io.IOException;
 import java.net.URL;

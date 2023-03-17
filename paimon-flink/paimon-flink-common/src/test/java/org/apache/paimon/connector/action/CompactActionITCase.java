@@ -23,7 +23,6 @@ import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.DataSplit;
@@ -35,6 +34,7 @@ import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.CommonTestUtils;
 
 import org.apache.paimon.connector.FlinkConnectorOptions;
+import org.apache.paimon.data.BinaryString;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;

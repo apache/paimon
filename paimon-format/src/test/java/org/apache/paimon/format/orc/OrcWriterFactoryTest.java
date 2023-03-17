@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format.orc;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.fs.local.LocalFileIO.LocalPositionOutputStream;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
@@ -26,6 +25,7 @@ import org.apache.flink.table.store.types.DataTypes;
 import org.apache.hadoop.fs.Path;
 import org.apache.orc.MemoryManager;
 import org.apache.orc.OrcFile;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.orc.writer.RowDataVectorizer;
 import org.apache.paimon.format.orc.writer.Vectorizer;
 import org.junit.jupiter.api.Test;

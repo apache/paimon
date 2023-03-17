@@ -18,8 +18,8 @@
 
 package org.apache.paimon.format.parquet.reader;
 
-import org.apache.flink.table.store.data.Timestamp;
-import org.apache.flink.table.store.data.columnar.Dictionary;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.Dictionary;
 
 import static org.apache.paimon.format.parquet.reader.TimestampColumnReader.decodeInt96ToTimestamp;
 

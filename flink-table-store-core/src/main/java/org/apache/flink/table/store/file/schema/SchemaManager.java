@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.file.schema;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.casting.CastExecutors;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.schema.SchemaChange.AddColumn;
@@ -41,6 +40,8 @@ import org.apache.flink.table.store.types.DataTypeVisitor;
 import org.apache.flink.table.store.types.ReassignFieldId;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Preconditions;
+
+import org.apache.paimon.annotation.VisibleForTesting;
 
 import javax.annotation.Nullable;
 

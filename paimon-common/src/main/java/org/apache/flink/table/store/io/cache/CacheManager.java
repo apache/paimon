@@ -18,13 +18,14 @@
 
 package org.apache.flink.table.store.io.cache;
 
-import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.options.MemorySize;
 
 import org.apache.flink.shaded.guava30.com.google.common.cache.Cache;
 import org.apache.flink.shaded.guava30.com.google.common.cache.CacheBuilder;
 import org.apache.flink.shaded.guava30.com.google.common.cache.RemovalNotification;
+
+import org.apache.paimon.annotation.VisibleForTesting;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;

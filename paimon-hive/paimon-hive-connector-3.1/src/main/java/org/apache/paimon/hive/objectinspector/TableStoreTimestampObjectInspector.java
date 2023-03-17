@@ -36,8 +36,7 @@ public class TableStoreTimestampObjectInspector extends AbstractPrimitiveJavaObj
     public Timestamp getPrimitiveJavaObject(Object o) {
         return o == null
                 ? null
-                : Timestamp.ofEpochMilli(
-                        ((org.apache.flink.table.store.data.Timestamp) o).getMillisecond());
+                : Timestamp.ofEpochMilli(((org.apache.paimon.data.Timestamp) o).getMillisecond());
     }
 
     @Override
@@ -48,7 +47,7 @@ public class TableStoreTimestampObjectInspector extends AbstractPrimitiveJavaObj
 
     @Override
     public Object copyObject(Object o) {
-        if (o instanceof org.apache.flink.table.store.data.Timestamp) {
+        if (o instanceof org.apache.paimon.data.Timestamp) {
             // immutable
             return o;
         } else if (o instanceof Timestamp) {

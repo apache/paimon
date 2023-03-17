@@ -18,10 +18,11 @@
 
 package org.apache.flink.table.store.file.memory;
 
-import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.memory.MemorySegment;
 import org.apache.flink.table.store.memory.MemorySegmentSource;
 import org.apache.flink.table.store.options.MemorySize;
+
+import org.apache.paimon.annotation.Experimental;
 
 import java.util.List;
 

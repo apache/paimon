@@ -18,11 +18,11 @@
 
 package org.apache.flink.table.store.file.format;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;

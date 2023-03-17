@@ -19,11 +19,11 @@
 package org.apache.paimon.connector.source;
 
 import org.apache.flink.core.io.SimpleVersionedSerialization;
-import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
 import org.apache.flink.table.store.table.source.DataSplit;
 
+import org.apache.paimon.data.BinaryRow;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;

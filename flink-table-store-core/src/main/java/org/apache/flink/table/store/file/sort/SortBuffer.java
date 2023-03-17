@@ -18,9 +18,10 @@
 
 package org.apache.flink.table.store.file.sort;
 
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.utils.MutableObjectIterator;
+
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 
 import java.io.IOException;
 

@@ -22,7 +22,7 @@ import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
 
 /** This column vector is used to adapt hive's BytesColumnVector to Flink's BytesColumnVector. */
 public class OrcBytesColumnVector extends AbstractOrcColumnVector
-        implements org.apache.flink.table.store.data.columnar.BytesColumnVector {
+        implements org.apache.paimon.data.columnar.BytesColumnVector {
 
     private final BytesColumnVector vector;
 

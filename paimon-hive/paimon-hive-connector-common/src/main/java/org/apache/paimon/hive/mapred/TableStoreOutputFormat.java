@@ -18,13 +18,12 @@
 
 package org.apache.paimon.hive.mapred;
 
-import org.apache.flink.table.store.data.InternalRow;
-
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.OutputFormat;
 import org.apache.hadoop.mapred.RecordWriter;
 import org.apache.hadoop.util.Progressable;
+import org.apache.paimon.data.InternalRow;
 
 import java.io.IOException;
 

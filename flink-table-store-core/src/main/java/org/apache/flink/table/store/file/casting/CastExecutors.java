@@ -18,9 +18,6 @@
 
 package org.apache.flink.table.store.file.casting;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.Decimal;
-import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.types.BinaryType;
 import org.apache.flink.table.store.types.CharType;
 import org.apache.flink.table.store.types.DataType;
@@ -31,6 +28,10 @@ import org.apache.flink.table.store.types.VarCharType;
 import org.apache.flink.table.store.utils.DateTimeUtils;
 import org.apache.flink.table.store.utils.DecimalUtils;
 import org.apache.flink.table.store.utils.StringUtils;
+
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 
 import javax.annotation.Nullable;
 

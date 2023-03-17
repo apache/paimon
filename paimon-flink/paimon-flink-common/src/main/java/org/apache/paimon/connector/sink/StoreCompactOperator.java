@@ -22,8 +22,6 @@ import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.OffsetRow;
@@ -31,6 +29,8 @@ import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.utils.Preconditions;
 
 import org.apache.paimon.connector.FlinkRowWrapper;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 
 import java.io.IOException;
 import java.util.List;

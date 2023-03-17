@@ -18,10 +18,6 @@
 
 package org.apache.paimon.docs.configuration;
 
-import org.apache.flink.table.store.annotation.ConfigGroup;
-import org.apache.flink.table.store.annotation.ConfigGroups;
-import org.apache.flink.table.store.annotation.Documentation;
-import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.options.ConfigOption;
 import org.apache.flink.table.store.options.description.DescribedEnum;
 import org.apache.flink.table.store.options.description.Description;
@@ -33,6 +29,10 @@ import org.apache.flink.table.store.utils.Pair;
 import org.apache.flink.table.store.utils.ThrowingConsumer;
 import org.apache.flink.table.store.utils.TimeUtils;
 
+import org.apache.paimon.annotation.ConfigGroup;
+import org.apache.paimon.annotation.ConfigGroups;
+import org.apache.paimon.annotation.Documentation;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

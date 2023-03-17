@@ -18,11 +18,10 @@
 
 package org.apache.paimon.format.parquet.reader;
 
-import org.apache.flink.table.store.data.Timestamp;
-import org.apache.flink.table.store.data.columnar.ColumnVector;
-import org.apache.flink.table.store.data.columnar.LongColumnVector;
-import org.apache.flink.table.store.data.columnar.TimestampColumnVector;
-
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.LongColumnVector;
+import org.apache.paimon.data.columnar.TimestampColumnVector;
 import org.apache.parquet.Preconditions;
 
 /**

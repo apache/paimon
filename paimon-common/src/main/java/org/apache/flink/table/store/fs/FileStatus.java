@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.fs;
 
-import org.apache.flink.table.store.annotation.Experimental;
+import org.apache.paimon.annotation.Experimental;
 
 /**
  * Interface that represents the client side information for a file independent of the file system.

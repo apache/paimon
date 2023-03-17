@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateFilter;
@@ -31,6 +30,8 @@ import org.apache.flink.table.store.table.source.ReadBuilder;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.utils.CloseableIterator;
+
+import org.apache.paimon.data.InternalRow;
 
 import java.util.List;
 

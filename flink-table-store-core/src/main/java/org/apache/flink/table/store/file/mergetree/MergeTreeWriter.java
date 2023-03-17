@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
-import org.apache.flink.table.store.annotation.VisibleForTesting;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
@@ -36,6 +34,9 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 

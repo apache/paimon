@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.memory.MemorySegmentUtils;
+
+import org.apache.paimon.data.BinaryString;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -29,9 +30,9 @@ import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
-import static org.apache.flink.table.store.data.BinaryString.fromBytes;
 import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.data.BinaryString.fromBytes;
 
 /**
  * Utils for {@link BinaryString} and utility class to convert objects into strings in vice-versa.

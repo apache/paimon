@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.table.sink.BatchWriteBuilder;
 import org.apache.flink.table.store.table.sink.StreamWriteBuilder;
 import org.apache.flink.table.store.table.source.ReadBuilder;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.annotation.Experimental;
 
 import java.io.Serializable;
 import java.util.Map;

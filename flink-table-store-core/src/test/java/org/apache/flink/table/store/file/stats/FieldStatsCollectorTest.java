@@ -18,14 +18,14 @@
 
 package org.apache.flink.table.store.file.stats;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.GenericArray;
-import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.VarCharType;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FieldStatsCollector;
 import org.junit.jupiter.api.Test;

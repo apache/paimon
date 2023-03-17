@@ -19,9 +19,6 @@
 package org.apache.flink.table.store.table.system;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.JoinedRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -45,6 +42,10 @@ import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.VarBinaryType;
+
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
 
 import java.io.IOException;
 import java.util.ArrayList;

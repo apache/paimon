@@ -18,10 +18,9 @@
 
 package org.apache.paimon.format.orc.reader;
 
-import org.apache.flink.table.store.data.Timestamp;
-
 import org.apache.hadoop.hive.ql.exec.vector.ColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
+import org.apache.paimon.data.Timestamp;
 
 import java.time.LocalDateTime;
 
@@ -30,7 +29,7 @@ import java.time.LocalDateTime;
  * LongColumnVector.
  */
 public class OrcLegacyTimestampColumnVector extends AbstractOrcColumnVector
-        implements org.apache.flink.table.store.data.columnar.TimestampColumnVector {
+        implements org.apache.paimon.data.columnar.TimestampColumnVector {
 
     private final LongColumnVector hiveVector;
 

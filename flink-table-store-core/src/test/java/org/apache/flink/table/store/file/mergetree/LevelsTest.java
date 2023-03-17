@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.mergetree;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 
+import org.apache.paimon.data.InternalRow;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

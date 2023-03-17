@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.store.annotation.Experimental;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.data.InternalRow;
 
 import java.io.Serializable;
 import java.util.Arrays;

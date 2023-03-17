@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format.orc;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.store.reader.RecordReader;
@@ -29,6 +28,7 @@ import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.DecimalUtils;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;

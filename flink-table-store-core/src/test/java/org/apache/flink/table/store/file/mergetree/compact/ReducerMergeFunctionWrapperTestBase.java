@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.file.mergetree.compact;
 
-import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.types.RowKind;
 
+import org.apache.paimon.data.GenericRow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
