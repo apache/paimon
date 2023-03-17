@@ -67,7 +67,7 @@ public class SchemaAwareStoreWriteOperatorTest {
 
     private static final RowType ROW_TYPE =
             RowType.of(
-                    new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                    new DataType[] {DataTypes.INT(), DataTypes.BIGINT(), DataTypes.STRING()},
                     new String[] {"pt", "k", "v"});
 
     @TempDir java.nio.file.Path tempDir;

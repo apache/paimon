@@ -18,11 +18,10 @@
 
 package org.apache.flink.table.store.connector.cdc;
 
-import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.store.cdc.Record;
-import org.apache.flink.table.store.connector.FlinkRowWrapper;
 import org.apache.flink.table.store.connector.sink.AbstractStoreWriteOperator;
 import org.apache.flink.table.store.connector.sink.StoreSinkWrite;
+import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.options.ConfigOption;
 import org.apache.flink.table.store.options.ConfigOptions;
@@ -78,17 +77,17 @@ public class SchemaAwareStoreWriteOperator extends AbstractStoreWriteOperator<Re
         }
 
         TableSchema schema = table.schema();
-        GenericRowData rowData = new GenericRowData(schema.fields().size());
+        GenericRow row = new GenericRow(schema.fields().size());
         for (Map.Entry<String, String> field : fields.entrySet()) {
             String key = field.getKey();
             String value = field.getValue();
             int idx = schema.fieldNames().indexOf(key);
             DataType type = schema.fields().get(idx).type();
-            rowData.setField(idx, TypeUtils.castFromString(value, type));
+            row.setField(idx, TypeUtils.castFromString(value, type));
         }
 
         try {
-            return write.write(new FlinkRowWrapper(rowData));
+            return write.write(row);
         } catch (Exception e) {
             throw new IOException(e);
         }
