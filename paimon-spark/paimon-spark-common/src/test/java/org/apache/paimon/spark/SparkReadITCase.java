@@ -52,42 +52,41 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     @Test
     public void testNormal() {
-        innerTestSimpleType(spark.table("tablestore.default.t1"));
+        innerTestSimpleType(spark.table("paimon.default.t1"));
 
-        innerTestNestedType(spark.table("tablestore.default.t2"));
+        innerTestNestedType(spark.table("paimon.default.t2"));
     }
 
     @Test
     public void testFilterPushDown() {
-        innerTestSimpleTypeFilterPushDown(spark.table("tablestore.default.t1"));
+        innerTestSimpleTypeFilterPushDown(spark.table("paimon.default.t1"));
 
-        innerTestNestedTypeFilterPushDown(spark.table("tablestore.default.t2"));
+        innerTestNestedTypeFilterPushDown(spark.table("paimon.default.t2"));
     }
 
     @Test
     public void testCatalogNormal() {
-        innerTestSimpleType(spark.table("tablestore.default.t1"));
-        innerTestNestedType(spark.table("tablestore.default.t2"));
+        innerTestSimpleType(spark.table("paimon.default.t1"));
+        innerTestNestedType(spark.table("paimon.default.t2"));
     }
 
     @Test
     public void testSnapshotsTable() {
         List<Row> rows =
-                spark.table("tablestore.default.`t1$snapshots`")
+                spark.table("paimon.default.`t1$snapshots`")
                         .select("snapshot_id", "schema_id", "commit_user", "commit_kind")
                         .collectAsList();
         assertThat(rows.toString()).isEqualTo("[[1,0,user,APPEND]]");
 
-        spark.sql("USE tablestore");
+        spark.sql("USE paimon");
         spark.sql(
                 "CREATE TABLE default.schemasTable (\n"
                         + "a BIGINT,\n"
-                        + "b STRING) USING tablestore\n"
+                        + "b STRING) USING paimon\n"
                         + "COMMENT 'table comment'\n"
                         + "TBLPROPERTIES ('primary-key' = 'a')");
         spark.sql("ALTER TABLE default.schemasTable ADD COLUMN c STRING");
-        List<Row> schemas =
-                spark.table("tablestore.default.`schemasTable$schemas`").collectAsList();
+        List<Row> schemas = spark.table("paimon.default.`schemasTable$schemas`").collectAsList();
         List<?> fieldsList = schemas.stream().map(row -> row.get(1)).collect(Collectors.toList());
         assertThat(fieldsList.stream().map(Object::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
@@ -101,7 +100,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     @Test
     public void testSnapshotsTableWithRecordCount() {
         List<Row> rows =
-                spark.table("tablestore.default.`t1$snapshots`")
+                spark.table("paimon.default.`t1$snapshots`")
                         .select(
                                 "snapshot_id",
                                 "total_record_count",
@@ -113,27 +112,27 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     @Test
     public void testCatalogFilterPushDown() {
-        innerTestSimpleTypeFilterPushDown(spark.table("tablestore.default.t1"));
+        innerTestSimpleTypeFilterPushDown(spark.table("paimon.default.t1"));
 
-        innerTestNestedTypeFilterPushDown(spark.table("tablestore.default.t2"));
+        innerTestNestedTypeFilterPushDown(spark.table("paimon.default.t2"));
     }
 
     @Test
     public void testDefaultNamespace() {
-        spark.sql("USE tablestore");
+        spark.sql("USE paimon");
         assertThat(spark.sql("SHOW CURRENT NAMESPACE").collectAsList().toString())
-                .isEqualTo("[[tablestore,default]]");
+                .isEqualTo("[[paimon,default]]");
     }
 
     @Test
     public void testCreateTable() {
         spark.sql(
-                "CREATE TABLE tablestore.default.testCreateTable(\n"
+                "CREATE TABLE paimon.default.testCreateTable(\n"
                         + "a BIGINT,\n"
                         + "b VARCHAR(10),\n"
                         + "c CHAR(10))");
         assertThat(
-                        spark.sql("SELECT fields FROM tablestore.default.`testCreateTable$schemas`")
+                        spark.sql("SELECT fields FROM paimon.default.`testCreateTable$schemas`")
                                 .collectAsList()
                                 .toString())
                 .isEqualTo(
@@ -162,7 +161,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                 "CREATE TABLE default.partitionedTable (\n"
                         + "a BIGINT,\n"
                         + "b STRING,"
-                        + "c STRING) USING tablestore\n"
+                        + "c STRING) USING paimon\n"
                         + "COMMENT 'table comment'\n"
                         + "PARTITIONED BY (a,b)");
         spark.sql("INSERT INTO default.partitionedTable VALUES(1,'aaa','bbb')");
@@ -279,11 +278,11 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     @Test
     public void testCreateTableWithNullablePk() {
-        spark.sql("USE tablestore");
+        spark.sql("USE paimon");
         spark.sql(
                 "CREATE TABLE default.PkTable (\n"
                         + "a BIGINT,\n"
-                        + "b STRING) USING tablestore\n"
+                        + "b STRING) USING paimon\n"
                         + "COMMENT 'table comment'\n"
                         + "TBLPROPERTIES ('primary-key' = 'a')");
         Path tablePath = new Path(warehousePath, "default.db/PkTable");
@@ -293,11 +292,11 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     @Test
     public void testDescribeTable() {
-        spark.sql("USE tablestore");
+        spark.sql("USE paimon");
         spark.sql(
                 "CREATE TABLE default.PartitionedTable (\n"
                         + "a BIGINT,\n"
-                        + "b STRING) USING tablestore\n"
+                        + "b STRING) USING paimon\n"
                         + "COMMENT 'table comment'\n"
                         + "PARTITIONED BY (a)\n"
                         + "TBLPROPERTIES ('foo' = 'bar')");
@@ -307,7 +306,7 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     @Test
     public void testShowTableProperties() {
-        spark.sql("USE tablestore");
+        spark.sql("USE paimon");
         spark.sql(
                 "CREATE TABLE default.tbl (\n"
                         + "a INT\n"
@@ -325,14 +324,14 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     @Test
     public void testCreateTableWithInvalidPk() {
-        spark.sql("USE tablestore");
+        spark.sql("USE paimon");
         assertThatThrownBy(
                         () ->
                                 spark.sql(
                                         "CREATE TABLE default.PartitionedPkTable (\n"
                                                 + "a BIGINT,\n"
                                                 + "b STRING,\n"
-                                                + "c DOUBLE) USING tablestore\n"
+                                                + "c DOUBLE) USING paimon\n"
                                                 + "COMMENT 'table comment'\n"
                                                 + "PARTITIONED BY (b)"
                                                 + "TBLPROPERTIES ('primary-key' = 'a')"))
@@ -343,14 +342,14 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     @Test
     public void testCreateTableWithNonexistentPk() {
-        spark.sql("USE tablestore");
+        spark.sql("USE paimon");
         assertThatThrownBy(
                         () ->
                                 spark.sql(
                                         "CREATE TABLE default.PartitionedPkTable (\n"
                                                 + "a BIGINT,\n"
                                                 + "b STRING,\n"
-                                                + "c DOUBLE) USING tablestore\n"
+                                                + "c DOUBLE) USING paimon\n"
                                                 + "COMMENT 'table comment'\n"
                                                 + "PARTITIONED BY (b)"
                                                 + "TBLPROPERTIES ('primary-key' = 'd')"))
@@ -361,14 +360,14 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     @Test
     public void testCreateTableWithNonexistentPartition() {
-        spark.sql("USE tablestore");
+        spark.sql("USE paimon");
         assertThatThrownBy(
                         () ->
                                 spark.sql(
                                         "CREATE TABLE default.PartitionedPkTable (\n"
                                                 + "a BIGINT,\n"
                                                 + "b STRING,\n"
-                                                + "c DOUBLE) USING tablestore\n"
+                                                + "c DOUBLE) USING paimon\n"
                                                 + "COMMENT 'table comment'\n"
                                                 + "PARTITIONED BY (d)"
                                                 + "TBLPROPERTIES ('primary-key' = 'a')"))
@@ -388,7 +387,7 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     private void innerTest(
             String tableName, boolean hasPk, boolean partitioned, boolean appendOnly) {
-        spark.sql("USE tablestore");
+        spark.sql("USE paimon");
         String ddlTemplate =
                 "CREATE TABLE default.%s (\n"
                         + "order_id BIGINT NOT NULL comment 'order_id',\n"
@@ -396,7 +395,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                         + "coupon_info ARRAY<STRING> NOT NULL COMMENT 'coupon_info',\n"
                         + "order_amount DOUBLE NOT NULL COMMENT 'order_amount',\n"
                         + "dt STRING NOT NULL COMMENT 'dt',\n"
-                        + "hh STRING NOT NULL COMMENT 'hh') USING tablestore\n"
+                        + "hh STRING NOT NULL COMMENT 'hh') USING paimon\n"
                         + "COMMENT 'table comment'\n"
                         + "%s\n"
                         + "TBLPROPERTIES (%s)";
@@ -503,7 +502,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                 tableName,
                 "(1L, 10L, array('loyalty_discount', 'shipping_discount'), 199.0d, '2022-07-20', '12')");
 
-        Dataset<Row> dataset = spark.read().format("tablestore").load(tablePath.toString());
+        Dataset<Row> dataset = spark.read().format("paimon").load(tablePath.toString());
         assertThat(dataset.select("order_id", "buyer_id", "dt").collectAsList().toString())
                 .isEqualTo("[[1,10,2022-07-20]]");
         assertThat(dataset.select("coupon_info").collectAsList().toString())
@@ -513,19 +512,19 @@ public class SparkReadITCase extends SparkReadTestBase {
         assertThat(
                         spark.sql(
                                         String.format(
-                                                "SHOW TABLES IN tablestore.default LIKE '%s'",
+                                                "SHOW TABLES IN paimon.default LIKE '%s'",
                                                 tableName))
                                 .select("namespace", "tableName")
                                 .collectAsList()
                                 .toString())
                 .isEqualTo(String.format("[[default,%s]]", tableName));
 
-        spark.sql(String.format("DROP TABLE tablestore.default.%s", tableName));
+        spark.sql(String.format("DROP TABLE paimon.default.%s", tableName));
 
         assertThat(
                         spark.sql(
                                         String.format(
-                                                "SHOW TABLES IN tablestore.default LIKE '%s'",
+                                                "SHOW TABLES IN paimon.default LIKE '%s'",
                                                 tableName))
                                 .select("namespace", "tableName")
                                 .collectAsList()
@@ -538,7 +537,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     @Test
     public void testCreateAndDropNamespace() {
         // create namespace
-        spark.sql("USE tablestore");
+        spark.sql("USE paimon");
         spark.sql("CREATE NAMESPACE bar");
 
         assertThatThrownBy(() -> spark.sql("CREATE NAMESPACE bar"))
@@ -631,9 +630,9 @@ public class SparkReadITCase extends SparkReadTestBase {
     @Test
     public void testCreateNestedField() {
         spark.sql(
-                "CREATE TABLE tablestore.default.nested_table ( a INT, b STRUCT<b1: STRUCT<b11: INT, b12 INT>, b2 BIGINT>)");
+                "CREATE TABLE paimon.default.nested_table ( a INT, b STRUCT<b1: STRUCT<b11: INT, b12 INT>, b2 BIGINT>)");
         assertThat(
-                        spark.sql("SHOW CREATE TABLE tablestore.default.nested_table")
+                        spark.sql("SHOW CREATE TABLE paimon.default.nested_table")
                                 .collectAsList()
                                 .toString())
                 .isEqualTo(

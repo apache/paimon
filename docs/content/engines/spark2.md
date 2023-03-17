@@ -74,7 +74,7 @@ After the guide, all table files should be stored under the path `/tmp/table_sto
 
 **Step 2: Specify Table Store Jar File**
 
-You can append path to table store jar file to the `--jars` argument when starting `spark-shell`.
+You can append path to paimon jar file to the `--jars` argument when starting `spark-shell`.
 
 ```bash
 spark-shell ... --jars /path/to/paimon-spark-2-{{< version >}}.jar
@@ -84,10 +84,10 @@ Alternatively, you can copy `paimon-spark-2-{{< version >}}.jar` under `spark/ja
 
 **Step 3: Query Table**
 
-Table store with Spark 2.4 does not support DDL. You can use the `Dataset` reader and register the `Dataset` as a temporary table. In spark shell:
+Paimon with Spark 2.4 does not support DDL. You can use the `Dataset` reader and register the `Dataset` as a temporary table. In spark shell:
 
 ```scala
-val dataset = spark.read.format("tablestore").load("file:/tmp/table_store/default.db/word_count")
+val dataset = spark.read.format("paimon").load("file:/tmp/table_store/default.db/word_count")
 dataset.createOrReplaceTempView("word_count")
 spark.sql("SELECT * FROM word_count").show()
 ```

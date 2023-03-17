@@ -592,35 +592,35 @@ under the License.
                             <relocations>
                                 <relocation>
                                     <pattern>com.facebook.fb303</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.com.facebook.fb303</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.com.facebook.fb303</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>com.google.common</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.com.google.common</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.com.google.common</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.hadoop.fs.ProxyLocalFileSystem</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.fs.ProxyLocalFileSystem</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.org.apache.hadoop.fs.ProxyLocalFileSystem</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.hadoop.fs.ProxyFileSystem</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.fs.ProxyFileSystem</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.org.apache.hadoop.fs.ProxyFileSystem</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.hadoop.fs.DefaultFileAccess</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.fs.DefaultFileAccess</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.org.apache.hadoop.fs.DefaultFileAccess</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.hadoop.mapred.WebHCatJTShim23</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.mapred.WebHCatJTShim23</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.org.apache.hadoop.mapred.WebHCatJTShim23</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.hadoop.security.token.delegation.HiveDelegationTokenSupport</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.hadoop.security.token.delegation.HiveDelegationTokenSupport</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.org.apache.hadoop.security.token.delegation.HiveDelegationTokenSupport</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.thrift</pattern>
-                                    <shadedPattern>org.apache.flink.table.store.shaded.org.apache.thrift</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.org.apache.thrift</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>

@@ -32,7 +32,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.List;
 
-/** Helper class of {@link StoreWriteOperator} for different types of table store sinks. */
+/** Helper class of {@link StoreWriteOperator} for different types of paimon sinks. */
 interface StoreSinkWrite {
 
     SinkRecord write(InternalRow rowData) throws Exception;

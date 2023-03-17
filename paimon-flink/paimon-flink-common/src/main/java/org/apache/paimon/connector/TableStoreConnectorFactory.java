@@ -37,7 +37,7 @@ import javax.annotation.Nullable;
 import static org.apache.paimon.CoreOptions.AUTO_CREATE;
 import static org.apache.paimon.connector.FlinkCatalogFactory.IDENTIFIER;
 
-/** A table store {@link DynamicTableFactory} to create source and sink. */
+/** A paimon {@link DynamicTableFactory} to create source and sink. */
 public class TableStoreConnectorFactory extends AbstractTableStoreFactory {
 
     @Nullable private final CatalogLock.Factory lockFactory;

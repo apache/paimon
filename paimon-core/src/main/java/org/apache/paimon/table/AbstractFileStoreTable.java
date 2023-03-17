@@ -119,7 +119,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         // set dynamic options with default values
         CoreOptions.setDefaultValues(newOptions);
 
-        // copy a new table store to contain dynamic options
+        // copy a new paimon to contain dynamic options
         TableSchema newTableSchema = tableSchema.copy(newOptions.toMap());
 
         // validate schema wit new options

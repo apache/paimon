@@ -35,7 +35,7 @@ public class TableStoreOutputFormat implements OutputFormat<InternalRow, Interna
             FileSystem fileSystem, JobConf jobConf, String s, Progressable progressable)
             throws IOException {
         throw new UnsupportedOperationException(
-                "Flink table store currently can only be used as an input format for Hive.");
+                "Flink paimon currently can only be used as an input format for Hive.");
     }
 
     @Override

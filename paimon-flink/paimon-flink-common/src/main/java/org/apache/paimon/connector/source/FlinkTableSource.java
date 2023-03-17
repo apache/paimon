@@ -36,7 +36,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-/** A Flink {@link ScanTableSource} for table store. */
+/** A Flink {@link ScanTableSource} for paimon. */
 public abstract class FlinkTableSource
         implements ScanTableSource,
                 SupportsFilterPushDown,

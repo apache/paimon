@@ -18,8 +18,6 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.flink.table.store.catalog.CatalogContext;
-
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -52,7 +50,7 @@ public interface CatalogFactory {
         String warehouse =
                 Preconditions.checkNotNull(
                         context.options().get(WAREHOUSE),
-                        "Table store '" + WAREHOUSE.key() + "' path must be set");
+                        "Paimon '" + WAREHOUSE.key() + "' path must be set");
         return new Path(warehouse);
     }
 

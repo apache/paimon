@@ -184,8 +184,7 @@ public class HiveCatalog extends AbstractCatalog {
         Path tableLocation = getDataTableLocation(identifier);
         return new SchemaManager(fileIO, tableLocation)
                 .latest()
-                .orElseThrow(
-                        () -> new RuntimeException("There is no table stored in " + tableLocation));
+                .orElseThrow(() -> new RuntimeException("There is no paimond in " + tableLocation));
     }
 
     @Override
@@ -431,9 +430,7 @@ public class HiveCatalog extends AbstractCatalog {
             return false;
         } catch (TException e) {
             throw new RuntimeException(
-                    "Cannot determine if table "
-                            + identifier.getFullName()
-                            + " is a table store table.",
+                    "Cannot determine if table " + identifier.getFullName() + " is a paimon table.",
                     e);
         }
 
@@ -443,7 +440,7 @@ public class HiveCatalog extends AbstractCatalog {
                 throw new IllegalArgumentException(
                         "Table "
                                 + identifier.getFullName()
-                                + " is not a table store table. It's input format is "
+                                + " is not a paimon table. It's input format is "
                                 + table.getSd().getInputFormat()
                                 + " and its output format is "
                                 + table.getSd().getOutputFormat());

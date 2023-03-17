@@ -18,8 +18,6 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.flink.table.store.catalog.CatalogContext;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.HdfsConfiguration;
 import org.apache.paimon.fs.Path;

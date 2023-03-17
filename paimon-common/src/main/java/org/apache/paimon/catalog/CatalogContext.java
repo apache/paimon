@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.catalog;
+package org.apache.paimon.catalog;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.paimon.annotation.Experimental;

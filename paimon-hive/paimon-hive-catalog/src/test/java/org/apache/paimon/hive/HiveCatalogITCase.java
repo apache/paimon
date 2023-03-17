@@ -211,7 +211,7 @@ public class HiveCatalogITCase {
             Assert.fail("No exception is thrown");
         } catch (Throwable t) {
             ExceptionUtils.assertThrowableWithMessage(
-                    t, "Table test_db.hive_table is not a table store table");
+                    t, "Table test_db.hive_table is not a paimon table");
         }
 
         // alter table
@@ -236,7 +236,7 @@ public class HiveCatalogITCase {
             Assert.fail("No exception is thrown");
         } catch (Throwable t) {
             ExceptionUtils.assertThrowableWithMessage(
-                    t, "Table test_db.hive_table is not a table store table");
+                    t, "Table test_db.hive_table is not a paimon table");
         }
     }
 
@@ -281,7 +281,7 @@ public class HiveCatalogITCase {
             Assert.fail("No exception is thrown");
         } catch (Throwable t) {
             ExceptionUtils.assertThrowableWithMessage(
-                    t, "Table test_db.hive_table is not a table store table");
+                    t, "Table test_db.hive_table is not a paimon table");
         }
     }
 
@@ -454,7 +454,7 @@ public class HiveCatalogITCase {
         // TODO: the hiverunner (4.0) has a bug ,it can not rename the table path correctly ,
         // we should upgrade it to the 6.0 later ,and  update the test case for query.
         assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM t3"))
-                .hasMessageContaining("SQL validation failed. There is no table stored in");
+                .hasMessageContaining("SQL validation failed. There is no paimond in");
     }
 
     @Test

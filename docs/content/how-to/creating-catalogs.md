@@ -54,18 +54,18 @@ USE CATALOG my_catalog;
 
 {{< tab "Spark3" >}}
 
-The following shell command registers a Table Store catalog named `tablestore`. Metadata and table files are stored under `hdfs://path/to/warehouse`.
+The following shell command registers a paimon catalog named `paimon`. Metadata and table files are stored under `hdfs://path/to/warehouse`.
 
 ```bash
 spark-sql ... \
-    --conf spark.sql.catalog.tablestore=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.tablestore.warehouse=hdfs://path/to/warehouse
+    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
+    --conf spark.sql.catalog.paimon.warehouse=hdfs://path/to/warehouse
 ```
 
-After `spark-sql` is started, you can switch to the `default` database of the `tablestore` catalog with the following SQL.
+After `spark-sql` is started, you can switch to the `default` database of the `paimon` catalog with the following SQL.
 
 ```sql
-USE tablestore.default;
+USE paimon.default;
 ```
 
 {{< /tab >}}
@@ -133,20 +133,20 @@ USE CATALOG my_hive;
 
 To enable Table Store Hive catalog support in Spark3, append the path of Table Store Hive catalog jar file to `--jars` argument when starting spark.
 
-The following shell command registers a Table tore Hive catalog named `tablestore`. Metadata and table files are stored under `hdfs://path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
+The following shell command registers a Table tore Hive catalog named `paimon`. Metadata and table files are stored under `hdfs://path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
 
 ```bash
 spark-sql ... \
-    --conf spark.sql.catalog.tablestore=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.tablestore.warehouse=hdfs://path/to/warehouse \
-    --conf spark.sql.catalog.tablestore.metastore=hive \
-    --conf spark.sql.catalog.tablestore.uri=thrift://<hive-metastore-host-name>:<port>
+    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
+    --conf spark.sql.catalog.paimon.warehouse=hdfs://path/to/warehouse \
+    --conf spark.sql.catalog.paimon.metastore=hive \
+    --conf spark.sql.catalog.paimon.uri=thrift://<hive-metastore-host-name>:<port>
 ```
 
-After `spark-sql` is started, you can switch to the `default` database of the `tablestore` catalog with the following SQL.
+After `spark-sql` is started, you can switch to the `default` database of the `paimon` catalog with the following SQL.
 
 ```sql
-USE tablestore.default;
+USE paimon.default;
 ```
 
 {{< /tab >}}

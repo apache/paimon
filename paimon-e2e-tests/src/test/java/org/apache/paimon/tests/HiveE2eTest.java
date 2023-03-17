@@ -27,7 +27,7 @@ import org.testcontainers.containers.ContainerState;
 import java.util.UUID;
 
 /**
- * Tests for reading table store from Hive.
+ * Tests for reading paimon from Hive.
  *
  * <p>NOTE: This test runs a complete Hadoop cluster in Docker, which requires a lot of memory. If
  * you're running this test locally, make sure that the memory limit of your Docker is at least 8GB.

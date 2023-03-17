@@ -45,7 +45,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *   <li>1. Add clear method to clean all memory.
  *   <li>2. Add tryInitialized() method to initialize memory before write and read in buffer, while
  *       the old buffer will do it in the constructor and reset().
- *   <li>3. Remove reset() and etc. methods which are not used in flink table store.
+ *   <li>3. Remove reset() and etc. methods which are not used in flink paimon.
  * </ul>
  */
 public class BinaryInMemorySortBuffer extends BinaryIndexedSortable implements SortBuffer {

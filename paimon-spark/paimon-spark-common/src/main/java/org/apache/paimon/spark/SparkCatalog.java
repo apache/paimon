@@ -18,9 +18,8 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.catalog.CatalogContext;
-
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
@@ -63,7 +62,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.spark.SparkTypeUtils.toFlinkType;
 
-/** Spark {@link TableCatalog} for table store. */
+/** Spark {@link TableCatalog} for paimon. */
 public class SparkCatalog implements TableCatalog, SupportsNamespaces {
 
     private static final String PRIMARY_KEY_IDENTIFIER = "primary-key";

@@ -44,7 +44,7 @@ import static org.apache.paimon.connector.util.ReadWriteTableTestUtil.testBatchR
 import static org.apache.paimon.connector.util.ReadWriteTableTestUtil.testStreamingRead;
 import static org.apache.paimon.connector.util.ReadWriteTableTestUtil.testStreamingReadWithReadFirst;
 
-/** Table store IT case when the table has computed column and watermark spec. */
+/** Paimon IT case when the table has computed column and watermark spec. */
 public class ComputedColumnAndWatermarkTableITCase extends KafkaTableTestBase {
 
     @BeforeEach

@@ -1078,7 +1078,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                                 "INSERT OVERWRITE `%s` VALUES('US Dollar', 102, '2022-06-20')",
                                                 table)))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Table store doesn't support streaming INSERT OVERWRITE.");
+                .hasMessage("Paimon doesn't support streaming INSERT OVERWRITE.");
     }
 
     // ----------------------------------------------------------------------------------------------------------------

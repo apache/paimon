@@ -18,8 +18,6 @@
 
 package org.apache.paimon.hive.mapred;
 
-import org.apache.flink.table.store.catalog.CatalogContext;
-
 import org.apache.hadoop.hive.ql.io.sarg.ConvertAstToSearchArg;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
 import org.apache.hadoop.hive.serde2.ColumnProjectionUtils;
@@ -29,6 +27,7 @@ import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.RecordReader;
 import org.apache.hadoop.mapred.Reporter;
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.hive.RowDataContainer;
 import org.apache.paimon.hive.SearchArgumentToPredicateConverter;
 import org.apache.paimon.hive.TableStoreJobConf;
@@ -45,7 +44,7 @@ import java.util.Arrays;
 import java.util.Optional;
 
 /**
- * {@link InputFormat} for table store. It divides all files into {@link InputSplit}s (one split per
+ * {@link InputFormat} for paimon. It divides all files into {@link InputSplit}s (one split per
  * bucket) and creates {@link RecordReader} for each split.
  */
 public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer> {

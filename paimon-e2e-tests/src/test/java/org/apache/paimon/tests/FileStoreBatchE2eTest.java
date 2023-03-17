@@ -92,7 +92,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
         // prepare test data
         writeSharedFile(testDataSourceFile, String.join("\n", data));
 
-        // insert data into table store
+        // insert data into paimon
         runSql(
                 "INSERT INTO ts_table SELECT * FROM test_source;",
                 catalogDdl,
@@ -100,7 +100,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                 testDataSourceDdl,
                 tableStoreDdl);
 
-        // test #1: read all data from table store
+        // test #1: read all data from paimon
         runSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,

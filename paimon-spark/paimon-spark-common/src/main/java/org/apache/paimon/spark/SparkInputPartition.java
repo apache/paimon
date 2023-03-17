@@ -21,7 +21,7 @@ package org.apache.paimon.spark;
 import org.apache.paimon.table.source.Split;
 import org.apache.spark.sql.connector.read.InputPartition;
 
-/** A Spark {@link InputPartition} for table store. */
+/** A Spark {@link InputPartition} for paimon. */
 public class SparkInputPartition implements InputPartition {
 
     private static final long serialVersionUID = 1L;

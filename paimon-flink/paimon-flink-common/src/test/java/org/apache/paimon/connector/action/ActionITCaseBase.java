@@ -18,9 +18,8 @@
 
 package org.apache.paimon.connector.action;
 
-import org.apache.flink.table.store.catalog.CatalogContext;
-
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.connector.util.AbstractTestBase;

@@ -150,7 +150,7 @@ under the License.
                             <outputDirectory>/tmp/paimon-e2e-tests-jars
                             </outputDirectory>
                         </artifactItem>
-                        <!-- test table store with kafka sql jar -->
+                        <!-- test paimon with kafka sql jar -->
                         <artifactItem>
                             <groupId>org.apache.flink</groupId>
                             <artifactId>${flink.sql.connector.kafka}</artifactId>

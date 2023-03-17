@@ -70,13 +70,13 @@ You can find Hive connector jar in `./paimon-hive/paimon-hive-connector-<hive-ve
 There are several ways to add this jar to Hive.
 
 * You can create an `auxlib` folder under the root directory of Hive, and copy `paimon-hive-connector-{{< version >}}.jar` into `auxlib`.
-* You can also copy this jar to a path accessible by Hive, then use `add jar /path/to/paimon-hive-connector-{{< version >}}.jar` to enable table store support in Hive. Note that this method is not recommended. If you're using the MR execution engine and running a join statement, you may be faced with the exception `org.apache.hive.com.esotericsoftware.kryo.kryoexception: unable to find class`.
+* You can also copy this jar to a path accessible by Hive, then use `add jar /path/to/paimon-hive-connector-{{< version >}}.jar` to enable paimon support in Hive. Note that this method is not recommended. If you're using the MR execution engine and running a join statement, you may be faced with the exception `org.apache.hive.com.esotericsoftware.kryo.kryoexception: unable to find class`.
 
 NOTE: If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
 
 ## Quick Start with Table Store Hive Catalog
 
-By using table store Hive catalog, you can create, drop and insert into table store tables from Flink. These operations directly affect the corresponding Hive metastore. Tables created in this way can also be accessed directly from Hive.
+By using paimon Hive catalog, you can create, drop and insert into paimon tables from Flink. These operations directly affect the corresponding Hive metastore. Tables created in this way can also be accessed directly from Hive.
 
 **Step 1: Prepare Table Store Hive Catalog Jar File for Flink**
 
@@ -88,7 +88,7 @@ Execute the following Flink SQL script in Flink SQL client to define a Table Sto
 
 ```sql
 -- Flink SQL CLI
--- Define table store Hive catalog
+-- Define paimon Hive catalog
 
 CREATE CATALOG my_hive WITH (
   'type' = 'paimon',
@@ -97,11 +97,11 @@ CREATE CATALOG my_hive WITH (
   'warehouse' = '/path/to/table/store/warehouse'
 );
 
--- Use table store Hive catalog
+-- Use paimon Hive catalog
 
 USE CATALOG my_hive;
 
--- Create a table in table store Hive catalog (use "default" database by default)
+-- Create a table in paimon Hive catalog (use "default" database by default)
 
 CREATE TABLE test_table (
   a int,
@@ -155,7 +155,7 @@ OK
 
 ## Quick Start with External Table
 
-To access existing table store table, you can also register them as external tables in Hive. Run the following Hive SQL in Hive CLI.
+To access existing paimon table, you can also register them as external tables in Hive. Run the following Hive SQL in Hive CLI.
 
 ```sql
 -- Assume that paimon-hive-connector-{{< version >}}.jar is already in auxlib directory.

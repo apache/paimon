@@ -113,9 +113,9 @@ public class HiveTableSchemaTest {
         String expected =
                 String.join(
                         "\n",
-                        "Hive DDL and table store schema mismatched! "
+                        "Hive DDL and paimon schema mismatched! "
                                 + "It is recommended not to write any column definition "
-                                + "as Flink table store external table can read schema from the specified location.",
+                                + "as Flink paimon external table can read schema from the specified location.",
                         "Mismatched fields are:",
                         "Field #1",
                         "Hive DDL          : mismatched string",
@@ -142,9 +142,9 @@ public class HiveTableSchemaTest {
         String expected =
                 String.join(
                         "\n",
-                        "Hive DDL and table store schema mismatched! "
+                        "Hive DDL and paimon schema mismatched! "
                                 + "It is recommended not to write any column definition "
-                                + "as Flink table store external table can read schema from the specified location.",
+                                + "as Flink paimon external table can read schema from the specified location.",
                         "Mismatched fields are:",
                         "Field #1",
                         "Hive DDL          : null",
@@ -180,9 +180,9 @@ public class HiveTableSchemaTest {
         String expected =
                 String.join(
                         "\n",
-                        "Hive DDL and table store schema mismatched! "
+                        "Hive DDL and paimon schema mismatched! "
                                 + "It is recommended not to write any column definition "
-                                + "as Flink table store external table can read schema from the specified location.",
+                                + "as Flink paimon external table can read schema from the specified location.",
                         "Mismatched fields are:",
                         "Field #3",
                         "Hive DDL          : d int",

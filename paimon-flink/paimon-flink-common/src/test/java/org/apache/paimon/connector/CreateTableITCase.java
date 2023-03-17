@@ -93,7 +93,7 @@ public class CreateTableITCase extends TableStoreTestBase {
             // check catalog
             assertThat(((TableEnvironmentImpl) tEnv).getCatalogManager().getTable(tableIdentifier))
                     .isPresent();
-            // check table store
+            // check paimon
             assertThat(Paths.get(rootPath, relativeTablePath(tableIdentifier)).toFile()).exists();
         } else {
             // check inconsistency

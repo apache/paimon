@@ -342,7 +342,7 @@ CREATE TABLE MyTable (
 Spark3 only supports creating external tables through Scala API. The following Scala code loads the table located at `hdfs://path/to/table` into a `DataSet`.
 
 ```scala
-val dataset = spark.read.format("tablestore").load("hdfs://path/to/table")
+val dataset = spark.read.format("paimon").load("hdfs://path/to/table")
 ```
 
 {{< /tab >}}
@@ -352,7 +352,7 @@ val dataset = spark.read.format("tablestore").load("hdfs://path/to/table")
 Spark2 only supports creating external tables through Scala API. The following Scala code loads the table located at `hdfs://path/to/table` into a `DataSet`.
 
 ```scala
-val dataset = spark.read.format("tablestore").load("hdfs://path/to/table")
+val dataset = spark.read.format("paimon").load("hdfs://path/to/table")
 ```
 
 {{< /tab >}}

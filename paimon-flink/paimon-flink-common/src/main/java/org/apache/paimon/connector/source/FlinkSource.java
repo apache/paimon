@@ -30,7 +30,7 @@ import org.apache.paimon.table.source.TableRead;
 
 import javax.annotation.Nullable;
 
-/** A Flink {@link Source} for table store. */
+/** A Flink {@link Source} for paimon. */
 public abstract class FlinkSource
         implements Source<RowData, FileStoreSourceSplit, PendingSplitsCheckpoint> {
 

@@ -71,7 +71,7 @@ public class FlinkConnectorOptions {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "The option to enable shuffle data by dynamic partition fields in sink phase for table store.");
+                            "The option to enable shuffle data by dynamic partition fields in sink phase for paimon.");
 
     public static final ConfigOption<Integer> SCAN_PARALLELISM =
             ConfigOptions.key("scan.parallelism")

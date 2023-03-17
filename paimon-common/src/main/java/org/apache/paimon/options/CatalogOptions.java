@@ -37,8 +37,7 @@ public class CatalogOptions {
             ConfigOptions.key("metastore")
                     .stringType()
                     .defaultValue("filesystem")
-                    .withDescription(
-                            "Metastore of table store catalog, supports filesystem and hive.");
+                    .withDescription("Metastore of paimon catalog, supports filesystem and hive.");
 
     public static final ConfigOption<String> URI =
             ConfigOptions.key("uri")
