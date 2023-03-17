@@ -21,7 +21,7 @@ jobs:
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          ./mvnw test -pl flink-table-store-e2e-tests -Duser.timezone=$jvm_timezone
+          ./mvnw test -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone
       - name: Build Flink 1.15
         run: ./mvnw clean install -Dmaven.test.skip=true -Pflink-1.15
       - name: Test Flink 1.15
@@ -30,7 +30,7 @@ jobs:
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          ./mvnw test -pl flink-table-store-e2e-tests -Duser.timezone=$jvm_timezone -Pflink-1.15
+          ./mvnw test -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -Pflink-1.15
       - name: Build Flink 1.14
         run: ./mvnw clean install -Dmaven.test.skip=true -Pflink-1.14
       - name: Test Flink 1.14
@@ -39,4 +39,4 @@ jobs:
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          ./mvnw test -pl flink-table-store-e2e-tests -Duser.timezone=$jvm_timezone -Pflink-1.14
+          ./mvnw test -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -Pflink-1.14
