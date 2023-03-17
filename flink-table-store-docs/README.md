@@ -23,7 +23,7 @@ This module contains generators that create HTML files directly from Flink Table
 
 ## Configuration documentation
 
-The `ConfigOptionsDocGenerator` can be used to generate a reference of `ConfigOptions`. By default, a separate file is generated for each `*Options` class found in `org.apache.flink.table.store`, `org.apache.flink.table.store.connector` and `org.apache.flink.table.store.kafka`. 
+The `ConfigOptionsDocGenerator` can be used to generate a reference of `ConfigOptions`. By default, a separate file is generated for each `*Options` class found in `org.apache.flink.table.store`, `org.apache.paimon.connector` and `org.apache.paimon.connector.kafka`. 
 The `@ConfigGroups` annotation can be used to generate multiple files from a single class.
 
 To integrate an `*Options` class from another package, add another module-package argument pair to `ConfigOptionsDocGenerator#LOCATIONS`.
