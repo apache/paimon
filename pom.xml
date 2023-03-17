@@ -58,8 +58,8 @@ under the License.
         <module>flink-table-store-common</module>
         <module>flink-table-store-core</module>
         <module>paimon-flink</module>
-        <module>flink-table-store-docs</module>
-        <module>flink-table-store-e2e-tests</module>
+        <module>paimon-docs</module>
+        <module>paimon-e2e-tests</module>
         <module>paimon-filesystems</module>
         <module>paimon-format</module>
         <module>paimon-shade</module>
