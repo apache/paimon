@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.paimon.file.operation.Lock;
 
 import javax.annotation.Nullable;
 

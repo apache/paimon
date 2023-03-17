@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table;
 
-import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.paimon.file.operation.Lock;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateFilter;
 import org.apache.paimon.reader.RecordReader;

@@ -20,19 +20,19 @@ package org.apache.paimon.table;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
-import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.KeyValueFileStore;
-import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.flink.table.store.file.mergetree.compact.LookupMergeFunction;
-import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
-import org.apache.flink.table.store.file.mergetree.compact.PartialUpdateMergeFunction;
-import org.apache.flink.table.store.file.mergetree.compact.aggregate.AggregateMergeFunction;
-import org.apache.flink.table.store.file.operation.FileStoreScan;
-import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
+import org.apache.paimon.file.KeyValue;
+import org.apache.paimon.file.KeyValueFileStore;
+import org.apache.paimon.file.WriteMode;
+import org.apache.paimon.file.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.file.mergetree.compact.LookupMergeFunction;
+import org.apache.paimon.file.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.file.mergetree.compact.PartialUpdateMergeFunction;
+import org.apache.paimon.file.mergetree.compact.aggregate.AggregateMergeFunction;
+import org.apache.paimon.file.operation.FileStoreScan;
+import org.apache.paimon.file.operation.KeyValueFileStoreScan;
 import org.apache.paimon.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
-import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.paimon.file.schema.KeyValueFieldsExtractor;
+import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
@@ -57,7 +57,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.file.predicate.PredicateBuilder.and;
 import static org.apache.paimon.file.predicate.PredicateBuilder.pickTransformFieldMapping;
 import static org.apache.paimon.file.predicate.PredicateBuilder.splitAnd;
-import static org.apache.flink.table.store.file.schema.SystemColumns.KEY_FIELD_PREFIX;
+import static org.apache.paimon.file.schema.SystemColumns.KEY_FIELD_PREFIX;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode with primary keys. */
 public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {

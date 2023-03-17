@@ -19,12 +19,12 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.operation.AbstractFileStoreWrite;
-import org.apache.flink.table.store.file.schema.Schema;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.SchemaUtils;
-import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.utils.TraceableFileIO;
+import org.apache.paimon.file.operation.AbstractFileStoreWrite;
+import org.apache.paimon.file.schema.Schema;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.file.schema.SchemaUtils;
+import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.file.utils.TraceableFileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.MemorySize;

@@ -25,7 +25,7 @@ import org.apache.flink.table.functions.TableFunction;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateFilter;
-import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.StreamDataTableScan;

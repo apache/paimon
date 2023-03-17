@@ -18,9 +18,9 @@
 
 package org.apache.paimon.table.source.snapshot;
 
-import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.paimon.file.Snapshot;
+import org.apache.paimon.file.manifest.ManifestCommittable;
+import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.table.sink.TableCommitImpl;
 
 import org.junit.jupiter.api.Test;

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.flink.table.store.file.io.DataFileMeta;
+import org.apache.paimon.file.io.DataFileMeta;
 
 import java.util.List;
 

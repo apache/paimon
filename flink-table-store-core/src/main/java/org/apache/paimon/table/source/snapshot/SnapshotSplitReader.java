@@ -18,9 +18,9 @@
 
 package org.apache.paimon.table.source.snapshot;
 
-import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.operation.ScanKind;
+import org.apache.paimon.file.Snapshot;
+import org.apache.paimon.file.io.DataFileMeta;
+import org.apache.paimon.file.operation.ScanKind;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.SplitGenerator;

@@ -19,8 +19,8 @@
 package org.apache.paimon.table.source;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.paimon.file.Snapshot;
+import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.table.source.snapshot.BoundedWatermarkFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;

@@ -19,7 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.source.BatchDataTableScan;

@@ -20,9 +20,9 @@ package org.apache.paimon.table;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.catalog.CatalogContext;
-import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.paimon.file.WriteMode;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
