@@ -1,8 +1,10 @@
-# Flink Table Store
+# Apache Paimon (incubating)
 
-Flink Table Store is a data lake storage for streaming updates/deletes changelog ingestion and high-performance queries in real time.
+Paimon is a data lake storage for streaming updates/deletes changelog ingestion and high-performance queries in real time.
 
-Flink Table Store is developed under the umbrella of [Apache Flink](https://flink.apache.org/).
+Paimon developed under the umbrella of [Apache Flink](https://flink.apache.org/) in the past.
+
+Now it is a standalone project and is incubating in Apache Software Foundation.
 
 ## Documentation & Getting Started
 
