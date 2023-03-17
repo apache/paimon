@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.datagen;
+package org.apache.paimon.datagen;
 
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
