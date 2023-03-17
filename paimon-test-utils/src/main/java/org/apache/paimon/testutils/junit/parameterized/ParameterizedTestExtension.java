@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.testutils.junit.parameterized;
+package org.apache.paimon.testutils.junit.parameterized;
 
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.BeforeEachCallback;

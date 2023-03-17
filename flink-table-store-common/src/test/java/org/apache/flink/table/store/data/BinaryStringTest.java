@@ -18,10 +18,10 @@
 package org.apache.flink.table.store.data;
 
 import org.apache.flink.table.store.memory.MemorySegment;
-import org.apache.flink.table.store.testutils.junit.parameterized.ParameterizedTestExtension;
-import org.apache.flink.table.store.testutils.junit.parameterized.Parameters;
 import org.apache.flink.table.store.utils.SortUtil;
 
+import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
+import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 
