@@ -29,7 +29,7 @@ import java.util.Arrays;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-/** Tests for reading table store from Spark3. */
+/** Tests for reading paimon from Spark3. */
 @DisabledIfSystemProperty(named = "test.flink.version", matches = "1.14.*")
 public class SparkE2eTest extends E2eReaderTestBase {
 
@@ -43,7 +43,7 @@ public class SparkE2eTest extends E2eReaderTestBase {
     public void testFlinkWriteAndSparkRead() throws Exception {
         String warehousePath = TEST_DATA_DIR + "/" + UUID.randomUUID().toString() + "_warehouse";
         final String table = "T";
-        final String sparkTable = String.format("tablestore.default.%s", table);
+        final String sparkTable = String.format("paimon.default.%s", table);
         runSql(
                 String.join(
                         "\n",
@@ -60,9 +60,9 @@ public class SparkE2eTest extends E2eReaderTestBase {
                                             "--master",
                                             "spark://spark-master:7077",
                                             "--conf",
-                                            "spark.sql.catalog.tablestore=org.apache.paimon.spark.SparkCatalog",
+                                            "spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog",
                                             "--conf",
-                                            "spark.sql.catalog.tablestore.warehouse=file:"
+                                            "spark.sql.catalog.paimon.warehouse=file:"
                                                     + warehousePath,
                                             "-f",
                                             TEST_DATA_DIR + "/" + sql);

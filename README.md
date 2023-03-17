@@ -9,7 +9,7 @@ Flink Table Store is developed under the umbrella of [Apache Flink](https://flin
 Please check out the full [documentation](https://nightlies.apache.org/flink/paimon-docs-master/), hosted by the
 [ASF](https://www.apache.org/), for detailed information and user guides.
 
-Check our [quick-start](https://nightlies.apache.org/flink/paimon-docs-master/docs/try-paimon/quick-start/) guide for simple setup instructions to get you started with the table store.
+Check our [quick-start](https://nightlies.apache.org/flink/paimon-docs-master/docs/try-paimon/quick-start/) guide for simple setup instructions to get you started with the paimon.
 
 ## Building
 

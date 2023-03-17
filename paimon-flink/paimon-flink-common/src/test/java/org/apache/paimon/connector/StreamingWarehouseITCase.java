@@ -34,7 +34,7 @@ import static org.apache.paimon.connector.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.connector.util.ReadWriteTableTestUtil.sEnv;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Table store IT case to test concurrent batch overwrite and streaming insert into. */
+/** Paimon IT case to test concurrent batch overwrite and streaming insert into. */
 public class StreamingWarehouseITCase extends KafkaTableTestBase {
 
     @Test

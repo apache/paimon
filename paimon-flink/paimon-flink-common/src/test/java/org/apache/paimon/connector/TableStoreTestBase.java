@@ -49,7 +49,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-/** End-to-end test base for table store. */
+/** End-to-end test base for paimon. */
 public abstract class TableStoreTestBase extends AbstractTestBase {
 
     public static final String CURRENT_CATALOG = "catalog";

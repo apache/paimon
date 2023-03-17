@@ -32,7 +32,7 @@ import java.io.IOException;
 import java.util.List;
 
 /**
- * Base {@link RecordReader} for table store. Reads {@link KeyValue}s from data files and picks out
+ * Base {@link RecordReader} for paimon. Reads {@link KeyValue}s from data files and picks out
  * {@link InternalRow} for Hive to consume.
  *
  * <p>NOTE: To support projection push down, when {@code selectedColumns} does not match {@code

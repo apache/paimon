@@ -39,7 +39,7 @@ import java.util.List;
 import java.util.OptionalLong;
 import java.util.stream.Collectors;
 
-/** A Spark {@link DataSourceReader} for table store. */
+/** A Spark {@link DataSourceReader} for paimon. */
 public class SparkDataSourceReader
         implements SupportsPushDownFilters,
                 SupportsPushDownRequiredColumns,

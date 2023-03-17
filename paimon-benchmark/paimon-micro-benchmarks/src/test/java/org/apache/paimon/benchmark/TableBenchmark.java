@@ -18,11 +18,10 @@
 
 package org.apache.paimon.benchmark;
 
-import org.apache.flink.table.store.catalog.CatalogContext;
-
 import org.apache.commons.math3.random.RandomDataGenerator;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;

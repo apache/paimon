@@ -28,18 +28,18 @@ under the License.
 
 ### CoreOptions
 
-Core options for table store.
+Core options for paimon.
 
 {{< generated/core_configuration >}}
 
 ### CatalogOptions
 
-Options for table store catalog.
+Options for paimon catalog.
 
 {{< generated/catalog_configuration >}}
 
 ### FlinkConnectorOptions
 
-Flink connector options for table store.
+Flink connector options for paimon.
 
 {{< generated/flink_connector_configuration >}}

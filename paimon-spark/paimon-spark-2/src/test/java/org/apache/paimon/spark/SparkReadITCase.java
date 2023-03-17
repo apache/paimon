@@ -103,14 +103,13 @@ public class SparkReadITCase {
 
     @Test
     public void testNormal() {
-        innerTestNormal(
-                spark.read().format("tablestore").option("path", tablePath1.toString()).load());
+        innerTestNormal(spark.read().format("paimon").option("path", tablePath1.toString()).load());
     }
 
     @Test
     public void testFilterPushDown() {
         innerTestFilterPushDown(
-                spark.read().format("tablestore").option("path", tablePath2.toString()).load());
+                spark.read().format("paimon").option("path", tablePath2.toString()).load());
     }
 
     private void innerTestNormal(Dataset<Row> dataset) {

@@ -31,7 +31,7 @@ import javax.annotation.Nullable;
 
 import java.util.Map;
 
-/** {@link FlinkSink} for writing records into table store. */
+/** {@link FlinkSink} for writing records into paimon. */
 public class FileStoreSink extends FlinkSink {
 
     private static final long serialVersionUID = 1L;

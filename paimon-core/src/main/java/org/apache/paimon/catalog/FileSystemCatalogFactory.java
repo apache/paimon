@@ -18,8 +18,6 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.flink.table.store.catalog.CatalogContext;
-
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.TableType;

@@ -44,7 +44,7 @@ import java.util.UUID;
 import static org.apache.paimon.connector.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
 import static org.apache.paimon.connector.FlinkConnectorOptions.CHANGELOG_PRODUCER_LOOKUP_WAIT;
 
-/** Abstract sink of table store. */
+/** Abstract sink of paimon. */
 public abstract class FlinkSink implements Serializable {
 
     private static final long serialVersionUID = 1L;

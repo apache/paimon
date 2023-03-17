@@ -37,7 +37,7 @@ public class TableStoreJobConf {
     private static final String INTERNAL_LOCATION = "paimon.internal.location";
     private static final String INTERNAL_CATALOG_CONFIG = "paimon.catalog.config";
 
-    private static final String TABLE_STORE_PREFIX = "tablestore.";
+    private static final String TABLE_STORE_PREFIX = "paimon.";
 
     private final JobConf jobConf;
 
@@ -59,7 +59,7 @@ public class TableStoreJobConf {
         return jobConf.get(INTERNAL_LOCATION);
     }
 
-    /** Extract table store catalog conf from Hive conf. */
+    /** Extract paimon catalog conf from Hive conf. */
     public static Options extractCatalogConfig(Configuration hiveConf) {
         Map<String, String> configMap = new HashMap<>();
         for (Map.Entry<String, String> entry : hiveConf) {

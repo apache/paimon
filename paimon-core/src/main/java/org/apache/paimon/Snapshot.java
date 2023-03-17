@@ -44,21 +44,19 @@ import java.util.Map;
  * <p>Versioned change list:
  *
  * <ul>
- *   <li>Version 1: Initial version for table store <= 0.2. There is no "version" field in json
- *       file.
- *   <li>Version 2: Introduced in table store 0.3. Add "version" field and "changelogManifestList"
- *       field.
- *   <li>Version 3: Introduced in table store 0.4. Add "baseRecordCount" field, "deltaRecordCount"
- *       field and "changelogRecordCount" field.
+ *   <li>Version 1: Initial version for paimon <= 0.2. There is no "version" field in json file.
+ *   <li>Version 2: Introduced in paimon 0.3. Add "version" field and "changelogManifestList" field.
+ *   <li>Version 3: Introduced in paimon 0.4. Add "baseRecordCount" field, "deltaRecordCount" field
+ *       and "changelogRecordCount" field.
  * </ul>
  *
  * <p>Unversioned change list:
  *
  * <ul>
- *   <li>Since table store 0.22 and table store 0.3, commitIdentifier is changed from a String to a
- *       long value. For table store < 0.22, only Flink connectors have table store sink and they
- *       use checkpointId as commitIdentifier (which is a long value). Json can automatically
- *       perform type conversion so there is no compatibility issue.
+ *   <li>Since paimon 0.22 and paimon 0.3, commitIdentifier is changed from a String to a long
+ *       value. For paimon < 0.22, only Flink connectors have paimon sink and they use checkpointId
+ *       as commitIdentifier (which is a long value). Json can automatically perform type conversion
+ *       so there is no compatibility issue.
  * </ul>
  */
 public class Snapshot {
@@ -85,7 +83,7 @@ public class Snapshot {
     private static final String FILED_WATERMARK = "watermark";
 
     // version of snapshot
-    // null for table store <= 0.2
+    // null for paimon <= 0.2
     @JsonProperty(FIELD_VERSION)
     @Nullable
     private final Integer version;
@@ -106,7 +104,7 @@ public class Snapshot {
     private final String deltaManifestList;
 
     // a manifest list recording all changelog produced in this snapshot
-    // null if no changelog is produced, or for table store <= 0.2
+    // null if no changelog is produced, or for paimon <= 0.2
     @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST)
     @Nullable
     private final String changelogManifestList;
@@ -134,25 +132,25 @@ public class Snapshot {
     private final Map<Integer, Long> logOffsets;
 
     // record count of all changes occurred in this snapshot
-    // null for table store <= 0.3
+    // null for paimon <= 0.3
     @JsonProperty(FIELD_TOTAL_RECORD_COUNT)
     @Nullable
     private final Long totalRecordCount;
 
     // record count of all new changes occurred in this snapshot
-    // null for table store <= 0.3
+    // null for paimon <= 0.3
     @JsonProperty(FIELD_DELTA_RECORD_COUNT)
     @Nullable
     private final Long deltaRecordCount;
 
     // record count of all changelog produced in this snapshot
-    // null for table store <= 0.3
+    // null for paimon <= 0.3
     @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT)
     @Nullable
     private final Long changelogRecordCount;
 
     // watermark for input records
-    // null for table store <= 0.3
+    // null for paimon <= 0.3
     // null if there is no watermark in new committing, and the previous snapshot does not have a
     // watermark
     @JsonProperty(FILED_WATERMARK)
@@ -228,7 +226,7 @@ public class Snapshot {
 
     @JsonGetter(FIELD_VERSION)
     public int version() {
-        // there is no version field for table store <= 0.2
+        // there is no version field for paimon <= 0.2
         return version == null ? TABLE_STORE_02_VERSION : version;
     }
 

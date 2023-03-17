@@ -18,8 +18,7 @@
 
 package org.apache.paimon.s3;
 
-import org.apache.flink.table.store.catalog.CatalogContext;
-
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.Path;

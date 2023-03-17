@@ -31,7 +31,7 @@ import javax.annotation.Nullable;
 import java.util.Properties;
 
 /**
- * {@link AbstractSerDe} for table store. It transforms map-reduce values to Hive objects.
+ * {@link AbstractSerDe} for paimon. It transforms map-reduce values to Hive objects.
  *
  * <p>Currently this class only supports deserialization.
  */

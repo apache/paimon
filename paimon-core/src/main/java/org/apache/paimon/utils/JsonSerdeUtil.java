@@ -77,7 +77,7 @@ public class JsonSerdeUtil {
     }
 
     private static Module createTableStoreJacksonModule() {
-        SimpleModule module = new SimpleModule("Table store");
+        SimpleModule module = new SimpleModule("Paimon");
         registerJsonObjects(
                 module, TableSchema.class, SchemaSerializer.INSTANCE, SchemaSerializer.INSTANCE);
         registerJsonObjects(

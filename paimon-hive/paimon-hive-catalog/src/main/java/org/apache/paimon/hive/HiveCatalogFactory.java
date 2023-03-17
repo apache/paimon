@@ -18,13 +18,12 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.flink.table.store.catalog.CatalogContext;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -59,7 +58,7 @@ public class HiveCatalogFactory implements CatalogFactory {
                 Preconditions.checkNotNull(
                         context.options().get(CatalogOptions.URI),
                         CatalogOptions.URI.key()
-                                + " must be set for table store "
+                                + " must be set for paimon "
                                 + IDENTIFIER
                                 + " catalog");
 

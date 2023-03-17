@@ -44,7 +44,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.description.TextElement.text;
 
-/** Core options for table store. */
+/** Core options for paimon. */
 public class CoreOptions implements Serializable {
 
     public static final ConfigOption<Integer> BUCKET =
@@ -61,7 +61,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             Description.builder()
                                     .text(
-                                            "Specify the table store distribution policy. Data is assigned"
+                                            "Specify the paimon distribution policy. Data is assigned"
                                                     + " to each bucket according to the hash value of bucket-key.")
                                     .linebreak()
                                     .text("If you specify multiple fields, delimiter is ','.")

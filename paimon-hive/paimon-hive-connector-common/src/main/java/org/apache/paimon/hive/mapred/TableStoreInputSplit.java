@@ -31,8 +31,7 @@ import java.io.IOException;
 import java.util.Objects;
 
 /**
- * {@link FileSplit} for table store. It contains all files to read from a certain partition and
- * bucket.
+ * {@link FileSplit} for paimon. It contains all files to read from a certain partition and bucket.
  */
 public class TableStoreInputSplit extends FileSplit {
 

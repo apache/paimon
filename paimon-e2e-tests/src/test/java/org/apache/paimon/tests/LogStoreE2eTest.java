@@ -101,7 +101,7 @@ public class LogStoreE2eTest extends E2eTestBase {
                                 + ");",
                         testTopicName);
 
-        // insert data into table store
+        // insert data into paimon
         runSql(
                 // long checkpoint interval ensures that new data are only visible from log store
                 "SET 'execution.checkpointing.interval' = '9999s';\n"
@@ -111,7 +111,7 @@ public class LogStoreE2eTest extends E2eTestBase {
                 streamTableDdl,
                 testDataSourceDdl);
 
-        // read all data from table store
+        // read all data from paimon
         runSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,

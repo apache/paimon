@@ -18,11 +18,10 @@
 
 package org.apache.paimon.oss;
 
-import org.apache.flink.table.store.catalog.CatalogContext;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
 import org.slf4j.Logger;
