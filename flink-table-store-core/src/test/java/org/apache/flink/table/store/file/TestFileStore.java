@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.file;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.ManifestCommittable;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
@@ -52,6 +50,8 @@ import org.apache.flink.table.store.table.sink.CommitMessageImpl;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

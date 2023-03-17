@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.store.annotation.Experimental;
-import org.apache.flink.table.store.data.BinaryRow;
+import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.data.BinaryRow;
 
 import java.io.Serializable;
 

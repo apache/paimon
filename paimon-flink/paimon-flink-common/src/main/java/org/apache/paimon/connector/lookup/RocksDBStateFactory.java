@@ -18,10 +18,9 @@
 
 package org.apache.paimon.connector.lookup;
 
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.serializer.Serializer;
-
 import org.apache.paimon.connector.RocksDBOptions;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.Serializer;
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;

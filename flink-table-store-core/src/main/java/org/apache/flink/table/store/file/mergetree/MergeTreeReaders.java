@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.mergetree;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
@@ -28,6 +27,8 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionWrapper;
 import org.apache.flink.table.store.file.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.flink.table.store.file.mergetree.compact.SortMergeReader;
 import org.apache.flink.table.store.reader.RecordReader;
+
+import org.apache.paimon.data.InternalRow;
 
 import java.io.IOException;
 import java.util.ArrayList;

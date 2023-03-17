@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.fs.hadoop;
 
-import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.FileStatus;
@@ -30,6 +29,7 @@ import org.apache.flink.table.store.hadoop.SerializableConfiguration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.paimon.annotation.VisibleForTesting;
 
 import java.io.IOException;
 

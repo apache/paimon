@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.format;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.append.AppendOnlyCompactManager;
 import org.apache.flink.table.store.file.append.AppendOnlyWriter;
 import org.apache.flink.table.store.file.io.DataFileMeta;
@@ -35,6 +33,8 @@ import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.VarCharType;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.FileFormat;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;

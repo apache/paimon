@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.types.DataField;
@@ -27,6 +26,7 @@ import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.TimestampType;
 
+import org.apache.paimon.data.Timestamp;
 import org.apache.spark.sql.sources.EqualTo;
 import org.apache.spark.sql.sources.GreaterThan;
 import org.apache.spark.sql.sources.GreaterThanOrEqual;

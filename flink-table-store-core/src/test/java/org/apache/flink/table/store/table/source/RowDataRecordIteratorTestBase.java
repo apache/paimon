@@ -18,12 +18,13 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
 import org.apache.flink.table.store.file.utils.TestReusingRecordReader;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.types.RowKind;
+
+import org.apache.paimon.data.InternalRow;
 
 import java.io.IOException;
 import java.util.List;

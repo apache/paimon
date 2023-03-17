@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
@@ -33,6 +32,7 @@ import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.TableRead;
 
+import org.apache.paimon.data.GenericRow;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

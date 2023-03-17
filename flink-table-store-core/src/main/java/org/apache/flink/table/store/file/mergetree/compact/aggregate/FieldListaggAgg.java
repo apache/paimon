@@ -18,9 +18,10 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-import org.apache.flink.table.store.data.BinaryString;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.utils.StringUtils;
+
+import org.apache.paimon.data.BinaryString;
 
 /** listagg aggregate a field of a row. */
 public class FieldListaggAgg extends FieldAggregator {

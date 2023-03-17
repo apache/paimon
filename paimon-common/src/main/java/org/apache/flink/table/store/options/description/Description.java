@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.options.description;
 
-import org.apache.flink.table.store.annotation.Experimental;
+import org.apache.paimon.annotation.Experimental;
 
 import java.util.ArrayList;
 import java.util.List;

@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.utils.Preconditions;
+
+import org.apache.paimon.annotation.Experimental;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

@@ -18,12 +18,12 @@
 
 package org.apache.paimon.format.parquet;
 
-import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.options.Options;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Projection;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatReaderFactory;

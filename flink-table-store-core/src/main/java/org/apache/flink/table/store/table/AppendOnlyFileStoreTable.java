@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.AppendOnlyFileStore;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreRead;
@@ -40,6 +39,8 @@ import org.apache.flink.table.store.table.source.Split;
 import org.apache.flink.table.store.table.source.SplitGenerator;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.utils.Preconditions;
+
+import org.apache.paimon.data.InternalRow;
 
 import java.io.IOException;
 import java.util.function.BiConsumer;

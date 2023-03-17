@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.store.annotation.Experimental;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.operation.FileStoreRead;
 import org.apache.flink.table.store.reader.RecordReader;
+
+import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.data.InternalRow;
 
 import java.io.IOException;
 import java.util.ArrayList;

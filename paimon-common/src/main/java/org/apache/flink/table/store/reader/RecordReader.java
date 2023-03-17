@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.reader;
 
-import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.utils.CloseableIterator;
+
+import org.apache.paimon.annotation.Experimental;
 
 import javax.annotation.Nullable;
 

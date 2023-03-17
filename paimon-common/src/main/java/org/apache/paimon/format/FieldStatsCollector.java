@@ -18,11 +18,12 @@
 
 package org.apache.paimon.format;
 
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.serializer.InternalSerializers;
-import org.apache.flink.table.store.data.serializer.Serializer;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
+
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.data.serializer.Serializer;
 
 /** Collector to extract statistics of each fields from a series of records. */
 public class FieldStatsCollector {

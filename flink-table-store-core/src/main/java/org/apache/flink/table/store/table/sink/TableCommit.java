@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.table.Table;
+
+import org.apache.paimon.annotation.Experimental;
 
 /**
  * Create and commit snapshots of a {@link Table}. Snapshots are produced from {@link

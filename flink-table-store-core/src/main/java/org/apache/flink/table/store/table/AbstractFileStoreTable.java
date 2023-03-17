@@ -19,7 +19,6 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.FileStore;
 import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -38,6 +37,8 @@ import org.apache.flink.table.store.table.source.StreamDataTableScan;
 import org.apache.flink.table.store.table.source.StreamDataTableScanImpl;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReader;
 import org.apache.flink.table.store.table.source.snapshot.SnapshotSplitReaderImpl;
+
+import org.apache.paimon.annotation.VisibleForTesting;
 
 import java.util.Map;
 import java.util.Objects;

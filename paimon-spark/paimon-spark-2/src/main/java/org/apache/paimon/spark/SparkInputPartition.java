@@ -18,12 +18,12 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.reader.RecordReaderIterator;
 import org.apache.flink.table.store.table.source.ReadBuilder;
 import org.apache.flink.table.store.table.source.Split;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.spark.sql.sources.v2.reader.InputPartition;
 import org.apache.spark.sql.sources.v2.reader.InputPartitionReader;
 

@@ -18,13 +18,13 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.data.InternalArray;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.RowDataUtils;
 
+import org.apache.paimon.data.InternalArray;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.expressions.SpecializedGettersReader;
 import org.apache.spark.sql.catalyst.util.ArrayData;

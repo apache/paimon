@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.casting.CastExecutor;
 import org.apache.flink.table.store.file.casting.CastExecutors;
@@ -35,6 +34,8 @@ import org.apache.flink.table.store.types.MultisetType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.ProjectedRow;
 import org.apache.flink.table.store.utils.RowDataUtils;
+
+import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 

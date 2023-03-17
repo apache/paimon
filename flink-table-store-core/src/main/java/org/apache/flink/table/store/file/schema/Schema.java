@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Preconditions;
+
+import org.apache.paimon.annotation.Experimental;
 
 import javax.annotation.Nullable;
 

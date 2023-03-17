@@ -19,7 +19,6 @@
 
 package org.apache.flink.table.store.file.append;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.compact.CompactManager;
 import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.DataFileMeta;
@@ -34,6 +33,7 @@ import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.LongCounter;
 import org.apache.flink.table.store.utils.Preconditions;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 
 import javax.annotation.Nullable;

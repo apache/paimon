@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.store.annotation.Experimental;
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.table.Table;
+
+import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 
 /**
  * Write of {@link Table} to provide {@link InternalRow} writing.

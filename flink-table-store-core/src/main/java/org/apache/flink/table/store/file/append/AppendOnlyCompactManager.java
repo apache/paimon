@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.append;
 
-import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.file.compact.CompactFutureManager;
 import org.apache.flink.table.store.file.compact.CompactResult;
 import org.apache.flink.table.store.file.compact.CompactTask;
@@ -26,6 +25,8 @@ import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.utils.Preconditions;
+
+import org.apache.paimon.annotation.VisibleForTesting;
 
 import java.io.IOException;
 import java.util.ArrayList;

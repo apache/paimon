@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.store.data.serializer.VersionedSerializer;
 import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.io.NewFilesIncrement;
@@ -26,6 +25,8 @@ import org.apache.flink.table.store.io.DataInputDeserializer;
 import org.apache.flink.table.store.io.DataInputView;
 import org.apache.flink.table.store.io.DataOutputView;
 import org.apache.flink.table.store.io.DataOutputViewStreamWrapper;
+
+import org.apache.paimon.data.serializer.VersionedSerializer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;

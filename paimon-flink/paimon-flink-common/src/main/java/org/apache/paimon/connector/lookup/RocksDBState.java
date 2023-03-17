@@ -18,14 +18,14 @@
 
 package org.apache.paimon.connector.lookup;
 
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.serializer.Serializer;
 import org.apache.flink.table.store.io.DataInputDeserializer;
 import org.apache.flink.table.store.io.DataOutputSerializer;
 
 import org.apache.flink.shaded.guava30.com.google.common.cache.Cache;
 import org.apache.flink.shaded.guava30.com.google.common.cache.CacheBuilder;
 
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.Serializer;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDB;
 import org.rocksdb.WriteOptions;

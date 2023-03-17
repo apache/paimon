@@ -20,9 +20,6 @@ package org.apache.paimon.connector.source;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
@@ -51,6 +48,9 @@ import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 
 import java.util.ArrayList;

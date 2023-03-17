@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateFilter;
@@ -29,6 +28,8 @@ import org.apache.flink.table.store.utils.TypeUtils;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
+
+import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 

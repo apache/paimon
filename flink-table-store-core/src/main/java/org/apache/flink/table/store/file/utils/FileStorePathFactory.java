@@ -19,13 +19,14 @@
 package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.annotation.VisibleForTesting;
-import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.options.ConfigOption;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Preconditions;
+
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 
 import javax.annotation.concurrent.ThreadSafe;
 

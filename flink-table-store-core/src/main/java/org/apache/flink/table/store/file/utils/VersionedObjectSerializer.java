@@ -18,12 +18,13 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.JoinedRow;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
 
 import java.util.ArrayList;
 import java.util.List;

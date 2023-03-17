@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.CharType;
 import org.apache.flink.table.store.types.DataType;
@@ -35,6 +34,8 @@ import org.apache.flink.table.store.types.TimestampType;
 import org.apache.flink.table.store.types.TinyIntType;
 import org.apache.flink.table.store.types.VarCharType;
 import org.apache.flink.table.store.utils.RowDataUtils;
+
+import org.apache.paimon.data.InternalRow;
 
 /** Generate sequence number. */
 public class SequenceGenerator {

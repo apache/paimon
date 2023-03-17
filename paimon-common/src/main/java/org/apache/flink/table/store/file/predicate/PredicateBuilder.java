@@ -18,16 +18,17 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.table.store.annotation.Experimental;
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.Decimal;
-import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DecimalType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Preconditions;
 import org.apache.flink.table.store.utils.TypeUtils;
+
+import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 
 import javax.annotation.Nullable;
 

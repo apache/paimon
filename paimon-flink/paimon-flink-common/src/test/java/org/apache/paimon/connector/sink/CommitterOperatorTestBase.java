@@ -19,7 +19,6 @@
 package org.apache.paimon.connector.sink;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.fs.Path;
@@ -35,6 +34,7 @@ import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.CloseableIterator;
 
+import org.apache.paimon.data.InternalRow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 

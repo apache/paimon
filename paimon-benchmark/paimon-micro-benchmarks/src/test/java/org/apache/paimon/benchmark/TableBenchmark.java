@@ -20,9 +20,6 @@ package org.apache.paimon.benchmark;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.catalog.CatalogContext;
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.file.catalog.Identifier;
@@ -35,6 +32,9 @@ import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.IntType;
 
 import org.apache.commons.math3.random.RandomDataGenerator;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;

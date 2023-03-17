@@ -20,10 +20,11 @@ package org.apache.flink.table.store.table.sink;
 
 import org.apache.flink.table.store.codegen.CodeGenUtils;
 import org.apache.flink.table.store.codegen.Projection;
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 
 /** A {@link PartitionComputer} to compute partition by partition keys. */
 public class PartitionComputer {

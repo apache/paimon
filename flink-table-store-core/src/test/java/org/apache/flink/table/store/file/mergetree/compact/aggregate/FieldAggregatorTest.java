@@ -18,8 +18,6 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.Decimal;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.BooleanType;
 import org.apache.flink.table.store.types.DecimalType;
@@ -30,6 +28,8 @@ import org.apache.flink.table.store.types.SmallIntType;
 import org.apache.flink.table.store.types.TinyIntType;
 import org.apache.flink.table.store.types.VarCharType;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;

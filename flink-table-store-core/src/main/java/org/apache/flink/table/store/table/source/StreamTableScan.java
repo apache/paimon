@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.file.utils.Restorable;
+
+import org.apache.paimon.annotation.Experimental;
 
 /**
  * {@link TableScan} for streaming, supports {@link #checkpoint} and {@link #restore}.

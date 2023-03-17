@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.table.store.annotation.VisibleForTesting;
 import org.apache.flink.table.store.fs.Path;
+
+import org.apache.paimon.annotation.VisibleForTesting;
 
 import javax.annotation.concurrent.ThreadSafe;
 

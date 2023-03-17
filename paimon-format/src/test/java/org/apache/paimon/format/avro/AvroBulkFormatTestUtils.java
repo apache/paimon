@@ -18,13 +18,13 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowType;
 
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.paimon.data.InternalRow;
 
 import java.util.function.Function;
 

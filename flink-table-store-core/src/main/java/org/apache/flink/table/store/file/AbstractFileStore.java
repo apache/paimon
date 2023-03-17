@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.file;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.annotation.VisibleForTesting;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
 import org.apache.flink.table.store.file.operation.FileStoreCommitImpl;
@@ -31,6 +29,9 @@ import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.InternalRow;
 
 import java.time.Duration;
 import java.util.Comparator;

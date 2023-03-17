@@ -18,11 +18,12 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
 import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.utils.OrderedPacking;
+
+import org.apache.paimon.data.InternalRow;
 
 import java.util.ArrayList;
 import java.util.Comparator;

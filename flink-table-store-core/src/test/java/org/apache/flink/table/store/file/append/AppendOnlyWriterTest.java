@@ -20,10 +20,6 @@
 package org.apache.flink.table.store.file.append;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
@@ -39,6 +35,10 @@ import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.VarCharType;
 import org.apache.flink.table.store.utils.Pair;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileFormat;
 import org.junit.jupiter.api.BeforeEach;

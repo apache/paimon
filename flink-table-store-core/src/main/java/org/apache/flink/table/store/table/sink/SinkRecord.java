@@ -18,9 +18,10 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.types.RowKind;
+
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 
 import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 

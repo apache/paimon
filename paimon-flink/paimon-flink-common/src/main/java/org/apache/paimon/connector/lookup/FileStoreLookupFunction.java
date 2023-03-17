@@ -23,7 +23,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.functions.FunctionContext;
 import org.apache.flink.table.functions.TableFunction;
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -39,6 +38,7 @@ import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
 
 import org.apache.paimon.connector.FlinkRowData;
 import org.apache.paimon.connector.FlinkRowWrapper;
+import org.apache.paimon.data.InternalRow;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

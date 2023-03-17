@@ -19,8 +19,6 @@
 package org.apache.flink.table.store.table.system;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.predicate.LeafPredicate;
 import org.apache.flink.table.store.file.predicate.Predicate;
@@ -51,6 +49,9 @@ import org.apache.flink.table.store.utils.Filter;
 import org.apache.flink.table.store.utils.ProjectedRow;
 
 import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
+
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 

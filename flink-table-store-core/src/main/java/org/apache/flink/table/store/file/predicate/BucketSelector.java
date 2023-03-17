@@ -18,14 +18,15 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.table.store.annotation.VisibleForTesting;
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.GenericRow;
-import org.apache.flink.table.store.data.serializer.InternalRowSerializer;
 import org.apache.flink.table.store.table.sink.BucketComputer;
 import org.apache.flink.table.store.types.RowType;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableSet;
+
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 
 import javax.annotation.concurrent.ThreadSafe;
 

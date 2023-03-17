@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.table.sink;
 
-import org.apache.flink.table.store.annotation.Experimental;
-import org.apache.flink.table.store.data.InternalRow;
+import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.data.InternalRow;
 
 /**
  * An interface for building the {@link StreamTableWrite} and {@link StreamTableCommit}.

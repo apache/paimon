@@ -18,10 +18,11 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.BinaryRowWriter;
-import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.file.stats.StatsTestUtils;
+
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.Timestamp;
 
 import java.util.Collections;
 

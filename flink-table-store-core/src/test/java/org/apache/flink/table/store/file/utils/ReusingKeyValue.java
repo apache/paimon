@@ -18,9 +18,10 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.data.BinaryRow;
-import org.apache.flink.table.store.data.BinaryRowWriter;
 import org.apache.flink.table.store.file.KeyValue;
+
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 
 /**
  * Util class which reuses a {@link KeyValue} to test if other components handle reuse correctly.

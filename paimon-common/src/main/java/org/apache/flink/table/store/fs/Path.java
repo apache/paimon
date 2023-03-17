@@ -22,8 +22,9 @@
 
 package org.apache.flink.table.store.fs;
 
-import org.apache.flink.table.store.annotation.Experimental;
 import org.apache.flink.table.store.utils.StringUtils;
+
+import org.apache.paimon.annotation.Experimental;
 
 import java.io.Serializable;
 import java.net.URI;

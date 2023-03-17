@@ -18,8 +18,9 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.memory.MemorySegment;
+
+import org.apache.paimon.data.BinaryRow;
 
 /**
  * Utilities for {@link BinaryRow}. Many of the methods in this class are used in code generation.

@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.file.io;
 
-import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
@@ -31,6 +30,7 @@ import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Projection;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 

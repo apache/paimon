@@ -18,11 +18,10 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.flink.table.store.data.BinaryString;
-
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
 import org.apache.hadoop.io.Text;
+import org.apache.paimon.data.BinaryString;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

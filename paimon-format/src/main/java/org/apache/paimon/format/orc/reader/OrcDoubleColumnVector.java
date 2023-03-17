@@ -25,8 +25,8 @@ import org.apache.hadoop.hive.ql.exec.vector.DoubleColumnVector;
  * ColumnVector.
  */
 public class OrcDoubleColumnVector extends AbstractOrcColumnVector
-        implements org.apache.flink.table.store.data.columnar.DoubleColumnVector,
-                org.apache.flink.table.store.data.columnar.FloatColumnVector {
+        implements org.apache.paimon.data.columnar.DoubleColumnVector,
+                org.apache.paimon.data.columnar.FloatColumnVector {
 
     private final DoubleColumnVector vector;
 

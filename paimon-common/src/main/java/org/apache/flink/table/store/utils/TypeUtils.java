@@ -18,9 +18,6 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.Decimal;
-import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypeRoot;
@@ -28,6 +25,10 @@ import org.apache.flink.table.store.types.DecimalType;
 import org.apache.flink.table.store.types.LocalZonedTimestampType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.types.TimestampType;
+
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 
 import java.math.BigDecimal;
 import java.time.DateTimeException;

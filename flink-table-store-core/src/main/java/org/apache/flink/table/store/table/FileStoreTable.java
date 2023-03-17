@@ -18,13 +18,14 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
 import org.apache.flink.table.store.table.sink.TableCommitImpl;
 import org.apache.flink.table.store.table.sink.TableWriteImpl;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.data.InternalRow;
 
 import java.util.List;
 import java.util.Map;

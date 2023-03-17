@@ -18,7 +18,6 @@
 
 package org.apache.flink.table.store.table.source.snapshot;
 
-import org.apache.flink.table.store.data.InternalRow;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -29,6 +28,7 @@ import org.apache.flink.table.store.table.source.TableRead;
 import org.apache.flink.table.store.table.system.BucketsTable;
 import org.apache.flink.table.store.types.RowKind;
 
+import org.apache.paimon.data.InternalRow;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;

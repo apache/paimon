@@ -18,25 +18,26 @@
 
 package org.apache.flink.table.store.memory;
 
-import org.apache.flink.table.store.annotation.VisibleForTesting;
-import org.apache.flink.table.store.data.BinaryArray;
-import org.apache.flink.table.store.data.BinaryMap;
-import org.apache.flink.table.store.data.BinaryString;
-import org.apache.flink.table.store.data.Decimal;
-import org.apache.flink.table.store.data.InternalArray;
-import org.apache.flink.table.store.data.InternalMap;
-import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.data.NestedRow;
-import org.apache.flink.table.store.data.Timestamp;
 import org.apache.flink.table.store.io.DataOutputView;
 import org.apache.flink.table.store.utils.MurmurHashUtils;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryArray;
+import org.apache.paimon.data.BinaryMap;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.NestedRow;
+import org.apache.paimon.data.Timestamp;
+
 import java.io.IOException;
 
-import static org.apache.flink.table.store.data.BinarySection.HIGHEST_FIRST_BIT;
-import static org.apache.flink.table.store.data.BinarySection.HIGHEST_SECOND_TO_EIGHTH_BIT;
 import static org.apache.flink.table.store.memory.MemorySegment.BYTE_ARRAY_BASE_OFFSET;
 import static org.apache.flink.table.store.memory.MemorySegment.LITTLE_ENDIAN;
+import static org.apache.paimon.data.BinarySection.HIGHEST_FIRST_BIT;
+import static org.apache.paimon.data.BinarySection.HIGHEST_SECOND_TO_EIGHTH_BIT;
 
 /** Utils for {@link MemorySegment}. */
 public class MemorySegmentUtils {
