@@ -18,8 +18,8 @@
 
 package org.apache.paimon.table;
 
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.fs.FileIOFinder;
 
 import java.util.Map;

@@ -18,8 +18,8 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.io.DataFileTestDataGenerator;
+import org.apache.paimon.file.io.DataFileMeta;
+import org.apache.paimon.file.io.DataFileTestDataGenerator;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 

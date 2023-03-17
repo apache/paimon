@@ -19,11 +19,11 @@
 package org.apache.paimon.table;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.schema.Schema;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.SchemaUtils;
-import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.paimon.file.WriteMode;
+import org.apache.paimon.file.schema.Schema;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.file.schema.SchemaUtils;
+import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;

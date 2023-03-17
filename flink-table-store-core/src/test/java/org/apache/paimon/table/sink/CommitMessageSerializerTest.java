@@ -18,16 +18,16 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.flink.table.store.file.io.CompactIncrement;
-import org.apache.flink.table.store.file.io.NewFilesIncrement;
+import org.apache.paimon.file.io.CompactIncrement;
+import org.apache.paimon.file.io.NewFilesIncrement;
 
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 
-import static org.apache.flink.table.store.file.manifest.ManifestCommittableSerializerTest.randomCompactIncrement;
-import static org.apache.flink.table.store.file.manifest.ManifestCommittableSerializerTest.randomNewFilesIncrement;
-import static org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManagerTest.row;
+import static org.apache.paimon.file.manifest.ManifestCommittableSerializerTest.randomCompactIncrement;
+import static org.apache.paimon.file.manifest.ManifestCommittableSerializerTest.randomNewFilesIncrement;
+import static org.apache.paimon.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CommitMessageSerializer}. */

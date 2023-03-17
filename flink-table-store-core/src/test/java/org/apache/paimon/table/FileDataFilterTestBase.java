@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table;
 
-import org.apache.flink.table.store.file.operation.ScanKind;
+import org.apache.paimon.file.operation.ScanKind;
 import org.apache.paimon.file.predicate.Equal;
 import org.apache.paimon.file.predicate.IsNull;
 import org.apache.paimon.file.predicate.LeafPredicate;

@@ -18,9 +18,9 @@
 
 package org.apache.paimon.table.source.snapshot;
 
-import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
-import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.paimon.file.Snapshot;
+import org.apache.paimon.file.io.DataFileMetaSerializer;
+import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.DataTableScan;

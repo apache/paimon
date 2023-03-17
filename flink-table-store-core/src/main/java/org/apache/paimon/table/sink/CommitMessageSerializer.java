@@ -18,9 +18,9 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.flink.table.store.file.io.CompactIncrement;
-import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
-import org.apache.flink.table.store.file.io.NewFilesIncrement;
+import org.apache.paimon.file.io.CompactIncrement;
+import org.apache.paimon.file.io.DataFileMetaSerializer;
+import org.apache.paimon.file.io.NewFilesIncrement;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
@@ -33,8 +33,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.flink.table.store.file.utils.SerializationUtils.deserializeBinaryRow;
-import static org.apache.flink.table.store.file.utils.SerializationUtils.serializeBinaryRow;
+import static org.apache.paimon.file.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.paimon.file.utils.SerializationUtils.serializeBinaryRow;
 
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {

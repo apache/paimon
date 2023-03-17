@@ -18,11 +18,11 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.flink.table.store.file.manifest.ManifestCommittable;
-import org.apache.flink.table.store.file.operation.FileStoreCommit;
-import org.apache.flink.table.store.file.operation.FileStoreExpire;
-import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.file.operation.PartitionExpire;
+import org.apache.paimon.file.manifest.ManifestCommittable;
+import org.apache.paimon.file.operation.FileStoreCommit;
+import org.apache.paimon.file.operation.FileStoreExpire;
+import org.apache.paimon.file.operation.Lock;
+import org.apache.paimon.file.operation.PartitionExpire;
 
 import javax.annotation.Nullable;
 

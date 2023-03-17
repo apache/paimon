@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.flink.table.store.file.utils.Restorable;
+import org.apache.paimon.file.utils.Restorable;
 
 import org.apache.paimon.annotation.Experimental;
 

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.source.snapshot;
 
-import org.apache.flink.table.store.file.Snapshot;
+import org.apache.paimon.file.Snapshot;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.StreamDataTableScan;
 

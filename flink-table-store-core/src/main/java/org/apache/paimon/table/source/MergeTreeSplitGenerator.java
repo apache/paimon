@@ -18,9 +18,9 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.mergetree.SortedRun;
-import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
+import org.apache.paimon.file.io.DataFileMeta;
+import org.apache.paimon.file.mergetree.SortedRun;
+import org.apache.paimon.file.mergetree.compact.IntervalPartition;
 import org.apache.paimon.utils.OrderedPacking;
 
 import org.apache.paimon.data.InternalRow;

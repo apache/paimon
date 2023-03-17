@@ -19,11 +19,11 @@
 package org.apache.paimon.table.system;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
+import org.apache.paimon.file.io.DataFileMeta;
+import org.apache.paimon.file.io.DataFileMetaSerializer;
 import org.apache.paimon.file.predicate.Predicate;
-import org.apache.flink.table.store.file.utils.IteratorRecordReader;
-import org.apache.flink.table.store.file.utils.SnapshotManager;
+import org.apache.paimon.file.utils.IteratorRecordReader;
+import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;

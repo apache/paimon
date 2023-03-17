@@ -19,18 +19,18 @@
 package org.apache.paimon.table;
 
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.KeyValueFileStore;
-import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.mergetree.compact.ValueCountMergeFunction;
-import org.apache.flink.table.store.file.operation.FileStoreScan;
-import org.apache.flink.table.store.file.operation.KeyValueFileStoreScan;
-import org.apache.flink.table.store.file.operation.ReverseReader;
+import org.apache.paimon.file.KeyValue;
+import org.apache.paimon.file.KeyValueFileStore;
+import org.apache.paimon.file.WriteMode;
+import org.apache.paimon.file.io.DataFileMeta;
+import org.apache.paimon.file.mergetree.compact.ValueCountMergeFunction;
+import org.apache.paimon.file.operation.FileStoreScan;
+import org.apache.paimon.file.operation.KeyValueFileStoreScan;
+import org.apache.paimon.file.operation.ReverseReader;
 import org.apache.paimon.file.predicate.Predicate;
-import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
-import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.stats.BinaryTableStats;
+import org.apache.paimon.file.schema.KeyValueFieldsExtractor;
+import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.file.stats.BinaryTableStats;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
@@ -53,7 +53,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.BiConsumer;
 
-import static org.apache.flink.table.store.file.schema.SystemColumns.VALUE_COUNT;
+import static org.apache.paimon.file.schema.SystemColumns.VALUE_COUNT;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode without primary keys. */
 public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
