@@ -15,9 +15,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.codegen
 
-import org.apache.paimon.codegen.GenerateUtils.{newName, ROW_DATA}
+import org.apache.paimon.codegen.GenerateUtils.{ROW_DATA, newName}
 import org.apache.paimon.types.RowType
 
 /** A code generator for generating [[RecordComparator]]. */
@@ -27,19 +28,19 @@ object ComparatorCodeGenerator {
    * Generates a [[RecordComparator]] that can be passed to a Java compiler.
    *
    * @param name
-   *   Class name of the function. Does not need to be unique but has to be a valid Java class
-   *   identifier.
+   * Class name of the function. Does not need to be unique but has to be a valid Java class
+   * identifier.
    * @param inputType
-   *   input type.
+   * input type.
    * @param sortSpec
-   *   sort specification.
+   * sort specification.
    * @return
-   *   A GeneratedRecordComparator
+   * A GeneratedRecordComparator
    */
   def gen(
-      name: String,
-      inputType: RowType,
-      sortSpec: SortSpec): GeneratedClass[RecordComparator] = {
+           name: String,
+           inputType: RowType,
+           sortSpec: SortSpec): GeneratedClass[RecordComparator] = {
     val className = newName(name)
     val baseClass = classOf[RecordComparator]
 
