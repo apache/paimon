@@ -23,13 +23,13 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-parent</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-parent</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-spark</artifactId>
-    <name>Flink Table Store : Spark</name>
+    <artifactId>paimon-spark</artifactId>
+    <name>Paimon : Spark</name>
 
     <packaging>pom</packaging>
 
@@ -49,23 +49,23 @@ under the License.
         <!-- Flink All dependencies -->
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-shade</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-shade</artifactId>
             <version>${project.version}</version>
         </dependency>
 
         <!-- Test -->
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-test-utils</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-test-utils</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-s3</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-s3</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>

@@ -30,7 +30,7 @@ under the License.
 
 ## Download
 
-[Download](https://repo.maven.apache.org/maven2/org/apache/flink/flink-table-store-oss/{{< version >}}/flink-table-store-oss-{{< version >}}.jar)
+[Download](https://repo.maven.apache.org/maven2/org/apache/flink/paimon-oss/{{< version >}}/paimon-oss-{{< version >}}.jar)
 flink table store shaded jar.
 
 {{< /stable >}}
@@ -48,7 +48,7 @@ mvn clean install -DskipTests
 ```
 
 You can find the shaded jars under
-`./flink-table-store-filesystems/flink-table-store-oss/target/flink-table-store-oss-{{< version >}}.jar`.
+`./paimon-filesystems/paimon-oss/target/paimon-oss-{{< version >}}.jar`.
 
 {{< /unstable >}}
 
@@ -58,7 +58,7 @@ You can find the shaded jars under
 
 {{< tab "Flink" >}}
 
-Put `flink-table-store-oss-{{< version >}}.jar` into `lib` directory of your Flink home, and create catalog:
+Put `paimon-oss-{{< version >}}.jar` into `lib` directory of your Flink home, and create catalog:
 
 ```sql
 CREATE CATALOG my_catalog WITH (
@@ -74,7 +74,7 @@ CREATE CATALOG my_catalog WITH (
 
 {{< tab "Spark" >}}
 
-Place `flink-table-store-oss-{{< version >}}.jar` together with `flink-table-store-spark-{{< version >}}.jar` under Spark's jars directory, and start like
+Place `paimon-oss-{{< version >}}.jar` together with `paimon-spark-{{< version >}}.jar` under Spark's jars directory, and start like
 
 ```shell
 spark-sql \ 
@@ -91,7 +91,7 @@ spark-sql \
 
 NOTE: You need to ensure that Hive metastore can access `oss`.
 
-Place `flink-table-store-oss-{{< version >}}.jar` together with `flink-table-store-hive-connector-{{< version >}}.jar` under Hive's auxlib directory, and start like
+Place `paimon-oss-{{< version >}}.jar` together with `paimon-hive-connector-{{< version >}}.jar` under Hive's auxlib directory, and start like
 
 ```sql
 SET tablestore.fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com;
@@ -109,7 +109,7 @@ SELECT COUNT(1) FROM test_table;
 
 {{< tab "Trino" >}}
 
-Place `flink-table-store-oss-{{< version >}}.jar` together with `flink-table-store-trino-{{< version >}}.jar` under `plugin/tablestore` directory.
+Place `paimon-oss-{{< version >}}.jar` together with `paimon-trino-{{< version >}}.jar` under `plugin/tablestore` directory.
 
 Add options in `etc/catalog/tablestore.properties`.
 ```shell

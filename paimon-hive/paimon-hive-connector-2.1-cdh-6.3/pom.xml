@@ -23,13 +23,13 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-hive</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-hive</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-hive-connector-2.1-cdh-6.3</artifactId>
-    <name>Flink Table Store : Hive Connector : 2.1-cdh-6.3</name>
+    <artifactId>paimon-hive-connector-2.1-cdh-6.3</artifactId>
+    <name>Paimon : Hive Connector : 2.1-cdh-6.3</name>
 
     <packaging>jar</packaging>
 
@@ -39,8 +39,8 @@ under the License.
 
     <dependencies>
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-hive-connector-common</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-hive-connector-common</artifactId>
             <version>${project.version}</version>
         </dependency>
     </dependencies>
@@ -60,7 +60,7 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <include>org.apache.flink:flink-table-store-hive-connector-common</include>
+                                    <include>org.apache.flink:paimon-hive-connector-common</include>
                                 </includes>
                             </artifactSet>
                         </configuration>

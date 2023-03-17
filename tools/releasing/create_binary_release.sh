@@ -56,48 +56,48 @@ mkdir ${RELEASE_DIR}
 ###########################
 
 mvn clean install -Dcheckstyle.skip=true -Dgpg.skip -DskipTests
-cp flink-table-store-flink/flink-table-store-flink-1.16/target/flink-table-store-flink-1.16-${RELEASE_VERSION}.jar ${RELEASE_DIR}
-cp flink-table-store-flink/flink-table-store-flink-1.15/target/flink-table-store-flink-1.15-${RELEASE_VERSION}.jar ${RELEASE_DIR}
-cp flink-table-store-flink/flink-table-store-flink-1.14/target/flink-table-store-flink-1.14-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp paimon-flink/paimon-flink-1.16/target/paimon-flink-1.16-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp paimon-flink/paimon-flink-1.15/target/paimon-flink-1.15-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp paimon-flink/paimon-flink-1.14/target/paimon-flink-1.14-${RELEASE_VERSION}.jar ${RELEASE_DIR}
 
-cp flink-table-store-hive/flink-table-store-hive-catalog/target/flink-table-store-hive-catalog-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp paimon-hive/paimon-hive-catalog/target/paimon-hive-catalog-${RELEASE_VERSION}.jar ${RELEASE_DIR}
 
-cp flink-table-store-hive/flink-table-store-hive-connector-3.1/target/flink-table-store-hive-connector-3.1-${RELEASE_VERSION}.jar ${RELEASE_DIR}
-cp flink-table-store-hive/flink-table-store-hive-connector-2.3/target/flink-table-store-hive-connector-2.3-${RELEASE_VERSION}.jar ${RELEASE_DIR}
-cp flink-table-store-hive/flink-table-store-hive-connector-2.2/target/flink-table-store-hive-connector-2.2-${RELEASE_VERSION}.jar ${RELEASE_DIR}
-cp flink-table-store-hive/flink-table-store-hive-connector-2.1/target/flink-table-store-hive-connector-2.1-${RELEASE_VERSION}.jar ${RELEASE_DIR}
-cp flink-table-store-hive/flink-table-store-hive-connector-2.1-cdh-6.3/target/flink-table-store-hive-connector-2.1-cdh-6.3-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp paimon-hive/paimon-hive-connector-3.1/target/paimon-hive-connector-3.1-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp paimon-hive/paimon-hive-connector-2.3/target/paimon-hive-connector-2.3-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp paimon-hive/paimon-hive-connector-2.2/target/paimon-hive-connector-2.2-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp paimon-hive/paimon-hive-connector-2.1/target/paimon-hive-connector-2.1-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp paimon-hive/paimon-hive-connector-2.1-cdh-6.3/target/paimon-hive-connector-2.1-cdh-6.3-${RELEASE_VERSION}.jar ${RELEASE_DIR}
 
-cp flink-table-store-spark/flink-table-store-spark-3.3/target/flink-table-store-spark-3.3-${RELEASE_VERSION}.jar ${RELEASE_DIR}
-cp flink-table-store-spark/flink-table-store-spark-3.2/target/flink-table-store-spark-3.2-${RELEASE_VERSION}.jar ${RELEASE_DIR}
-cp flink-table-store-spark/flink-table-store-spark-3.1/target/flink-table-store-spark-3.1-${RELEASE_VERSION}.jar ${RELEASE_DIR}
-cp flink-table-store-spark/flink-table-store-spark-2/target/flink-table-store-spark-2-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp paimon-spark/paimon-spark-3.3/target/paimon-spark-3.3-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp paimon-spark/paimon-spark-3.2/target/paimon-spark-3.2-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp paimon-spark/paimon-spark-3.1/target/paimon-spark-3.1-${RELEASE_VERSION}.jar ${RELEASE_DIR}
+cp paimon-spark/paimon-spark-2/target/paimon-spark-2-${RELEASE_VERSION}.jar ${RELEASE_DIR}
 
 cd ${RELEASE_DIR}
-gpg --armor --detach-sig "flink-table-store-flink-1.16-${RELEASE_VERSION}.jar"
-gpg --armor --detach-sig "flink-table-store-flink-1.15-${RELEASE_VERSION}.jar"
-gpg --armor --detach-sig "flink-table-store-flink-1.14-${RELEASE_VERSION}.jar"
-gpg --armor --detach-sig "flink-table-store-hive-catalog-${RELEASE_VERSION}.jar"
-gpg --armor --detach-sig "flink-table-store-hive-connector-3.1-${RELEASE_VERSION}.jar"
-gpg --armor --detach-sig "flink-table-store-hive-connector-2.3-${RELEASE_VERSION}.jar"
-gpg --armor --detach-sig "flink-table-store-hive-connector-2.2-${RELEASE_VERSION}.jar"
-gpg --armor --detach-sig "flink-table-store-hive-connector-2.1-${RELEASE_VERSION}.jar"
-gpg --armor --detach-sig "flink-table-store-hive-connector-2.1-cdh-6.3-${RELEASE_VERSION}.jar"
-gpg --armor --detach-sig "flink-table-store-spark-3.3-${RELEASE_VERSION}.jar"
-gpg --armor --detach-sig "flink-table-store-spark-3.2-${RELEASE_VERSION}.jar"
-gpg --armor --detach-sig "flink-table-store-spark-3.1-${RELEASE_VERSION}.jar"
-gpg --armor --detach-sig "flink-table-store-spark-2-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "paimon-flink-1.16-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "paimon-flink-1.15-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "paimon-flink-1.14-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "paimon-hive-catalog-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "paimon-hive-connector-3.1-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "paimon-hive-connector-2.3-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "paimon-hive-connector-2.2-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "paimon-hive-connector-2.1-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "paimon-hive-connector-2.1-cdh-6.3-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "paimon-spark-3.3-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "paimon-spark-3.2-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "paimon-spark-3.1-${RELEASE_VERSION}.jar"
+gpg --armor --detach-sig "paimon-spark-2-${RELEASE_VERSION}.jar"
 
-$SHASUM "flink-table-store-flink-1.16-${RELEASE_VERSION}.jar" > "flink-table-store-flink-1.16-${RELEASE_VERSION}.jar.sha512"
-$SHASUM "flink-table-store-flink-1.15-${RELEASE_VERSION}.jar" > "flink-table-store-flink-1.15-${RELEASE_VERSION}.jar.sha512"
-$SHASUM "flink-table-store-flink-1.14-${RELEASE_VERSION}.jar" > "flink-table-store-flink-1.14-${RELEASE_VERSION}.jar.sha512"
-$SHASUM "flink-table-store-hive-catalog-${RELEASE_VERSION}.jar" > "flink-table-store-hive-catalog-${RELEASE_VERSION}.jar.sha512"
-$SHASUM "flink-table-store-hive-connector-3.1-${RELEASE_VERSION}.jar" > "flink-table-store-hive-connector-3.1-${RELEASE_VERSION}.jar.sha512"
-$SHASUM "flink-table-store-hive-connector-2.3-${RELEASE_VERSION}.jar" > "flink-table-store-hive-connector-2.3-${RELEASE_VERSION}.jar.sha512"
-$SHASUM "flink-table-store-hive-connector-2.2-${RELEASE_VERSION}.jar" > "flink-table-store-hive-connector-2.2-${RELEASE_VERSION}.jar.sha512"
-$SHASUM "flink-table-store-hive-connector-2.1-${RELEASE_VERSION}.jar" > "flink-table-store-hive-connector-2.1-${RELEASE_VERSION}.jar.sha512"
-$SHASUM "flink-table-store-hive-connector-2.1-cdh-6.3-${RELEASE_VERSION}.jar" > "flink-table-store-hive-connector-2.1-cdh-6.3-${RELEASE_VERSION}.jar.sha512"
-$SHASUM "flink-table-store-spark-3.3-${RELEASE_VERSION}.jar" > "flink-table-store-spark-3.3-${RELEASE_VERSION}.jar.sha512"
-$SHASUM "flink-table-store-spark-3.2-${RELEASE_VERSION}.jar" > "flink-table-store-spark-3.2-${RELEASE_VERSION}.jar.sha512"
-$SHASUM "flink-table-store-spark-3.1-${RELEASE_VERSION}.jar" > "flink-table-store-spark-3.1-${RELEASE_VERSION}.jar.sha512"
-$SHASUM "flink-table-store-spark-2-${RELEASE_VERSION}.jar" > "flink-table-store-spark-2-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "paimon-flink-1.16-${RELEASE_VERSION}.jar" > "paimon-flink-1.16-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "paimon-flink-1.15-${RELEASE_VERSION}.jar" > "paimon-flink-1.15-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "paimon-flink-1.14-${RELEASE_VERSION}.jar" > "paimon-flink-1.14-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "paimon-hive-catalog-${RELEASE_VERSION}.jar" > "paimon-hive-catalog-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "paimon-hive-connector-3.1-${RELEASE_VERSION}.jar" > "paimon-hive-connector-3.1-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "paimon-hive-connector-2.3-${RELEASE_VERSION}.jar" > "paimon-hive-connector-2.3-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "paimon-hive-connector-2.2-${RELEASE_VERSION}.jar" > "paimon-hive-connector-2.2-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "paimon-hive-connector-2.1-${RELEASE_VERSION}.jar" > "paimon-hive-connector-2.1-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "paimon-hive-connector-2.1-cdh-6.3-${RELEASE_VERSION}.jar" > "paimon-hive-connector-2.1-cdh-6.3-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "paimon-spark-3.3-${RELEASE_VERSION}.jar" > "paimon-spark-3.3-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "paimon-spark-3.2-${RELEASE_VERSION}.jar" > "paimon-spark-3.2-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "paimon-spark-3.1-${RELEASE_VERSION}.jar" > "paimon-spark-3.1-${RELEASE_VERSION}.jar.sha512"
+$SHASUM "paimon-spark-2-${RELEASE_VERSION}.jar" > "paimon-spark-2-${RELEASE_VERSION}.jar.sha512"

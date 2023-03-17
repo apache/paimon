@@ -23,27 +23,27 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>flink-table-store-hive</artifactId>
-        <groupId>org.apache.flink</groupId>
+        <artifactId>paimon-hive</artifactId>
+        <groupId>org.apache.paimon</groupId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>flink-table-store-hive-connector-common</artifactId>
-    <name>Flink Table Store : Hive Connector Common</name>
+    <artifactId>paimon-hive-connector-common</artifactId>
+    <name>Paimon : Hive Connector Common</name>
 
     <packaging>jar</packaging>
 
     <dependencies>
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-hive-common</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-hive-common</artifactId>
             <version>${project.version}</version>
         </dependency>
 
         <!-- Flink All dependencies -->
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-shade</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-shade</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -84,7 +84,7 @@ under the License.
         <!--
         Why we need this test dependency:
         IDEA reads classes from the same project from target/classes of that module,
-        so even though we've packaged and shaded avro classes into flink-table-store-format.jar
+        so even though we've packaged and shaded avro classes into paimon-format.jar
         we still have to include this test dependency here.
 
         Why do we put this test dependency before the provided hive-exec:
@@ -139,8 +139,8 @@ under the License.
         <!-- test dependencies -->
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-store-core</artifactId>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-core</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
             <type>test-jar</type>
@@ -520,8 +520,8 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <include>org.apache.flink:flink-table-store-hive-common</include>
-                                    <include>org.apache.flink:flink-table-store-shade</include>
+                                    <include>org.apache.flink:paimon-hive-common</include>
+                                    <include>org.apache.flink:paimon-shade</include>
                                 </includes>
                             </artifactSet>
                         </configuration>

@@ -23,7 +23,7 @@ import org.apache.paimon.plugin.PluginLoader;
 /** Copied and modified from the flink-table-planner-loader module. */
 public class CodeGenLoader {
 
-    private static final String FLINK_TABLE_STORE_CODEGEN_FAT_JAR = "flink-table-store-codegen.jar";
+    private static final String FLINK_TABLE_STORE_CODEGEN_FAT_JAR = "paimon-codegen.jar";
 
     // Singleton lazy initialization
 

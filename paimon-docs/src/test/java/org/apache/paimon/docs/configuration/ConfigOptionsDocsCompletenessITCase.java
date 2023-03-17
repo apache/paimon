@@ -197,7 +197,7 @@ public class ConfigOptionsDocsCompletenessITCase {
             StringBuilder stringBuilder =
                     new StringBuilder(
                             "Documentation is outdated, please regenerate it according to the"
-                                    + " instructions in flink-table-store-docs/README.md.");
+                                    + " instructions in paimon-docs/README.md.");
             stringBuilder.append(System.lineSeparator());
             stringBuilder.append("\tProblems:");
             for (String problem : problems) {
