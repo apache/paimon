@@ -17,10 +17,10 @@
  */
 package org.apache.paimon.codegen
 
-import org.apache.paimon.codegen.GenerateUtils.{newName, ROW_DATA, SEGMENT}
+import org.apache.paimon.codegen.GenerateUtils.{ROW_DATA, SEGMENT, newName}
 import org.apache.paimon.data.{BinaryRow, Decimal, Timestamp}
-import org.apache.paimon.types.{DataType, DecimalType, RowType, TimestampType}
 import org.apache.paimon.types.DataTypeRoot._
+import org.apache.paimon.types.{DataType, DecimalType, RowType, TimestampType}
 import org.apache.paimon.utils.{SortUtil, TypeUtils}
 
 import scala.collection.mutable
