@@ -26,13 +26,14 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.FileUtils;
 import org.apache.flink.table.store.file.utils.VersionedObjectSerializer;
-import org.apache.flink.table.store.format.FieldStatsCollector;
-import org.apache.flink.table.store.format.FileFormat;
-import org.apache.flink.table.store.format.FormatReaderFactory;
-import org.apache.flink.table.store.format.FormatWriterFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.format.FieldStatsCollector;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.format.FormatWriterFactory;
 
 import java.io.IOException;
 import java.util.List;

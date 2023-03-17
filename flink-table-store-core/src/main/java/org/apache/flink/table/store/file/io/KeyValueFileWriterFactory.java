@@ -23,12 +23,13 @@ import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.KeyValueSerializer;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.format.FileFormat;
-import org.apache.flink.table.store.format.FileStatsExtractor;
-import org.apache.flink.table.store.format.FormatWriterFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.RowType;
+
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileStatsExtractor;
+import org.apache.paimon.format.FormatWriterFactory;
 
 import javax.annotation.Nullable;
 

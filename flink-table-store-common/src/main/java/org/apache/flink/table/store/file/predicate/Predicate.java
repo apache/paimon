@@ -19,7 +19,8 @@
 package org.apache.flink.table.store.file.predicate;
 
 import org.apache.flink.table.store.annotation.Experimental;
-import org.apache.flink.table.store.format.FieldStats;
+
+import org.apache.paimon.format.FieldStats;
 
 import java.io.Serializable;
 import java.util.Optional;

@@ -31,7 +31,6 @@ import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
 import org.apache.flink.table.store.file.stats.FieldStatsConverters;
 import org.apache.flink.table.store.file.utils.IteratorRecordReader;
 import org.apache.flink.table.store.file.utils.SerializationUtils;
-import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.ReadonlyTable;
@@ -51,6 +50,8 @@ import org.apache.flink.table.store.utils.ProjectedRow;
 import org.apache.flink.table.store.utils.RowDataToObjectArrayConverter;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
+
+import org.apache.paimon.format.FieldStats;
 
 import javax.annotation.Nullable;
 

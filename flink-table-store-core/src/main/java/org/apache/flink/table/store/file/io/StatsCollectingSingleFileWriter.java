@@ -20,14 +20,15 @@
 package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.format.FieldStats;
-import org.apache.flink.table.store.format.FieldStatsCollector;
-import org.apache.flink.table.store.format.FileStatsExtractor;
-import org.apache.flink.table.store.format.FormatWriterFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Preconditions;
+
+import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.format.FieldStatsCollector;
+import org.apache.paimon.format.FileStatsExtractor;
+import org.apache.paimon.format.FormatWriterFactory;
 
 import javax.annotation.Nullable;
 
