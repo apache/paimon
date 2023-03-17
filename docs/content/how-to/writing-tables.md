@@ -204,7 +204,7 @@ Run the following command to submit a drop-partition job for the table.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.connector.action.FlinkActions \
+    -c org.apache.paimon.flink.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
     /path/to/paimon-flink-**-{{< version >}}.jar \
     drop-partition \
@@ -222,7 +222,7 @@ For more information of drop-partition, see
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.connector.action.FlinkActions \
+    -c org.apache.paimon.flink.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
     /path/to/paimon-flink-**-{{< version >}}.jar \
     drop-partition --help
@@ -244,7 +244,7 @@ Run the following command to submit a 'delete' job for the table.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.connector.action.FlinkActions \
+    -c org.apache.paimon.flink.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
     /path/to/paimon-flink-**-{{< version >}}.jar \
     delete \
@@ -263,7 +263,7 @@ For more information of 'delete', see
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.connector.action.FlinkActions \
+    -c org.apache.paimon.flink.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
     /path/to/paimon-flink-**-{{< version >}}.jar \
     delete --help
@@ -312,7 +312,7 @@ Run the following command to submit a 'merge-into' job for the table.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.connector.action.FlinkActions \
+    -c org.apache.paimon.flink.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
     /path/to/paimon-flink-**-{{< version >}}.jar \
     merge-into \
@@ -339,7 +339,7 @@ Alternatively, you can use '--source-sql <sql> [, --source-sql <sql> ...]' to cr
 -- Find all orders mentioned in the source table, then mark as important if the price is above 100 
 -- or delete if the price is under 10.
 ./flink run \
-    -c org.apache.paimon.connector.action.FlinkActions \
+    -c org.apache.paimon.flink.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
     /path/to/paimon-flink-**-{{< version >}}.jar \
     merge-into \
@@ -357,7 +357,7 @@ Alternatively, you can use '--source-sql <sql> [, --source-sql <sql> ...]' to cr
 -- For matched order rows, increase the price, and if there is no match, insert the order from the 
 -- source table:
 ./flink run \
-    -c org.apache.paimon.connector.action.FlinkActions \
+    -c org.apache.paimon.flink.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
     /path/to/paimon-flink-**-{{< version >}}.jar \
     merge-into \
@@ -374,7 +374,7 @@ Alternatively, you can use '--source-sql <sql> [, --source-sql <sql> ...]' to cr
 -- For not matched by source order rows (which are in the target table and does not match any row in the
 -- source table based on the merge-condition), decrease the price or if the mark is 'trivial', delete them:
 ./flink run \
-    -c org.apache.paimon.connector.action.FlinkActions \
+    -c org.apache.paimon.flink.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
     /path/to/paimon-flink-**-{{< version >}}.jar \
     merge-into \
@@ -392,7 +392,7 @@ Alternatively, you can use '--source-sql <sql> [, --source-sql <sql> ...]' to cr
 -- An source-sql example: 
 -- Create a temporary view S in new catalog and use it as source table
 ./flink run \
-    -c org.apache.paimon.connector.action.FlinkActions \
+    -c org.apache.paimon.flink.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
     /path/to/paimon-flink-**-{{< version >}}.jar \
     merge-into \
@@ -451,7 +451,7 @@ For more information of 'merge-into', see
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.connector.action.FlinkActions \
+    -c org.apache.paimon.flink.action.FlinkActions \
     -Dclassloader.resolve-order=parent-first \
     /path/to/paimon-flink-**-{{< version >}}.jar \
     merge-into --help

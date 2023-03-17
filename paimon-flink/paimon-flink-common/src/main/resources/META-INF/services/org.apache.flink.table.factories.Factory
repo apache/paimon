@@ -13,6 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-org.apache.paimon.connector.TableStoreConnectorFactory
-org.apache.paimon.connector.FlinkCatalogFactory
-org.apache.paimon.connector.kafka.KafkaLogStoreFactory
+org.apache.paimon.flink.TableStoreConnectorFactory
+org.apache.paimon.flink.FlinkCatalogFactory
+org.apache.paimon.flink.kafka.KafkaLogStoreFactory
