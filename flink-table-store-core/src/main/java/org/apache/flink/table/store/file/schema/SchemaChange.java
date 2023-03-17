@@ -70,6 +70,10 @@ public interface SchemaChange {
         return new UpdateColumnComment(fieldNames, comment);
     }
 
+    static SchemaChange updateColumnPosition(Move move) {
+        return new UpdateColumnPosition(move);
+    }
+
     /** A SchemaChange to set a table option. */
     final class SetOption implements SchemaChange {
         private final String key;
@@ -288,6 +292,57 @@ public interface SchemaChange {
             int result = Objects.hash(newDataType);
             result = 31 * result + Objects.hashCode(fieldName);
             return result;
+        }
+    }
+
+    /** A SchemaChange to update the field position. */
+    final class UpdateColumnPosition implements SchemaChange {
+        private final Move move;
+
+        private UpdateColumnPosition(Move move) {
+            this.move = move;
+        }
+
+        public Move move() {
+            return move;
+        }
+    }
+
+    /** Represents a requested column move in a struct. */
+    class Move {
+        public enum MoveType {
+            FIRST,
+            AFTER
+        }
+
+        public static Move first(String fieldName) {
+            return new Move(fieldName, null, MoveType.FIRST);
+        }
+
+        public static Move after(String fieldName, String referenceFieldName) {
+            return new Move(fieldName, referenceFieldName, MoveType.AFTER);
+        }
+
+        private final String fieldName;
+        private final String referenceFieldName;
+        private final MoveType type;
+
+        public Move(String fieldName, String referenceFieldName, MoveType type) {
+            this.fieldName = fieldName;
+            this.referenceFieldName = referenceFieldName;
+            this.type = type;
+        }
+
+        public String fieldName() {
+            return fieldName;
+        }
+
+        public String referenceFieldName() {
+            return referenceFieldName;
+        }
+
+        public MoveType type() {
+            return type;
         }
     }
 

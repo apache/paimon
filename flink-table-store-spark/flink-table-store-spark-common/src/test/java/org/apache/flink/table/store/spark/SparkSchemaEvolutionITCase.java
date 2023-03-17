@@ -361,6 +361,66 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testUpdateColumnPosition() {
+        // move first
+        spark.sql("CREATE TABLE tableFirst (a INT , b BIGINT, c STRING)");
+        spark.sql("ALTER TABLE tableFirst ALTER COLUMN b FIRST");
+        List<Row> result = spark.sql("SHOW CREATE TABLE tableFirst").collectAsList();
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE tableFirst (\n"
+                                + "  `b` BIGINT,\n"
+                                + "  `a` INT,\n"
+                                + "  `c` STRING)");
+
+        // move after
+        spark.sql("CREATE TABLE tableAfter (a INT, b BIGINT, c STRING)");
+        spark.sql("ALTER TABLE tableAfter ALTER COLUMN c AFTER a");
+        result = spark.sql("SHOW CREATE TABLE tableAfter").collectAsList();
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE tableAfter (\n"
+                                + "  `a` INT,\n"
+                                + "  `c` STRING,\n"
+                                + "  `b` BIGINT)");
+
+        spark.sql("CREATE TABLE tableAfter1 (a INT, b BIGINT, c STRING, d DOUBLE)");
+        spark.sql("ALTER TABLE tableAfter1 ALTER COLUMN b AFTER c");
+        result = spark.sql("SHOW CREATE TABLE tableAfter1").collectAsList();
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE tableAfter1 (\n"
+                                + "  `a` INT,\n"
+                                + "  `c` STRING,\n"
+                                + "  `b` BIGINT,\n"
+                                + "  `d` DOUBLE)");
+
+        //  move self for first test
+        spark.sql("CREATE TABLE tableFirstSelf (a INT , b BIGINT, c STRING)");
+        assertThatThrownBy(() -> spark.sql("ALTER TABLE tableFirstSelf ALTER COLUMN a FIRST"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Cannot move itself for column a");
+
+        //  move self for after test
+        spark.sql("CREATE TABLE tableAfterSelf (a INT , b BIGINT, c STRING)");
+        assertThatThrownBy(() -> spark.sql("ALTER TABLE tableAfterSelf ALTER COLUMN b AFTER b"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Cannot move itself for column b");
+
+        // missing column
+        spark.sql("CREATE TABLE tableMissing (a INT , b BIGINT, c STRING)");
+        assertThatThrownBy(() -> spark.sql("ALTER TABLE tableMissing ALTER COLUMN d FIRST"))
+                .hasMessageContaining("Missing field d in table tablestore.default.tableMissing");
+
+        spark.sql("CREATE TABLE tableMissingAfter (a INT , b BIGINT, c STRING)");
+        assertThatThrownBy(() -> spark.sql("ALTER TABLE tableMissingAfter ALTER COLUMN a AFTER d"))
+                .hasMessageContaining(
+                        "Missing field d in table tablestore.default.tableMissingAfter");
+    }
+
+    @Test
     public void testAlterColumnType() {
         createTable("testAlterColumnType");
         writeTable("testAlterColumnType", "(1, 2L, '1')", "(5, 6L, '3')");
