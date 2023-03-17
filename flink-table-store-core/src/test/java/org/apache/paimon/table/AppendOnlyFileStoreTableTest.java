@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.WriteMode;
 import org.apache.paimon.file.operation.ScanKind;
 import org.apache.paimon.file.predicate.Predicate;

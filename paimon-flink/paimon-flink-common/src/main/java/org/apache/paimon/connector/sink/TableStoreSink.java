@@ -25,9 +25,9 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
-import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
-import org.apache.flink.table.store.CoreOptions.MergeEngine;
+import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.LogChangelogMode;
+import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.paimon.options.Options;
@@ -48,9 +48,9 @@ import javax.annotation.Nullable;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.apache.flink.table.store.CoreOptions.CHANGELOG_PRODUCER;
-import static org.apache.flink.table.store.CoreOptions.LOG_CHANGELOG_MODE;
-import static org.apache.flink.table.store.CoreOptions.MERGE_ENGINE;
+import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
+import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 
 /** Table sink to create sink. */
 public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning {

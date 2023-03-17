@@ -57,7 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.apache.flink.table.store.CoreOptions.TARGET_FILE_SIZE;
+import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.file.KeyValue.UNKNOWN_SEQUENCE;
 import static org.apache.paimon.file.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;

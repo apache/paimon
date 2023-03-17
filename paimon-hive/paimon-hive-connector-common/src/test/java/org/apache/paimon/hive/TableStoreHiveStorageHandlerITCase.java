@@ -19,7 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.flink.connectors.hive.FlinkEmbeddedHiveRunner;
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.file.WriteMode;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;

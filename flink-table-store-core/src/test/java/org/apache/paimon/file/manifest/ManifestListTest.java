@@ -18,7 +18,7 @@
 
 package org.apache.paimon.file.manifest;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.TestKeyValueGenerator;
 import org.apache.paimon.file.utils.FailingFileIO;
 import org.apache.paimon.file.utils.FileStorePathFactory;

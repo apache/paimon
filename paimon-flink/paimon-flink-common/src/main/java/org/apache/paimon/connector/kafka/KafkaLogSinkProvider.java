@@ -21,8 +21,8 @@ package org.apache.paimon.connector.kafka;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer.Semantic;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.CoreOptions.LogChangelogMode;
-import org.apache.flink.table.store.CoreOptions.LogConsistency;
+import org.apache.paimon.CoreOptions.LogChangelogMode;
+import org.apache.paimon.CoreOptions.LogConsistency;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.connector.log.LogSinkProvider;

@@ -25,7 +25,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
@@ -46,7 +46,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.registerData;
-import static org.apache.flink.table.store.CoreOptions.SCAN_MODE;
+import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.connector.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.paimon.connector.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.paimon.connector.kafka.KafkaLogOptions.TOPIC;

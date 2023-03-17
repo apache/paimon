@@ -18,7 +18,7 @@
 
 package org.apache.paimon.file.compact;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.utils.Preconditions;
 

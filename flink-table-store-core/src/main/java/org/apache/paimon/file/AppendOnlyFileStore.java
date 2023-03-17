@@ -18,7 +18,7 @@
 
 package org.apache.paimon.file;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.operation.AppendOnlyFileStoreRead;
 import org.apache.paimon.file.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.file.operation.AppendOnlyFileStoreWrite;

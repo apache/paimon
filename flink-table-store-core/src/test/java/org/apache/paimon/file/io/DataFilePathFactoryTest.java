@@ -18,7 +18,7 @@
 
 package org.apache.paimon.file.io;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.Path;
 
 import org.junit.jupiter.api.Test;

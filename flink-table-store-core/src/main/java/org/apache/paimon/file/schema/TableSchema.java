@@ -33,7 +33,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 
 /**
  * Schema of a table. Unlike schema, it has more information than {@link Schema}, including schemaId

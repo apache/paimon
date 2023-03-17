@@ -18,7 +18,7 @@
 
 package org.apache.paimon.file;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.manifest.ManifestFile;
 import org.apache.paimon.file.manifest.ManifestList;
 import org.apache.paimon.file.operation.FileStoreCommitImpl;
