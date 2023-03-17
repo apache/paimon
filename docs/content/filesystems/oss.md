@@ -78,7 +78,7 @@ Place `flink-table-store-oss-{{< version >}}.jar` together with `flink-table-sto
 
 ```shell
 spark-sql \ 
-  --conf spark.sql.catalog.tablestore=org.apache.flink.table.store.spark.SparkCatalog \
+  --conf spark.sql.catalog.tablestore=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.tablestore.warehouse=oss://<bucket-name>/ \
   --conf spark.sql.catalog.tablestore.fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com \
   --conf spark.sql.catalog.tablestore.fs.oss.accessKeyId=xxx \

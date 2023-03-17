@@ -58,7 +58,7 @@ The following shell command registers a Table Store catalog named `tablestore`. 
 
 ```bash
 spark-sql ... \
-    --conf spark.sql.catalog.tablestore=org.apache.flink.table.store.spark.SparkCatalog \
+    --conf spark.sql.catalog.tablestore=org.apache.paimon.spark.SparkCatalog \
     --conf spark.sql.catalog.tablestore.warehouse=hdfs://path/to/warehouse
 ```
 
@@ -137,7 +137,7 @@ The following shell command registers a Table tore Hive catalog named `tablestor
 
 ```bash
 spark-sql ... \
-    --conf spark.sql.catalog.tablestore=org.apache.flink.table.store.spark.SparkCatalog \
+    --conf spark.sql.catalog.tablestore=org.apache.paimon.spark.SparkCatalog \
     --conf spark.sql.catalog.tablestore.warehouse=hdfs://path/to/warehouse \
     --conf spark.sql.catalog.tablestore.metastore=hive \
     --conf spark.sql.catalog.tablestore.uri=thrift://<hive-metastore-host-name>:<port>
