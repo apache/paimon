@@ -25,7 +25,7 @@ on:
   workflow_dispatch:
 jobs:
   publish-snapshot:
-    if: github.repository == 'apache/flink-table-store'
+    if: github.repository == 'apache/incubator-paimon'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
