@@ -58,7 +58,7 @@ public class PluginLoader {
                                     "org.apache.commons.lang3"))
                     .toArray(String[]::new);
 
-    private static final String[] COMPONENT_CLASSPATH = new String[] {"org.apache.flink"};
+    private static final String[] COMPONENT_CLASSPATH = new String[] {"org.apache.paimon"};
 
     private final ClassLoader submoduleClassLoader;
 
