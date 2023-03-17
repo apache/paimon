@@ -61,7 +61,7 @@ import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.paimon.connector.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.paimon.connector.kafka.KafkaLogOptions.TOPIC;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
-import static org.apache.paimon.file.mergetree.compact.MergeTreeCompactManagerTest.row;
+import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 
 /** Utils for the test of {@link KafkaLogStoreFactory}. */
 public class KafkaLogTestUtils {

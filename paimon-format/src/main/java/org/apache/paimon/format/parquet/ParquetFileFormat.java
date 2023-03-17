@@ -19,7 +19,7 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatReaderFactory;

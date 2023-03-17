@@ -25,7 +25,7 @@ import org.apache.paimon.data.BinaryRow;
 
 import java.util.Random;
 
-import static org.apache.paimon.file.io.DataFileTestUtils.row;
+import static org.apache.paimon.io.DataFileTestUtils.row;
 
 /** Test for {@link BinaryRowTypeSerializer}. */
 public class BinaryRowTypeSerializerTest extends SerializerTestBase<BinaryRow> {

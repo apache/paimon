@@ -19,9 +19,9 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.operation.Lock;
-import org.apache.paimon.file.predicate.Predicate;
-import org.apache.paimon.file.predicate.PredicateFilter;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateFilter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;

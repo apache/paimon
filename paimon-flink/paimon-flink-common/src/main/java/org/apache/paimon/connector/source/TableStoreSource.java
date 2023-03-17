@@ -36,7 +36,7 @@ import org.apache.paimon.connector.log.LogSourceProvider;
 import org.apache.paimon.connector.log.LogStoreTableFactory;
 import org.apache.paimon.connector.lookup.FileStoreLookupFunction;
 import org.apache.paimon.connector.lookup.LookupRuntimeProviderFactory;
-import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.ChangelogValueCountFileStoreTable;

@@ -1,0 +1,255 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.manifest;
+
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.file.stats.StatsTestUtils;
+import org.apache.paimon.file.utils.FailingFileIO;
+import org.apache.paimon.file.utils.FileStorePathFactory;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileIOFinder;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.TreeSet;
+import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** Tests for {@link ManifestFileMeta}. */
+public class ManifestFileMetaTest {
+
+    private static final RowType PARTITION_TYPE = RowType.of(new IntType());
+
+    private final FileFormat avro;
+
+    @TempDir java.nio.file.Path tempDir;
+    private ManifestFile manifestFile;
+
+    public ManifestFileMetaTest() {
+        this.avro = FileFormat.fromIdentifier("avro", new Options());
+    }
+
+    @BeforeEach
+    public void beforeEach() {
+        manifestFile = createManifestFile(tempDir.toString());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 3, 4})
+    public void testMerge(int numLastBits) {
+        List<ManifestFileMeta> input = new ArrayList<>();
+        List<ManifestFileMeta> expected = new ArrayList<>();
+        createData(numLastBits, input, expected);
+
+        List<ManifestFileMeta> actual = ManifestFileMeta.merge(input, manifestFile, 500, 3);
+        assertThat(actual).hasSameSizeAs(expected);
+
+        // these two manifest files are merged from the input
+        assertSameContent(expected.get(0), actual.get(0), manifestFile);
+        assertSameContent(expected.get(1), actual.get(1), manifestFile);
+
+        // these two manifest files should be kept without modification
+        assertThat(actual.get(2)).isEqualTo(input.get(5));
+        assertThat(actual.get(3)).isEqualTo(input.get(6));
+
+        // check last bits
+        for (int i = 4; i < actual.size(); i++) {
+            assertSameContent(expected.get(i), actual.get(i), manifestFile);
+        }
+    }
+
+    private void assertSameContent(
+            ManifestFileMeta expected, ManifestFileMeta actual, ManifestFile manifestFile) {
+        // check meta
+        assertThat(actual.numAddedFiles()).isEqualTo(expected.numAddedFiles());
+        assertThat(actual.numDeletedFiles()).isEqualTo(expected.numDeletedFiles());
+        assertThat(actual.partitionStats()).isEqualTo(expected.partitionStats());
+
+        // check content
+        assertThat(manifestFile.read(actual.fileName()))
+                .isEqualTo(manifestFile.read(expected.fileName()));
+    }
+
+    @RepeatedTest(10)
+    public void testCleanUpForException() throws IOException {
+        String failingName = UUID.randomUUID().toString();
+        FailingFileIO.reset(failingName, 1, 10);
+        List<ManifestFileMeta> input = new ArrayList<>();
+        createData(ThreadLocalRandom.current().nextInt(5), input, null);
+        ManifestFile failingManifestFile =
+                createManifestFile(FailingFileIO.getFailingPath(failingName, tempDir.toString()));
+
+        try {
+            ManifestFileMeta.merge(input, failingManifestFile, 500, 3);
+        } catch (Throwable e) {
+            assertThat(e).hasRootCauseExactlyInstanceOf(FailingFileIO.ArtificialException.class);
+            // old files should be kept untouched, while new files should be cleaned up
+            Path manifestDir = new Path(tempDir.toString() + "/manifest");
+            assertThat(
+                            new TreeSet<>(
+                                    Arrays.stream(LocalFileIO.create().listStatus(manifestDir))
+                                            .map(s -> s.getPath().getName())
+                                            .collect(Collectors.toList())))
+                    .isEqualTo(
+                            new TreeSet<>(
+                                    input.stream()
+                                            .map(ManifestFileMeta::fileName)
+                                            .collect(Collectors.toList())));
+        }
+    }
+
+    private ManifestFile createManifestFile(String pathStr) {
+        Path path = new Path(pathStr);
+        FileIO fileIO = FileIOFinder.find(path);
+        return new ManifestFile.Factory(
+                        fileIO,
+                        new SchemaManager(fileIO, path),
+                        PARTITION_TYPE,
+                        avro,
+                        new FileStorePathFactory(
+                                path,
+                                PARTITION_TYPE,
+                                "default",
+                                CoreOptions.FILE_FORMAT.defaultValue()),
+                        Long.MAX_VALUE)
+                .create();
+    }
+
+    private void createData(
+            int numLastBits, List<ManifestFileMeta> input, List<ManifestFileMeta> expected) {
+        // suggested size 500 and suggested count 3
+        // file sizes:
+        // 200, 300, -- multiple files exactly the suggested size
+        // 100, 200, 300, -- multiple files exceeding the suggested size
+        // 500, -- single file exactly the suggested size
+        // 600, -- single file exceeding the suggested size
+        // 100 * numLastBits -- the last bit
+
+        input.add(makeManifest(makeEntry(true, "A"), makeEntry(true, "B")));
+        input.add(makeManifest(makeEntry(true, "C"), makeEntry(false, "B"), makeEntry(true, "D")));
+
+        input.add(makeManifest(makeEntry(false, "A")));
+        input.add(makeManifest(makeEntry(true, "E"), makeEntry(true, "F")));
+        input.add(makeManifest(makeEntry(true, "G"), makeEntry(false, "E"), makeEntry(false, "G")));
+
+        input.add(
+                makeManifest(
+                        makeEntry(false, "C"),
+                        makeEntry(false, "F"),
+                        makeEntry(true, "H"),
+                        makeEntry(true, "I"),
+                        makeEntry(false, "H")));
+
+        input.add(
+                makeManifest(
+                        makeEntry(false, "I"),
+                        makeEntry(true, "J"),
+                        makeEntry(true, "K"),
+                        makeEntry(false, "J"),
+                        makeEntry(false, "K"),
+                        makeEntry(true, "L")));
+
+        for (int i = 0; i < numLastBits; i++) {
+            input.add(makeManifest(makeEntry(true, String.valueOf(i))));
+        }
+
+        if (expected == null) {
+            return;
+        }
+
+        expected.add(
+                makeManifest(makeEntry(true, "A"), makeEntry(true, "C"), makeEntry(true, "D")));
+        expected.add(makeManifest(makeEntry(false, "A"), makeEntry(true, "F")));
+        expected.add(input.get(5));
+        expected.add(input.get(6));
+
+        if (numLastBits < 3) {
+            for (int i = 0; i < numLastBits; i++) {
+                expected.add(input.get(7 + i));
+            }
+        } else {
+            expected.add(
+                    makeManifest(
+                            IntStream.range(0, numLastBits)
+                                    .mapToObj(i -> makeEntry(true, String.valueOf(i)))
+                                    .toArray(ManifestEntry[]::new)));
+        }
+    }
+
+    private ManifestFileMeta makeManifest(ManifestEntry... entries) {
+        ManifestFileMeta writtenMeta = manifestFile.write(Arrays.asList(entries)).get(0);
+        return new ManifestFileMeta(
+                writtenMeta.fileName(),
+                entries.length * 100, // for testing purpose
+                writtenMeta.numAddedFiles(),
+                writtenMeta.numDeletedFiles(),
+                writtenMeta.partitionStats(),
+                0);
+    }
+
+    private ManifestEntry makeEntry(boolean isAdd, String fileName) {
+        BinaryRow binaryRow = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
+        writer.writeInt(0, 0);
+        writer.complete();
+
+        return new ManifestEntry(
+                isAdd ? FileKind.ADD : FileKind.DELETE,
+                binaryRow, // not used
+                0, // not used
+                0, // not used
+                new DataFileMeta(
+                        fileName,
+                        0, // not used
+                        0, // not used
+                        binaryRow, // not useds
+                        binaryRow, // not used
+                        StatsTestUtils.newEmptyTableStats(), // not used
+                        StatsTestUtils.newEmptyTableStats(), // not used
+                        0, // not used
+                        0, // not used
+                        0, // not used
+                        0, // not used
+                        Collections.emptyList(),
+                        Timestamp.fromEpochMillis(200000)));
+    }
+}

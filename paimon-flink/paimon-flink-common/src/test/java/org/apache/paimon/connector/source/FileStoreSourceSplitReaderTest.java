@@ -31,9 +31,9 @@ import org.apache.flink.types.RowKind;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.file.KeyValue;
-import org.apache.paimon.file.io.DataFileMeta;
-import org.apache.paimon.file.schema.Schema;
-import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.file.utils.RecordWriter;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -54,7 +54,7 @@ import java.util.stream.Stream;
 import static org.apache.paimon.connector.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.connector.source.FileStoreSourceSplitSerializerTest.newFile;
 import static org.apache.paimon.connector.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
-import static org.apache.paimon.file.mergetree.compact.MergeTreeCompactManagerTest.row;
+import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

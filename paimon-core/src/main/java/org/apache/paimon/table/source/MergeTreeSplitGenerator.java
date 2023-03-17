@@ -19,9 +19,9 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.io.DataFileMeta;
-import org.apache.paimon.file.mergetree.SortedRun;
-import org.apache.paimon.file.mergetree.compact.IntervalPartition;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.mergetree.SortedRun;
+import org.apache.paimon.mergetree.compact.IntervalPartition;
 import org.apache.paimon.utils.OrderedPacking;
 
 import java.util.ArrayList;

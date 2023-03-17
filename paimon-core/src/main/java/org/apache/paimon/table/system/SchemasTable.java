@@ -23,9 +23,9 @@ import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.predicate.Predicate;
-import org.apache.paimon.file.schema.SchemaManager;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.file.utils.IteratorRecordReader;
 import org.apache.paimon.file.utils.JsonSerdeUtil;
 import org.apache.paimon.file.utils.SerializationUtils;
@@ -51,7 +51,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
 
-import static org.apache.paimon.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing schemas of table. */
 public class SchemasTable implements ReadonlyTable {

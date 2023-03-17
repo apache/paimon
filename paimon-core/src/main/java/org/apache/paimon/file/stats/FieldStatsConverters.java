@@ -18,8 +18,8 @@
 
 package org.apache.paimon.file.stats;
 
-import org.apache.paimon.file.casting.CastExecutor;
-import org.apache.paimon.file.schema.SchemaEvolutionUtil;
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.schema.SchemaEvolutionUtil;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 

@@ -18,8 +18,8 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.paimon.file.operation.Lock;
-import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.SupportsPartition;
 import org.apache.paimon.table.Table;

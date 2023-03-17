@@ -20,10 +20,10 @@ package org.apache.paimon.file;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.operation.AppendOnlyFileStoreRead;
-import org.apache.paimon.file.operation.AppendOnlyFileStoreScan;
-import org.apache.paimon.file.operation.AppendOnlyFileStoreWrite;
-import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.operation.AppendOnlyFileStoreRead;
+import org.apache.paimon.operation.AppendOnlyFileStoreScan;
+import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.types.RowType;

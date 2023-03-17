@@ -19,8 +19,8 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.file.predicate.Predicate;
-import org.apache.paimon.file.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.IntType;

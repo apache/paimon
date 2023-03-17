@@ -20,8 +20,8 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.mergetree.compact.ConcatRecordReader;
-import org.apache.paimon.file.operation.FileStoreRead;
+import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.operation.FileStoreRead;
 import org.apache.paimon.reader.RecordReader;
 
 import java.io.IOException;

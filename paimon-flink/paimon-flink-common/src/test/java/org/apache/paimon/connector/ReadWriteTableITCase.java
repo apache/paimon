@@ -41,7 +41,7 @@ import org.apache.flink.types.Row;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.connector.sink.TableStoreSink;
 import org.apache.paimon.connector.util.AbstractTestBase;
-import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.file.utils.BlockingIterator;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;

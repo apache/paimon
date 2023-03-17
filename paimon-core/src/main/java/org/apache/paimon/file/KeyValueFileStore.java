@@ -20,12 +20,12 @@ package org.apache.paimon.file;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.mergetree.compact.MergeFunctionFactory;
-import org.apache.paimon.file.operation.KeyValueFileStoreRead;
-import org.apache.paimon.file.operation.KeyValueFileStoreScan;
-import org.apache.paimon.file.operation.KeyValueFileStoreWrite;
-import org.apache.paimon.file.schema.KeyValueFieldsExtractor;
-import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.operation.KeyValueFileStoreRead;
+import org.apache.paimon.operation.KeyValueFileStoreScan;
+import org.apache.paimon.operation.KeyValueFileStoreWrite;
+import org.apache.paimon.schema.KeyValueFieldsExtractor;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.file.utils.KeyComparatorSupplier;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;

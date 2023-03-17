@@ -18,7 +18,7 @@
 
 package org.apache.paimon.file.utils;
 
-import org.apache.paimon.file.io.DataFileMeta;
+import org.apache.paimon.io.DataFileMeta;
 
 import java.util.List;
 
@@ -43,7 +43,7 @@ public interface RecordWriter<T> {
     void compact(boolean fullCompaction) throws Exception;
 
     /**
-     * Add files to the internal {@link org.apache.paimon.file.compact.CompactManager}.
+     * Add files to the internal {@link org.apache.paimon.compact.CompactManager}.
      *
      * @param files files to add
      */

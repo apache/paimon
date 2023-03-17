@@ -21,8 +21,8 @@ package org.apache.paimon.format.orc.filter;
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.file.predicate.FieldRef;
-import org.apache.paimon.file.predicate.FunctionVisitor;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.types.DataType;
 
 import javax.annotation.Nullable;
@@ -34,7 +34,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Convert {@link org.apache.paimon.file.predicate.Predicate} to {@link OrcFilters.Predicate} for
+ * Convert {@link org.apache.paimon.predicate.Predicate} to {@link OrcFilters.Predicate} for
  * orc.
  */
 public class OrcPredicateFunctionVisitor

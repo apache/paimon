@@ -31,10 +31,10 @@ import org.apache.paimon.connector.FlinkCatalog;
 import org.apache.paimon.connector.LogicalTypeConversion;
 import org.apache.paimon.connector.sink.FlinkSinkBuilder;
 import org.apache.paimon.connector.utils.TableEnvironmentUtils;
-import org.apache.paimon.file.catalog.Catalog;
-import org.apache.paimon.file.catalog.CatalogFactory;
-import org.apache.paimon.file.catalog.Identifier;
-import org.apache.paimon.file.operation.Lock;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -49,7 +49,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.file.catalog.Catalog.DEFAULT_DATABASE;
+import static org.apache.paimon.catalog.Catalog.DEFAULT_DATABASE;
 
 /** Abstract base of {@link Action}. */
 public abstract class ActionBase implements Action {

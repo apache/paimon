@@ -19,8 +19,8 @@
 package org.apache.paimon.format.orc;
 
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
-import org.apache.paimon.file.predicate.Predicate;
-import org.apache.paimon.file.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.format.orc.filter.OrcPredicateFunctionVisitor;
 import org.apache.paimon.types.BigIntType;

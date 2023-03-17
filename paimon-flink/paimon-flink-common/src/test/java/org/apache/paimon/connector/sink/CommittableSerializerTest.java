@@ -18,8 +18,8 @@
 
 package org.apache.paimon.connector.sink;
 
-import org.apache.paimon.file.io.CompactIncrement;
-import org.apache.paimon.file.io.NewFilesIncrement;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
@@ -27,9 +27,9 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 
-import static org.apache.paimon.file.manifest.ManifestCommittableSerializerTest.randomCompactIncrement;
-import static org.apache.paimon.file.manifest.ManifestCommittableSerializerTest.randomNewFilesIncrement;
-import static org.apache.paimon.file.mergetree.compact.MergeTreeCompactManagerTest.row;
+import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomCompactIncrement;
+import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomNewFilesIncrement;
+import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CommittableSerializer}. */

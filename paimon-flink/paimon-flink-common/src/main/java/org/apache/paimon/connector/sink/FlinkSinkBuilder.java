@@ -26,7 +26,7 @@ import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.data.RowData;
 
 import org.apache.paimon.connector.FlinkConnectorOptions;
-import org.apache.paimon.file.operation.Lock;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
 
 import javax.annotation.Nullable;

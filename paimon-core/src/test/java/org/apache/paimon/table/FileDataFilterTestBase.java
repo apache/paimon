@@ -19,12 +19,12 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.operation.ScanKind;
-import org.apache.paimon.file.predicate.Equal;
-import org.apache.paimon.file.predicate.IsNull;
-import org.apache.paimon.file.predicate.LeafPredicate;
-import org.apache.paimon.file.predicate.Predicate;
-import org.apache.paimon.file.predicate.PredicateBuilder;
+import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.IsNull;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;

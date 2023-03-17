@@ -31,7 +31,7 @@ import org.apache.paimon.connector.CatalogITCaseBase;
 import org.apache.paimon.connector.FlinkConnectorOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.io.DataFileMeta;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;

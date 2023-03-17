@@ -19,9 +19,9 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.data.serializer.VersionedSerializer;
-import org.apache.paimon.file.io.CompactIncrement;
-import org.apache.paimon.file.io.DataFileMetaSerializer;
-import org.apache.paimon.file.io.NewFilesIncrement;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;

@@ -19,8 +19,8 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.file.operation.ScanKind;
-import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.utils.Filter;
 
 import javax.annotation.Nullable;

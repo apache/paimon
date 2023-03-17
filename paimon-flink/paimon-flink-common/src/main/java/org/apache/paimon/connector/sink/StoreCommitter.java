@@ -18,7 +18,7 @@
 
 package org.apache.paimon.connector.sink;
 
-import org.apache.paimon.file.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommit;
 import org.apache.paimon.table.sink.TableCommitImpl;
