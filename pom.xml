@@ -52,7 +52,7 @@ under the License.
     </scm>
 
     <modules>
-        <module>flink-table-store-benchmark</module>
+        <module>paimon-benchmark</module>
         <module>flink-table-store-codegen</module>
         <module>flink-table-store-codegen-loader</module>
         <module>flink-table-store-common</module>
