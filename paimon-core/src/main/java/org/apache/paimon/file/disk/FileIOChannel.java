@@ -18,9 +18,8 @@
 
 package org.apache.paimon.file.disk;
 
-import org.apache.paimon.utils.StringUtils;
-
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.utils.StringUtils;
 
 import java.io.File;
 import java.io.IOException;

@@ -19,10 +19,10 @@
 package org.apache.paimon.file.sort;
 
 import org.apache.flink.table.store.codegen.NormalizedKeyComputer;
-import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.utils.SortUtil;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.utils.SortUtil;
 
 /** Example for int {@link NormalizedKeyComputer}. */
 public class IntNormalizedKeyComputer implements NormalizedKeyComputer {

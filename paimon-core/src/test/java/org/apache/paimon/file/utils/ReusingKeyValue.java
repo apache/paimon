@@ -18,10 +18,9 @@
 
 package org.apache.paimon.file.utils;
 
-import org.apache.paimon.file.KeyValue;
-
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.file.KeyValue;
 
 /**
  * Util class which reuses a {@link KeyValue} to test if other components handle reuse correctly.

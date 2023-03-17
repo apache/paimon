@@ -18,13 +18,12 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataUtils;
-
-import org.apache.paimon.data.InternalArray;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.expressions.SpecializedGettersReader;
 import org.apache.spark.sql.catalyst.util.ArrayData;
@@ -33,9 +32,9 @@ import org.apache.spark.sql.types.Decimal;
 import org.apache.spark.unsafe.types.CalendarInterval;
 import org.apache.spark.unsafe.types.UTF8String;
 
+import static org.apache.paimon.spark.SparkInternalRow.fromFlink;
 import static org.apache.paimon.utils.RowDataUtils.copyArray;
 import static org.apache.paimon.utils.TypeUtils.timestampPrecision;
-import static org.apache.paimon.spark.SparkInternalRow.fromFlink;
 
 /** Spark {@link ArrayData} to wrap flink {@code ArrayData}. */
 public class SparkArrayData extends ArrayData {

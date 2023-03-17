@@ -18,6 +18,12 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.data.serializer.BinaryRowSerializer;
+import org.apache.paimon.data.serializer.InternalArraySerializer;
+import org.apache.paimon.data.serializer.InternalMapSerializer;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -26,13 +32,6 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.InstantiationUtil;
-
-import org.apache.paimon.data.serializer.BinaryRowSerializer;
-import org.apache.paimon.data.serializer.InternalArraySerializer;
-import org.apache.paimon.data.serializer.InternalMapSerializer;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.data.serializer.InternalSerializers;
-import org.apache.paimon.data.serializer.Serializer;
 import org.junit.jupiter.api.Test;
 
 import java.io.EOFException;

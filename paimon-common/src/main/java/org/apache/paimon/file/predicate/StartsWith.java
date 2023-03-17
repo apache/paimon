@@ -18,10 +18,9 @@
 
 package org.apache.paimon.file.predicate;
 
-import org.apache.paimon.types.DataType;
-
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.types.DataType;
 
 import java.util.List;
 import java.util.Optional;

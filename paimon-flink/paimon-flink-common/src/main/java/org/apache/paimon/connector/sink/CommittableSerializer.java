@@ -19,6 +19,7 @@
 package org.apache.paimon.connector.sink;
 
 import org.apache.flink.core.io.SimpleVersionedSerializer;
+
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 

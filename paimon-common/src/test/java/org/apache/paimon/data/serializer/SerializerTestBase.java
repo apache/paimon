@@ -23,7 +23,6 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.utils.InstantiationUtil;
-
 import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nonnull;

@@ -17,12 +17,11 @@
 
 package org.apache.paimon.data;
 
-import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.memory.MemorySegmentUtils;
-
 import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySegmentUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;

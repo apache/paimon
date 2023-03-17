@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.paimon.codegen;
 
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;

@@ -20,8 +20,9 @@ package org.apache.paimon.connector;
 
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.CatalogTable;
-import org.apache.paimon.table.Table;
 import org.apache.flink.table.types.utils.TypeConversions;
+
+import org.apache.paimon.table.Table;
 
 import java.util.Collections;
 import java.util.List;

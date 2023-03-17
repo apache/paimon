@@ -27,7 +27,6 @@ import org.apache.paimon.file.schema.SchemaManager;
 import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.file.stats.BinaryTableStats;
 import org.apache.paimon.table.source.DataSplit;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

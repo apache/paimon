@@ -18,10 +18,9 @@
 
 package org.apache.paimon.data.columnar;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.RecyclableIterator;
-
-import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 

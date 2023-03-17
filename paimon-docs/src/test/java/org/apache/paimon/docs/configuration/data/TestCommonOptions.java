@@ -18,10 +18,9 @@
 
 package org.apache.paimon.docs.configuration.data;
 
+import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
-
-import org.apache.paimon.annotation.Documentation;
 
 /** Collection of test {@link ConfigOptions ConfigOptions}. */
 @SuppressWarnings("unused") // this class is only accessed reflectively

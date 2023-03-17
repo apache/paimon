@@ -18,7 +18,11 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
+
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.operation.ScanKind;
 import org.apache.paimon.file.predicate.LeafPredicate;
 import org.apache.paimon.file.predicate.Predicate;
@@ -47,11 +51,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ProjectedRow;
-
-import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
-
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 

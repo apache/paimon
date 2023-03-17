@@ -19,6 +19,8 @@
 package org.apache.paimon.file;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.manifest.ManifestCommittable;
 import org.apache.paimon.file.manifest.ManifestEntry;
@@ -49,9 +51,6 @@ import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

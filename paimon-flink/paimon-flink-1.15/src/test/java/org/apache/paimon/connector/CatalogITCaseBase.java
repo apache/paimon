@@ -30,8 +30,6 @@ import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.delegation.Parser;
 import org.apache.flink.table.operations.Operation;
 import org.apache.flink.table.operations.ddl.CreateCatalogOperation;
-import org.apache.paimon.file.Snapshot;
-import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.test.util.AbstractTestBase;
@@ -40,6 +38,8 @@ import org.apache.flink.util.CloseableIterator;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 
+import org.apache.paimon.file.Snapshot;
+import org.apache.paimon.file.utils.SnapshotManager;
 import org.junit.Before;
 
 import javax.annotation.Nullable;

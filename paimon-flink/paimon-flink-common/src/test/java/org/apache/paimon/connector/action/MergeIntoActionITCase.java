@@ -19,10 +19,10 @@
 package org.apache.paimon.connector.action;
 
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
-import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.types.Row;
 
+import org.apache.paimon.CoreOptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;

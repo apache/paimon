@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.file.FileStore;
 import org.apache.paimon.file.operation.FileStoreScan;
 import org.apache.paimon.file.predicate.Predicate;
@@ -37,8 +38,6 @@ import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.StreamDataTableScanImpl;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
-
-import org.apache.paimon.annotation.VisibleForTesting;
 
 import java.util.Map;
 import java.util.Objects;

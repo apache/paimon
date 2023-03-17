@@ -25,23 +25,23 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
 import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.store.file.catalog.CatalogLock;
+import org.apache.flink.table.store.file.operation.Lock;
+import org.apache.flink.types.RowKind;
+
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.MergeEngine;
-import org.apache.flink.table.store.file.catalog.CatalogLock;
-import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
-import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
-import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.flink.types.RowKind;
-
 import org.apache.paimon.connector.FlinkCatalog;
 import org.apache.paimon.connector.FlinkConnectorOptions;
 import org.apache.paimon.connector.TableStoreDataStreamSinkProvider;
 import org.apache.paimon.connector.log.LogSinkProvider;
 import org.apache.paimon.connector.log.LogStoreTableFactory;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
+import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 
 import javax.annotation.Nullable;
 

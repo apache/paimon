@@ -18,10 +18,9 @@
 
 package org.apache.paimon.file.catalog;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.StringUtils;
-
-import org.apache.paimon.annotation.Experimental;
 
 import java.io.Serializable;
 import java.util.Objects;

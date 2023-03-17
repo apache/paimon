@@ -19,6 +19,8 @@
 package org.apache.paimon.file;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.manifest.ManifestFile;
 import org.apache.paimon.file.manifest.ManifestList;
 import org.apache.paimon.file.operation.FileStoreCommitImpl;
@@ -29,9 +31,6 @@ import org.apache.paimon.file.utils.FileStorePathFactory;
 import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.data.InternalRow;
 
 import java.time.Duration;
 import java.util.Comparator;

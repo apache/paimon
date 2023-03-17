@@ -18,10 +18,9 @@
 
 package org.apache.paimon.file.mergetree.compact;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.types.RowKind;
-
-import org.apache.paimon.data.GenericRow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;

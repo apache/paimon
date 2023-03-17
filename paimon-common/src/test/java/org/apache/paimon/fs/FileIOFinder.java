@@ -19,6 +19,7 @@
 package org.apache.paimon.fs;
 
 import org.apache.flink.table.store.catalog.CatalogContext;
+
 import org.apache.paimon.options.Options;
 
 import java.io.IOException;

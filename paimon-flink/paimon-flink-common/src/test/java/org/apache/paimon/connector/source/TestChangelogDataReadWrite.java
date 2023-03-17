@@ -19,7 +19,6 @@
 package org.apache.paimon.connector.source;
 
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.memory.HeapMemorySegmentPool;
@@ -27,7 +26,6 @@ import org.apache.flink.table.store.file.memory.MemoryOwner;
 import org.apache.flink.table.store.file.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreRead;
 import org.apache.flink.table.store.file.operation.KeyValueFileStoreWrite;
-import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
@@ -36,6 +34,13 @@ import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
+
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.KeyValueTableRead;
@@ -47,11 +52,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FileFormat;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -76,19 +76,13 @@ public class TestChangelogDataReadWrite {
                 @Override
                 public List<DataField> keyFields(TableSchema schema) {
                     return Collections.singletonList(
-                            new DataField(
-                                    0,
-                                    "k",
-                                    new org.apache.paimon.types.BigIntType(false)));
+                            new DataField(0, "k", new org.apache.paimon.types.BigIntType(false)));
                 }
 
                 @Override
                 public List<DataField> valueFields(TableSchema schema) {
                     return Collections.singletonList(
-                            new DataField(
-                                    0,
-                                    "v",
-                                    new org.apache.paimon.types.BigIntType(false)));
+                            new DataField(0, "v", new org.apache.paimon.types.BigIntType(false)));
                 }
             };
 

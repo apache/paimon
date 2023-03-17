@@ -24,7 +24,6 @@ import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.schema.SchemaManager;
 import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.file.stats.BinaryTableStats;
-
 import org.junit.jupiter.api.BeforeEach;
 
 import java.util.Collections;

@@ -19,6 +19,13 @@
 package org.apache.paimon.file;
 
 import org.apache.flink.table.store.codegen.RecordComparator;
+
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.file.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.file.schema.SchemaManager;
 import org.apache.paimon.file.schema.TableSchema;
@@ -32,13 +39,6 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
-
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericArray;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
 
 import javax.annotation.Nullable;
 

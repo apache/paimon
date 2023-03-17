@@ -18,14 +18,13 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.disk.IOManager;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.operation.AbstractFileStoreWrite;
 import org.apache.paimon.file.operation.FileStoreWrite;
 import org.apache.paimon.file.utils.Restorable;
-
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalRow;
 
 import java.util.List;
 

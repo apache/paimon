@@ -20,15 +20,15 @@ package org.apache.paimon.file.sort;
 
 import org.apache.flink.table.store.codegen.NormalizedKeyComputer;
 import org.apache.flink.table.store.codegen.RecordComparator;
-import org.apache.paimon.file.memory.MemorySegmentPool;
-import org.apache.paimon.file.utils.MutableObjectIterator;
-import org.apache.paimon.memory.MemorySegment;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.SimpleCollectingOutputView;
 import org.apache.paimon.data.serializer.AbstractRowDataSerializer;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
+import org.apache.paimon.file.memory.MemorySegmentPool;
+import org.apache.paimon.file.utils.MutableObjectIterator;
+import org.apache.paimon.memory.MemorySegment;
 
 import java.io.EOFException;
 import java.io.IOException;

@@ -18,14 +18,13 @@
 
 package org.apache.paimon.file.operation;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.manifest.FileKind;
 import org.apache.paimon.file.manifest.ManifestEntry;
 import org.apache.paimon.file.manifest.ManifestFileMeta;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.utils.Filter;
-
-import org.apache.paimon.data.BinaryRow;
 
 import javax.annotation.Nullable;
 

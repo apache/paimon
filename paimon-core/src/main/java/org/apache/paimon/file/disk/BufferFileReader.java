@@ -18,9 +18,8 @@
 
 package org.apache.paimon.file.disk;
 
-import org.apache.paimon.file.memory.Buffer;
-
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.file.memory.Buffer;
 
 import java.io.IOException;
 

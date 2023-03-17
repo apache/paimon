@@ -17,9 +17,6 @@
 
 package org.apache.paimon.format.parquet.reader;
 
-import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.DataType;
-
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.heap.HeapArrayVector;
@@ -33,6 +30,8 @@ import org.apache.paimon.data.columnar.heap.HeapLongVector;
 import org.apache.paimon.data.columnar.heap.HeapShortVector;
 import org.apache.paimon.data.columnar.heap.HeapTimestampVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.schema.PrimitiveType;

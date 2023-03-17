@@ -20,6 +20,9 @@ package org.apache.paimon.file.mergetree;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.compact.CompactResult;
 import org.apache.paimon.file.format.FlushingFileFormat;
@@ -40,6 +43,7 @@ import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.file.utils.CommitIncrement;
 import org.apache.paimon.file.utils.FileStorePathFactory;
 import org.apache.paimon.file.utils.RecordWriter;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -52,11 +56,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FileFormat;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -152,8 +151,7 @@ public class MergeTreeTest {
                                         new DataField(
                                                 0,
                                                 "k",
-                                                new org.apache.paimon.types.IntType(
-                                                        false)));
+                                                new org.apache.paimon.types.IntType(false)));
                             }
 
                             @Override
@@ -162,8 +160,7 @@ public class MergeTreeTest {
                                         new DataField(
                                                 0,
                                                 "v",
-                                                new org.apache.paimon.types.IntType(
-                                                        false)));
+                                                new org.apache.paimon.types.IntType(false)));
                             }
                         });
         readerFactory = readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);

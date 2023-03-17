@@ -19,9 +19,9 @@
 package org.apache.paimon.spark;
 
 import org.apache.flink.table.store.catalog.CatalogContext;
+
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTableFactory;
-
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.sources.DataSourceRegister;
 import org.apache.spark.sql.sources.v2.DataSourceOptions;

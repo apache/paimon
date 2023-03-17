@@ -18,9 +18,8 @@
 
 package org.apache.paimon.data;
 
-import org.apache.paimon.types.RowKind;
-
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.types.RowKind;
 
 import javax.annotation.Nullable;
 

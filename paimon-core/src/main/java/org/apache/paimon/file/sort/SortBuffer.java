@@ -18,10 +18,9 @@
 
 package org.apache.paimon.file.sort;
 
-import org.apache.paimon.file.utils.MutableObjectIterator;
-
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.file.utils.MutableObjectIterator;
 
 import java.io.IOException;
 

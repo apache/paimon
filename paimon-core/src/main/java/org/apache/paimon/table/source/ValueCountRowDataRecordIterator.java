@@ -18,11 +18,10 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowKind;
-
-import org.apache.paimon.data.InternalRow;
 
 import java.io.IOException;
 

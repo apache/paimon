@@ -18,15 +18,14 @@
 
 package org.apache.paimon.data.serializer;
 
+import org.apache.paimon.data.AbstractPagedInputView;
+import org.apache.paimon.data.AbstractPagedOutputView;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.memory.MemorySegmentWritable;
-
-import org.apache.paimon.data.AbstractPagedInputView;
-import org.apache.paimon.data.AbstractPagedOutputView;
-import org.apache.paimon.data.BinaryRow;
 
 import java.io.IOException;
 

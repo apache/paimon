@@ -20,6 +20,8 @@ package org.apache.paimon.file.operation;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.compact.CompactManager;
 import org.apache.paimon.file.compact.NoopCompactManager;
@@ -43,13 +45,10 @@ import org.apache.paimon.file.schema.SchemaManager;
 import org.apache.paimon.file.utils.CommitIncrement;
 import org.apache.paimon.file.utils.FileStorePathFactory;
 import org.apache.paimon.file.utils.SnapshotManager;
+import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FileFormatDiscover;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

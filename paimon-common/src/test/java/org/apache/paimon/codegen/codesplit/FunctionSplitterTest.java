@@ -15,34 +15,34 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen.codesplit;
+package org.apache.paimon.codegen.codesplit;
 
 import org.junit.jupiter.api.Test;
 
-/** Tests for {@link org.apache.flink.table.store.codegen.codesplit.ReturnValueRewriter}. */
-class ReturnValueRewriterTest extends CodeRewriterTestBase<ReturnValueRewriter> {
+/** Tests for {@link org.apache.paimon.codegen.codesplit.FunctionSplitter}. */
+class FunctionSplitterTest extends CodeRewriterTestBase<FunctionSplitter> {
 
-    public ReturnValueRewriterTest() {
-        super("return", code -> new ReturnValueRewriter(code, 50));
+    public FunctionSplitterTest() {
+        super("function", code -> new FunctionSplitter(code, 40));
     }
 
     @Test
-    void testRewriteReturnValue() {
-        runTest("TestRewriteReturnValue");
+    void testSplitFunction() {
+        runTest("TestSplitFunction");
+    }
+
+    @Test
+    void testNotSplitFunctionWithReturnValue() {
+        runTest("TestNotSplitFunctionWithReturnValue");
+    }
+
+    @Test
+    void testNotSplitFunctionWithOnlyOneStatement() {
+        runTest("TestNotSplitFunctionWithOnlyOneStatement");
     }
 
     @Test
     void testRewriteInnerClass() {
         runTest("TestRewriteInnerClass");
-    }
-
-    @Test
-    void testNotRewrite() {
-        runTest("TestNotRewrite");
-    }
-
-    @Test
-    void testSkipAnonymousClassAndLambda() {
-        runTest("TestSkipAnonymousClassAndLambda");
     }
 }

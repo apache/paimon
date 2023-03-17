@@ -18,14 +18,13 @@
 
 package org.apache.paimon.file.io;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.casting.CastFieldGetter;
 import org.apache.paimon.file.utils.FileUtils;
+import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
-
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FormatReaderFactory;
 
 import javax.annotation.Nullable;
 

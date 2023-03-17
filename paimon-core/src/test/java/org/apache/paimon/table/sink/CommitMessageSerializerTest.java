@@ -20,7 +20,6 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.file.io.CompactIncrement;
 import org.apache.paimon.file.io.NewFilesIncrement;
-
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;

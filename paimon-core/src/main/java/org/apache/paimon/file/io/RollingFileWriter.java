@@ -19,9 +19,8 @@
 
 package org.apache.paimon.file.io;
 
-import org.apache.paimon.utils.Preconditions;
-
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.utils.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

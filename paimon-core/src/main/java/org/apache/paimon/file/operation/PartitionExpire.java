@@ -18,14 +18,13 @@
 
 package org.apache.paimon.file.operation;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.file.manifest.ManifestCommittable;
 import org.apache.paimon.file.manifest.ManifestEntry;
 import org.apache.paimon.file.partition.PartitionTimeExtractor;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
-
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.data.BinaryRow;
 
 import java.time.Duration;
 import java.time.LocalDateTime;

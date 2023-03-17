@@ -20,6 +20,7 @@ package org.apache.paimon.connector.action;
 
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
+
 import org.apache.paimon.file.catalog.CatalogUtils;
 
 import javax.annotation.Nullable;

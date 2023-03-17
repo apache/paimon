@@ -18,6 +18,10 @@
 
 package org.apache.paimon.file;
 
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
 import org.apache.paimon.file.manifest.ManifestEntry;
 import org.apache.paimon.file.manifest.ManifestFileMeta;
 import org.apache.paimon.file.manifest.ManifestList;
@@ -25,10 +29,6 @@ import org.apache.paimon.file.operation.FileStoreScan;
 import org.apache.paimon.file.utils.JsonSerdeUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import javax.annotation.Nullable;
 

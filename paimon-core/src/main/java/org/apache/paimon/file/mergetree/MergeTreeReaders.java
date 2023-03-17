@@ -18,6 +18,7 @@
 
 package org.apache.paimon.file.mergetree;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.io.KeyValueFileReaderFactory;
@@ -27,8 +28,6 @@ import org.apache.paimon.file.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.file.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.file.mergetree.compact.SortMergeReader;
 import org.apache.paimon.reader.RecordReader;
-
-import org.apache.paimon.data.InternalRow;
 
 import java.io.IOException;
 import java.util.ArrayList;

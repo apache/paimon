@@ -18,6 +18,12 @@
 
 package org.apache.paimon.format.parquet.writer;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
@@ -27,13 +33,6 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
-
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.InternalArray;
-import org.apache.paimon.data.InternalMap;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.io.api.RecordConsumer;
 import org.apache.parquet.schema.GroupType;
@@ -45,11 +44,11 @@ import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.List;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.computeMinBytesForDecimalPrecision;
 import static org.apache.paimon.format.parquet.reader.TimestampColumnReader.JULIAN_EPOCH_OFFSET_DAYS;
 import static org.apache.paimon.format.parquet.reader.TimestampColumnReader.MILLIS_IN_DAY;
 import static org.apache.paimon.format.parquet.reader.TimestampColumnReader.NANOS_PER_MILLISECOND;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Writes a record to the Parquet API with the expected schema in order to be written to a file. */
 public class ParquetRowDataWriter {

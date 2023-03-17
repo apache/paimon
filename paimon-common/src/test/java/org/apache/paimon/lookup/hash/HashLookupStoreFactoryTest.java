@@ -22,13 +22,12 @@
 
 package org.apache.paimon.lookup.hash;
 
+import org.apache.commons.math3.random.RandomDataGenerator;
 import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.utils.MathUtils;
 import org.apache.paimon.utils.VarLengthIntUtils;
-
-import org.apache.commons.math3.random.RandomDataGenerator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

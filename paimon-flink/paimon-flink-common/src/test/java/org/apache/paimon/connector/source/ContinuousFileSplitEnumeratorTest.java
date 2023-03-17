@@ -21,10 +21,10 @@ package org.apache.paimon.connector.source;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
 import org.apache.flink.table.store.file.io.DataFileMeta;
+
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan.DataFilePlan;
 import org.apache.paimon.table.source.EndOfScanException;
-
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

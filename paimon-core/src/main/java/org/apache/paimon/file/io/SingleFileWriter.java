@@ -19,14 +19,13 @@
 
 package org.apache.paimon.file.io;
 
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.utils.IOUtils;
-
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FormatWriter;
-import org.apache.paimon.format.FormatWriterFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

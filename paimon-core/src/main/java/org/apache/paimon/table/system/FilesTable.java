@@ -18,6 +18,11 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
+
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.LazyGenericRow;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.io.DataFilePathFactory;
 import org.apache.paimon.file.predicate.Predicate;
@@ -28,6 +33,7 @@ import org.apache.paimon.file.stats.FieldStatsArraySerializer;
 import org.apache.paimon.file.stats.FieldStatsConverters;
 import org.apache.paimon.file.utils.IteratorRecordReader;
 import org.apache.paimon.file.utils.SerializationUtils;
+import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -45,13 +51,6 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
-
-import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
-
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.LazyGenericRow;
-import org.apache.paimon.format.FieldStats;
 
 import javax.annotation.Nullable;
 

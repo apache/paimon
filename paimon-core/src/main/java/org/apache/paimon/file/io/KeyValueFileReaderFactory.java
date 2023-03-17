@@ -18,6 +18,7 @@
 
 package org.apache.paimon.file.io;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.schema.KeyValueFieldsExtractor;
@@ -25,14 +26,12 @@ import org.apache.paimon.file.schema.SchemaManager;
 import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.file.utils.BulkFormatMapping;
 import org.apache.paimon.file.utils.FileStorePathFactory;
+import org.apache.paimon.format.FileFormatDiscover;
+import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Projection;
-
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.format.FileFormatDiscover;
-import org.apache.paimon.format.FormatKey;
 
 import javax.annotation.Nullable;
 

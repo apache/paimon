@@ -18,9 +18,8 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.table.Table;
-
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.table.Table;
 
 import java.util.List;
 

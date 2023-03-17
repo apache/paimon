@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.operation.ScanKind;
 import org.apache.paimon.file.predicate.Equal;
 import org.apache.paimon.file.predicate.IsNull;
@@ -29,8 +30,6 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.data.InternalRow;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

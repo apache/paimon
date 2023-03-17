@@ -23,11 +23,11 @@ import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.table.data.RowData;
-import org.apache.paimon.CoreOptions.LogConsistency;
-import org.apache.paimon.CoreOptions.StartupMode;
 import org.apache.flink.table.types.DataType;
 
 import org.apache.kafka.common.TopicPartition;
+import org.apache.paimon.CoreOptions.LogConsistency;
+import org.apache.paimon.CoreOptions.StartupMode;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.connector.log.LogSourceProvider;
 

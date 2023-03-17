@@ -20,6 +20,7 @@ package org.apache.paimon.connector.source;
 
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
+
 import org.apache.paimon.utils.Reference;
 
 import javax.annotation.Nullable;

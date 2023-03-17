@@ -24,10 +24,10 @@ import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.utils.OffsetRow;
-import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.connector.FlinkRowWrapper;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.types.RowType;
 
 /**
  * {@link StreamPartitioner} to partition {@link RowData} according to its hash value from an {@link

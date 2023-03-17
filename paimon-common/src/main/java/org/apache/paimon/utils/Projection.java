@@ -18,11 +18,10 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.data.InternalRow;
 
 import java.lang.reflect.Array;
 import java.util.ArrayList;

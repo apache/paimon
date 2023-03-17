@@ -31,7 +31,6 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
-
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -102,12 +101,9 @@ public class SchemaManagerTest {
 
         List<DataField> fields =
                 Arrays.asList(
-                        new DataField(
-                                0, "f0", new org.apache.paimon.types.IntType(false)),
-                        new DataField(
-                                1, "f1", new org.apache.paimon.types.BigIntType(false)),
-                        new DataField(
-                                2, "f2", new org.apache.paimon.types.VarCharType()));
+                        new DataField(0, "f0", new org.apache.paimon.types.IntType(false)),
+                        new DataField(1, "f1", new org.apache.paimon.types.BigIntType(false)),
+                        new DataField(2, "f2", new org.apache.paimon.types.VarCharType()));
 
         assertThat(latest.isPresent()).isTrue();
         assertThat(tableSchema).isEqualTo(latest.get());
@@ -234,12 +230,9 @@ public class SchemaManagerTest {
 
         List<DataField> fields =
                 Arrays.asList(
-                        new DataField(
-                                0, "f0", new org.apache.paimon.types.DoubleType(false)),
-                        new DataField(
-                                1, "f1", new org.apache.paimon.types.BigIntType(false)),
-                        new DataField(
-                                2, "f2", new org.apache.paimon.types.VarCharType()));
+                        new DataField(0, "f0", new org.apache.paimon.types.DoubleType(false)),
+                        new DataField(1, "f1", new org.apache.paimon.types.BigIntType(false)),
+                        new DataField(2, "f2", new org.apache.paimon.types.VarCharType()));
 
         assertThat(latest.isPresent()).isTrue();
         assertThat(tableSchema).isEqualTo(latest.get());

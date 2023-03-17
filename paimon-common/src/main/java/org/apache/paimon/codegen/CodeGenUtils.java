@@ -16,12 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
-
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.RowType;
+package org.apache.paimon.codegen;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 
 import java.util.List;
 

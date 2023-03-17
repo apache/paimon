@@ -18,6 +18,8 @@
 
 package org.apache.paimon.file.operation;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.manifest.FileKind;
@@ -25,9 +27,6 @@ import org.apache.paimon.file.manifest.ManifestEntry;
 import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.Timestamp;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 

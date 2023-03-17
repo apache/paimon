@@ -19,6 +19,11 @@
 package org.apache.paimon.file.sort;
 
 import org.apache.flink.table.store.codegen.RecordComparator;
+
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.file.compression.BlockCompressionFactory;
 import org.apache.paimon.file.compression.Lz4BlockCompressionFactory;
 import org.apache.paimon.file.disk.ChannelWithMeta;
@@ -28,11 +33,6 @@ import org.apache.paimon.file.disk.FileIOChannel;
 import org.apache.paimon.file.disk.IOManager;
 import org.apache.paimon.file.utils.MutableObjectIterator;
 import org.apache.paimon.options.MemorySize;
-
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.serializer.BinaryRowSerializer;
 
 import java.io.IOException;
 import java.util.ArrayList;

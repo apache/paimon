@@ -18,9 +18,8 @@
 
 package org.apache.paimon.file.io;
 
-import org.apache.paimon.fs.Path;
-
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fs.Path;
 
 import javax.annotation.concurrent.ThreadSafe;
 

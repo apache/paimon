@@ -20,7 +20,6 @@ package org.apache.paimon.io.cache;
 
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
-
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

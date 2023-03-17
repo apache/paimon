@@ -18,11 +18,10 @@
 
 package org.apache.paimon.file.io;
 
-import org.apache.paimon.file.stats.StatsTestUtils;
-
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.file.stats.StatsTestUtils;
 
 import java.util.Collections;
 

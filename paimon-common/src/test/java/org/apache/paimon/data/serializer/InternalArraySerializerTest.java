@@ -18,9 +18,6 @@
 
 package org.apache.paimon.data.serializer;
 
-import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.types.DataTypes;
-
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryArrayWriter;
 import org.apache.paimon.data.BinaryString;
@@ -28,6 +25,8 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.columnar.ColumnarArray;
 import org.apache.paimon.data.columnar.heap.HeapBytesVector;
+import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.types.DataTypes;
 
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;

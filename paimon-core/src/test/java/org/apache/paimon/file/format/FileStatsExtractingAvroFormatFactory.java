@@ -18,10 +18,9 @@
 
 package org.apache.paimon.file.format;
 
-import org.apache.paimon.options.Options;
-
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
+import org.apache.paimon.options.Options;
 
 /** Factory to create {@link FileStatsExtractingAvroFormat}. */
 public class FileStatsExtractingAvroFormatFactory implements FileFormatFactory {

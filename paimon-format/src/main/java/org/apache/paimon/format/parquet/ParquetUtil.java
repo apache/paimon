@@ -20,8 +20,8 @@ package org.apache.paimon.format.parquet;
 
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.paimon.types.DataField;
 
+import org.apache.paimon.types.DataField;
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.statistics.Statistics;
 import org.apache.parquet.hadoop.ParquetFileReader;

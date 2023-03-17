@@ -18,10 +18,9 @@
 
 package org.apache.paimon.file.mergetree.compact.aggregate;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.StringUtils;
-
-import org.apache.paimon.data.BinaryString;
 
 /** listagg aggregate a field of a row. */
 public class FieldListaggAgg extends FieldAggregator {

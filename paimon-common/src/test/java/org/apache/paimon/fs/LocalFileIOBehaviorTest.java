@@ -19,7 +19,6 @@
 package org.apache.paimon.fs;
 
 import org.apache.paimon.fs.local.LocalFileIO;
-
 import org.junit.jupiter.api.io.TempDir;
 
 /** Test for {@link LocalFileIO}. */

@@ -19,6 +19,7 @@
 package org.apache.paimon.file.utils;
 
 import org.apache.flink.table.store.catalog.CatalogContext;
+
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.FileStatus;

@@ -18,11 +18,10 @@
 
 package org.apache.paimon.file.utils;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataUtils;
 import org.apache.paimon.utils.StringUtils;
-
-import org.apache.paimon.data.InternalRow;
 
 import java.util.Arrays;
 import java.util.LinkedHashMap;

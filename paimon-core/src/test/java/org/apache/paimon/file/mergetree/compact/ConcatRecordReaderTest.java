@@ -22,7 +22,6 @@ import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.utils.ReusingTestData;
 import org.apache.paimon.file.utils.TestReusingRecordReader;
 import org.apache.paimon.reader.RecordReader;
-
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;

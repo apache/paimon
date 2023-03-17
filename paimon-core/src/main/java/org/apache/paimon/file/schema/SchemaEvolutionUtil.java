@@ -18,6 +18,7 @@
 
 package org.apache.paimon.file.schema;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.casting.CastExecutor;
 import org.apache.paimon.file.casting.CastExecutors;
@@ -34,8 +35,6 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RowDataUtils;
-
-import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 

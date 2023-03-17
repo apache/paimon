@@ -18,15 +18,14 @@
 
 package org.apache.paimon.file.predicate;
 
-import org.apache.paimon.table.sink.BucketComputer;
-import org.apache.paimon.types.RowType;
-
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableSet;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.table.sink.BucketComputer;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.concurrent.ThreadSafe;
 

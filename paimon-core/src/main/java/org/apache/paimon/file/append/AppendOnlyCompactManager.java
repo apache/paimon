@@ -18,6 +18,7 @@
 
 package org.apache.paimon.file.append;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.file.compact.CompactFutureManager;
 import org.apache.paimon.file.compact.CompactResult;
 import org.apache.paimon.file.compact.CompactTask;
@@ -25,8 +26,6 @@ import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.io.DataFilePathFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.utils.Preconditions;
-
-import org.apache.paimon.annotation.VisibleForTesting;
 
 import java.io.IOException;
 import java.util.ArrayList;

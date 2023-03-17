@@ -15,11 +15,11 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen.codesplit;
+package org.apache.paimon.codegen.codesplit;
 
 import org.junit.jupiter.api.Test;
 
-/** Tests for {@link org.apache.flink.table.store.codegen.codesplit.MemberFieldRewriter}. */
+/** Tests for {@link org.apache.paimon.codegen.codesplit.MemberFieldRewriter}. */
 class MemberFieldRewriterTest extends CodeRewriterTestBase<MemberFieldRewriter> {
 
     public MemberFieldRewriterTest() {

@@ -18,9 +18,8 @@
 
 package org.apache.paimon.format.parquet;
 
-import org.apache.paimon.options.Options;
-
 import org.apache.paimon.format.FileFormatFactory;
+import org.apache.paimon.options.Options;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 

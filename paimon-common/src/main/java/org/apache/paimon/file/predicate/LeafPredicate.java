@@ -18,14 +18,13 @@
 
 package org.apache.paimon.file.predicate;
 
-import org.apache.paimon.io.DataInputViewStreamWrapper;
-import org.apache.paimon.io.DataOutputViewStreamWrapper;
-import org.apache.paimon.types.DataType;
-
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.ListSerializer;
 import org.apache.paimon.data.serializer.NullableSerializer;
 import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.io.DataInputViewStreamWrapper;
+import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.types.DataType;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;

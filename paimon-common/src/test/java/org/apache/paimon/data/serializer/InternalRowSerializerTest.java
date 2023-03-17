@@ -18,9 +18,6 @@
 
 package org.apache.paimon.data.serializer;
 
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
-
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryArrayWriter;
 import org.apache.paimon.data.BinaryMap;
@@ -28,6 +25,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.Test;
 
 import java.util.Objects;

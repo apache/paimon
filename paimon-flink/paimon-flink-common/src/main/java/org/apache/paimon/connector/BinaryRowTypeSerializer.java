@@ -23,10 +23,10 @@ import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
 import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
-import org.apache.paimon.memory.MemorySegment;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
+import org.apache.paimon.memory.MemorySegment;
 
 import java.io.IOException;
 import java.util.Objects;

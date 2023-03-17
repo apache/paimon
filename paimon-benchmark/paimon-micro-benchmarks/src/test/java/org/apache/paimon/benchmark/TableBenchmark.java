@@ -18,8 +18,13 @@
 
 package org.apache.paimon.benchmark;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.catalog.CatalogContext;
+
+import org.apache.commons.math3.random.RandomDataGenerator;
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.catalog.Catalog;
 import org.apache.paimon.file.catalog.CatalogFactory;
 import org.apache.paimon.file.catalog.Identifier;
@@ -30,11 +35,6 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
-
-import org.apache.commons.math3.random.RandomDataGenerator;
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;

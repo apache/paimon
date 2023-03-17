@@ -18,11 +18,10 @@
 
 package org.apache.paimon.file.catalog;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.file.schema.Schema;
 import org.apache.paimon.file.schema.SchemaChange;
 import org.apache.paimon.table.Table;
-
-import org.apache.paimon.annotation.Experimental;
 
 import java.util.List;
 import java.util.Optional;

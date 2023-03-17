@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen;
+package org.apache.paimon.codegen;
 
 import java.util.Arrays;
 import java.util.LinkedList;

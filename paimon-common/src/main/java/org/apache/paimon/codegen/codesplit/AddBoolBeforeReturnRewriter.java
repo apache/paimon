@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen.codesplit;
+package org.apache.paimon.codegen.codesplit;
 
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
@@ -28,7 +28,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A helper class of {@link org.apache.flink.table.store.codegen.codesplit.FunctionSplitter}.
+ * A helper class of {@link org.apache.paimon.codegen.codesplit.FunctionSplitter}.
  *
  * <p>Add a boolean variable before each return statement so that when the function is split, the
  * outer function can determine whether to return early with this boolean variable.
