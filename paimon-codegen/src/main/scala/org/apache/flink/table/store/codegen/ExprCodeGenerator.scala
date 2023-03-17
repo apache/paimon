@@ -17,11 +17,12 @@
  */
 package org.apache.flink.table.store.codegen
 
-import org.apache.flink.table.store.codegen.GeneratedExpression.{NEVER_NULL, NO_CODE}
-import org.apache.flink.table.store.codegen.GenerateUtils.{generateRecordStatement, rowSetField, DEFAULT_OUT_RECORD_TERM, DEFAULT_OUT_RECORD_WRITER_TERM}
 import org.apache.flink.table.store.data.{BinaryRow, InternalRow}
 import org.apache.flink.table.store.types.{RowType, TimestampType}
 import org.apache.flink.table.store.utils.TypeUtils.isInteroperable
+
+import GeneratedExpression.{NEVER_NULL, NO_CODE}
+import GenerateUtils.{generateRecordStatement, rowSetField, DEFAULT_OUT_RECORD_TERM, DEFAULT_OUT_RECORD_WRITER_TERM}
 
 class ExprCodeGenerator(ctx: CodeGeneratorContext) {
 

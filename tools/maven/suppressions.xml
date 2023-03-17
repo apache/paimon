@@ -31,7 +31,7 @@ under the License.
 			checks=".*"/>
 		<!-- Benchmark CPU metrics collector based on YARN  -->
 		<suppress
-			files="org[\\/]apache[\\/]flink[\\/]table[\\/]store[\\/]benchmark[\\/]metric[\\/]cpu[\\/].*"
+			files="org[\\/]apache[\\/]paimon[\\/]benchmark[\\/]metric[\\/]cpu[\\/].*"
 			checks=".*"/>
 		<!-- Classes copied from AWS -->
 		<suppress
