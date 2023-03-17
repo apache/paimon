@@ -31,7 +31,7 @@ import java.util.Set;
 /** Factory for {@link FlinkCatalog}. */
 public class FlinkCatalogFactory implements org.apache.flink.table.factories.CatalogFactory {
 
-    public static final String IDENTIFIER = "table-store";
+    public static final String IDENTIFIER = "paimon";
 
     public static final ConfigOption<String> DEFAULT_DATABASE =
             ConfigOptions.key("default-database")

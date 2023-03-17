@@ -71,7 +71,7 @@ public class CustomHiveMetastoreClientITCase {
                         String.join(
                                 "\n",
                                 "CREATE CATALOG my_hive WITH (",
-                                "  'type' = 'table-store',",
+                                "  'type' = 'paimon',",
                                 "  'metastore' = 'hive',",
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",

@@ -62,7 +62,7 @@ Put `paimon-oss-{{< version >}}.jar` into `lib` directory of your Flink home, an
 
 ```sql
 CREATE CATALOG my_catalog WITH (
-    'type' = 'table-store',
+    'type' = 'paimon',
     'warehouse' = 'oss://path/to/warehouse',
     'fs.oss.endpoint' = 'oss-cn-hangzhou.aliyuncs.com',
     'fs.oss.accessKeyId' = 'xxx',

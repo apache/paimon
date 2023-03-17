@@ -50,7 +50,7 @@ public class LogStoreE2eTest extends E2eTestBase {
         String catalogDdl =
                 String.format(
                         "CREATE CATALOG ts_catalog WITH (\n"
-                                + "    'type' = 'table-store',\n"
+                                + "    'type' = 'paimon',\n"
                                 + "    'warehouse' = '%s'\n"
                                 + ");",
                         TEST_DATA_DIR + "/" + UUID.randomUUID() + ".store");

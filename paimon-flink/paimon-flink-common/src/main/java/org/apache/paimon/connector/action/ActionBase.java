@@ -60,7 +60,7 @@ public abstract class ActionBase implements Action {
 
     protected final FlinkCatalog flinkCatalog;
 
-    protected final String catalogName = "table-store-" + UUID.randomUUID();
+    protected final String catalogName = "paimon-" + UUID.randomUUID();
 
     protected StreamExecutionEnvironment env;
 

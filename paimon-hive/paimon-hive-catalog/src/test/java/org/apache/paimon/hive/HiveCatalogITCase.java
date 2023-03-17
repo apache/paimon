@@ -104,7 +104,7 @@ public class HiveCatalogITCase {
                         String.join(
                                 "\n",
                                 "CREATE CATALOG my_hive WITH (",
-                                "  'type' = 'table-store',",
+                                "  'type' = 'paimon',",
                                 "  'metastore' = 'hive',",
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",
@@ -246,7 +246,7 @@ public class HiveCatalogITCase {
                         String.join(
                                 "\n",
                                 "CREATE CATALOG my_hive_external WITH (",
-                                "  'type' = 'table-store',",
+                                "  'type' = 'paimon',",
                                 "  'metastore' = 'hive',",
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",
@@ -535,7 +535,7 @@ public class HiveCatalogITCase {
                 String.join(
                         "\n",
                         "CREATE CATALOG my_hive_custom_client WITH (",
-                        "  'type' = 'table-store',",
+                        "  'type' = 'paimon',",
                         "  'metastore' = 'hive',",
                         "  'uri' = '',",
                         "  'warehouse' = '" + path + "',",
@@ -566,7 +566,7 @@ public class HiveCatalogITCase {
                         String.join(
                                 "\n",
                                 "CREATE CATALOG my_alter_hive WITH (",
-                                "  'type' = 'table-store',",
+                                "  'type' = 'paimon',",
                                 "  'metastore' = 'hive',",
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",

@@ -51,7 +51,7 @@ public class RescaleBucketITCase extends CatalogITCaseBase {
     protected List<String> ddl() {
         return Arrays.asList(
                 String.format(
-                        "CREATE CATALOG `fs_catalog` WITH ('type' = 'table-store', 'warehouse' = '%s')",
+                        "CREATE CATALOG `fs_catalog` WITH ('type' = 'paimon', 'warehouse' = '%s')",
                         path),
                 "CREATE TABLE IF NOT EXISTS `fs_catalog`.`default`.`T1` (f0 INT) WITH ('bucket' = '2')");
     }

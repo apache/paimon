@@ -166,7 +166,7 @@ public class SinkSavepointITCase extends AbstractTestBase {
                 String.join(
                         "\n",
                         "CREATE CATALOG my_catalog WITH (",
-                        "  'type' = 'table-store',",
+                        "  'type' = 'paimon',",
                         "  'warehouse' = '" + failingPath + "'",
                         ")");
         FailingFileIO.retryArtificialException(() -> tEnv.executeSql(createCatalogSql));
@@ -206,7 +206,7 @@ public class SinkSavepointITCase extends AbstractTestBase {
                 String.join(
                         "\n",
                         "CREATE CATALOG my_catalog WITH (",
-                        "  'type' = 'table-store',",
+                        "  'type' = 'paimon',",
                         "  'warehouse' = '" + failingPath + "'",
                         ")");
         tEnv.executeSql(createCatalogSql);

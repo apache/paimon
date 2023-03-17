@@ -72,7 +72,7 @@ public abstract class E2eTestBase {
     protected static final String TEST_DATA_DIR = "/test-data";
     protected static final String HDFS_ROOT = "hdfs://namenode:8020";
 
-    private static final String PRINT_SINK_IDENTIFIER = "table-store-e2e-result";
+    private static final String PRINT_SINK_IDENTIFIER = "paimon-e2e-result";
     private static final int CHECK_RESULT_INTERVAL_MS = 1000;
     private static final int CHECK_RESULT_RETRIES = 60;
     private final List<String> currentResults = new ArrayList<>();

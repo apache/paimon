@@ -53,7 +53,7 @@ public class MappingTableITCase extends AbstractTestBase {
         tEnv.executeSql(
                 String.format(
                         "CREATE TABLE T (i INT, j INT) WITH ("
-                                + "'connector'='table-store', 'path'='%s')",
+                                + "'connector'='paimon', 'path'='%s')",
                         path));
         assertThrows(
                 ValidationException.class,
@@ -66,7 +66,7 @@ public class MappingTableITCase extends AbstractTestBase {
         tEnv.executeSql(
                 String.format(
                         "CREATE TABLE T (i INT, j INT) WITH ("
-                                + "'connector'='table-store', 'path'='%s', 'auto-create'='true')",
+                                + "'connector'='paimon', 'path'='%s', 'auto-create'='true')",
                         path));
         tEnv.executeSql("INSERT INTO T VALUES (1, 2), (3, 4)").await();
 
@@ -74,7 +74,7 @@ public class MappingTableITCase extends AbstractTestBase {
         tEnv.executeSql(
                 String.format(
                         "CREATE TABLE T (i INT, j INT) WITH ("
-                                + "'connector'='table-store', 'path'='%s')",
+                                + "'connector'='paimon', 'path'='%s')",
                         path));
 
         List<Row> result = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM T").collect());
@@ -87,7 +87,7 @@ public class MappingTableITCase extends AbstractTestBase {
             tEnv.executeSql(
                     String.format(
                             "CREATE TABLE T (i INT, j INT) WITH ("
-                                    + "'connector'='table-store', 'path'='%s', 'auto-create'='true')",
+                                    + "'connector'='paimon', 'path'='%s', 'auto-create'='true')",
                             path));
             tEnv.executeSql("SELECT * FROM T").collect().close();
             tEnv.executeSql("DROP TABLE T");
@@ -99,7 +99,7 @@ public class MappingTableITCase extends AbstractTestBase {
         tEnv.executeSql(
                 String.format(
                         "CREATE TABLE T (i INT, j INT) WITH ("
-                                + "'connector'='table-store', 'path'='%s', 'auto-create'='true')",
+                                + "'connector'='paimon', 'path'='%s', 'auto-create'='true')",
                         path));
         tEnv.executeSql("SELECT * FROM T").collect().close();
         tEnv.executeSql("DROP TABLE T");
@@ -107,7 +107,7 @@ public class MappingTableITCase extends AbstractTestBase {
         tEnv.executeSql(
                 String.format(
                         "CREATE TABLE T (i INT, j INT, k INT) WITH ("
-                                + "'connector'='table-store', 'path'='%s', 'auto-create'='true')",
+                                + "'connector'='paimon', 'path'='%s', 'auto-create'='true')",
                         path));
 
         assertThrows(

@@ -45,7 +45,7 @@ public class FlinkActionsE2eTest extends E2eTestBase {
         catalogDdl =
                 String.format(
                         "CREATE CATALOG ts_catalog WITH (\n"
-                                + "    'type' = 'table-store',\n"
+                                + "    'type' = 'paimon',\n"
                                 + "    'warehouse' = '%s'\n"
                                 + ");",
                         warehousePath);

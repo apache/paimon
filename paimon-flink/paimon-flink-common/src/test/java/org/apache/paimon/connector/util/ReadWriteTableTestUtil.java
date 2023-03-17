@@ -94,7 +94,7 @@ public class ReadWriteTableTestUtil {
         String catalog = "TABLE_STORE";
         sEnv.executeSql(
                 String.format(
-                        "CREATE CATALOG %s WITH ('type'='table-store', 'warehouse'='%s');",
+                        "CREATE CATALOG %s WITH ('type'='paimon', 'warehouse'='%s');",
                         catalog, warehouse));
         sEnv.useCatalog(catalog);
 
