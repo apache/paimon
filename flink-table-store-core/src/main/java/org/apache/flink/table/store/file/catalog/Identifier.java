@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.table.store.fs.Path;
+import org.apache.paimon.fs.Path;
 import org.apache.flink.table.store.utils.StringUtils;
 
 import org.apache.paimon.annotation.Experimental;

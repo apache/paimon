@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.datagen;
 
-import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.paimon.options.ConfigOption;
 
 import java.util.Arrays;
 import java.util.HashSet;

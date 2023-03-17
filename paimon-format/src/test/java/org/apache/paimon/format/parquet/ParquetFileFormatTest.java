@@ -18,9 +18,9 @@
 
 package org.apache.paimon.format.parquet;
 
-import org.apache.flink.table.store.options.ConfigOption;
-import org.apache.flink.table.store.options.ConfigOptions;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.Options;
 
 import org.apache.parquet.format.CompressionCodec;
 import org.apache.parquet.hadoop.ParquetOutputFormat;

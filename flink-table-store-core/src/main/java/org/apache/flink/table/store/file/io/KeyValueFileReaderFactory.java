@@ -19,13 +19,13 @@
 package org.apache.flink.table.store.file.io;
 
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.BulkFormatMapping;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.fs.FileIO;
+import org.apache.paimon.fs.FileIO;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Projection;

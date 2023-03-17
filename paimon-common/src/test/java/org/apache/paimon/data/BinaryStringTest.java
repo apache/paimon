@@ -17,7 +17,7 @@
 
 package org.apache.paimon.data;
 
-import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySegment;
 import org.apache.flink.table.store.utils.SortUtil;
 
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;

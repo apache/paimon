@@ -17,8 +17,8 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.flink.table.store.io.DataInputDeserializer;
-import org.apache.flink.table.store.io.DataOutputSerializer;
+import org.apache.paimon.io.DataInputDeserializer;
+import org.apache.paimon.io.DataOutputSerializer;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 

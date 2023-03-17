@@ -18,8 +18,8 @@
 
 package org.apache.paimon.docs.configuration.data;
 
-import org.apache.flink.table.store.options.ConfigOption;
-import org.apache.flink.table.store.options.ConfigOptions;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 
 import org.apache.paimon.annotation.Documentation;
 

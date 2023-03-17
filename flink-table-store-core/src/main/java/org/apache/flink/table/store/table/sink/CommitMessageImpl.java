@@ -20,8 +20,8 @@ package org.apache.flink.table.store.table.sink;
 
 import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.NewFilesIncrement;
-import org.apache.flink.table.store.io.DataInputViewStreamWrapper;
-import org.apache.flink.table.store.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.io.DataInputViewStreamWrapper;
+import org.apache.paimon.io.DataOutputViewStreamWrapper;
 
 import org.apache.paimon.data.BinaryRow;
 

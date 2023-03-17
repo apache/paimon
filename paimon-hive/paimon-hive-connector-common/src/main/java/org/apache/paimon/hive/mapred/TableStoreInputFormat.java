@@ -20,9 +20,9 @@ package org.apache.paimon.hive.mapred;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.catalog.CatalogContext;
-import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.source.DataTableScan;

@@ -29,12 +29,12 @@ import org.apache.flink.table.store.file.mergetree.compact.IntervalPartition;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionWrapper;
 import org.apache.flink.table.store.file.mergetree.compact.ReducerMergeFunctionWrapper;
-import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.fs.FileIO;
+import org.apache.paimon.fs.FileIO;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.types.RowType;
@@ -54,8 +54,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.store.file.io.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
-import static org.apache.flink.table.store.file.predicate.PredicateBuilder.containsFields;
-import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
+import static org.apache.paimon.file.predicate.PredicateBuilder.containsFields;
+import static org.apache.paimon.file.predicate.PredicateBuilder.splitAnd;
 
 /**
  * {@link FileStoreRead} implementation for {@link

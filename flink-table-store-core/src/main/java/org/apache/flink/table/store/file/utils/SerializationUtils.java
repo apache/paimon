@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.io.DataInputView;
-import org.apache.flink.table.store.io.DataOutputView;
-import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataOutputView;
+import org.apache.paimon.memory.MemorySegment;
 import org.apache.flink.table.store.types.VarBinaryType;
 import org.apache.flink.table.store.types.VarCharType;
 
@@ -30,8 +30,8 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import static org.apache.flink.table.store.memory.MemorySegmentUtils.copyToBytes;
-import static org.apache.flink.table.store.memory.MemorySegmentUtils.copyToView;
+import static org.apache.paimon.memory.MemorySegmentUtils.copyToBytes;
+import static org.apache.paimon.memory.MemorySegmentUtils.copyToView;
 
 /** Utils for serialization. */
 public class SerializationUtils {

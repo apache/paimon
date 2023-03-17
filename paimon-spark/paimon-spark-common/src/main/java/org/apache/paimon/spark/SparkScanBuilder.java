@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.table.Table;
 
 import org.apache.spark.sql.connector.read.Scan;

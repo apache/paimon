@@ -23,10 +23,10 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.functions.FunctionContext;
 import org.apache.flink.table.functions.TableFunction;
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateFilter;
+import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.StreamDataTableScan;
 import org.apache.flink.table.store.table.source.TableStreamingReader;
@@ -60,7 +60,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.apache.flink.table.store.file.predicate.PredicateBuilder.transformFieldMapping;
+import static org.apache.paimon.file.predicate.PredicateBuilder.transformFieldMapping;
 import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 import static org.apache.paimon.connector.RocksDBOptions.LOOKUP_CACHE_ROWS;
 

@@ -23,9 +23,9 @@ import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.CatalogOptions;
-import org.apache.flink.table.store.options.ConfigOption;
-import org.apache.flink.table.store.options.ConfigOptions;
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 import org.apache.flink.table.store.utils.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;

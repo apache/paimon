@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.catalog;
 
-import org.apache.flink.table.store.fs.FileIOLoader;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.hadoop.HadoopFileIOLoader;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.fs.FileIOLoader;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
+import org.apache.paimon.options.Options;
 import org.apache.flink.table.store.utils.HadoopUtils;
 
 import org.apache.hadoop.conf.Configuration;
@@ -29,8 +29,8 @@ import org.apache.paimon.annotation.Experimental;
 
 import javax.annotation.Nullable;
 
-import static org.apache.flink.table.store.options.CatalogOptions.FS_ALLOW_HADOOP_FALLBACK;
-import static org.apache.flink.table.store.options.CatalogOptions.WAREHOUSE;
+import static org.apache.paimon.options.CatalogOptions.FS_ALLOW_HADOOP_FALLBACK;
+import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 
 /**
  * Context of catalog.

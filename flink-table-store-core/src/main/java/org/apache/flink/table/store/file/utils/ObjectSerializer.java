@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.io.DataInputView;
-import org.apache.flink.table.store.io.DataInputViewStreamWrapper;
-import org.apache.flink.table.store.io.DataOutputView;
-import org.apache.flink.table.store.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataInputViewStreamWrapper;
+import org.apache.paimon.io.DataOutputView;
+import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.flink.table.store.types.RowType;
 
 import org.apache.paimon.data.InternalRow;

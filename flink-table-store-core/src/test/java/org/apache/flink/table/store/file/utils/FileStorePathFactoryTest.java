@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
-import org.apache.flink.table.store.fs.Path;
+import org.apache.paimon.fs.Path;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;

@@ -18,10 +18,10 @@
 
 package org.apache.paimon.connector;
 
-import org.apache.flink.table.store.options.ConfigOption;
-import org.apache.flink.table.store.options.MemorySize;
-import org.apache.flink.table.store.options.Options;
-import org.apache.flink.table.store.options.description.Description;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.options.description.Description;
 
 import org.apache.paimon.annotation.Documentation;
 import org.rocksdb.BlockBasedTableConfig;
@@ -36,9 +36,9 @@ import org.rocksdb.TableFormatConfig;
 
 import java.io.File;
 
-import static org.apache.flink.table.store.options.ConfigOptions.key;
-import static org.apache.flink.table.store.options.description.LinkElement.link;
-import static org.apache.flink.table.store.options.description.TextElement.code;
+import static org.apache.paimon.options.ConfigOptions.key;
+import static org.apache.paimon.options.description.LinkElement.link;
+import static org.apache.paimon.options.description.TextElement.code;
 import static org.rocksdb.CompactionStyle.FIFO;
 import static org.rocksdb.CompactionStyle.LEVEL;
 import static org.rocksdb.CompactionStyle.NONE;

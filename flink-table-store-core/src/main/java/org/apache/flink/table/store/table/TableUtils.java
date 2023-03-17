@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateFilter;
+import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.sink.BatchTableCommit;
 import org.apache.flink.table.store.table.sink.BatchTableWrite;

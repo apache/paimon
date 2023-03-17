@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySegment;
 
 import org.apache.paimon.data.BinaryRow;
 

@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.datagen;
 
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypeDefaultVisitor;
 import org.apache.flink.table.store.types.DateType;

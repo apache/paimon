@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionFactory;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.utils.Projection;
@@ -33,7 +33,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 
-import static org.apache.flink.table.store.options.ConfigOptions.key;
+import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
 import static org.apache.flink.table.store.utils.RowDataUtils.createFieldGetters;
 

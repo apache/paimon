@@ -18,8 +18,8 @@
 
 package org.apache.paimon.connector.kafka;
 
-import org.apache.flink.table.store.options.ConfigOption;
-import org.apache.flink.table.store.options.ConfigOptions;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 
 /** Options for kafka log. */
 public class KafkaLogOptions {

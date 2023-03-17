@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format.parquet.writer;
 
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 import org.apache.flink.table.store.types.RowType;
 
 import org.apache.paimon.data.InternalRow;

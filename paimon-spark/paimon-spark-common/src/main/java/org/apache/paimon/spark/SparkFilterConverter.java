@@ -18,8 +18,8 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateBuilder;
+import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowType;
 
@@ -41,7 +41,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.file.predicate.PredicateBuilder.convertJavaObject;
+import static org.apache.paimon.file.predicate.PredicateBuilder.convertJavaObject;
 
 /** Conversion from {@link Filter} to {@link Predicate}. */
 public class SparkFilterConverter {

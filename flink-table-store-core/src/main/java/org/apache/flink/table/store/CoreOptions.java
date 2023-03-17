@@ -19,13 +19,13 @@
 package org.apache.flink.table.store;
 
 import org.apache.flink.table.store.file.WriteMode;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.ConfigOption;
-import org.apache.flink.table.store.options.MemorySize;
-import org.apache.flink.table.store.options.Options;
-import org.apache.flink.table.store.options.description.DescribedEnum;
-import org.apache.flink.table.store.options.description.Description;
-import org.apache.flink.table.store.options.description.InlineElement;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.options.description.DescribedEnum;
+import org.apache.paimon.options.description.Description;
+import org.apache.paimon.options.description.InlineElement;
 
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
@@ -43,8 +43,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.options.ConfigOptions.key;
-import static org.apache.flink.table.store.options.description.TextElement.text;
+import static org.apache.paimon.options.ConfigOptions.key;
+import static org.apache.paimon.options.description.TextElement.text;
 
 /** Core options for table store. */
 public class CoreOptions implements Serializable {

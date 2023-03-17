@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.operation;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.manifest.ManifestFile;
 import org.apache.flink.table.store.file.manifest.ManifestList;
-import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.stats.FieldStatsConverters;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -29,9 +29,9 @@ import org.apache.flink.table.store.types.RowType;
 
 import java.util.List;
 
-import static org.apache.flink.table.store.file.predicate.PredicateBuilder.and;
-import static org.apache.flink.table.store.file.predicate.PredicateBuilder.pickTransformFieldMapping;
-import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
+import static org.apache.paimon.file.predicate.PredicateBuilder.and;
+import static org.apache.paimon.file.predicate.PredicateBuilder.pickTransformFieldMapping;
+import static org.apache.paimon.file.predicate.PredicateBuilder.splitAnd;
 
 /** {@link FileStoreScan} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {

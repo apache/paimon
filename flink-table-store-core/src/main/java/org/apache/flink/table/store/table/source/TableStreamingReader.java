@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.table.source;
 
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateFilter;
+import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.PredicateFilter;
 import org.apache.flink.table.store.reader.RecordReaderIterator;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.source.DataTableScan.DataFilePlan;
@@ -40,7 +40,7 @@ import java.util.List;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
 
-import static org.apache.flink.table.store.file.predicate.PredicateBuilder.transformFieldMapping;
+import static org.apache.paimon.file.predicate.PredicateBuilder.transformFieldMapping;
 
 /** A streaming reader to read table. */
 public class TableStreamingReader {

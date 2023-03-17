@@ -20,7 +20,7 @@ package org.apache.paimon.s3;
 
 import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;

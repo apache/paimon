@@ -18,9 +18,9 @@
 
 package org.apache.paimon.format;
 
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.options.ConfigOption;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.Options;
 import org.apache.flink.table.store.types.RowType;
 
 import javax.annotation.Nullable;

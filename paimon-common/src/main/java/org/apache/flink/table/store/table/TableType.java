@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.store.options.description.DescribedEnum;
-import org.apache.flink.table.store.options.description.InlineElement;
+import org.apache.paimon.options.description.DescribedEnum;
+import org.apache.paimon.options.description.InlineElement;
 
-import static org.apache.flink.table.store.options.description.TextElement.text;
+import static org.apache.paimon.options.description.TextElement.text;
 
 /** Enum of catalog table type. */
 public enum TableType implements DescribedEnum {

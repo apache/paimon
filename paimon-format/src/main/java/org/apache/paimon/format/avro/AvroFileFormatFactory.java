@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;

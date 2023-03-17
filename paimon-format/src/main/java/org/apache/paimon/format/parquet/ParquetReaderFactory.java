@@ -20,7 +20,7 @@ package org.apache.paimon.format.parquet;
 
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.reader.RecordReader.RecordIterator;
 import org.apache.flink.table.store.types.DataType;

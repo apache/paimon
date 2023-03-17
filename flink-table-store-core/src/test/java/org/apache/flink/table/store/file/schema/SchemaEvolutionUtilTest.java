@@ -18,11 +18,11 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.store.file.predicate.Equal;
-import org.apache.flink.table.store.file.predicate.IsNotNull;
-import org.apache.flink.table.store.file.predicate.IsNull;
-import org.apache.flink.table.store.file.predicate.LeafPredicate;
-import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.Equal;
+import org.apache.paimon.file.predicate.IsNotNull;
+import org.apache.paimon.file.predicate.IsNull;
+import org.apache.paimon.file.predicate.LeafPredicate;
+import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.DataTypes;
