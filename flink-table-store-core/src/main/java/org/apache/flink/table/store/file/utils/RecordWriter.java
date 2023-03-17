@@ -18,9 +18,7 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.file.io.CompactIncrement;
 import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.io.NewFilesIncrement;
 
 import java.util.List;
 
@@ -51,6 +49,9 @@ public interface RecordWriter<T> {
      */
     void addNewFiles(List<DataFileMeta> files);
 
+    /** Get all data files maintained by this writer. */
+    List<DataFileMeta> dataFiles();
+
     /**
      * Prepare for a commit.
      *
@@ -67,12 +68,4 @@ public interface RecordWriter<T> {
 
     /** Close this writer, the call will delete newly generated but not committed files. */
     void close() throws Exception;
-
-    /** Changes to commit. */
-    interface CommitIncrement {
-
-        NewFilesIncrement newFilesIncrement();
-
-        CompactIncrement compactIncrement();
-    }
 }

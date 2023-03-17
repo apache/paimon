@@ -116,6 +116,11 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
         toCompact.add(file);
     }
 
+    @Override
+    public List<DataFileMeta> allFiles() {
+        return toCompact;
+    }
+
     /** Finish current task, and update result files to {@link #toCompact}. */
     @Override
     public Optional<CompactResult> getCompactionResult(boolean blocking)

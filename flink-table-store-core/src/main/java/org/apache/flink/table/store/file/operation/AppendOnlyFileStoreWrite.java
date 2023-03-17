@@ -28,6 +28,7 @@ import org.apache.flink.table.store.file.compact.NoopCompactManager;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.io.RowDataRollingFileWriter;
+import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -37,6 +38,8 @@ import org.apache.flink.table.store.reader.RecordReaderIterator;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.LongCounter;
+
+import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.LinkedList;
@@ -85,31 +88,11 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
     }
 
     @Override
-    public WriterContainer<InternalRow> createWriterContainer(
-            BinaryRow partition, int bucket, ExecutorService compactExecutor) {
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        RecordWriter<InternalRow> writer =
-                createWriter(
-                        partition,
-                        bucket,
-                        scanExistingFileMetas(latestSnapshotId, partition, bucket),
-                        compactExecutor);
-        return new WriterContainer<>(writer, latestSnapshotId);
-    }
-
-    @Override
-    public WriterContainer<InternalRow> createEmptyWriterContainer(
-            BinaryRow partition, int bucket, ExecutorService compactExecutor) {
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        RecordWriter<InternalRow> writer =
-                createWriter(partition, bucket, Collections.emptyList(), compactExecutor);
-        return new WriterContainer<>(writer, latestSnapshotId);
-    }
-
-    private RecordWriter<InternalRow> createWriter(
+    protected RecordWriter<InternalRow> createWriter(
             BinaryRow partition,
             int bucket,
             List<DataFileMeta> restoredFiles,
+            @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor) {
         // let writer and compact manager hold the same reference
         // and make restore files mutable to update
@@ -136,7 +119,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                 getMaxSequenceNumber(restored),
                 compactManager,
                 commitForceCompact,
-                factory);
+                factory,
+                restoreIncrement);
     }
 
     private AppendOnlyCompactManager.CompactRewriter compactRewriter(

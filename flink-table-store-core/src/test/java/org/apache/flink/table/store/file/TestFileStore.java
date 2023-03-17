@@ -38,6 +38,7 @@ import org.apache.flink.table.store.file.operation.FileStoreScan;
 import org.apache.flink.table.store.file.operation.ScanKind;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
+import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
@@ -65,8 +66,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
@@ -214,15 +213,10 @@ public class TestFileStore extends KeyValueFileStore {
                             bucket,
                             (b, w) -> {
                                 if (w == null) {
-                                    ExecutorService service = Executors.newSingleThreadExecutor();
                                     RecordWriter<KeyValue> writer =
-                                            emptyWriter
-                                                    ? write.createEmptyWriterContainer(
-                                                                    partition, bucket, service)
-                                                            .writer
-                                                    : write.createWriterContainer(
-                                                                    partition, bucket, service)
-                                                            .writer;
+                                            write.createWriterContainer(
+                                                            partition, bucket, emptyWriter)
+                                                    .writer;
                                     ((MemoryOwner) writer)
                                             .setMemoryPool(
                                                     new HeapMemorySegmentPool(
@@ -244,8 +238,7 @@ public class TestFileStore extends KeyValueFileStore {
                 writers.entrySet()) {
             for (Map.Entry<Integer, RecordWriter<KeyValue>> entryWithBucket :
                     entryWithPartition.getValue().entrySet()) {
-                RecordWriter.CommitIncrement increment =
-                        entryWithBucket.getValue().prepareCommit(emptyWriter);
+                CommitIncrement increment = entryWithBucket.getValue().prepareCommit(emptyWriter);
                 committable.addFileCommittable(
                         new CommitMessageImpl(
                                 entryWithPartition.getKey(),

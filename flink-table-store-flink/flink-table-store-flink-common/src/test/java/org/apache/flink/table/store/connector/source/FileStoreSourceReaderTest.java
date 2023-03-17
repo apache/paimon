@@ -89,7 +89,7 @@ public class FileStoreSourceReaderTest {
         return new FileStoreSourceReader<>(
                 RecordsFunction.forIterate(),
                 context,
-                new TestChangelogDataReadWrite(tempDir.toString(), null).createReadWithKey(),
+                new TestChangelogDataReadWrite(tempDir.toString()).createReadWithKey(),
                 null);
     }
 

@@ -40,6 +40,7 @@ import org.apache.flink.table.store.file.mergetree.compact.UniversalCompaction;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
+import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
 import org.apache.flink.table.store.file.utils.RecordWriter;
 import org.apache.flink.table.store.format.FileFormat;
@@ -254,7 +255,7 @@ public class MergeTreeTest {
             }
             writeAll(records);
             expected.addAll(records);
-            RecordWriter.CommitIncrement increment = writer.prepareCommit(true);
+            CommitIncrement increment = writer.prepareCommit(true);
             mergeCompacted(newFileNames, compactedFiles, increment);
         }
         writer.close();
@@ -285,7 +286,7 @@ public class MergeTreeTest {
                 writer.sync();
             }
 
-            RecordWriter.CommitIncrement increment = writer.prepareCommit(true);
+            CommitIncrement increment = writer.prepareCommit(true);
             newFiles.addAll(increment.newFilesIncrement().newFiles());
             mergeCompacted(newFileNames, compactedFiles, increment);
         }
@@ -327,7 +328,8 @@ public class MergeTreeTest {
                         DeduplicateMergeFunction.factory().create(),
                         writerFactory,
                         options.commitForceCompact(),
-                        ChangelogProducer.NONE);
+                        ChangelogProducer.NONE,
+                        null);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return writer;
@@ -354,7 +356,7 @@ public class MergeTreeTest {
     private void mergeCompacted(
             Set<String> newFileNames,
             List<DataFileMeta> compactedFiles,
-            RecordWriter.CommitIncrement increment) {
+            CommitIncrement increment) {
         increment.newFilesIncrement().newFiles().stream()
                 .map(DataFileMeta::fileName)
                 .forEach(newFileNames::add);

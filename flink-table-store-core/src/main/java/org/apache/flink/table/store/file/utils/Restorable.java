@@ -16,15 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.table.source;
-
-import org.apache.flink.table.store.annotation.Experimental;
-import org.apache.flink.table.store.file.utils.Restorable;
+package org.apache.flink.table.store.file.utils;
 
 /**
- * {@link TableScan} for streaming, supports {@link #checkpoint} and {@link #restore}.
+ * Operations implementing this interface can checkpoint and restore their states between different
+ * instances.
  *
- * @since 0.4.0
+ * @param <S> type of state
  */
-@Experimental
-public interface StreamTableScan extends TableScan, Restorable<Long> {}
+public interface Restorable<S> {
+
+    /** Extract state of the current operation instance. */
+    S checkpoint();
+
+    /** Restore state of a previous operation instance into the current operation instance. */
+    void restore(S state);
+}

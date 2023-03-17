@@ -21,6 +21,7 @@ package org.apache.flink.table.store.file.compact;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 
 import java.io.Closeable;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 
@@ -32,6 +33,8 @@ public interface CompactManager extends Closeable {
 
     /** Add a new file. */
     void addNewFile(DataFileMeta file);
+
+    List<DataFileMeta> allFiles();
 
     /**
      * Trigger a new compaction task.
