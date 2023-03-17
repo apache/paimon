@@ -18,8 +18,8 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateBuilder;
+import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowType;

@@ -27,7 +27,7 @@ import org.apache.flink.table.store.file.io.NewFilesIncrement;
 import org.apache.flink.table.store.file.io.RowDataRollingFileWriter;
 import org.apache.flink.table.store.file.utils.CommitIncrement;
 import org.apache.flink.table.store.file.utils.RecordWriter;
-import org.apache.flink.table.store.fs.FileIO;
+import org.apache.paimon.fs.FileIO;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.LongCounter;

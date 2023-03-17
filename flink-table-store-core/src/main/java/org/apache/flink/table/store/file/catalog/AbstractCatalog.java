@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.Path;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.FileStoreTableFactory;
 import org.apache.flink.table.store.table.Table;

@@ -18,8 +18,8 @@
 
 package org.apache.paimon.data;
 
-import org.apache.flink.table.store.io.DataInputView;
-import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.memory.MemorySegment;
 
 import java.io.EOFException;
 import java.io.IOException;

@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.disk;
 import org.apache.flink.table.store.file.compression.BlockCompressionFactory;
 import org.apache.flink.table.store.file.compression.BlockDecompressor;
 import org.apache.flink.table.store.file.memory.Buffer;
-import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySegment;
 
 import org.apache.paimon.data.AbstractPagedInputView;
 

@@ -18,10 +18,10 @@
 
 package org.apache.paimon.format;
 
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.PositionOutputStream;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.flink.table.store.types.ArrayType;
 import org.apache.flink.table.store.types.BinaryType;
 import org.apache.flink.table.store.types.CharType;

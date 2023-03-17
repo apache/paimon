@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.utils;
 
-import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.Predicate;
 
 /**
  * Represents a filter (boolean-valued function) of one argument. This class is for avoiding name

@@ -18,9 +18,9 @@
 
 package org.apache.paimon.data.serializer;
 
-import org.apache.flink.table.store.io.DataInputView;
-import org.apache.flink.table.store.io.DataOutputView;
-import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataOutputView;
+import org.apache.paimon.memory.MemorySegment;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowKind;
 import org.apache.flink.table.store.types.RowType;
@@ -45,8 +45,8 @@ import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Objects;
 
-import static org.apache.flink.table.store.memory.MemorySegmentUtils.bitGet;
-import static org.apache.flink.table.store.memory.MemorySegmentUtils.bitSet;
+import static org.apache.paimon.memory.MemorySegmentUtils.bitGet;
+import static org.apache.paimon.memory.MemorySegmentUtils.bitSet;
 import static org.apache.flink.table.store.types.DataTypeChecks.getPrecision;
 import static org.apache.flink.table.store.types.DataTypeChecks.getScale;
 import static org.apache.flink.table.store.utils.Preconditions.checkArgument;

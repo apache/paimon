@@ -18,15 +18,15 @@
 
 package org.apache.paimon.data;
 
-import org.apache.flink.table.store.memory.MemorySegment;
-import org.apache.flink.table.store.memory.MemorySegmentUtils;
+import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.flink.table.store.types.DataType;
 
 import org.apache.paimon.annotation.Experimental;
 
 import java.lang.reflect.Array;
 
-import static org.apache.flink.table.store.memory.MemorySegment.UNSAFE;
+import static org.apache.paimon.memory.MemorySegment.UNSAFE;
 
 /**
  * A binary implementation of {@link InternalArray} which is backed by {@link MemorySegment}s.

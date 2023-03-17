@@ -18,8 +18,8 @@
 
 package org.apache.paimon.format.orc;
 
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateBuilder;
+import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.types.BigIntType;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.RowType;

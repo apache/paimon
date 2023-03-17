@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.sort;
 import org.apache.flink.table.store.codegen.NormalizedKeyComputer;
 import org.apache.flink.table.store.codegen.RecordComparator;
 import org.apache.flink.table.store.file.memory.MemorySegmentPool;
-import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySegment;
 
 import org.apache.paimon.data.AbstractPagedOutputView;
 import org.apache.paimon.data.BinaryRow;

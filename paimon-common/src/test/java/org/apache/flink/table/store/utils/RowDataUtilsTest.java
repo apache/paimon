@@ -21,7 +21,7 @@ package org.apache.flink.table.store.utils;
 import org.apache.flink.table.store.datagen.DataGenerator;
 import org.apache.flink.table.store.datagen.RandomGeneratorVisitor;
 import org.apache.flink.table.store.datagen.RowDataGenerator;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 import org.apache.flink.table.store.types.DataTypeRoot;
 import org.apache.flink.table.store.types.DataTypes;
 import org.apache.flink.table.store.types.RowType;

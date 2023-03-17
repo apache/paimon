@@ -27,7 +27,7 @@ import org.apache.flink.table.store.file.disk.FileChannelUtil;
 import org.apache.flink.table.store.file.disk.FileIOChannel;
 import org.apache.flink.table.store.file.disk.IOManager;
 import org.apache.flink.table.store.file.utils.MutableObjectIterator;
-import org.apache.flink.table.store.options.MemorySize;
+import org.apache.paimon.options.MemorySize;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;

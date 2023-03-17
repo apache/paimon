@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.io.DataInputDeserializer;
-import org.apache.flink.table.store.io.DataOutputSerializer;
+import org.apache.paimon.io.DataInputDeserializer;
+import org.apache.paimon.io.DataOutputSerializer;
 
 import org.junit.jupiter.api.Test;
 

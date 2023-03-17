@@ -23,8 +23,8 @@ import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.manifest.FileKind;
 import org.apache.flink.table.store.file.manifest.ManifestEntry;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;

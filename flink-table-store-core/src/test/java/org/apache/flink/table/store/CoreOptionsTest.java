@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store;
 
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
 

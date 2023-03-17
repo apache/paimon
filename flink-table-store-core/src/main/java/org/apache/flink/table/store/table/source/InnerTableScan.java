@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.table.source;
 
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateBuilder;
+import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.PredicateBuilder;
 
 import java.util.List;
 

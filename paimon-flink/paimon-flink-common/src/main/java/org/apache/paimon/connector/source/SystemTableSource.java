@@ -23,7 +23,7 @@ import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.SourceProvider;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.table.DataTable;
 import org.apache.flink.table.store.table.Table;
 

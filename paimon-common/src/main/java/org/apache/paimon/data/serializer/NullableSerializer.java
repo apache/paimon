@@ -18,10 +18,10 @@
 
 package org.apache.paimon.data.serializer;
 
-import org.apache.flink.table.store.io.DataInputDeserializer;
-import org.apache.flink.table.store.io.DataInputView;
-import org.apache.flink.table.store.io.DataOutputSerializer;
-import org.apache.flink.table.store.io.DataOutputView;
+import org.apache.paimon.io.DataInputDeserializer;
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataOutputSerializer;
+import org.apache.paimon.io.DataOutputView;
 
 import javax.annotation.Nonnull;
 

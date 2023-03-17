@@ -18,7 +18,7 @@
 package org.apache.flink.table.store.codegen
 
 import org.apache.paimon.data._
-import org.apache.flink.table.store.memory.MemorySegment
+import org.apache.paimon.memory.MemorySegment
 import org.apache.flink.table.store.types._
 import org.apache.flink.table.store.types.DataTypeChecks.{getFieldCount, getFieldTypes, getPrecision, getScale}
 import org.apache.flink.table.store.types.DataTypeRoot._

@@ -22,14 +22,14 @@ import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.flink.table.store.file.io.RowDataFileRecordReader;
 import org.apache.flink.table.store.file.mergetree.compact.ConcatRecordReader;
-import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.IndexCastMapping;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.file.utils.BulkFormatMapping;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.fs.FileIO;
+import org.apache.paimon.fs.FileIO;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.table.source.DataSplit;
 import org.apache.flink.table.store.types.RowType;
@@ -47,7 +47,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.flink.table.store.file.predicate.PredicateBuilder.splitAnd;
+import static org.apache.paimon.file.predicate.PredicateBuilder.splitAnd;
 
 /** {@link FileStoreRead} for {@link org.apache.flink.table.store.file.AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {

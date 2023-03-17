@@ -20,7 +20,7 @@ package org.apache.paimon.connector;
 
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.store.catalog.CatalogContext;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 
 import java.util.Map;
 

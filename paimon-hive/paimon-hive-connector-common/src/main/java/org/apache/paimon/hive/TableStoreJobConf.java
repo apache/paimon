@@ -19,7 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.flink.table.store.file.utils.JsonSerdeUtil;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;

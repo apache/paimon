@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Preconditions;
 
@@ -33,7 +33,7 @@ import javax.annotation.concurrent.ThreadSafe;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.apache.flink.table.store.options.ConfigOptions.key;
+import static org.apache.paimon.options.ConfigOptions.key;
 
 /** Factory which produces {@link Path}s for manifest files. */
 @ThreadSafe

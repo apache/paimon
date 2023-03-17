@@ -28,7 +28,7 @@ import org.apache.flink.table.store.file.catalog.CatalogLock;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 
 import org.apache.paimon.connector.sink.TableStoreSink;
 

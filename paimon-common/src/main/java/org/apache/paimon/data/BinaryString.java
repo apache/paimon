@@ -18,8 +18,8 @@
 
 package org.apache.paimon.data;
 
-import org.apache.flink.table.store.memory.MemorySegment;
-import org.apache.flink.table.store.memory.MemorySegmentUtils;
+import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySegmentUtils;
 
 import org.apache.paimon.annotation.Experimental;
 
@@ -30,8 +30,8 @@ import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
-import static org.apache.flink.table.store.memory.MemorySegmentUtils.allocateReuseBytes;
-import static org.apache.flink.table.store.memory.MemorySegmentUtils.allocateReuseChars;
+import static org.apache.paimon.memory.MemorySegmentUtils.allocateReuseBytes;
+import static org.apache.paimon.memory.MemorySegmentUtils.allocateReuseChars;
 import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /**

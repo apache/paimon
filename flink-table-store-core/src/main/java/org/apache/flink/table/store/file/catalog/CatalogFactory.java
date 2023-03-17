@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.catalog;
 
 import org.apache.flink.table.store.catalog.CatalogContext;
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.Path;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.flink.table.store.utils.Preconditions;
 
 import org.apache.paimon.annotation.Experimental;
@@ -32,8 +32,8 @@ import java.util.List;
 import java.util.ServiceLoader;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.options.CatalogOptions.METASTORE;
-import static org.apache.flink.table.store.options.CatalogOptions.WAREHOUSE;
+import static org.apache.paimon.options.CatalogOptions.METASTORE;
+import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
 
 /**

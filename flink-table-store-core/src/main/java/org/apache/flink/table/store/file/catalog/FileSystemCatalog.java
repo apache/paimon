@@ -22,9 +22,9 @@ import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.FileStatus;
-import org.apache.flink.table.store.fs.Path;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.Path;
 
 import java.util.ArrayList;
 import java.util.List;

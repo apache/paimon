@@ -18,13 +18,13 @@
 
 package org.apache.flink.table.store.table;
 
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateBuilder;
+import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaChange;
 import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.flink.table.store.table.sink.StreamTableWrite;
 import org.apache.flink.table.store.table.source.InnerTableRead;
 import org.apache.flink.table.store.table.source.Split;

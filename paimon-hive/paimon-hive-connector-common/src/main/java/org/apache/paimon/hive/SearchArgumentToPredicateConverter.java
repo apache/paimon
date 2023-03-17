@@ -18,8 +18,8 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.flink.table.store.file.predicate.Predicate;
-import org.apache.flink.table.store.file.predicate.PredicateBuilder;
+import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.types.DataType;
 import org.apache.flink.table.store.types.RowType;
 import org.apache.flink.table.store.utils.Preconditions;
@@ -36,7 +36,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.file.predicate.PredicateBuilder.convertJavaObject;
+import static org.apache.paimon.file.predicate.PredicateBuilder.convertJavaObject;
 
 /** Converts {@link SearchArgument} to {@link Predicate} with best effort. */
 public class SearchArgumentToPredicateConverter {

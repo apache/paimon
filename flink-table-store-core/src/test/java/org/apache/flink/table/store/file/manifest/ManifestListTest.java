@@ -22,10 +22,10 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.utils.FailingFileIO;
 import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.fs.FileIOFinder;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.fs.FileIOFinder;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.Options;
 
 import org.apache.paimon.format.FileFormat;
 import org.junit.jupiter.api.RepeatedTest;

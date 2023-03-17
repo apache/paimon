@@ -18,7 +18,7 @@
 
 package org.apache.paimon.docs.configuration;
 
-import org.apache.flink.table.store.options.ConfigOption;
+import org.apache.paimon.options.ConfigOption;
 
 /** Simple descriptor for the location of a class containing {@link ConfigOption ConfigOptions}. */
 class OptionsClassLocation {

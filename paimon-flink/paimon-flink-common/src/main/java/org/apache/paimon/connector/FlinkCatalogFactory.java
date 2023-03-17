@@ -21,8 +21,8 @@ package org.apache.paimon.connector;
 import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.store.file.catalog.Catalog;
 import org.apache.flink.table.store.file.catalog.CatalogFactory;
-import org.apache.flink.table.store.options.ConfigOption;
-import org.apache.flink.table.store.options.ConfigOptions;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 
 import java.util.Collections;
 import java.util.Set;

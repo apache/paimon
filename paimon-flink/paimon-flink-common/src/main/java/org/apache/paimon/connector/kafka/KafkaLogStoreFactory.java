@@ -30,7 +30,7 @@ import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.utils.DataTypeUtils;
 

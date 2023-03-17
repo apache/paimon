@@ -20,7 +20,7 @@ package org.apache.flink.table.store.file.utils;
 
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.casting.CastFieldGetter;
-import org.apache.flink.table.store.file.predicate.Predicate;
+import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.file.schema.IndexCastMapping;
 import org.apache.flink.table.store.file.schema.KeyValueFieldsExtractor;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;

@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.mergetree;
 
 import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.lookup.LookupStoreReader;
-import org.apache.flink.table.store.options.MemorySize;
+import org.apache.paimon.lookup.LookupStoreReader;
+import org.apache.paimon.options.MemorySize;
 import org.apache.flink.table.store.utils.FileIOUtils;
 
 import javax.annotation.Nullable;

@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.catalog;
 
-import org.apache.flink.table.store.fs.Path;
+import org.apache.paimon.fs.Path;
 
 /** Utils for {@link Catalog}. */
 public class CatalogUtils {

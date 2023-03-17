@@ -20,7 +20,7 @@ package org.apache.flink.table.store.table;
 
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.fs.FileIOFinder;
+import org.apache.paimon.fs.FileIOFinder;
 
 import java.util.Map;
 

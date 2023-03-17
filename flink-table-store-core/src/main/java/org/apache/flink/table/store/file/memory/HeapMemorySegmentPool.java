@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.memory;
 
-import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySegment;
 
 import java.util.LinkedList;
 import java.util.List;

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format;
 
-import org.apache.flink.table.store.fs.PositionOutputStream;
+import org.apache.paimon.fs.PositionOutputStream;
 
 import javax.annotation.Nullable;
 

@@ -18,8 +18,8 @@
 
 package org.apache.paimon.data;
 
-import org.apache.flink.table.store.io.SeekableDataInputView;
-import org.apache.flink.table.store.memory.MemorySegment;
+import org.apache.paimon.io.SeekableDataInputView;
+import org.apache.paimon.memory.MemorySegment;
 import org.apache.flink.table.store.utils.MathUtils;
 
 import java.io.EOFException;

@@ -21,7 +21,7 @@ package org.apache.paimon.format;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.table.store.fs.PositionOutputStream;
 import org.apache.flink.table.store.fs.local.LocalFileIO;
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 import org.apache.flink.table.store.reader.RecordReader;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;

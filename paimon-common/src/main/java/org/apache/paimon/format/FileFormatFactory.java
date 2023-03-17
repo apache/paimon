@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format;
 
-import org.apache.flink.table.store.options.Options;
+import org.apache.paimon.options.Options;
 
 /** Factory to create {@link FileFormat}. */
 public interface FileFormatFactory {
