@@ -76,10 +76,10 @@ public class ConfigOptionsDocGenerator {
                 new OptionsClassLocation("flink-table-store-core", "org.apache.flink.table.store"),
                 new OptionsClassLocation(
                         "flink-table-store-flink/flink-table-store-flink-common",
-                        "org.apache.flink.table.store.connector"),
+                        "org.apache.paimon.connector"),
                 new OptionsClassLocation(
                         "flink-table-store-flink/flink-table-store-flink-common",
-                        "org.apache.flink.table.store.kafka")
+                        "org.apache.paimon.connector.kafka")
             };
     static final String DEFAULT_PATH_PREFIX = "src/main/java";
 

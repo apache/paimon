@@ -155,7 +155,7 @@ Run the following command to submit a compaction job for the table.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.flink.table.store.connector.action.FlinkActions \
+    -c org.apache.paimon.connector.action.FlinkActions \
     /path/to/flink-table-store-flink-**-{{< version >}}.jar \
     compact \
     --warehouse <warehouse-path> \
@@ -175,7 +175,7 @@ For more usage of the compact action, see
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.flink.table.store.connector.action.FlinkActions \
+    -c org.apache.paimon.connector.action.FlinkActions \
     /path/to/flink-table-store-flink-**-{{< version >}}.jar \
     compact --help
 ```
