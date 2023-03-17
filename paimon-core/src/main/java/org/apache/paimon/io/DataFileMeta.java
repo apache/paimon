@@ -21,8 +21,8 @@ package org.apache.paimon.io;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.file.stats.BinaryTableStats;
-import org.apache.paimon.file.stats.FieldStatsArraySerializer;
+import org.apache.paimon.stats.BinaryTableStats;
+import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -36,9 +36,9 @@ import java.util.List;
 import java.util.Objects;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
-import static org.apache.paimon.file.utils.SerializationUtils.newBytesType;
-import static org.apache.paimon.file.utils.SerializationUtils.newStringType;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.SerializationUtils.newBytesType;
+import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
 /** Metadata of a data file. */
 public class DataFileMeta {

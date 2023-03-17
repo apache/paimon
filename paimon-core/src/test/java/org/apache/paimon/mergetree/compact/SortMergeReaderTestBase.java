@@ -18,10 +18,10 @@
 
 package org.apache.paimon.mergetree.compact;
 
-import org.apache.paimon.file.KeyValue;
-import org.apache.paimon.file.utils.ReusingTestData;
-import org.apache.paimon.file.utils.TestReusingRecordReader;
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.ReusingTestData;
+import org.apache.paimon.utils.TestReusingRecordReader;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;

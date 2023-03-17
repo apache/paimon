@@ -27,13 +27,13 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.flink.table.types.logical.LogicalType;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.connector.FlinkCatalog;
 import org.apache.paimon.connector.LogicalTypeConversion;
 import org.apache.paimon.connector.sink.FlinkSinkBuilder;
 import org.apache.paimon.connector.utils.TableEnvironmentUtils;
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;

@@ -18,14 +18,15 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.file.stats.FieldStatsConverters;
-import org.apache.paimon.file.utils.SnapshotManager;
+import org.apache.paimon.stats.FieldStatsConverters;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.List;
 
@@ -33,7 +34,7 @@ import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
-/** {@link FileStoreScan} for {@link org.apache.paimon.file.AppendOnlyFileStore}. */
+/** {@link FileStoreScan} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     private final RowType rowType;

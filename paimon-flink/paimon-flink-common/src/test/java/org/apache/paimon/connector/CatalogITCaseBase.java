@@ -35,12 +35,12 @@ import org.apache.flink.util.CloseableIterator;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.connector.util.AbstractTestBase;
-import org.apache.paimon.file.Snapshot;
-import org.apache.paimon.file.utils.BlockingIterator;
-import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.utils.BlockingIterator;
+import org.apache.paimon.utils.SnapshotManager;
 import org.junit.jupiter.api.BeforeEach;
 
 import javax.annotation.Nullable;

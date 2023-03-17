@@ -19,8 +19,7 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.file.Snapshot;
-import org.apache.paimon.file.utils.SnapshotManager;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -28,6 +27,7 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.SnapshotManager;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

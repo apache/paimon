@@ -22,7 +22,7 @@ import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.file.utils.BlockingIterator;
+import org.apache.paimon.utils.BlockingIterator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;

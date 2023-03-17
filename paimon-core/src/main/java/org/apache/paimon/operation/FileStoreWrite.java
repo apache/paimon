@@ -18,13 +18,13 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.FileStore;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.file.FileStore;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.file.utils.RecordWriter;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
+import org.apache.paimon.utils.RecordWriter;
 
 import java.util.List;
 

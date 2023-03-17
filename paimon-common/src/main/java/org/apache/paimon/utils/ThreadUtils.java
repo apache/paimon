@@ -18,6 +18,13 @@
 
 package org.apache.paimon.utils;
 
+import org.slf4j.Logger;
+
+import java.lang.management.ManagementFactory;
+import java.lang.management.ThreadInfo;
+import java.util.Arrays;
+import java.util.stream.Collectors;
+
 /** Utils for thread. */
 public class ThreadUtils {
 
@@ -28,5 +35,13 @@ public class ThreadUtils {
             builder.append("\nat ").append(traceElement);
         }
         return builder.toString();
+    }
+
+    public static void errorLogThreadDump(Logger logger) {
+        final ThreadInfo[] perThreadInfo =
+                ManagementFactory.getThreadMXBean().dumpAllThreads(true, true);
+        logger.error(
+                "Thread dump: \n{}",
+                Arrays.stream(perThreadInfo).map(Object::toString).collect(Collectors.joining()));
     }
 }

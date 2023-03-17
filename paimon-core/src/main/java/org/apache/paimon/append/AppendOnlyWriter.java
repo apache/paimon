@@ -19,21 +19,21 @@
 
 package org.apache.paimon.append;
 
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.compact.CompactManager;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.io.RowDataRollingFileWriter;
-import org.apache.paimon.file.utils.CommitIncrement;
-import org.apache.paimon.file.utils.RecordWriter;
-import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.RecordWriter;
 
 import javax.annotation.Nullable;
 

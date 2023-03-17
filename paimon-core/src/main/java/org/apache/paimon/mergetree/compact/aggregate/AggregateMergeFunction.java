@@ -18,9 +18,9 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.options.Options;

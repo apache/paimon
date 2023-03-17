@@ -18,20 +18,20 @@
 
 package org.apache.paimon.mergetree;
 
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordComparator;
-import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionTestUtils;
 import org.apache.paimon.mergetree.compact.ValueCountMergeFunction;
-import org.apache.paimon.file.sort.BinaryInMemorySortBuffer;
-import org.apache.paimon.file.utils.ReusingKeyValue;
-import org.apache.paimon.file.utils.ReusingTestData;
+import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ReusingKeyValue;
+import org.apache.paimon.utils.ReusingTestData;
 import org.junit.jupiter.api.Test;
 
 import java.io.EOFException;

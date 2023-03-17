@@ -18,13 +18,14 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.FileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite;
-import org.apache.paimon.file.utils.Restorable;
+import org.apache.paimon.utils.Restorable;
 
 import java.util.List;
 
@@ -33,7 +34,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 /**
  * {@link TableWrite} implementation.
  *
- * @param <T> type of record to write into {@link org.apache.paimon.file.FileStore}.
+ * @param <T> type of record to write into {@link FileStore}.
  */
 public class TableWriteImpl<T>
         implements InnerTableWrite, Restorable<List<AbstractFileStoreWrite.State>> {

@@ -19,7 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.annotation.Experimental;
-import org.apache.paimon.file.utils.Restorable;
+import org.apache.paimon.utils.Restorable;
 
 /**
  * {@link TableScan} for streaming, supports {@link #checkpoint} and {@link #restore}.

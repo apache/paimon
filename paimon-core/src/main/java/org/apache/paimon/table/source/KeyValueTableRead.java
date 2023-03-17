@@ -18,8 +18,8 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.operation.KeyValueFileStoreRead;
 import org.apache.paimon.reader.RecordReader;
 

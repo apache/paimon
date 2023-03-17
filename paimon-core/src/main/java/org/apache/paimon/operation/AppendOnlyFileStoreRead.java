@@ -18,24 +18,25 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormatDiscover;
+import org.apache.paimon.format.FormatKey;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.RowDataFileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.file.utils.BulkFormatMapping;
-import org.apache.paimon.file.utils.FileStorePathFactory;
-import org.apache.paimon.format.FileFormatDiscover;
-import org.apache.paimon.format.FormatKey;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BulkFormatMapping;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
@@ -48,7 +49,7 @@ import java.util.Map;
 
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
-/** {@link FileStoreRead} for {@link org.apache.paimon.file.AppendOnlyFileStore}. */
+/** {@link FileStoreRead} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
 
     private final FileIO fileIO;

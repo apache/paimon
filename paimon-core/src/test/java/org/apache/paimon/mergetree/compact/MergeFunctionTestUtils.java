@@ -18,10 +18,10 @@
 
 package org.apache.paimon.mergetree.compact;
 
-import org.apache.paimon.file.KeyValue;
-import org.apache.paimon.file.utils.ReusingTestData;
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.ReusingTestData;
 
 import java.util.ArrayList;
 import java.util.Collections;

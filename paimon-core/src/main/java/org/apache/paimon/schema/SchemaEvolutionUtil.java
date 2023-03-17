@@ -18,11 +18,11 @@
 
 package org.apache.paimon.schema;
 
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.KeyValue;
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.casting.CastFieldGetter;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateReplaceVisitor;

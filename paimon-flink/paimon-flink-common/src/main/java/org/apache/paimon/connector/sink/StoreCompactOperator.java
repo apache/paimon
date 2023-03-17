@@ -28,8 +28,8 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
-import org.apache.paimon.file.utils.OffsetRow;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.OffsetRow;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;

@@ -19,29 +19,29 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.KeyValue;
+import org.apache.paimon.KeyValueSerializerTest;
+import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.file.KeyValue;
-import org.apache.paimon.file.KeyValueSerializerTest;
-import org.apache.paimon.file.TestKeyValueGenerator;
-import org.apache.paimon.file.format.FlushingFileFormat;
-import org.apache.paimon.file.stats.FieldStatsArraySerializer;
-import org.apache.paimon.file.stats.StatsTestUtils;
-import org.apache.paimon.file.utils.FailingFileIO;
-import org.apache.paimon.file.utils.FileStorePathFactory;
+import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.stats.FieldStatsArraySerializer;
+import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -53,7 +53,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 
-import static org.apache.paimon.file.TestKeyValueGenerator.createTestSchemaManager;
+import static org.apache.paimon.TestKeyValueGenerator.createTestSchemaManager;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

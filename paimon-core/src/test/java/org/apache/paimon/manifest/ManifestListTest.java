@@ -19,14 +19,14 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.file.TestKeyValueGenerator;
-import org.apache.paimon.file.utils.FailingFileIO;
-import org.apache.paimon.file.utils.FileStorePathFactory;
+import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.io.TempDir;
 

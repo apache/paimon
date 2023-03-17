@@ -19,11 +19,11 @@
 package org.apache.paimon.mergetree;
 
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.CompactResult;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -33,9 +33,9 @@ import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.mergetree.compact.MergeFunction;
-import org.apache.paimon.file.utils.CommitIncrement;
-import org.apache.paimon.file.utils.RecordWriter;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.RecordWriter;
 
 import javax.annotation.Nullable;
 

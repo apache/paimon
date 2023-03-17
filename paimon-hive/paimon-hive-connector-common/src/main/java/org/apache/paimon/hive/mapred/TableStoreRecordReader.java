@@ -19,8 +19,8 @@
 package org.apache.paimon.hive.mapred;
 
 import org.apache.hadoop.mapred.RecordReader;
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.hive.RowDataContainer;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.source.ReadBuilder;

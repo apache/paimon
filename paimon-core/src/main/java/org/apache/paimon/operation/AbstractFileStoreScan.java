@@ -18,8 +18,8 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.file.Snapshot;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -29,14 +29,14 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.file.stats.FieldStatsArraySerializer;
-import org.apache.paimon.file.utils.FileStorePathFactory;
-import org.apache.paimon.file.utils.FileUtils;
-import org.apache.paimon.file.utils.SnapshotManager;
+import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
+import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 

@@ -19,9 +19,9 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;

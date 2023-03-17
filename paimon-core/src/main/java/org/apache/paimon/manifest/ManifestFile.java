@@ -19,20 +19,20 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.io.RollingFileWriter;
-import org.apache.paimon.io.SingleFileWriter;
-import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.file.stats.FieldStatsArraySerializer;
-import org.apache.paimon.file.utils.FileStorePathFactory;
-import org.apache.paimon.file.utils.FileUtils;
-import org.apache.paimon.file.utils.VersionedObjectSerializer;
 import org.apache.paimon.format.FieldStatsCollector;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.io.SingleFileWriter;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FileUtils;
+import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import java.io.IOException;
 import java.util.List;

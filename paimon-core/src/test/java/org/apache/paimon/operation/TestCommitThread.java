@@ -18,16 +18,16 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.KeyValue;
+import org.apache.paimon.TestFileStore;
+import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.file.KeyValue;
-import org.apache.paimon.file.TestFileStore;
-import org.apache.paimon.file.TestKeyValueGenerator;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.MergeTreeWriter;
-import org.apache.paimon.file.utils.CommitIncrement;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CommitIncrement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,10 +43,10 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.file.TestFileStore.PAGE_SIZE;
-import static org.apache.paimon.file.TestFileStore.WRITE_BUFFER_SIZE;
-import static org.apache.paimon.file.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
-import static org.apache.paimon.file.utils.FailingFileIO.retryArtificialException;
+import static org.apache.paimon.TestFileStore.PAGE_SIZE;
+import static org.apache.paimon.TestFileStore.WRITE_BUFFER_SIZE;
+import static org.apache.paimon.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
+import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 
 /** Testing {@link Thread}s to perform concurrent commits. */
 public class TestCommitThread extends Thread {

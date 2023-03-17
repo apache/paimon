@@ -18,8 +18,8 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.types.RowKind;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
