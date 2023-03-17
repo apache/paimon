@@ -164,7 +164,7 @@ To access existing table store table, you can also register them as external tab
 -- Pointing the location to the path of table is enough.
 
 CREATE EXTERNAL TABLE external_test_table
-STORED BY 'org.apache.flink.table.store.hive.TableStoreHiveStorageHandler'
+STORED BY 'org.apache.paimon.hive.TableStoreHiveStorageHandler'
 LOCATION '/path/to/table/store/warehouse/default.db/test_table';
 
 -- Read records from external_test_table
