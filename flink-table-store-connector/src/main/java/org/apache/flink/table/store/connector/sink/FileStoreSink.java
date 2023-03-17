@@ -20,11 +20,11 @@ package org.apache.flink.table.store.connector.sink;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.store.connector.SerializableFunction;
 import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
 import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.table.store.table.FileStoreTable;
 import org.apache.flink.table.store.table.sink.LogSinkFunction;
-import org.apache.flink.util.function.SerializableFunction;
 
 import javax.annotation.Nullable;
 
