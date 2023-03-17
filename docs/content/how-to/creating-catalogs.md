@@ -31,7 +31,7 @@ Table Store catalogs currently support two types of metastores:
 * `filesystem` metastore (default), which stores both metadata and table files in filesystems.
 * `hive` metastore, which additionally stores metadata in Hive metastore. Users can directly access the tables from Hive.
 
-See [CatalogOptions]({{< ref "docs/maintenance/configurations#catalogoptions" >}}) for detailed options when creating a catalog.
+See [CatalogOptions]({{< ref "maintenance/configurations#catalogoptions" >}}) for detailed options when creating a catalog.
 
 ## Creating a Catalog with Filesystem Metastore
 
