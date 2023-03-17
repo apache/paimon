@@ -22,10 +22,10 @@ import org.apache.flink.table.store.data.BinaryRow;
 import org.apache.flink.table.store.file.casting.CastExecutor;
 import org.apache.flink.table.store.file.schema.SchemaEvolutionUtil;
 import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.types.DataField;
 import org.apache.flink.table.store.types.IntType;
 
+import org.apache.paimon.format.FieldStats;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

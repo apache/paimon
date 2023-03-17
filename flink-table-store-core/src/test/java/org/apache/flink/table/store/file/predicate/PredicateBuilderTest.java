@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.file.predicate;
 
-import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.types.IntType;
 import org.apache.flink.table.store.types.RowType;
 
+import org.apache.paimon.format.FieldStats;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

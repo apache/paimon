@@ -23,7 +23,8 @@ import org.apache.flink.table.store.data.GenericArray;
 import org.apache.flink.table.store.data.GenericRow;
 import org.apache.flink.table.store.data.InternalArray;
 import org.apache.flink.table.store.data.InternalRow;
-import org.apache.flink.table.store.format.FieldStats;
+
+import org.apache.paimon.format.FieldStats;
 
 import javax.annotation.Nullable;
 

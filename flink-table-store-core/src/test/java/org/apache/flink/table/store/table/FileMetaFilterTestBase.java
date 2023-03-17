@@ -22,9 +22,9 @@ import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.predicate.Predicate;
 import org.apache.flink.table.store.file.predicate.PredicateBuilder;
 import org.apache.flink.table.store.file.stats.BinaryTableStats;
-import org.apache.flink.table.store.format.FieldStats;
 import org.apache.flink.table.store.table.source.DataSplit;
 
+import org.apache.paimon.format.FieldStats;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
