@@ -18,8 +18,8 @@
 
 package org.apache.paimon.table;
 
-import org.apache.flink.table.store.CoreOptions;
-import org.apache.flink.table.store.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.KeyValueFileStore;
 import org.apache.paimon.file.WriteMode;

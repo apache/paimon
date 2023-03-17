@@ -18,7 +18,7 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.file.schema.Schema;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.fs.Path;
@@ -30,7 +30,7 @@ import org.apache.paimon.types.RowType;
 
 import java.util.List;
 
-import static org.apache.flink.table.store.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.PATH;
 
 /** Test utils related to {@link org.apache.flink.table.store.file.FileStore}. */
 public class FileStoreTestUtils {

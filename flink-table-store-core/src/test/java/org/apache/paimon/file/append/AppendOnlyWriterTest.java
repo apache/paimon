@@ -19,7 +19,7 @@
 
 package org.apache.paimon.file.append;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.io.DataFilePathFactory;
 import org.apache.paimon.file.stats.FieldStatsArraySerializer;

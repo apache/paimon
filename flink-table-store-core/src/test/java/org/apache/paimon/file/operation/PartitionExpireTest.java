@@ -18,7 +18,7 @@
 
 package org.apache.paimon.file.operation;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.schema.Schema;
 import org.apache.paimon.file.schema.SchemaManager;
 import org.apache.paimon.fs.Path;
@@ -46,8 +46,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.flink.table.store.CoreOptions.PARTITION_EXPIRATION_TIME;
-import static org.apache.flink.table.store.CoreOptions.WRITE_ONLY;
+import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
+import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

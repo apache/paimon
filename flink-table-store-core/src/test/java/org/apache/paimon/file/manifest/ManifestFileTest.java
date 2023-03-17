@@ -18,7 +18,7 @@
 
 package org.apache.paimon.file.manifest;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.schema.SchemaManager;
 import org.apache.paimon.file.stats.StatsTestUtils;
 import org.apache.paimon.file.utils.FailingFileIO;

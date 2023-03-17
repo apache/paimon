@@ -18,7 +18,7 @@
 
 package org.apache.paimon.file.operation;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.append.AppendOnlyCompactManager;
 import org.apache.paimon.file.append.AppendOnlyWriter;
 import org.apache.paimon.file.compact.CompactManager;

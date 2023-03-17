@@ -23,8 +23,8 @@ import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.CoreOptions.LogConsistency;
-import org.apache.flink.table.store.CoreOptions.StartupMode;
+import org.apache.paimon.CoreOptions.LogConsistency;
+import org.apache.paimon.CoreOptions.StartupMode;
 import org.apache.flink.table.types.DataType;
 
 import org.apache.kafka.common.TopicPartition;

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateBuilder;
 import org.apache.paimon.table.source.Split;

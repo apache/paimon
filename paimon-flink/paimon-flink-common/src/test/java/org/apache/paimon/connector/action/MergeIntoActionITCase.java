@@ -19,7 +19,7 @@
 package org.apache.paimon.connector.action;
 
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.types.Row;
 
@@ -35,7 +35,7 @@ import java.util.HashMap;
 import java.util.List;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
-import static org.apache.flink.table.store.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.connector.util.ReadWriteTableTestUtil.buildDdl;
 import static org.apache.paimon.connector.util.ReadWriteTableTestUtil.buildSimpleQuery;
 import static org.apache.paimon.connector.util.ReadWriteTableTestUtil.createTable;

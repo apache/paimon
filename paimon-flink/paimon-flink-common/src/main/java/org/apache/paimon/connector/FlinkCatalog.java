@@ -62,7 +62,7 @@ import java.util.Optional;
 
 import static org.apache.flink.table.descriptors.Schema.SCHEMA;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
-import static org.apache.flink.table.store.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.connector.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.connector.LogicalTypeConversion.toLogicalType;

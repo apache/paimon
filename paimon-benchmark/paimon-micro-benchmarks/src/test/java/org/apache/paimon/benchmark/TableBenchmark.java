@@ -18,7 +18,7 @@
 
 package org.apache.paimon.benchmark;
 
-import org.apache.flink.table.store.CoreOptions;
+import org.apache.paimon.CoreOptions;
 import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.paimon.file.catalog.Catalog;
 import org.apache.paimon.file.catalog.CatalogFactory;
