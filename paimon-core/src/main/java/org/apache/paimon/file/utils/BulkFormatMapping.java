@@ -19,12 +19,12 @@
 package org.apache.paimon.file.utils;
 
 import org.apache.paimon.file.KeyValue;
-import org.apache.paimon.file.casting.CastFieldGetter;
-import org.apache.paimon.file.predicate.Predicate;
-import org.apache.paimon.file.schema.IndexCastMapping;
-import org.apache.paimon.file.schema.KeyValueFieldsExtractor;
-import org.apache.paimon.file.schema.SchemaEvolutionUtil;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.casting.CastFieldGetter;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.IndexCastMapping;
+import org.apache.paimon.schema.KeyValueFieldsExtractor;
+import org.apache.paimon.schema.SchemaEvolutionUtil;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.types.DataField;

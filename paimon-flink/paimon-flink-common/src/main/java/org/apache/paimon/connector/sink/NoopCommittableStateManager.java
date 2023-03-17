@@ -20,7 +20,7 @@ package org.apache.paimon.connector.sink;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 
-import org.apache.paimon.file.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestCommittable;
 
 import java.util.List;
 

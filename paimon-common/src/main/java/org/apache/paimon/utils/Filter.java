@@ -18,7 +18,7 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.predicate.Predicate;
 
 /**
  * Represents a filter (boolean-valued function) of one argument. This class is for avoiding name

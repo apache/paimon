@@ -18,7 +18,7 @@
 
 package org.apache.paimon.file.sort;
 
-import org.apache.paimon.file.disk.FileIOChannel;
+import org.apache.paimon.disk.FileIOChannel;
 
 import java.io.Closeable;
 import java.io.File;

@@ -18,8 +18,8 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.file.schema.SchemaManager;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.fs.FileIOFinder;
 
 import java.util.Map;

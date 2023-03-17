@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.file.io.DataFilePathFactory;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;

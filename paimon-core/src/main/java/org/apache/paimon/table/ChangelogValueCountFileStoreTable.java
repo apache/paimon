@@ -24,14 +24,14 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.KeyValueFileStore;
 import org.apache.paimon.file.WriteMode;
-import org.apache.paimon.file.io.DataFileMeta;
-import org.apache.paimon.file.mergetree.compact.ValueCountMergeFunction;
-import org.apache.paimon.file.operation.FileStoreScan;
-import org.apache.paimon.file.operation.KeyValueFileStoreScan;
-import org.apache.paimon.file.operation.ReverseReader;
-import org.apache.paimon.file.predicate.Predicate;
-import org.apache.paimon.file.schema.KeyValueFieldsExtractor;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.mergetree.compact.ValueCountMergeFunction;
+import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.KeyValueFileStoreScan;
+import org.apache.paimon.operation.ReverseReader;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.KeyValueFieldsExtractor;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.file.stats.BinaryTableStats;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -52,7 +52,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.BiConsumer;
 
-import static org.apache.paimon.file.schema.SystemColumns.VALUE_COUNT;
+import static org.apache.paimon.schema.SystemColumns.VALUE_COUNT;
 
 /** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode without primary keys. */
 public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {

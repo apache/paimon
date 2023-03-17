@@ -25,7 +25,7 @@ import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
 
-import org.apache.paimon.file.manifest.ManifestCommittable;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.file.utils.SerializableSupplier;
 
 import java.util.ArrayList;

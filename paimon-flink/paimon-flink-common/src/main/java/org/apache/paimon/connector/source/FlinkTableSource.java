@@ -27,8 +27,8 @@ import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.paimon.connector.LogicalTypeConversion;
 import org.apache.paimon.connector.PredicateConverter;
-import org.apache.paimon.file.predicate.Predicate;
-import org.apache.paimon.file.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.Table;
 
 import javax.annotation.Nullable;

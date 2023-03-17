@@ -19,9 +19,9 @@
 package org.apache.paimon.file.stats;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.file.casting.CastExecutor;
-import org.apache.paimon.file.schema.SchemaEvolutionUtil;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.schema.SchemaEvolutionUtil;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.Collections;
 
-import static org.apache.paimon.file.io.DataFileTestUtils.row;
+import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link FieldStatsArraySerializer}. */

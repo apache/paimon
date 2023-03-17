@@ -25,7 +25,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.RandomAccessInputView;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
-import org.apache.paimon.file.memory.MemorySegmentPool;
+import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.memory.MemorySegment;
 
 import java.io.IOException;

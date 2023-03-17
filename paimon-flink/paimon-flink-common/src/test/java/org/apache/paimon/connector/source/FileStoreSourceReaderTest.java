@@ -20,8 +20,8 @@ package org.apache.paimon.connector.source;
 
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
 
-import org.apache.paimon.file.schema.Schema;
-import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.types.BigIntType;
@@ -36,7 +36,7 @@ import java.util.Arrays;
 import java.util.Collections;
 
 import static org.apache.paimon.connector.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
-import static org.apache.paimon.file.mergetree.compact.MergeTreeCompactManagerTest.row;
+import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for the {@link FileStoreSourceReader}. */

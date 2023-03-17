@@ -23,11 +23,11 @@ import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.LazyGenericRow;
-import org.apache.paimon.file.io.DataFileMeta;
-import org.apache.paimon.file.io.DataFilePathFactory;
-import org.apache.paimon.file.predicate.Predicate;
-import org.apache.paimon.file.schema.SchemaManager;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.file.stats.BinaryTableStats;
 import org.apache.paimon.file.stats.FieldStatsArraySerializer;
 import org.apache.paimon.file.stats.FieldStatsConverters;
@@ -67,7 +67,7 @@ import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import static org.apache.paimon.file.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing files of a snapshot in specific table. */
 public class FilesTable implements ReadonlyTable {

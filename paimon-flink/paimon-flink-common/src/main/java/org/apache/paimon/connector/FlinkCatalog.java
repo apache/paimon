@@ -45,10 +45,10 @@ import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.file.catalog.Catalog;
-import org.apache.paimon.file.catalog.Identifier;
-import org.apache.paimon.file.schema.Schema;
-import org.apache.paimon.file.schema.SchemaChange;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 

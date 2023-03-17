@@ -18,8 +18,8 @@
 
 package org.apache.paimon.file.utils;
 
-import org.apache.paimon.file.io.CompactIncrement;
-import org.apache.paimon.file.io.NewFilesIncrement;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.NewFilesIncrement;
 
 /** Changes to commit. */
 public class CommitIncrement {

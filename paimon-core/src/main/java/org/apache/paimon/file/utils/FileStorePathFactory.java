@@ -21,7 +21,7 @@ package org.apache.paimon.file.utils;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.file.io.DataFilePathFactory;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.types.RowType;

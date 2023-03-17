@@ -19,8 +19,8 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.io.DataFileMeta;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.file.stats.BinaryTableStats;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;

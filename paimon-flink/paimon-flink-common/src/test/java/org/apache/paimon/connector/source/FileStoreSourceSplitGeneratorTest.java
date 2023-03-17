@@ -18,10 +18,10 @@
 
 package org.apache.paimon.connector.source;
 
-import org.apache.paimon.file.io.DataFileMeta;
-import org.apache.paimon.file.manifest.FileKind;
-import org.apache.paimon.file.manifest.ManifestEntry;
-import org.apache.paimon.file.operation.FileStoreScan;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.file.stats.StatsTestUtils;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
@@ -36,7 +36,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.file.mergetree.compact.MergeTreeCompactManagerTest.row;
+import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FileStoreSourceSplitGenerator}. */

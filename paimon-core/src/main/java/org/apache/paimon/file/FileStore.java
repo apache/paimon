@@ -19,12 +19,12 @@
 package org.apache.paimon.file;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.file.operation.FileStoreCommit;
-import org.apache.paimon.file.operation.FileStoreExpire;
-import org.apache.paimon.file.operation.FileStoreRead;
-import org.apache.paimon.file.operation.FileStoreScan;
-import org.apache.paimon.file.operation.FileStoreWrite;
-import org.apache.paimon.file.operation.PartitionExpire;
+import org.apache.paimon.operation.FileStoreCommit;
+import org.apache.paimon.operation.FileStoreExpire;
+import org.apache.paimon.operation.FileStoreRead;
+import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.FileStoreWrite;
+import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.types.RowType;
 

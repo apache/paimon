@@ -29,8 +29,8 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.deser.std
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.module.SimpleModule;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ser.std.StdSerializer;
 
-import org.apache.paimon.file.schema.SchemaSerializer;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.schema.SchemaSerializer;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeJsonParser;

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.file.format;
 
-import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.file.stats.TestFileStatsExtractor;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileStatsExtractor;

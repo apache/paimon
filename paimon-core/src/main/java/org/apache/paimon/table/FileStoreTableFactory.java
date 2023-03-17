@@ -22,8 +22,8 @@ import org.apache.flink.table.store.catalog.CatalogContext;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.WriteMode;
-import org.apache.paimon.file.schema.SchemaManager;
-import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
