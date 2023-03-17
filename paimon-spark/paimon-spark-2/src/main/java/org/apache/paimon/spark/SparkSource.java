@@ -33,7 +33,7 @@ import org.apache.spark.sql.types.StructType;
 /** The Spark source for table store. */
 public class SparkSource implements DataSourceRegister, ReadSupport, SessionConfigSupport {
 
-    /** Not use 'table-store' here, the '-' is not allowed in SQL. */
+    /** Not use 'paimon' here, the '-' is not allowed in SQL. */
     private static final String SHORT_NAME = "tablestore";
 
     @Override

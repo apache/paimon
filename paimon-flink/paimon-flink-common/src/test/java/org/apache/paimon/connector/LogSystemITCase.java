@@ -39,7 +39,7 @@ public class LogSystemITCase extends KafkaTableTestBase {
         tEnv.executeSql(
                 String.format(
                         "CREATE CATALOG TABLE_STORE WITH ("
-                                + "'type'='table-store', 'warehouse'='%s')",
+                                + "'type'='paimon', 'warehouse'='%s')",
                         getTempDirPath()));
         tEnv.useCatalog("TABLE_STORE");
     }

@@ -170,7 +170,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         String catalog =
                 String.format(
-                        "CREATE CATALOG test_cat WITH ('type' = 'table-store', 'warehouse' = '%s')",
+                        "CREATE CATALOG test_cat WITH ('type' = 'paimon', 'warehouse' = '%s')",
                         getTempDirPath());
         String useCatalog = "USE CATALOG test_cat";
         String id =

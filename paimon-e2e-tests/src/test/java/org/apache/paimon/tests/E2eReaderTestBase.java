@@ -30,7 +30,7 @@ public abstract class E2eReaderTestBase extends E2eTestBase {
         return String.join(
                 "\n",
                 String.format("CREATE CATALOG %s WITH (", catalog),
-                "  'type' = 'table-store',",
+                "  'type' = 'paimon',",
                 options.length > 0 ? String.join(",", options) + "," : "",
                 String.format("  'warehouse' = '%s'", warehouse),
                 ");",

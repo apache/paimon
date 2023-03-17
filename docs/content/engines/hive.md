@@ -91,7 +91,7 @@ Execute the following Flink SQL script in Flink SQL client to define a Table Sto
 -- Define table store Hive catalog
 
 CREATE CATALOG my_hive WITH (
-  'type' = 'table-store',
+  'type' = 'paimon',
   'metastore' = 'hive',
   'uri' = 'thrift://<hive-metastore-host-name>:<port>',
   'warehouse' = '/path/to/table/store/warehouse'

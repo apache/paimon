@@ -43,7 +43,7 @@ The following Flink SQL registers and uses a Table Store catalog named `my_catal
 
 ```sql
 CREATE CATALOG my_catalog WITH (
-    'type' = 'table-store',
+    'type' = 'paimon',
     'warehouse' = 'hdfs://path/to/warehouse'
 );
 
@@ -118,7 +118,7 @@ The following Flink SQL registers and uses a Table Store Hive catalog named `my_
 
 ```sql
 CREATE CATALOG my_hive WITH (
-    'type' = 'table-store',
+    'type' = 'paimon',
     'metastore' = 'hive',
     'uri' = 'thrift://<hive-metastore-host-name>:<port>',
     'warehouse' = 'hdfs://path/to/warehouse'
