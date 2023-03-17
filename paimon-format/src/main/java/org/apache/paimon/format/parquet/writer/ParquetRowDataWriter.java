@@ -18,15 +18,15 @@
 
 package org.apache.paimon.format.parquet.writer;
 
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DecimalType;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.LocalZonedTimestampType;
-import org.apache.flink.table.store.types.MapType;
-import org.apache.flink.table.store.types.MultisetType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.types.TimestampType;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimestampType;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalArray;
@@ -45,7 +45,7 @@ import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.List;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.computeMinBytesForDecimalPrecision;
 import static org.apache.paimon.format.parquet.reader.TimestampColumnReader.JULIAN_EPOCH_OFFSET_DAYS;
 import static org.apache.paimon.format.parquet.reader.TimestampColumnReader.MILLIS_IN_DAY;

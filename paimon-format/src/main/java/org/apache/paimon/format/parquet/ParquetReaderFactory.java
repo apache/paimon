@@ -21,11 +21,11 @@ package org.apache.paimon.format.parquet;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.reader.RecordReader;
-import org.apache.flink.table.store.reader.RecordReader.RecordIterator;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.Pool;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.RecordReader.RecordIterator;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pool;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnVector;

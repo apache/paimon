@@ -22,7 +22,7 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.TestKeyValueGenerator;
 import org.apache.flink.table.store.file.io.DataFileTestDataGenerator;
 import org.apache.flink.table.store.file.stats.FieldStatsArraySerializer;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FieldStatsCollector;

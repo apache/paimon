@@ -32,8 +32,8 @@ import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.table.FileStoreTable;
-import org.apache.flink.table.store.table.sink.SinkRecord;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.SinkRecord;
 
 import org.apache.paimon.connector.BinaryRowTypeSerializer;
 import org.apache.paimon.data.BinaryRow;

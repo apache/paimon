@@ -24,7 +24,7 @@ import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreScan;
 import org.apache.flink.table.store.file.operation.AppendOnlyFileStoreWrite;
 import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.paimon.fs.FileIO;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;

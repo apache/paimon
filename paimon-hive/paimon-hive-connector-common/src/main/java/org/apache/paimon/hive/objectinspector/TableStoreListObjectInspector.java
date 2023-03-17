@@ -18,7 +18,7 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.flink.table.store.types.DataType;
+import org.apache.paimon.types.DataType;
 
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.objectinspector.ListObjectInspector;

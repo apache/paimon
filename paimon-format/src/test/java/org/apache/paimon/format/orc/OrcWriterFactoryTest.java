@@ -19,8 +19,8 @@
 package org.apache.paimon.format.orc;
 
 import org.apache.flink.table.store.fs.local.LocalFileIO.LocalPositionOutputStream;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DataTypes;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.hadoop.fs.Path;
 import org.apache.orc.MemoryManager;
@@ -35,7 +35,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests the behavior of {@link OrcWriterFactory}. */

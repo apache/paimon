@@ -20,11 +20,11 @@ package org.apache.paimon.format.orc.filter;
 
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DecimalType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.DateTimeUtils;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.orc.BooleanColumnStatistics;

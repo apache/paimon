@@ -17,7 +17,7 @@
 
 package org.apache.flink.table.store.file.utils;
 
-import org.apache.flink.table.store.types.RowKind;
+import org.apache.paimon.types.RowKind;
 
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryArrayWriter;

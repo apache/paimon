@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.format;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.file.stats.TestFileStatsExtractor;
 import org.apache.paimon.options.Options;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileStatsExtractor;

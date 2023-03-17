@@ -20,11 +20,11 @@ package org.apache.paimon.format.orc;
 
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.reader.RecordReader.RecordIterator;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.Pair;
-import org.apache.flink.table.store.utils.Pool;
+import org.apache.paimon.reader.RecordReader.RecordIterator;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Pool;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
@@ -48,7 +48,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.List;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.format.orc.reader.AbstractOrcColumnVector.createFlinkVector;
 import static org.apache.paimon.format.orc.reader.OrcSplitReaderUtil.toOrcType;
 
@@ -202,7 +202,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
      * skipped before.
      */
     private static final class OrcVectorizedReader
-            implements org.apache.flink.table.store.reader.RecordReader<InternalRow> {
+            implements org.apache.paimon.reader.RecordReader<InternalRow> {
 
         private final RecordReader orcReader;
         private final Pool<OrcReaderBatch> pool;

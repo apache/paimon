@@ -19,7 +19,7 @@
 package org.apache.flink.table.store.file.catalog;
 
 import org.apache.paimon.fs.Path;
-import org.apache.flink.table.store.utils.StringUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.annotation.Experimental;
 
@@ -27,7 +27,7 @@ import java.io.Serializable;
 import java.util.Objects;
 
 import static org.apache.flink.table.store.file.catalog.AbstractCatalog.DB_SUFFIX;
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Identifies an object in a catalog.

@@ -18,9 +18,9 @@
 
 package org.apache.paimon.data;
 
-import org.apache.flink.table.store.types.LocalZonedTimestampType;
-import org.apache.flink.table.store.types.TimestampType;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.annotation.Experimental;
 

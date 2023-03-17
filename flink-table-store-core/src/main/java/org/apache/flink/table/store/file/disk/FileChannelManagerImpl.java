@@ -20,8 +20,8 @@ package org.apache.flink.table.store.file.disk;
 
 import org.apache.flink.table.store.file.disk.FileIOChannel.Enumerator;
 import org.apache.flink.table.store.file.disk.FileIOChannel.ID;
-import org.apache.flink.table.store.utils.FileIOUtils;
-import org.apache.flink.table.store.utils.IOUtils;
+import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.IOUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,8 +35,8 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
-import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** The manager used for creating/deleting file channels based on config temp dirs. */
 public class FileChannelManagerImpl implements FileChannelManager {

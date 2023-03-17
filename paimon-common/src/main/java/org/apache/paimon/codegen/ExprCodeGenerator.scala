@@ -18,8 +18,8 @@
 package org.apache.flink.table.store.codegen
 
 import org.apache.paimon.data.{BinaryRow, InternalRow}
-import org.apache.flink.table.store.types.{RowType, TimestampType}
-import org.apache.flink.table.store.utils.TypeUtils.isInteroperable
+import org.apache.paimon.types.{RowType, TimestampType}
+import org.apache.paimon.utils.TypeUtils.isInteroperable
 
 import GeneratedExpression.{NEVER_NULL, NO_CODE}
 import GenerateUtils.{generateRecordStatement, rowSetField, DEFAULT_OUT_RECORD_TERM, DEFAULT_OUT_RECORD_WRITER_TERM}

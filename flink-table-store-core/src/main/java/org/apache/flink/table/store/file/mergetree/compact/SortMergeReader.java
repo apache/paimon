@@ -19,8 +19,8 @@
 package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.reader.RecordReader;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.data.InternalRow;
 

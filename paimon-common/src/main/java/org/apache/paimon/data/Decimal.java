@@ -18,7 +18,7 @@
 
 package org.apache.paimon.data;
 
-import org.apache.flink.table.store.types.DecimalType;
+import org.apache.paimon.types.DecimalType;
 
 import org.apache.paimon.annotation.Experimental;
 
@@ -30,7 +30,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.math.RoundingMode;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * An internal data structure representing data of {@link DecimalType}.

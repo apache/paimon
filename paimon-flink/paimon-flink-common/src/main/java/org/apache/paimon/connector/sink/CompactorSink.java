@@ -21,7 +21,7 @@ package org.apache.paimon.connector.sink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.flink.util.function.SerializableFunction;
 
 /** {@link FlinkSink} for dedicated compact jobs. */

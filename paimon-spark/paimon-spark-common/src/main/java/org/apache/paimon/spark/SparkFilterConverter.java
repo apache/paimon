@@ -20,8 +20,8 @@ package org.apache.paimon.spark;
 
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.spark.sql.sources.And;
 import org.apache.spark.sql.sources.EqualTo;

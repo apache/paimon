@@ -18,7 +18,7 @@
 
 package org.apache.paimon.options;
 
-import org.apache.flink.table.store.utils.TimeUtils;
+import org.apache.paimon.utils.TimeUtils;
 
 import javax.annotation.Nonnull;
 

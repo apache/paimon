@@ -25,7 +25,7 @@ import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushD
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.table.Table;
+import org.apache.paimon.table.Table;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.paimon.connector.LogicalTypeConversion;

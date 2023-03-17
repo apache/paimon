@@ -18,22 +18,22 @@
 
 package org.apache.flink.table.store.file.casting;
 
-import org.apache.flink.table.store.types.BigIntType;
-import org.apache.flink.table.store.types.BinaryType;
-import org.apache.flink.table.store.types.CharType;
-import org.apache.flink.table.store.types.DateType;
-import org.apache.flink.table.store.types.DecimalType;
-import org.apache.flink.table.store.types.DoubleType;
-import org.apache.flink.table.store.types.FloatType;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.SmallIntType;
-import org.apache.flink.table.store.types.TimeType;
-import org.apache.flink.table.store.types.TimestampType;
-import org.apache.flink.table.store.types.TinyIntType;
-import org.apache.flink.table.store.types.VarBinaryType;
-import org.apache.flink.table.store.types.VarCharType;
-import org.apache.flink.table.store.utils.DateTimeUtils;
-import org.apache.flink.table.store.utils.DecimalUtils;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DateType;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.SmallIntType;
+import org.apache.paimon.types.TimeType;
+import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.types.VarBinaryType;
+import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.DecimalUtils;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Timestamp;

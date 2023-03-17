@@ -18,8 +18,8 @@
 
 package org.apache.paimon.data.columnar;
 
-import org.apache.flink.table.store.reader.RecordReader;
-import org.apache.flink.table.store.utils.RecyclableIterator;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.RecyclableIterator;
 
 import org.apache.paimon.data.InternalRow;
 

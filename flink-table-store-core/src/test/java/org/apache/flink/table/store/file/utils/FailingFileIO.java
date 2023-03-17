@@ -27,7 +27,7 @@ import org.apache.paimon.fs.PositionOutputStreamWrapper;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.flink.table.store.utils.ExceptionUtils;
+import org.apache.paimon.utils.ExceptionUtils;
 
 import java.io.File;
 import java.io.FileNotFoundException;

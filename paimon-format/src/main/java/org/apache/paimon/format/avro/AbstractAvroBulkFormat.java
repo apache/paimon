@@ -20,10 +20,10 @@ package org.apache.paimon.format.avro;
 
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.reader.RecordReader;
-import org.apache.flink.table.store.utils.IOUtils;
-import org.apache.flink.table.store.utils.IteratorResultIterator;
-import org.apache.flink.table.store.utils.Pool;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.IteratorResultIterator;
+import org.apache.paimon.utils.Pool;
 
 import org.apache.avro.Schema;
 import org.apache.avro.file.DataFileReader;

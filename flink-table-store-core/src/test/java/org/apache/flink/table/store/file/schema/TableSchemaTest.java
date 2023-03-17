@@ -18,9 +18,9 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;

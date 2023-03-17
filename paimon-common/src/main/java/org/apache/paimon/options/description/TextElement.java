@@ -18,7 +18,7 @@
 
 package org.apache.paimon.options.description;
 
-import org.apache.flink.table.store.utils.StringUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import java.util.Arrays;
 import java.util.Collections;

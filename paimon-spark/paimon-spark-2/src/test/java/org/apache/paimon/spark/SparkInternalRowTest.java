@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.utils.DateTimeUtils;
+import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;

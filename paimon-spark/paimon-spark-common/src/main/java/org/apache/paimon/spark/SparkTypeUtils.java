@@ -18,27 +18,27 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.types.BigIntType;
-import org.apache.flink.table.store.types.BinaryType;
-import org.apache.flink.table.store.types.BooleanType;
-import org.apache.flink.table.store.types.CharType;
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DataTypeDefaultVisitor;
-import org.apache.flink.table.store.types.DateType;
-import org.apache.flink.table.store.types.DecimalType;
-import org.apache.flink.table.store.types.DoubleType;
-import org.apache.flink.table.store.types.FloatType;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.LocalZonedTimestampType;
-import org.apache.flink.table.store.types.MapType;
-import org.apache.flink.table.store.types.MultisetType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.types.SmallIntType;
-import org.apache.flink.table.store.types.TimestampType;
-import org.apache.flink.table.store.types.TinyIntType;
-import org.apache.flink.table.store.types.VarBinaryType;
-import org.apache.flink.table.store.types.VarCharType;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BooleanType;
+import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeDefaultVisitor;
+import org.apache.paimon.types.DateType;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.SmallIntType;
+import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.types.VarBinaryType;
+import org.apache.paimon.types.VarCharType;
 
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.DataTypes;
@@ -61,11 +61,11 @@ public class SparkTypeUtils {
         return (StructType) fromFlinkType(type);
     }
 
-    public static DataType fromFlinkType(org.apache.flink.table.store.types.DataType type) {
+    public static DataType fromFlinkType(org.apache.paimon.types.DataType type) {
         return type.accept(FlinkToSparkTypeVisitor.INSTANCE);
     }
 
-    public static org.apache.flink.table.store.types.DataType toFlinkType(DataType dataType) {
+    public static org.apache.paimon.types.DataType toFlinkType(DataType dataType) {
         return SparkToFlinkTypeVisitor.visit(dataType);
     }
 
@@ -150,7 +150,7 @@ public class SparkTypeUtils {
 
         @Override
         public DataType visit(ArrayType arrayType) {
-            org.apache.flink.table.store.types.DataType elementType = arrayType.getElementType();
+            org.apache.paimon.types.DataType elementType = arrayType.getElementType();
             return DataTypes.createArrayType(elementType.accept(this), elementType.isNullable());
         }
 
@@ -185,7 +185,7 @@ public class SparkTypeUtils {
         }
 
         @Override
-        protected DataType defaultMethod(org.apache.flink.table.store.types.DataType dataType) {
+        protected DataType defaultMethod(org.apache.paimon.types.DataType dataType) {
             throw new UnsupportedOperationException("Unsupported type: " + dataType);
         }
     }
@@ -194,15 +194,15 @@ public class SparkTypeUtils {
 
         private final AtomicInteger currentIndex = new AtomicInteger(0);
 
-        static org.apache.flink.table.store.types.DataType visit(DataType type) {
+        static org.apache.paimon.types.DataType visit(DataType type) {
             return visit(type, new SparkToFlinkTypeVisitor());
         }
 
-        static org.apache.flink.table.store.types.DataType visit(
+        static org.apache.paimon.types.DataType visit(
                 DataType type, SparkToFlinkTypeVisitor visitor) {
             if (type instanceof StructType) {
                 StructField[] fields = ((StructType) type).fields();
-                List<org.apache.flink.table.store.types.DataType> fieldResults =
+                List<org.apache.paimon.types.DataType> fieldResults =
                         new ArrayList<>(fields.length);
 
                 for (StructField field : fields) {
@@ -232,13 +232,13 @@ public class SparkTypeUtils {
             }
         }
 
-        public org.apache.flink.table.store.types.DataType struct(
-                StructType struct, List<org.apache.flink.table.store.types.DataType> fieldResults) {
+        public org.apache.paimon.types.DataType struct(
+                StructType struct, List<org.apache.paimon.types.DataType> fieldResults) {
             StructField[] fields = struct.fields();
             List<DataField> newFields = new ArrayList<>(fields.length);
             for (int i = 0; i < fields.length; i += 1) {
                 StructField field = fields[i];
-                org.apache.flink.table.store.types.DataType fieldType =
+                org.apache.paimon.types.DataType fieldType =
                         fieldResults.get(i).copy(field.nullable());
                 String comment = field.getComment().getOrElse(() -> null);
                 newFields.add(
@@ -249,20 +249,20 @@ public class SparkTypeUtils {
             return new RowType(newFields);
         }
 
-        public org.apache.flink.table.store.types.DataType array(
+        public org.apache.paimon.types.DataType array(
                 org.apache.spark.sql.types.ArrayType array,
-                org.apache.flink.table.store.types.DataType elementResult) {
+                org.apache.paimon.types.DataType elementResult) {
             return new ArrayType(elementResult.copy(array.containsNull()));
         }
 
-        public org.apache.flink.table.store.types.DataType map(
+        public org.apache.paimon.types.DataType map(
                 org.apache.spark.sql.types.MapType map,
-                org.apache.flink.table.store.types.DataType keyResult,
-                org.apache.flink.table.store.types.DataType valueResult) {
+                org.apache.paimon.types.DataType keyResult,
+                org.apache.paimon.types.DataType valueResult) {
             return new MapType(keyResult.copy(false), valueResult.copy(map.valueContainsNull()));
         }
 
-        public org.apache.flink.table.store.types.DataType atomic(DataType atomic) {
+        public org.apache.paimon.types.DataType atomic(DataType atomic) {
             if (atomic instanceof org.apache.spark.sql.types.BooleanType) {
                 return new BooleanType();
             } else if (atomic instanceof org.apache.spark.sql.types.ByteType) {

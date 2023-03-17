@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format.orc.reader;
 
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.hadoop.hive.ql.exec.vector.StructColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;

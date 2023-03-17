@@ -18,7 +18,7 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.flink.table.store.utils.StringUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
 import org.apache.hadoop.hive.metastore.api.MetaException;

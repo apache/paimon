@@ -22,7 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Helper class for splitting a string on a given delimiter with quoting logic. */
 class StructuredOptionsSplitter {

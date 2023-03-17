@@ -21,7 +21,7 @@ package org.apache.paimon.connector;
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.StringData;
-import org.apache.flink.table.store.types.RowKind;
+import org.apache.paimon.types.RowKind;
 import org.apache.flink.table.types.logical.LogicalType;
 
 import org.apache.paimon.data.BinaryString;

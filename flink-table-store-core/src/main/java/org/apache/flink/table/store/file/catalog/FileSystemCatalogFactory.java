@@ -21,7 +21,7 @@ package org.apache.flink.table.store.file.catalog;
 import org.apache.flink.table.store.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.flink.table.store.table.TableType;
+import org.apache.paimon.table.TableType;
 
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 

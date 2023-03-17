@@ -21,7 +21,7 @@ package org.apache.paimon.hive.mapred;
 import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
-import org.apache.flink.table.store.table.source.DataSplit;
+import org.apache.paimon.table.source.DataSplit;
 
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.mapred.FileSplit;

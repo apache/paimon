@@ -20,14 +20,14 @@ package org.apache.paimon.data;
 
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
-import org.apache.flink.table.store.types.DataType;
+import org.apache.paimon.types.DataType;
 
 import org.apache.paimon.annotation.Experimental;
 
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * [4 byte(keyArray size in bytes)] + [Key BinaryArray] + [Value BinaryArray].

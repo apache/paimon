@@ -22,7 +22,7 @@ import org.apache.flink.table.store.codegen.RecordComparator;
 import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.utils.ReusingTestData;
 import org.apache.flink.table.store.file.utils.TestReusingRecordReader;
-import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.paimon.reader.RecordReader;
 
 import org.junit.jupiter.api.RepeatedTest;
 

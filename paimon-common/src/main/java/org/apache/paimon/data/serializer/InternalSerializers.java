@@ -18,16 +18,16 @@
 
 package org.apache.paimon.data.serializer;
 
-import org.apache.flink.table.store.types.ArrayType;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.MapType;
-import org.apache.flink.table.store.types.MultisetType;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
+import org.apache.paimon.types.RowType;
 
-import static org.apache.flink.table.store.types.DataTypeChecks.getFieldTypes;
-import static org.apache.flink.table.store.types.DataTypeChecks.getPrecision;
-import static org.apache.flink.table.store.types.DataTypeChecks.getScale;
+import static org.apache.paimon.types.DataTypeChecks.getFieldTypes;
+import static org.apache.paimon.types.DataTypeChecks.getPrecision;
+import static org.apache.paimon.types.DataTypeChecks.getScale;
 
 /** {@link Serializer} of {@link DataType} for internal data structures. */
 public final class InternalSerializers {

@@ -19,7 +19,7 @@
 package org.apache.paimon.connector.sink;
 
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
-import org.apache.flink.table.store.table.sink.SinkRecord;
+import org.apache.paimon.table.sink.SinkRecord;
 
 /** Log {@link SinkFunction} with {@link WriteCallback}. */
 public interface LogSinkFunction extends SinkFunction<SinkRecord> {

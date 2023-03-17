@@ -26,11 +26,11 @@ import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.lookup.LookupStoreWriter;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
-import org.apache.flink.table.store.reader.RecordReader;
-import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.FileIOUtils;
-import org.apache.flink.table.store.utils.IOFunction;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.IOFunction;
 
 import org.apache.flink.shaded.guava30.com.google.common.cache.Cache;
 import org.apache.flink.shaded.guava30.com.google.common.cache.CacheBuilder;

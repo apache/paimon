@@ -21,8 +21,8 @@ package org.apache.flink.table.store.file.utils;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.memory.MemorySegment;
-import org.apache.flink.table.store.types.VarBinaryType;
-import org.apache.flink.table.store.types.VarCharType;
+import org.apache.paimon.types.VarBinaryType;
+import org.apache.paimon.types.VarCharType;
 
 import org.apache.paimon.data.BinaryRow;
 

@@ -19,9 +19,9 @@ package org.apache.paimon.data;
 
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
-import org.apache.flink.table.store.types.RowKind;
+import org.apache.paimon.types.RowKind;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.data.BinaryRow.calculateBitSetWidthInBytes;
 
 /**

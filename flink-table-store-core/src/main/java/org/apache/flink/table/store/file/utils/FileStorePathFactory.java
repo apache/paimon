@@ -22,8 +22,8 @@ import org.apache.flink.table.store.CoreOptions;
 import org.apache.flink.table.store.file.io.DataFilePathFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.ConfigOption;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;

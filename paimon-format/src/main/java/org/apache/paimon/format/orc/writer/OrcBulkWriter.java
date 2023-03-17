@@ -25,7 +25,7 @@ import org.apache.paimon.format.FormatWriter;
 
 import java.io.IOException;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** A {@link FormatWriter} implementation that writes data in ORC format. */
 public class OrcBulkWriter implements FormatWriter {

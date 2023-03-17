@@ -18,8 +18,8 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.utils.RowDataUtils;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.RowDataUtils;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;

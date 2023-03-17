@@ -26,7 +26,7 @@ import org.apache.flink.table.store.file.mergetree.compact.MergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.MergeFunctionWrapper;
 import org.apache.flink.table.store.file.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.flink.table.store.file.mergetree.compact.SortMergeReader;
-import org.apache.flink.table.store.reader.RecordReader;
+import org.apache.paimon.reader.RecordReader;
 
 import org.apache.paimon.data.InternalRow;
 

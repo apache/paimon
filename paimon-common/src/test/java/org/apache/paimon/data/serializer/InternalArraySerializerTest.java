@@ -19,7 +19,7 @@
 package org.apache.paimon.data.serializer;
 
 import org.apache.paimon.memory.MemorySegment;
-import org.apache.flink.table.store.types.DataTypes;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryArrayWriter;

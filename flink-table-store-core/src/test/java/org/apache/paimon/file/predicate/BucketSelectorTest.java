@@ -18,8 +18,8 @@
 
 package org.apache.paimon.file.predicate;
 
-import org.apache.flink.table.store.types.IntType;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 

@@ -17,7 +17,7 @@
 
 package org.apache.flink.table.store.codegen.codesplit;
 
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.utils.Preconditions;
 
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;

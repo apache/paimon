@@ -18,7 +18,7 @@
 
 package org.apache.paimon.connector.source;
 
-import org.apache.flink.table.store.table.source.TableScan;
+import org.apache.paimon.table.source.TableScan;
 
 import java.util.List;
 import java.util.stream.Collectors;

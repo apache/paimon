@@ -37,7 +37,7 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Operator to commit {@link Committable}s for each snapshot. */
 public class CommitterOperator extends AbstractStreamOperator<Committable>

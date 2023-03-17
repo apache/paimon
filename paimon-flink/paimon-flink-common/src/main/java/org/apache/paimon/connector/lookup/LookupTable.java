@@ -18,7 +18,7 @@
 
 package org.apache.paimon.connector.lookup;
 
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.data.InternalRow;
 

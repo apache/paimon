@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.codegen;
 
-import org.apache.flink.table.store.plugin.PluginLoader;
+import org.apache.paimon.plugin.PluginLoader;
 
 /** Copied and modified from the flink-table-planner-loader module. */
 public class CodeGenLoader {

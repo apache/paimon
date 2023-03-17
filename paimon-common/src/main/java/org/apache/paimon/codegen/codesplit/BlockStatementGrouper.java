@@ -19,7 +19,7 @@ package org.apache.flink.table.store.codegen.codesplit;
 
 import org.apache.flink.table.store.codegen.codesplit.JavaParser.BlockStatementContext;
 import org.apache.flink.table.store.codegen.codesplit.JavaParser.StatementContext;
-import org.apache.flink.table.store.utils.Pair;
+import org.apache.paimon.utils.Pair;
 
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;

@@ -18,8 +18,8 @@
 
 package org.apache.paimon.file.predicate;
 
-import org.apache.flink.table.store.table.sink.BucketComputer;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.table.sink.BucketComputer;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableSet;
 

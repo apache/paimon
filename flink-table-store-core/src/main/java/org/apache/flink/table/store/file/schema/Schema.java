@@ -18,10 +18,10 @@
 
 package org.apache.flink.table.store.file.schema;
 
-import org.apache.flink.table.store.types.DataField;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.annotation.Experimental;
 

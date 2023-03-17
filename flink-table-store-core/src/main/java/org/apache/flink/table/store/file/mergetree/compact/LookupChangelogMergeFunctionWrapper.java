@@ -19,13 +19,13 @@
 package org.apache.flink.table.store.file.mergetree.compact;
 
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.types.RowKind;
+import org.apache.paimon.types.RowKind;
 
 import org.apache.paimon.data.InternalRow;
 
 import java.util.function.Function;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Wrapper for {@link MergeFunction}s to produce changelog by lookup during the compaction involving

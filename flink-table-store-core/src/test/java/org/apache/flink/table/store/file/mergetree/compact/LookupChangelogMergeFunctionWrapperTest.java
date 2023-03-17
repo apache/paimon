@@ -22,7 +22,7 @@ import org.apache.flink.table.store.file.KeyValue;
 import org.apache.flink.table.store.file.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.flink.table.store.file.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.flink.table.store.file.mergetree.compact.aggregate.FieldSumAgg;
-import org.apache.flink.table.store.types.DataTypes;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
@@ -33,10 +33,10 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.flink.table.store.file.io.DataFileTestUtils.row;
-import static org.apache.flink.table.store.types.RowKind.DELETE;
-import static org.apache.flink.table.store.types.RowKind.INSERT;
-import static org.apache.flink.table.store.types.RowKind.UPDATE_AFTER;
-import static org.apache.flink.table.store.types.RowKind.UPDATE_BEFORE;
+import static org.apache.paimon.types.RowKind.DELETE;
+import static org.apache.paimon.types.RowKind.INSERT;
+import static org.apache.paimon.types.RowKind.UPDATE_AFTER;
+import static org.apache.paimon.types.RowKind.UPDATE_BEFORE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link LookupChangelogMergeFunctionWrapper}. */

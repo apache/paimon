@@ -18,10 +18,10 @@
 
 package org.apache.paimon.data;
 
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.DataTypeChecks;
-import org.apache.flink.table.store.types.RowKind;
-import org.apache.flink.table.store.types.RowType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.annotation.Experimental;
 
@@ -29,8 +29,8 @@ import javax.annotation.Nullable;
 
 import java.io.Serializable;
 
-import static org.apache.flink.table.store.types.DataTypeChecks.getPrecision;
-import static org.apache.flink.table.store.types.DataTypeChecks.getScale;
+import static org.apache.paimon.types.DataTypeChecks.getPrecision;
+import static org.apache.paimon.types.DataTypeChecks.getScale;
 
 /**
  * Base interface for an internal data structure representing data of {@link RowType}.

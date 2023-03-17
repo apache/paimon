@@ -23,7 +23,7 @@ import org.apache.parquet.io.PositionOutputStream;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.apache.flink.table.store.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * An implementation of Parquet's {@link OutputFile} interface that goes against a Flink {@link

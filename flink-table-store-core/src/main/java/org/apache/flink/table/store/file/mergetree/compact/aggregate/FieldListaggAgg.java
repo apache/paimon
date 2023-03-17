@@ -18,8 +18,8 @@
 
 package org.apache.flink.table.store.file.mergetree.compact.aggregate;
 
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.utils.StringUtils;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.data.BinaryString;
 

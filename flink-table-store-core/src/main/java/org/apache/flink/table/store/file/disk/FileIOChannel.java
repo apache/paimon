@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.store.file.disk;
 
-import org.apache.flink.table.store.utils.StringUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.annotation.Experimental;
 

@@ -20,9 +20,9 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateBuilder;
-import org.apache.flink.table.store.types.DataType;
-import org.apache.flink.table.store.types.RowType;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.hive.ql.io.sarg.ExpressionTree;
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;

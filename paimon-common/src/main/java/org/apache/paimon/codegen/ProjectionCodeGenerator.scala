@@ -19,7 +19,7 @@ package org.apache.flink.table.store.codegen
 
 import org.apache.flink.table.store.codegen.GenerateUtils.{generateRecordStatement, newName, DEFAULT_INPUT1_TERM, DEFAULT_OUT_RECORD_TERM, DEFAULT_OUT_RECORD_WRITER_TERM, ROW_DATA}
 import org.apache.paimon.data.{BinaryRow, InternalRow}
-import org.apache.flink.table.store.types.RowType
+import org.apache.paimon.types.RowType
 
 import GeneratedExpression.{NEVER_NULL, NO_CODE}
 

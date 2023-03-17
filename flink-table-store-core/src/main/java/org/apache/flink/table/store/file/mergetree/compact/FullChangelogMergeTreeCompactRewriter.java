@@ -23,7 +23,7 @@ import org.apache.flink.table.store.file.io.DataFileMeta;
 import org.apache.flink.table.store.file.io.KeyValueFileReaderFactory;
 import org.apache.flink.table.store.file.io.KeyValueFileWriterFactory;
 import org.apache.flink.table.store.file.mergetree.SortedRun;
-import org.apache.flink.table.store.utils.Preconditions;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.data.InternalRow;
 
