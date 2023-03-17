@@ -23,8 +23,8 @@ import org.apache.flink.connector.base.source.hybrid.HybridSource;
 import org.apache.flink.connector.base.source.hybrid.HybridSource.SourceFactory;
 import org.apache.flink.table.data.RowData;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.connector.log.LogSourceProvider;
-import org.apache.paimon.file.Snapshot;
 
 import java.util.Map;
 

@@ -20,8 +20,8 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.operation.ScanKind;
-import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.utils.SnapshotManager;
 
 /**
  * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_SNAPSHOT} startup mode of a

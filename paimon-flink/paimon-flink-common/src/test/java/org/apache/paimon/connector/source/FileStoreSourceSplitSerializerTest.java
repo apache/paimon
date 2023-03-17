@@ -22,7 +22,7 @@ import org.apache.flink.core.io.SimpleVersionedSerialization;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.file.stats.StatsTestUtils;
+import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.source.DataSplit;
 import org.junit.jupiter.api.Test;
 

@@ -18,9 +18,9 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.casting.CastedRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 

@@ -18,11 +18,11 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.file.stats.BinaryTableStats;
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.table.source.DataSplit;
 import org.junit.jupiter.api.Test;
 

@@ -19,11 +19,11 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.file.WriteMode;
+import org.apache.paimon.WriteMode;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.file.stats.BinaryTableStats;
+import org.apache.paimon.stats.BinaryTableStats;
 import org.junit.jupiter.api.BeforeEach;
 
 import java.util.Collections;

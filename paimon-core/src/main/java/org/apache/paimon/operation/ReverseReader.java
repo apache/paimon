@@ -18,7 +18,7 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.file.KeyValue;
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowKind;
 

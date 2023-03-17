@@ -19,7 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.file.WriteMode;
+import org.apache.paimon.WriteMode;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.junit.jupiter.api.BeforeEach;

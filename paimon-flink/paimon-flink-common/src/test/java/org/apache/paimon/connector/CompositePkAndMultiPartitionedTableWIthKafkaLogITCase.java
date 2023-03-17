@@ -21,7 +21,7 @@ package org.apache.paimon.connector;
 import org.apache.flink.types.Row;
 
 import org.apache.paimon.connector.kafka.KafkaTableTestBase;
-import org.apache.paimon.file.utils.BlockingIterator;
+import org.apache.paimon.utils.BlockingIterator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

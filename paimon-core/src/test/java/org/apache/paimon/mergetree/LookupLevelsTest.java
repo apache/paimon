@@ -18,29 +18,29 @@
 
 package org.apache.paimon.mergetree;
 
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.KeyValue;
-import org.apache.paimon.file.format.FlushingFileFormat;
+import org.apache.paimon.format.FlushingFileFormat;
+import org.apache.paimon.fs.FileIOFinder;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
-import org.apache.paimon.schema.KeyValueFieldsExtractor;
-import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.file.utils.FileStorePathFactory;
-import org.apache.paimon.fs.FileIOFinder;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.schema.KeyValueFieldsExtractor;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SchemaEvolutionTableTestBase;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -57,7 +57,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
-import static org.apache.paimon.file.KeyValue.UNKNOWN_SEQUENCE;
+import static org.apache.paimon.KeyValue.UNKNOWN_SEQUENCE;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 

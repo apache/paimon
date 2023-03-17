@@ -19,17 +19,16 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.FileStore;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.file.FileStore;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.file.utils.SnapshotManager;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.BatchDataTableScan;
 import org.apache.paimon.table.source.BatchDataTableScanImpl;
@@ -38,6 +37,7 @@ import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.StreamDataTableScanImpl;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
+import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.Map;
 import java.util.Objects;

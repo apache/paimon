@@ -18,8 +18,8 @@
 
 package org.apache.paimon.manifest;
 
-import org.apache.paimon.file.utils.ObjectSerializer;
-import org.apache.paimon.file.utils.ObjectSerializerTestBase;
+import org.apache.paimon.utils.ObjectSerializer;
+import org.apache.paimon.utils.ObjectSerializerTestBase;
 
 /** Tests for {@link ManifestEntrySerializerTest}. */
 public class ManifestEntrySerializerTest extends ObjectSerializerTestBase<ManifestEntry> {

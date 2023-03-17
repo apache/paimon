@@ -20,10 +20,10 @@ package org.apache.paimon.connector.source;
 
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
 
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;

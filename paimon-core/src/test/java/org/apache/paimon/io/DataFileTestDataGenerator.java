@@ -18,11 +18,11 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.KeyValue;
+import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.file.KeyValue;
-import org.apache.paimon.file.TestKeyValueGenerator;
-import org.apache.paimon.file.stats.FieldStatsArraySerializer;
 import org.apache.paimon.format.FieldStatsCollector;
+import org.apache.paimon.stats.FieldStatsArraySerializer;
 
 import java.util.ArrayList;
 import java.util.HashMap;

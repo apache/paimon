@@ -18,15 +18,15 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.file.KeyValue;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.file.utils.SnapshotManager;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.utils.SnapshotManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 

@@ -19,8 +19,8 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.utils.SnapshotManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

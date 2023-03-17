@@ -18,8 +18,11 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.KeyValue;
+import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.KeyValue;
+import org.apache.paimon.format.FileFormatDiscover;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.mergetree.DropDeleteReader;
@@ -31,15 +34,13 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.file.utils.FileStorePathFactory;
-import org.apache.paimon.format.FileFormatDiscover;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
@@ -56,7 +57,7 @@ import static org.apache.paimon.io.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
 import static org.apache.paimon.predicate.PredicateBuilder.containsFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
-/** {@link FileStoreRead} implementation for {@link org.apache.paimon.file.KeyValueFileStore}. */
+/** {@link FileStoreRead} implementation for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     private final TableSchema tableSchema;

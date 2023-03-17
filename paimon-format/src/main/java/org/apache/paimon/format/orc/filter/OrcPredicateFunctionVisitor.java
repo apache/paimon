@@ -34,8 +34,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Convert {@link org.apache.paimon.predicate.Predicate} to {@link OrcFilters.Predicate} for
- * orc.
+ * Convert {@link org.apache.paimon.predicate.Predicate} to {@link OrcFilters.Predicate} for orc.
  */
 public class OrcPredicateFunctionVisitor
         implements FunctionVisitor<Optional<OrcFilters.Predicate>> {

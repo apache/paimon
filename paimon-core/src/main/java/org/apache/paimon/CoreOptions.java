@@ -20,7 +20,6 @@ package org.apache.paimon;
 
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
-import org.apache.paimon.file.WriteMode;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.ConfigOption;

@@ -21,6 +21,8 @@ package org.apache.paimon.schema;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.casting.CastExecutors;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
@@ -31,15 +33,13 @@ import org.apache.paimon.schema.SchemaChange.UpdateColumnComment;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnNullability;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnPosition;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnType;
-import org.apache.paimon.file.utils.JsonSerdeUtil;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
 import org.apache.paimon.types.DataTypeVisitor;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
@@ -58,7 +58,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.file.utils.FileUtils.listVersionedFiles;
+import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Schema Manager to manage schema versions. */

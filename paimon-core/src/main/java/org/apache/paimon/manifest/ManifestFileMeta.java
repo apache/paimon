@@ -18,8 +18,8 @@
 
 package org.apache.paimon.manifest;
 
-import org.apache.paimon.file.stats.BinaryTableStats;
-import org.apache.paimon.file.stats.FieldStatsArraySerializer;
+import org.apache.paimon.stats.BinaryTableStats;
+import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;

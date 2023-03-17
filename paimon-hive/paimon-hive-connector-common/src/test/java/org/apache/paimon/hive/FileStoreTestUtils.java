@@ -19,11 +19,12 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.FileStore;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.RowType;
@@ -32,7 +33,7 @@ import java.util.List;
 
 import static org.apache.paimon.CoreOptions.PATH;
 
-/** Test utils related to {@link org.apache.paimon.file.FileStore}. */
+/** Test utils related to {@link FileStore}. */
 public class FileStoreTestUtils {
 
     public static FileStoreTable createFileStoreTable(

@@ -18,17 +18,17 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.file.KeyValue;
-import org.apache.paimon.file.stats.BinaryTableStats;
-import org.apache.paimon.file.stats.FieldStatsArraySerializer;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.stats.BinaryTableStats;
+import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.RowType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

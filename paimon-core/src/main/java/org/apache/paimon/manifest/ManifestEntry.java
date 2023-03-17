@@ -20,11 +20,11 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.file.utils.FileStorePathFactory;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
@@ -34,7 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import static org.apache.paimon.file.utils.SerializationUtils.newBytesType;
+import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 
 /** Entry of a manifest file, representing an addition / deletion of a data file. */
 public class ManifestEntry {

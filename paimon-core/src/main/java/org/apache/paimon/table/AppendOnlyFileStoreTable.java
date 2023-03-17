@@ -18,19 +18,19 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.AppendOnlyFileStore;
-import org.apache.paimon.file.WriteMode;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.AppendOnlyFileStoreRead;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ReverseReader;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.SinkRecordConverter;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;

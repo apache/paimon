@@ -20,14 +20,18 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.KeyValue;
+import org.apache.paimon.KeyValue;
+import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormatDiscover;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
+import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.MergeTreeWriter;
@@ -42,13 +46,10 @@ import org.apache.paimon.mergetree.compact.MergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.UniversalCompaction;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.file.utils.CommitIncrement;
-import org.apache.paimon.file.utils.FileStorePathFactory;
-import org.apache.paimon.file.utils.SnapshotManager;
-import org.apache.paimon.format.FileFormatDiscover;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.SnapshotManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,7 +62,7 @@ import java.util.function.Supplier;
 
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
 
-/** {@link FileStoreWrite} for {@link org.apache.paimon.file.KeyValueFileStore}. */
+/** {@link FileStoreWrite} for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
 
     private static final Logger LOG = LoggerFactory.getLogger(KeyValueFileStoreWrite.class);

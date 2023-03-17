@@ -20,7 +20,6 @@ package org.apache.paimon.memory;
 
 import org.apache.paimon.annotation.Experimental;
 
-
 import java.nio.ByteBuffer;
 
 /**

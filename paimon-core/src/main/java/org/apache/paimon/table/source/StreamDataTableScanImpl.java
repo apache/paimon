@@ -19,8 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.file.Snapshot;
-import org.apache.paimon.file.utils.SnapshotManager;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.table.source.snapshot.BoundedWatermarkFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
@@ -30,6 +29,7 @@ import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.InputChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
+import org.apache.paimon.utils.SnapshotManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

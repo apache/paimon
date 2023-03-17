@@ -31,7 +31,7 @@ import org.apache.flink.util.CloseableIterator;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.connector.ReadWriteTableITCase;
 import org.apache.paimon.connector.StreamingReadWriteTableWithKafkaLogITCase;
-import org.apache.paimon.file.utils.BlockingIterator;
+import org.apache.paimon.utils.BlockingIterator;
 
 import javax.annotation.Nullable;
 

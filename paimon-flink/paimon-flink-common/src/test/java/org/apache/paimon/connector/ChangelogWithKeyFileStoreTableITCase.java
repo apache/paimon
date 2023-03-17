@@ -33,8 +33,8 @@ import org.apache.flink.util.CloseableIterator;
 
 import org.apache.paimon.connector.action.FlinkActions;
 import org.apache.paimon.connector.util.AbstractTestBase;
-import org.apache.paimon.file.utils.FailingFileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.utils.FailingFileIO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;

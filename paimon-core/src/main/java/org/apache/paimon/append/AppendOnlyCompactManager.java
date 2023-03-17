@@ -18,13 +18,14 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactFutureManager;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactTask;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
@@ -38,7 +39,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
-/** Compact manager for {@link org.apache.paimon.file.AppendOnlyFileStore}. */
+/** Compact manager for {@link AppendOnlyFileStore}. */
 public class AppendOnlyCompactManager extends CompactFutureManager {
 
     private final FileIO fileIO;

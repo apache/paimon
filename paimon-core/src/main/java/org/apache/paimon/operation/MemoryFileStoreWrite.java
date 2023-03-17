@@ -21,12 +21,12 @@ package org.apache.paimon.operation;
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemoryPoolFactory;
-import org.apache.paimon.file.utils.RecordWriter;
-import org.apache.paimon.file.utils.SnapshotManager;
-import org.apache.paimon.io.cache.CacheManager;
+import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.Iterator;
 import java.util.Map;

@@ -26,12 +26,12 @@ import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 
 import org.apache.paimon.connector.VersionedSerializerWrapper;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.manifest.ManifestCommittableSerializer;
-import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.utils.SnapshotManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

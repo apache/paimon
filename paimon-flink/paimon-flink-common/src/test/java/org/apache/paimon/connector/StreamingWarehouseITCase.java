@@ -23,7 +23,7 @@ import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.types.Row;
 
 import org.apache.paimon.connector.kafka.KafkaTableTestBase;
-import org.apache.paimon.file.utils.BlockingIterator;
+import org.apache.paimon.utils.BlockingIterator;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;

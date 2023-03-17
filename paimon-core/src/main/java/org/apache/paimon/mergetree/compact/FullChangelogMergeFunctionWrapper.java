@@ -18,7 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
-import org.apache.paimon.file.KeyValue;
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Preconditions;
 

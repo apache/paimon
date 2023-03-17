@@ -21,11 +21,11 @@ package org.apache.paimon.hive;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.objectinspector.TableStoreRowDataObjectInspector;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

@@ -23,12 +23,11 @@ import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.file.utils.IteratorRecordReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -37,6 +36,7 @@ import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 
 import java.io.IOException;
@@ -47,7 +47,7 @@ import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
-import static org.apache.paimon.file.utils.SerializationUtils.newStringType;
+import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
 /** A {@link Table} for showing options of table. */
 public class OptionsTable implements ReadonlyTable {

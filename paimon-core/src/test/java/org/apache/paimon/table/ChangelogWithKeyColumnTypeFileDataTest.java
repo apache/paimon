@@ -19,8 +19,8 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.WriteMode;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
