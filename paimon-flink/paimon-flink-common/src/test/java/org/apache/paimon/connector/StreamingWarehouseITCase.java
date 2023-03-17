@@ -20,10 +20,10 @@ package org.apache.paimon.connector;
 
 import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.types.Row;
 
 import org.apache.paimon.connector.kafka.KafkaTableTestBase;
+import org.apache.paimon.file.utils.BlockingIterator;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;

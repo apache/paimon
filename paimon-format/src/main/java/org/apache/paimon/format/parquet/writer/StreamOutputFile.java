@@ -36,7 +36,7 @@ public class StreamOutputFile implements OutputFile {
 
     private static final long DEFAULT_BLOCK_SIZE = 64L * 1024L * 1024L;
 
-    private final org.apache.flink.table.store.fs.PositionOutputStream stream;
+    private final org.apache.paimon.fs.PositionOutputStream stream;
 
     private final AtomicBoolean used;
 
@@ -46,7 +46,7 @@ public class StreamOutputFile implements OutputFile {
      *
      * @param stream The stream to write to.
      */
-    public StreamOutputFile(org.apache.flink.table.store.fs.PositionOutputStream stream) {
+    public StreamOutputFile(org.apache.paimon.fs.PositionOutputStream stream) {
         this.stream = checkNotNull(stream);
         this.used = new AtomicBoolean(false);
     }

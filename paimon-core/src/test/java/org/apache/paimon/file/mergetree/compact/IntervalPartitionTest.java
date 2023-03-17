@@ -18,8 +18,7 @@
 
 package org.apache.paimon.file.mergetree.compact;
 
-import org.apache.flink.table.store.codegen.RecordComparator;
-
+import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.Timestamp;

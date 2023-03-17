@@ -27,14 +27,14 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
-import org.apache.flink.table.store.file.utils.FailingFileIO;
-import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 
 import org.apache.paimon.connector.action.FlinkActions;
 import org.apache.paimon.connector.util.AbstractTestBase;
+import org.apache.paimon.file.utils.FailingFileIO;
+import org.apache.paimon.fs.Path;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;

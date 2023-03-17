@@ -25,14 +25,14 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.paimon.connector.CatalogITCaseBase;
 import org.apache.paimon.connector.FlinkConnectorOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.file.io.DataFileMeta;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.SinkRecord;

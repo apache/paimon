@@ -24,9 +24,9 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 
-import static org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.apache.paimon.connector.source.FileStoreSourceSplitSerializerTest.newFile;
 import static org.apache.paimon.connector.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
+import static org.apache.paimon.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for the {@link FileStoreSourceSplitState}. */

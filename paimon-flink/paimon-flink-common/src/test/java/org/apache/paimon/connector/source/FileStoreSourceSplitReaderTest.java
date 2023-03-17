@@ -24,19 +24,19 @@ import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.KeyValue;
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.schema.Schema;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.utils.RecordWriter;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.file.KeyValue;
+import org.apache.paimon.file.io.DataFileMeta;
+import org.apache.paimon.file.schema.Schema;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.file.utils.RecordWriter;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.table.source.TableRead;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,10 +51,10 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.apache.paimon.connector.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.connector.source.FileStoreSourceSplitSerializerTest.newFile;
 import static org.apache.paimon.connector.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
+import static org.apache.paimon.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

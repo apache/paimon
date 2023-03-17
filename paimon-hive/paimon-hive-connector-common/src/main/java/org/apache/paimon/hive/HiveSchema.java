@@ -19,8 +19,6 @@
 package org.apache.paimon.hive;
 
 import org.apache.flink.table.store.catalog.CatalogContext;
-import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.fs.Path;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
@@ -29,6 +27,8 @@ import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataField;

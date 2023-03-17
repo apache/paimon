@@ -18,11 +18,11 @@
 
 package org.apache.paimon.connector.action;
 
-import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.types.Row;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.file.Snapshot;
+import org.apache.paimon.file.utils.BlockingIterator;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;

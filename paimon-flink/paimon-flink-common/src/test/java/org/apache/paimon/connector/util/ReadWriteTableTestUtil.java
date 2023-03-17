@@ -25,13 +25,13 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
-import org.apache.flink.table.store.file.utils.BlockingIterator;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.connector.ReadWriteTableITCase;
 import org.apache.paimon.connector.StreamingReadWriteTableWithKafkaLogITCase;
+import org.apache.paimon.file.utils.BlockingIterator;
 
 import javax.annotation.Nullable;
 

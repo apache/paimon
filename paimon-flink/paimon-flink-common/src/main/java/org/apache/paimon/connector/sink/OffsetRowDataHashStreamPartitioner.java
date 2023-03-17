@@ -23,10 +23,10 @@ import org.apache.flink.runtime.plugable.SerializationDelegate;
 import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.utils.OffsetRow;
 
 import org.apache.paimon.connector.FlinkRowWrapper;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.file.utils.OffsetRow;
 import org.apache.paimon.types.RowType;
 
 /**

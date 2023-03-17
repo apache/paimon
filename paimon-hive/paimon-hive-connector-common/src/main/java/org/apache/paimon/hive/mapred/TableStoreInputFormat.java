@@ -19,7 +19,6 @@
 package org.apache.paimon.hive.mapred;
 
 import org.apache.flink.table.store.catalog.CatalogContext;
-import org.apache.flink.table.store.file.schema.TableSchema;
 
 import org.apache.hadoop.hive.ql.io.sarg.ConvertAstToSearchArg;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
@@ -31,6 +30,7 @@ import org.apache.hadoop.mapred.RecordReader;
 import org.apache.hadoop.mapred.Reporter;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.file.predicate.Predicate;
+import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.hive.RowDataContainer;
 import org.apache.paimon.hive.SearchArgumentToPredicateConverter;
 import org.apache.paimon.hive.TableStoreJobConf;

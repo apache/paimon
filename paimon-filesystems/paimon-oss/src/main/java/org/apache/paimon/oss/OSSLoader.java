@@ -19,11 +19,11 @@
 package org.apache.paimon.oss;
 
 import org.apache.flink.table.store.catalog.CatalogContext;
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.FileIOLoader;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.PluginFileIO;
 
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileIOLoader;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PluginFileIO;
 import org.apache.paimon.plugin.PluginLoader;
 
 /** A {@link PluginLoader} to load oss. */

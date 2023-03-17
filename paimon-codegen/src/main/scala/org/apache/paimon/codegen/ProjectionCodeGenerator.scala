@@ -17,11 +17,10 @@
  */
 package org.apache.paimon.codegen
 
-import org.apache.paimon.codegen.GenerateUtils.{generateRecordStatement, newName, DEFAULT_INPUT1_TERM, DEFAULT_OUT_RECORD_TERM, DEFAULT_OUT_RECORD_WRITER_TERM, ROW_DATA}
+import org.apache.paimon.codegen.GeneratedExpression.{NEVER_NULL, NO_CODE}
+import org.apache.paimon.codegen.GenerateUtils._
 import org.apache.paimon.data.{BinaryRow, InternalRow}
 import org.apache.paimon.types.RowType
-
-import GeneratedExpression.{NEVER_NULL, NO_CODE}
 
 /**
  * CodeGenerator for projection, Take out some fields of [[InternalRow]] to generate a new
@@ -70,6 +69,7 @@ object ProjectionCodeGenerator {
 
   /**
    * CodeGenerator for projection.
+   *
    * @param reusedOutRecord
    *   If objects or variables can be reused, they will be added a reusable output record to the
    *   member area of the generated class. If not they will be as temp variables.
