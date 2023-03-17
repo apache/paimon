@@ -18,6 +18,8 @@
 
 package org.apache.paimon.file.mergetree.compact.aggregate;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DecimalType;
@@ -27,9 +29,6 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
-
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.Decimal;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;

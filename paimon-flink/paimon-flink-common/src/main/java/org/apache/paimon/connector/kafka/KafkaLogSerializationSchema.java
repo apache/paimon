@@ -22,12 +22,12 @@ import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
 import org.apache.flink.streaming.connectors.kafka.KafkaSerializationSchema;
 import org.apache.flink.table.data.RowData;
-import org.apache.paimon.CoreOptions.LogChangelogMode;
-import org.apache.paimon.table.sink.SinkRecord;
-import org.apache.paimon.types.RowKind;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.connector.FlinkRowData;
+import org.apache.paimon.table.sink.SinkRecord;
+import org.apache.paimon.types.RowKind;
 
 import javax.annotation.Nullable;
 

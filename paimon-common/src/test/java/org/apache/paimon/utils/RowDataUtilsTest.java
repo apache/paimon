@@ -18,6 +18,11 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.datagen.DataGenerator;
 import org.apache.paimon.datagen.RandomGeneratorVisitor;
 import org.apache.paimon.datagen.RowDataGenerator;
@@ -25,12 +30,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.Decimal;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

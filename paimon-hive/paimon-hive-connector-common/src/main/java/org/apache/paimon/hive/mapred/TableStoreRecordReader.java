@@ -19,13 +19,13 @@
 package org.apache.paimon.hive.mapred;
 
 import org.apache.flink.table.store.file.KeyValue;
-import org.apache.paimon.reader.RecordReaderIterator;
-import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.utils.ProjectedRow;
 
 import org.apache.hadoop.mapred.RecordReader;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.hive.RowDataContainer;
+import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 

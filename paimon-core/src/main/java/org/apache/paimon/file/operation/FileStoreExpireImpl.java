@@ -18,6 +18,9 @@
 
 package org.apache.paimon.file.operation;
 
+import org.apache.flink.shaded.guava30.com.google.common.collect.Iterables;
+
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.file.Snapshot;
 import org.apache.paimon.file.manifest.ManifestEntry;
 import org.apache.paimon.file.manifest.ManifestFile;
@@ -27,10 +30,6 @@ import org.apache.paimon.file.utils.FileStorePathFactory;
 import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-
-import org.apache.flink.shaded.guava30.com.google.common.collect.Iterables;
-
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

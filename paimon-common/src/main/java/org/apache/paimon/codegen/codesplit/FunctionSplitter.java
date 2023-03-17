@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen.codesplit;
+package org.apache.paimon.codegen.codesplit;
 
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
@@ -31,10 +31,10 @@ import java.util.Map;
  * Split long functions into several smaller functions.
  *
  * <p>This rewriter only deals with functions without return values. Functions with return values
- * should have been converted by {@link
- * org.apache.flink.table.store.codegen.codesplit.ReturnValueRewriter}. For functions with <code>
+ * should have been converted by {@link org.apache.paimon.codegen.codesplit.ReturnValueRewriter}.
+ * For functions with <code>
  * return</code> statements, this rewriter will add a check for early returns with the help of
- * {@link org.apache.flink.table.store.codegen.codesplit.AddBoolBeforeReturnRewriter}.
+ * {@link org.apache.paimon.codegen.codesplit.AddBoolBeforeReturnRewriter}.
  *
  * <p><i>Before</i>
  *

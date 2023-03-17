@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen.codesplit;
+package org.apache.paimon.codegen.codesplit;
 
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link org.apache.flink.table.store.codegen.codesplit.JavaParser}. */
+/** Tests for {@link org.apache.paimon.codegen.codesplit.JavaParser}. */
 class JavaParserTest {
 
     @Test

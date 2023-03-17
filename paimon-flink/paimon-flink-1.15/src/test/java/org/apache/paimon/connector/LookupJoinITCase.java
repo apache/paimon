@@ -18,9 +18,9 @@
 
 package org.apache.paimon.connector;
 
-import org.apache.paimon.file.utils.BlockingIterator;
 import org.apache.flink.types.Row;
 
+import org.apache.paimon.file.utils.BlockingIterator;
 import org.junit.Test;
 
 import java.util.Arrays;

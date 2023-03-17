@@ -18,11 +18,10 @@
 
 package org.apache.paimon.file.manifest;
 
-import org.apache.paimon.file.io.DataFileMetaSerializer;
-import org.apache.paimon.file.utils.VersionedObjectSerializer;
-
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.file.io.DataFileMetaSerializer;
+import org.apache.paimon.file.utils.VersionedObjectSerializer;
 
 import static org.apache.paimon.file.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.file.utils.SerializationUtils.serializeBinaryRow;

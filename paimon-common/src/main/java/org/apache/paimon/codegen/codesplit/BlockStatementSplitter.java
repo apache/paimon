@@ -15,17 +15,16 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen.codesplit;
-
-import org.apache.flink.table.store.codegen.codesplit.JavaParser.BlockStatementContext;
-import org.apache.flink.table.store.codegen.codesplit.JavaParser.StatementContext;
-import org.apache.paimon.utils.Preconditions;
+package org.apache.paimon.codegen.codesplit;
 
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.TokenStreamRewriter;
 import org.antlr.v4.runtime.atn.PredictionMode;
+import org.apache.paimon.codegen.codesplit.JavaParser.BlockStatementContext;
+import org.apache.paimon.codegen.codesplit.JavaParser.StatementContext;
+import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -39,8 +38,8 @@ import java.util.stream.Collectors;
  *
  * <p>BlockStatementSplitter does not recognize if statement operates on local of class member
  * variable. Because of that, code must be preprocessed by {@link
- * org.apache.flink.table.store.codegen.codesplit.DeclarationRewriter} which converts all local
- * variables extracted as to member variables.
+ * org.apache.paimon.codegen.codesplit.DeclarationRewriter} which converts all local variables
+ * extracted as to member variables.
  *
  * <p><i>Before</i>
  *

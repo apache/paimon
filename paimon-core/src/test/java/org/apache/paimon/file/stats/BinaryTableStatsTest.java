@@ -18,13 +18,12 @@
 
 package org.apache.paimon.file.stats;
 
-import org.apache.paimon.types.IntType;
-import org.apache.paimon.types.RowType;
-
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

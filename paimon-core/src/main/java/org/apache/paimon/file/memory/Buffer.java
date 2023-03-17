@@ -18,9 +18,8 @@
 
 package org.apache.paimon.file.memory;
 
-import org.apache.paimon.memory.MemorySegment;
-
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.memory.MemorySegment;
 
 import java.nio.ByteBuffer;
 

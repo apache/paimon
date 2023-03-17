@@ -18,12 +18,11 @@
 
 package org.apache.paimon.file.io;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.casting.CastFieldGetter;
 import org.apache.paimon.file.casting.CastedRow;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.ProjectedRow;
-
-import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 

@@ -19,7 +19,6 @@
 package org.apache.paimon.file.compact;
 
 import org.apache.paimon.file.io.DataFileMeta;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

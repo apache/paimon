@@ -20,7 +20,6 @@ package org.apache.paimon.file.predicate;
 
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
-
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

@@ -18,18 +18,17 @@
 
 package org.apache.paimon.data.serializer;
 
-import org.apache.paimon.io.DataInputView;
-import org.apache.paimon.io.DataOutputView;
-import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.memory.MemorySegmentUtils;
-import org.apache.paimon.types.DataType;
-
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryArrayWriter;
 import org.apache.paimon.data.BinaryMap;
 import org.apache.paimon.data.BinaryWriter;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataOutputView;
+import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.memory.MemorySegmentUtils;
+import org.apache.paimon.types.DataType;
 
 import java.io.IOException;
 import java.util.HashMap;

@@ -18,9 +18,8 @@
 
 package org.apache.paimon.file.predicate;
 
-import org.apache.paimon.types.DataType;
-
 import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.types.DataType;
 
 import java.io.Serializable;
 import java.util.List;

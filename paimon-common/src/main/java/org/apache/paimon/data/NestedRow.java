@@ -21,8 +21,8 @@ import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.RowKind;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.data.BinaryRow.calculateBitSetWidthInBytes;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Its memory storage structure is exactly the same with {@link BinaryRow}. The only different is

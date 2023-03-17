@@ -18,10 +18,9 @@
 
 package org.apache.paimon.file.mergetree.compact.aggregate;
 
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.DecimalUtils;
-
-import org.apache.paimon.data.Decimal;
 
 /** sum aggregate a field of a row. */
 public class FieldSumAgg extends FieldAggregator {

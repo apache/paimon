@@ -18,12 +18,11 @@
 
 package org.apache.paimon.format;
 
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
-
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 /** Collector to extract statistics of each fields from a series of records. */
 public class FieldStatsCollector {

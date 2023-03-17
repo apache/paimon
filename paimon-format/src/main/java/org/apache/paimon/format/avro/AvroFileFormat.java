@@ -18,14 +18,7 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.paimon.file.predicate.Predicate;
 import org.apache.flink.table.store.fs.PositionOutputStream;
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Projection;
 
 import org.apache.avro.Schema;
 import org.apache.avro.file.CodecFactory;
@@ -36,10 +29,17 @@ import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.io.DatumWriter;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
 

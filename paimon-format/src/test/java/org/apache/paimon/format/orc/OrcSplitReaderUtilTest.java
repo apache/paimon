@@ -18,10 +18,9 @@
 
 package org.apache.paimon.format.orc;
 
+import org.apache.paimon.format.orc.reader.OrcSplitReaderUtil;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
-
-import org.apache.paimon.format.orc.reader.OrcSplitReaderUtil;
 import org.junit.jupiter.api.Test;
 
 import static org.apache.paimon.format.orc.reader.OrcSplitReaderUtil.toOrcType;

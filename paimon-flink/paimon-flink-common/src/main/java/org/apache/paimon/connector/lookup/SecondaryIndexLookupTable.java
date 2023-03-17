@@ -18,13 +18,12 @@
 
 package org.apache.paimon.connector.lookup;
 
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyProjectedRow;
 import org.apache.paimon.utils.TypeUtils;
-
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.serializer.InternalSerializers;
 
 import java.io.IOException;
 import java.util.ArrayList;

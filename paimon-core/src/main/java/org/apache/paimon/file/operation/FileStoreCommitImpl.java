@@ -18,6 +18,8 @@
 
 package org.apache.paimon.file.operation;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.Snapshot;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.manifest.FileKind;
@@ -38,9 +40,6 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
-
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalRow;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

@@ -18,16 +18,15 @@
 
 package org.apache.paimon.file.sort;
 
-import org.apache.paimon.file.disk.IOManager;
-import org.apache.paimon.file.memory.HeapMemorySegmentPool;
-import org.apache.paimon.file.memory.MemorySegmentPool;
-import org.apache.paimon.file.utils.MutableObjectIterator;
-
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.serializer.AbstractRowDataSerializer;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
+import org.apache.paimon.file.disk.IOManager;
+import org.apache.paimon.file.memory.HeapMemorySegmentPool;
+import org.apache.paimon.file.memory.MemorySegmentPool;
+import org.apache.paimon.file.utils.MutableObjectIterator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

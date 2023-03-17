@@ -18,11 +18,10 @@
 
 package org.apache.paimon.io.cache;
 
+import org.apache.paimon.data.AbstractPagedInputView;
 import org.apache.paimon.io.SeekableDataInputView;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.utils.MathUtils;
-
-import org.apache.paimon.data.AbstractPagedInputView;
 
 import java.io.Closeable;
 import java.io.EOFException;

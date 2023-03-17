@@ -28,10 +28,6 @@ import org.apache.flink.table.store.file.schema.SchemaManager;
 import org.apache.flink.table.store.file.schema.TableSchema;
 import org.apache.flink.table.store.fs.FileIO;
 import org.apache.flink.table.store.fs.Path;
-import org.apache.paimon.options.OptionsUtils;
-import org.apache.paimon.table.TableType;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -48,6 +44,10 @@ import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.metastore.api.UnknownDBException;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
+import org.apache.paimon.options.OptionsUtils;
+import org.apache.paimon.table.TableType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,11 +60,11 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
+import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.utils.Preconditions.checkState;
-import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
-import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
 
 /** A catalog implementation for Hive. */
 public class HiveCatalog extends AbstractCatalog {

@@ -18,11 +18,10 @@
 
 package org.apache.paimon.file.memory;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentSource;
 import org.apache.paimon.options.MemorySize;
-
-import org.apache.paimon.annotation.Experimental;
 
 import java.util.List;
 

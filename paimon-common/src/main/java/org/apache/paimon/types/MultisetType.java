@@ -18,11 +18,10 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.utils.Preconditions;
-
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
 import java.util.Objects;

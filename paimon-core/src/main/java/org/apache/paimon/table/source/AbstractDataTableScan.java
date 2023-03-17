@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.file.operation.FileStoreScan;
 import org.apache.paimon.file.operation.ScanKind;
 import org.apache.paimon.file.predicate.Predicate;
@@ -33,8 +34,6 @@ import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
-
-import org.apache.paimon.annotation.VisibleForTesting;
 
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
 public abstract class AbstractDataTableScan implements DataTableScan {

@@ -18,12 +18,11 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.file.disk.IOManager;
-import org.apache.paimon.table.Table;
-
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.file.disk.IOManager;
+import org.apache.paimon.table.Table;
 
 /**
  * Write of {@link Table} to provide {@link InternalRow} writing.

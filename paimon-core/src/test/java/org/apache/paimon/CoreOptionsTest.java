@@ -18,14 +18,12 @@
 
 package org.apache.paimon;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
-
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link CoreOptions}. */
+/** Tests for {@link org.apache.paimon.CoreOptions}. */
 public class CoreOptionsTest {
 
     @Test

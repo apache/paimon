@@ -22,9 +22,8 @@ import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateBuilder;
 import org.apache.paimon.file.stats.BinaryTableStats;
-import org.apache.paimon.table.source.DataSplit;
-
 import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.table.source.DataSplit;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;

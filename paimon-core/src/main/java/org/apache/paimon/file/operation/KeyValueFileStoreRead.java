@@ -18,6 +18,7 @@
 
 package org.apache.paimon.file.operation;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.io.KeyValueFileReaderFactory;
@@ -34,14 +35,12 @@ import org.apache.paimon.file.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.file.schema.SchemaManager;
 import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.file.utils.FileStorePathFactory;
+import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
-
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FileFormatDiscover;
 
 import javax.annotation.Nullable;
 
@@ -57,10 +56,7 @@ import static org.apache.paimon.file.io.DataFilePathFactory.CHANGELOG_FILE_PREFI
 import static org.apache.paimon.file.predicate.PredicateBuilder.containsFields;
 import static org.apache.paimon.file.predicate.PredicateBuilder.splitAnd;
 
-/**
- * {@link FileStoreRead} implementation for {@link
- * org.apache.paimon.file.KeyValueFileStore}.
- */
+/** {@link FileStoreRead} implementation for {@link org.apache.paimon.file.KeyValueFileStore}. */
 public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     private final TableSchema tableSchema;

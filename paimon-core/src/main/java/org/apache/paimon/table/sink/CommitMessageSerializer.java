@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.data.serializer.VersionedSerializer;
 import org.apache.paimon.file.io.CompactIncrement;
 import org.apache.paimon.file.io.DataFileMetaSerializer;
 import org.apache.paimon.file.io.NewFilesIncrement;
@@ -25,8 +26,6 @@ import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
-
-import org.apache.paimon.data.serializer.VersionedSerializer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;

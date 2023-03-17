@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.flink.table.store.codegen
+package org.apache.paimon.codegen
 
 import org.apache.paimon.data._
 import org.apache.paimon.memory.MemorySegment

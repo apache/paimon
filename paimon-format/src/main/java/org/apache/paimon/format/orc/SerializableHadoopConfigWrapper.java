@@ -18,10 +18,9 @@
 
 package org.apache.paimon.format.orc;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
-
-import org.apache.hadoop.conf.Configuration;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;

@@ -18,10 +18,9 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.paimon.options.Options;
-
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
+import org.apache.paimon.options.Options;
 
 /** Factory to create {@link AvroFileFormat}. */
 public class AvroFileFormatFactory implements FileFormatFactory {

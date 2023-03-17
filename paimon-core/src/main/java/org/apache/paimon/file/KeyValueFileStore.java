@@ -19,6 +19,7 @@
 package org.apache.paimon.file;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.file.operation.KeyValueFileStoreRead;
 import org.apache.paimon.file.operation.KeyValueFileStoreScan;
@@ -26,11 +27,9 @@ import org.apache.paimon.file.operation.KeyValueFileStoreWrite;
 import org.apache.paimon.file.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.file.schema.SchemaManager;
 import org.apache.paimon.file.utils.KeyComparatorSupplier;
+import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FileFormatDiscover;
 
 import java.util.Comparator;
 import java.util.function.Supplier;

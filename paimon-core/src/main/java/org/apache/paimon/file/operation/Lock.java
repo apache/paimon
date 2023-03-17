@@ -18,10 +18,9 @@
 
 package org.apache.paimon.file.operation;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.file.catalog.CatalogLock;
 import org.apache.paimon.file.catalog.Identifier;
-
-import org.apache.paimon.annotation.Experimental;
 
 import javax.annotation.Nullable;
 

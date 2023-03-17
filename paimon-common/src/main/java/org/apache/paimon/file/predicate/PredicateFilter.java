@@ -18,10 +18,9 @@
 
 package org.apache.paimon.file.predicate;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
-
-import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 

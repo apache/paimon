@@ -18,6 +18,7 @@
 
 package org.apache.paimon.file.operation;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.file.Snapshot;
 import org.apache.paimon.file.manifest.ManifestEntry;
 import org.apache.paimon.file.manifest.ManifestFile;
@@ -36,8 +37,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
-
-import org.apache.paimon.data.BinaryRow;
 
 import javax.annotation.Nullable;
 

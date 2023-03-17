@@ -18,11 +18,10 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.memory.MemorySegment;
-
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.memory.MemorySegment;
 
 import java.nio.ByteOrder;
 

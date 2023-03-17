@@ -17,6 +17,7 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.DataType;
@@ -25,8 +26,6 @@ import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.TimestampType;
-
-import org.apache.paimon.annotation.Experimental;
 
 import java.nio.ByteOrder;
 

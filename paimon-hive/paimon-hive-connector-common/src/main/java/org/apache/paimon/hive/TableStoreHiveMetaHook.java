@@ -18,13 +18,12 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.utils.Preconditions;
-
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.paimon.hive.mapred.TableStoreInputFormat;
 import org.apache.paimon.hive.mapred.TableStoreOutputFormat;
+import org.apache.paimon.utils.Preconditions;
 
 /**
  * {@link HiveMetaHook} for table store. Currently this class is only used to set input and output

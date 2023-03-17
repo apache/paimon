@@ -18,15 +18,14 @@
 
 package org.apache.paimon.file.format;
 
-import org.apache.paimon.file.predicate.Predicate;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.types.RowType;
-
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 

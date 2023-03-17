@@ -19,6 +19,7 @@
 package org.apache.paimon.file.mergetree;
 
 import org.apache.flink.table.store.codegen.RecordComparator;
+
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.memory.HeapMemorySegmentPool;
 import org.apache.paimon.file.mergetree.compact.DeduplicateMergeFunction;
@@ -32,7 +33,6 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
-
 import org.junit.jupiter.api.Test;
 
 import java.io.EOFException;

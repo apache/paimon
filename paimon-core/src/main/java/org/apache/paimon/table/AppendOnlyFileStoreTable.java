@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.AppendOnlyFileStore;
 import org.apache.paimon.file.WriteMode;
 import org.apache.paimon.file.operation.AppendOnlyFileStoreRead;
@@ -39,8 +40,6 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Preconditions;
-
-import org.apache.paimon.data.InternalRow;
 
 import java.io.IOException;
 import java.util.function.BiConsumer;

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.file.format;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.file.append.AppendOnlyCompactManager;
 import org.apache.paimon.file.append.AppendOnlyWriter;
 import org.apache.paimon.file.io.DataFileMeta;
@@ -25,6 +27,7 @@ import org.apache.paimon.file.io.DataFilePathFactory;
 import org.apache.paimon.file.io.KeyValueFileReadWriteTest;
 import org.apache.paimon.file.io.KeyValueFileWriterFactory;
 import org.apache.paimon.file.utils.CommitIncrement;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -32,10 +35,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
-
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.format.FileFormat;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

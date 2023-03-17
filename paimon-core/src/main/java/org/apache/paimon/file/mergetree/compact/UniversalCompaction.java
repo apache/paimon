@@ -18,11 +18,10 @@
 
 package org.apache.paimon.file.mergetree.compact;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.file.compact.CompactUnit;
 import org.apache.paimon.file.mergetree.LevelSortedRun;
 import org.apache.paimon.file.mergetree.SortedRun;
-
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

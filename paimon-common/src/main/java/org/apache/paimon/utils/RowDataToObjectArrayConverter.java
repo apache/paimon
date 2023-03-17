@@ -18,9 +18,8 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.types.RowType;
-
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.RowType;
 
 import java.util.stream.IntStream;
 

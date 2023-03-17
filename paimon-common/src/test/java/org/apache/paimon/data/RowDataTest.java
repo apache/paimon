@@ -17,14 +17,13 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.data.serializer.InternalArraySerializer;
+import org.apache.paimon.data.serializer.InternalMapSerializer;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.data.serializer.InternalArraySerializer;
-import org.apache.paimon.data.serializer.InternalMapSerializer;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

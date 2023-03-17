@@ -15,11 +15,11 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen.codesplit;
+package org.apache.paimon.codegen.codesplit;
 
 import org.junit.jupiter.api.Test;
 
-/** Tests for {@link org.apache.flink.table.store.codegen.codesplit.DeclarationRewriter}. */
+/** Tests for {@link org.apache.paimon.codegen.codesplit.DeclarationRewriter}. */
 class DeclarationRewriterTest extends CodeRewriterTestBase<DeclarationRewriter> {
 
     public DeclarationRewriterTest() {

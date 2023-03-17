@@ -15,17 +15,17 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen.codesplit;
+package org.apache.paimon.codegen.codesplit;
 
 import org.apache.paimon.utils.FileIOUtils;
 
 import java.io.File;
 import java.util.function.Function;
 
-import static org.apache.flink.table.store.codegen.codesplit.CodeSplitTestUtil.trimLines;
+import static org.apache.paimon.codegen.codesplit.CodeSplitTestUtil.trimLines;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Base test class for {@link org.apache.flink.table.store.codegen.codesplit.CodeRewriter}. */
+/** Base test class for {@link org.apache.paimon.codegen.codesplit.CodeRewriter}. */
 abstract class CodeRewriterTestBase<R extends CodeRewriter> {
 
     private final String resourceDir;

@@ -18,10 +18,9 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.types.RowType;
-
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.RowType;
 
 import java.io.Serializable;
 

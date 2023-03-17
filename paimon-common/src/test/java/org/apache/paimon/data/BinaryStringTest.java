@@ -18,10 +18,9 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.utils.SortUtil;
-
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
+import org.apache.paimon.utils.SortUtil;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -33,9 +32,9 @@ import java.util.List;
 import java.util.Random;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.apache.paimon.utils.DecimalUtils.castFrom;
 import static org.apache.paimon.data.BinaryString.blankString;
 import static org.apache.paimon.data.BinaryString.fromBytes;
+import static org.apache.paimon.utils.DecimalUtils.castFrom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**

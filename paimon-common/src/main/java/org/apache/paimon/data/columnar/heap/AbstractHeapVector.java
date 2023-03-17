@@ -18,9 +18,8 @@
 
 package org.apache.paimon.data.columnar.heap;
 
-import org.apache.paimon.memory.MemorySegment;
-
 import org.apache.paimon.data.columnar.writable.AbstractWritableVector;
+import org.apache.paimon.memory.MemorySegment;
 
 import java.nio.ByteOrder;
 import java.util.Arrays;

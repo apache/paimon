@@ -18,12 +18,11 @@
 
 package org.apache.paimon.format.orc.reader;
 
-import org.apache.paimon.types.MapType;
-
 import org.apache.hadoop.hive.ql.exec.vector.MapColumnVector;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarMap;
+import org.apache.paimon.types.MapType;
 
 /** This column vector is used to adapt hive's MapColumnVector to Flink's MapColumnVector. */
 public class OrcMapColumnVector extends AbstractOrcColumnVector

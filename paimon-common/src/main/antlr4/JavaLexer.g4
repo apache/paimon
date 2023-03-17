@@ -39,7 +39,7 @@
 lexer grammar JavaLexer;
 
 @header {
-    package org.apache.flink.table.store.codegen.codesplit;
+    package org.apache.paimon.codegen.codesplit;
 }
 
 // Keywords

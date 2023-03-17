@@ -18,10 +18,9 @@
 
 package org.apache.paimon.file.disk;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.file.disk.FileIOChannel.Enumerator;
 import org.apache.paimon.file.disk.FileIOChannel.ID;
-
-import org.apache.paimon.annotation.Experimental;
 
 import java.io.IOException;
 

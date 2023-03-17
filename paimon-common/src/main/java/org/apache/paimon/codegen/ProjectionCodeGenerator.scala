@@ -15,9 +15,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.flink.table.store.codegen
+package org.apache.paimon.codegen
 
-import org.apache.flink.table.store.codegen.GenerateUtils.{generateRecordStatement, newName, DEFAULT_INPUT1_TERM, DEFAULT_OUT_RECORD_TERM, DEFAULT_OUT_RECORD_WRITER_TERM, ROW_DATA}
+import org.apache.paimon.codegen.GenerateUtils.{generateRecordStatement, newName, DEFAULT_INPUT1_TERM, DEFAULT_OUT_RECORD_TERM, DEFAULT_OUT_RECORD_WRITER_TERM, ROW_DATA}
 import org.apache.paimon.data.{BinaryRow, InternalRow}
 import org.apache.paimon.types.RowType
 

@@ -24,8 +24,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Description for {@link org.apache.paimon.options.ConfigOption}. Allows providing
- * multiple rich formats.
+ * Description for {@link org.apache.paimon.options.ConfigOption}. Allows providing multiple rich
+ * formats.
  *
  * @since 0.4.0
  */

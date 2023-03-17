@@ -22,7 +22,13 @@ import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.functions.FunctionContext;
 import org.apache.flink.table.functions.TableFunction;
+
+import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
+
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.connector.FlinkRowData;
+import org.apache.paimon.connector.FlinkRowWrapper;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateFilter;
 import org.apache.paimon.file.schema.TableSchema;
@@ -33,12 +39,6 @@ import org.apache.paimon.table.source.TableStreamingReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.TypeUtils;
-
-import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
-
-import org.apache.paimon.connector.FlinkRowData;
-import org.apache.paimon.connector.FlinkRowWrapper;
-import org.apache.paimon.data.InternalRow;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,9 +60,9 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.connector.RocksDBOptions.LOOKUP_CACHE_ROWS;
 import static org.apache.paimon.file.predicate.PredicateBuilder.transformFieldMapping;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.connector.RocksDBOptions.LOOKUP_CACHE_ROWS;
 
 /** A lookup {@link TableFunction} for file store. */
 public class FileStoreLookupFunction implements Serializable, Closeable {

@@ -19,12 +19,11 @@
 
 package org.apache.paimon.file.io;
 
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
-
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FileFormat;
 
 /** {@link RollingFileWriter} for data files containing {@link InternalRow}. */
 public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, DataFileMeta> {

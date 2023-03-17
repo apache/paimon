@@ -28,22 +28,22 @@ import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.DynamicTableSourceFactory;
+import org.apache.flink.table.store.catalog.CatalogContext;
+import org.apache.flink.table.types.logical.RowType;
+
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
-import org.apache.flink.table.store.catalog.CatalogContext;
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.connector.log.LogStoreTableFactory;
+import org.apache.paimon.connector.sink.TableStoreSink;
+import org.apache.paimon.connector.source.SystemTableSource;
+import org.apache.paimon.connector.source.TableStoreSource;
 import org.apache.paimon.file.schema.Schema;
 import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.flink.table.types.logical.RowType;
-
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.connector.log.LogStoreTableFactory;
-import org.apache.paimon.connector.sink.TableStoreSink;
-import org.apache.paimon.connector.source.SystemTableSource;
-import org.apache.paimon.connector.source.TableStoreSource;
 
 import java.util.Collections;
 import java.util.HashSet;

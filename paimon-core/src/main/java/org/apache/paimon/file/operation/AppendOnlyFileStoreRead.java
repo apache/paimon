@@ -18,6 +18,7 @@
 
 package org.apache.paimon.file.operation;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.io.DataFileMeta;
 import org.apache.paimon.file.io.DataFilePathFactory;
 import org.apache.paimon.file.io.RowDataFileRecordReader;
@@ -29,15 +30,13 @@ import org.apache.paimon.file.schema.SchemaManager;
 import org.apache.paimon.file.schema.TableSchema;
 import org.apache.paimon.file.utils.BulkFormatMapping;
 import org.apache.paimon.file.utils.FileStorePathFactory;
+import org.apache.paimon.format.FileFormatDiscover;
+import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Projection;
-
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FileFormatDiscover;
-import org.apache.paimon.format.FormatKey;
 
 import javax.annotation.Nullable;
 

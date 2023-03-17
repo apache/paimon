@@ -18,14 +18,13 @@
 
 package org.apache.paimon.file.casting;
 
-import org.apache.paimon.types.RowKind;
-
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.types.RowKind;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 

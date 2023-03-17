@@ -21,7 +21,6 @@ package org.apache.paimon.file.mergetree.compact;
 import org.apache.paimon.file.compact.CompactUnit;
 import org.apache.paimon.file.mergetree.LevelSortedRun;
 import org.apache.paimon.file.mergetree.SortedRun;
-
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

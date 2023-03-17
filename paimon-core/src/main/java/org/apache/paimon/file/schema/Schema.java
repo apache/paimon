@@ -18,12 +18,11 @@
 
 package org.apache.paimon.file.schema;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
-
-import org.apache.paimon.annotation.Experimental;
 
 import javax.annotation.Nullable;
 

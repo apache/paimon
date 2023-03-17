@@ -18,8 +18,6 @@
 
 package org.apache.paimon.data.columnar;
 
-import org.apache.paimon.types.RowKind;
-
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataSetters;
 import org.apache.paimon.data.Decimal;
@@ -28,6 +26,7 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.BytesColumnVector.Bytes;
+import org.apache.paimon.types.RowKind;
 
 import java.io.Serializable;
 

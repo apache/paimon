@@ -15,15 +15,14 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen.codesplit;
-
-import org.apache.paimon.utils.Preconditions;
+package org.apache.paimon.codegen.codesplit;
 
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.TokenStreamRewriter;
 import org.antlr.v4.runtime.atn.PredictionMode;
+import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
 import java.util.HashMap;

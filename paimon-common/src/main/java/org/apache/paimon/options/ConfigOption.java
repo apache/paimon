@@ -18,9 +18,8 @@
 
 package org.apache.paimon.options;
 
-import org.apache.paimon.options.description.Description;
-
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.options.description.Description;
 
 import java.util.Arrays;
 import java.util.Collections;

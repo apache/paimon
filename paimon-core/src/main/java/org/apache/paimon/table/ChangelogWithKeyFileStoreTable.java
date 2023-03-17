@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.KeyValueFileStore;
 import org.apache.paimon.file.WriteMode;
@@ -47,8 +48,6 @@ import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.ValueContentRowDataRecordIterator;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.data.InternalRow;
 
 import java.util.List;
 import java.util.function.BiConsumer;

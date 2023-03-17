@@ -18,9 +18,8 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.memory.MemorySegment;
-
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.memory.MemorySegment;
 
 /**
  * Utilities for {@link BinaryRow}. Many of the methods in this class are used in code generation.

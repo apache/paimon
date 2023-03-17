@@ -18,17 +18,16 @@
 
 package org.apache.paimon.file.predicate;
 
+import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.TypeUtils;
-
-import org.apache.paimon.annotation.Experimental;
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.Decimal;
-import org.apache.paimon.data.Timestamp;
 
 import javax.annotation.Nullable;
 

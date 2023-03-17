@@ -19,7 +19,6 @@
 package org.apache.paimon.format.fs;
 
 import org.apache.flink.table.store.fs.FileIO;
-import org.apache.paimon.utils.IOUtils;
 
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -30,6 +29,7 @@ import org.apache.hadoop.fs.PositionedReadable;
 import org.apache.hadoop.fs.Seekable;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.util.Progressable;
+import org.apache.paimon.utils.IOUtils;
 
 import java.io.IOException;
 import java.io.InputStream;

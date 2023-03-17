@@ -26,9 +26,16 @@ import org.apache.flink.table.connector.source.LookupTableSource;
 import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
+
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
+import org.apache.paimon.connector.FlinkConnectorOptions;
+import org.apache.paimon.connector.TableStoreDataStreamScanProvider;
+import org.apache.paimon.connector.log.LogSourceProvider;
+import org.apache.paimon.connector.log.LogStoreTableFactory;
+import org.apache.paimon.connector.lookup.FileStoreLookupFunction;
+import org.apache.paimon.connector.lookup.LookupRuntimeProviderFactory;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
@@ -36,13 +43,6 @@ import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
 import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Projection;
-
-import org.apache.paimon.connector.FlinkConnectorOptions;
-import org.apache.paimon.connector.TableStoreDataStreamScanProvider;
-import org.apache.paimon.connector.log.LogSourceProvider;
-import org.apache.paimon.connector.log.LogStoreTableFactory;
-import org.apache.paimon.connector.lookup.FileStoreLookupFunction;
-import org.apache.paimon.connector.lookup.LookupRuntimeProviderFactory;
 
 import javax.annotation.Nullable;
 

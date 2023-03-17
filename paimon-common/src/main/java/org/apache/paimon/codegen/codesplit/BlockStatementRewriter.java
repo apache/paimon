@@ -15,15 +15,14 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.codegen.codesplit;
-
-import org.apache.flink.table.store.codegen.codesplit.BlockStatementGrouper.RewriteGroupedCode;
-import org.apache.flink.table.store.codegen.codesplit.JavaParser.StatementContext;
+package org.apache.paimon.codegen.codesplit;
 
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.TokenStreamRewriter;
 import org.antlr.v4.runtime.atn.PredictionMode;
+import org.apache.paimon.codegen.codesplit.BlockStatementGrouper.RewriteGroupedCode;
+import org.apache.paimon.codegen.codesplit.JavaParser.StatementContext;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -37,9 +36,9 @@ import java.util.StringJoiner;
  * extracted also to separate methods.
  *
  * <p>This rewriter only deals with functions without return values. Functions with return values
- * should have been converted by {@link
- * org.apache.flink.table.store.codegen.codesplit.ReturnValueRewriter}. Also, this rewriter will not
- * extract blocks containing <code>return</code> statements for correctness.
+ * should have been converted by {@link org.apache.paimon.codegen.codesplit.ReturnValueRewriter}.
+ * Also, this rewriter will not extract blocks containing <code>return</code> statements for
+ * correctness.
  *
  * <p><i>Before</i>
  *

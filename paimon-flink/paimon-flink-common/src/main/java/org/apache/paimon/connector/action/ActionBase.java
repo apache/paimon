@@ -25,6 +25,12 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.store.catalog.CatalogContext;
+import org.apache.flink.table.types.logical.LogicalType;
+
+import org.apache.paimon.connector.FlinkCatalog;
+import org.apache.paimon.connector.LogicalTypeConversion;
+import org.apache.paimon.connector.sink.FlinkSinkBuilder;
+import org.apache.paimon.connector.utils.TableEnvironmentUtils;
 import org.apache.paimon.file.catalog.Catalog;
 import org.apache.paimon.file.catalog.CatalogFactory;
 import org.apache.paimon.file.catalog.Identifier;
@@ -35,12 +41,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
-import org.apache.flink.table.types.logical.LogicalType;
-
-import org.apache.paimon.connector.FlinkCatalog;
-import org.apache.paimon.connector.LogicalTypeConversion;
-import org.apache.paimon.connector.sink.FlinkSinkBuilder;
-import org.apache.paimon.connector.utils.TableEnvironmentUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

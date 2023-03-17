@@ -18,12 +18,11 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.file.predicate.Predicate;
 import org.apache.paimon.file.predicate.PredicateBuilder;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.annotation.Experimental;
-import org.apache.paimon.data.InternalRow;
 
 import java.io.Serializable;
 import java.util.Arrays;

@@ -18,11 +18,10 @@
 
 package org.apache.paimon.file.disk;
 
-import org.apache.paimon.file.utils.MutableObjectIterator;
-import org.apache.paimon.memory.MemorySegment;
-
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
+import org.apache.paimon.file.utils.MutableObjectIterator;
+import org.apache.paimon.memory.MemorySegment;
 
 import java.io.EOFException;
 import java.io.IOException;

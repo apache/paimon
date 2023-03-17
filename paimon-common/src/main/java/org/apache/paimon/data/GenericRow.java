@@ -18,10 +18,9 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.annotation.Experimental;
 
 import java.io.Serializable;
 import java.util.Arrays;

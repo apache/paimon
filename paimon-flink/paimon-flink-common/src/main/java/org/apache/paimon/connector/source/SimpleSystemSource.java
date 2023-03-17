@@ -21,6 +21,7 @@ package org.apache.paimon.connector.source;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
+
 import org.apache.paimon.table.source.ReadBuilder;
 
 import javax.annotation.Nullable;
