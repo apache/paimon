@@ -86,7 +86,7 @@ When starting `spark-sql`, use the following command to register Table Store’s
 
 ```bash
 spark-sql ... \
-    --conf spark.sql.catalog.tablestore=org.apache.flink.table.store.spark.SparkCatalog \
+    --conf spark.sql.catalog.tablestore=org.apache.paimon.spark.SparkCatalog \
     --conf spark.sql.catalog.tablestore.warehouse=file:/tmp/table_store
 ```
 

@@ -64,7 +64,7 @@ under the License.
         <module>flink-table-store-format</module>
         <module>flink-table-store-shade</module>
         <module>flink-table-store-hive</module>
-        <module>flink-table-store-spark</module>
+        <module>paimon-spark</module>
         <module>paimon-test-utils</module>
     </modules>
 
