@@ -18,11 +18,10 @@
 
 package org.apache.paimon.file.mergetree;
 
-import org.apache.flink.table.store.codegen.CodeGenUtils;
-import org.apache.flink.table.store.codegen.NormalizedKeyComputer;
-import org.apache.flink.table.store.codegen.RecordComparator;
-
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.codegen.CodeGenUtils;
+import org.apache.paimon.codegen.NormalizedKeyComputer;
+import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;

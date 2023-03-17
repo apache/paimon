@@ -18,8 +18,6 @@
 
 package org.apache.paimon.format.orc.writer;
 
-import org.apache.flink.table.store.fs.PositionOutputStream;
-
 import com.google.protobuf.CodedOutputStream;
 import org.apache.orc.CompressionCodec;
 import org.apache.orc.CompressionKind;
@@ -30,6 +28,7 @@ import org.apache.orc.impl.HadoopShims;
 import org.apache.orc.impl.OrcCodecPool;
 import org.apache.orc.impl.OutStream;
 import org.apache.orc.impl.StreamName;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

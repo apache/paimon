@@ -21,14 +21,14 @@ package org.apache.paimon.connector.sink;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.io.DataFileMeta;
-import org.apache.flink.table.store.file.io.DataFileMetaSerializer;
-import org.apache.flink.table.store.file.utils.OffsetRow;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.connector.FlinkRowWrapper;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.file.io.DataFileMeta;
+import org.apache.paimon.file.io.DataFileMetaSerializer;
+import org.apache.paimon.file.utils.OffsetRow;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 

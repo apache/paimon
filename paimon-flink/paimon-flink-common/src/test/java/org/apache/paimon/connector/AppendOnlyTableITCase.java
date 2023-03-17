@@ -19,10 +19,10 @@
 package org.apache.paimon.connector;
 
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
-import org.apache.flink.table.store.file.Snapshot;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 
+import org.apache.paimon.file.Snapshot;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

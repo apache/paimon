@@ -24,12 +24,6 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
-import org.apache.flink.table.store.file.catalog.AbstractCatalog;
-import org.apache.flink.table.store.file.catalog.Catalog;
-import org.apache.flink.table.store.file.catalog.CatalogLock;
-import org.apache.flink.table.store.file.catalog.Identifier;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.ExceptionUtils;
@@ -40,6 +34,12 @@ import com.klarna.hiverunner.annotations.HiveSQL;
 import com.klarna.hiverunner.config.HiveRunnerConfig;
 import org.apache.hadoop.hive.ql.lockmgr.DbTxnManager;
 import org.apache.paimon.connector.FlinkCatalog;
+import org.apache.paimon.file.catalog.AbstractCatalog;
+import org.apache.paimon.file.catalog.Catalog;
+import org.apache.paimon.file.catalog.CatalogLock;
+import org.apache.paimon.file.catalog.Identifier;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.assertj.core.api.Assertions;
 import org.junit.After;
 import org.junit.Assert;
@@ -447,7 +447,7 @@ public class HiveCatalogITCase {
         Identifier identifier = new Identifier("test_db", "t3");
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
-        org.apache.flink.table.store.fs.Path tablePath =
+        org.apache.paimon.fs.Path tablePath =
                 ((AbstractCatalog) catalog).getDataTableLocation(identifier);
         Assert.assertEquals(tablePath.toString(), path + "test_db.db" + File.separator + "t3");
 
@@ -524,8 +524,7 @@ public class HiveCatalogITCase {
         List<Row> tables = collect("SHOW TABLES");
         Assert.assertEquals("[+I[t]]", tables.toString());
 
-        new LocalFileIO()
-                .delete(new org.apache.flink.table.store.fs.Path(path, "test_db.db/t"), true);
+        new LocalFileIO().delete(new org.apache.paimon.fs.Path(path, "test_db.db/t"), true);
         tables = collect("SHOW TABLES");
         Assert.assertEquals("[]", tables.toString());
     }
@@ -556,8 +555,7 @@ public class HiveCatalogITCase {
         assertTrue(
                 new SchemaManager(
                                 LocalFileIO.create(),
-                                new org.apache.flink.table.store.fs.Path(
-                                        path, "default.db/hive_table"))
+                                new org.apache.paimon.fs.Path(path, "default.db/hive_table"))
                         .listAllIds()
                         .isEmpty());
     }
@@ -592,7 +590,7 @@ public class HiveCatalogITCase {
         assertTrue(
                 new SchemaManager(
                                 LocalFileIO.create(),
-                                new org.apache.flink.table.store.fs.Path(
+                                new org.apache.paimon.fs.Path(
                                         path, "default.db/alter_failed_table"))
                         .latest()
                         .get()

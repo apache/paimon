@@ -19,11 +19,11 @@
 package org.apache.paimon.connector.source;
 
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
-import org.apache.flink.table.store.file.schema.Schema;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
 
+import org.apache.paimon.file.schema.Schema;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
@@ -35,8 +35,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.util.Arrays;
 import java.util.Collections;
 
-import static org.apache.flink.table.store.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.apache.paimon.connector.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
+import static org.apache.paimon.file.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for the {@link FileStoreSourceReader}. */

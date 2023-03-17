@@ -18,9 +18,6 @@
 
 package org.apache.paimon.format.orc;
 
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.Path;
-
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgumentFactory;
@@ -37,6 +34,8 @@ import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.fs.HadoopReadOnlyFileSystem;
 import org.apache.paimon.format.orc.filter.OrcFilters;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -247,7 +246,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             int[] selectedFields,
             List<OrcFilters.Predicate> conjunctPredicates,
             FileIO fileIO,
-            org.apache.flink.table.store.fs.Path path,
+            org.apache.paimon.fs.Path path,
             long splitStart,
             long splitLength)
             throws IOException {
@@ -343,7 +342,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
     public static org.apache.orc.Reader createReader(
             org.apache.hadoop.conf.Configuration conf,
             FileIO fileIO,
-            org.apache.flink.table.store.fs.Path path)
+            org.apache.paimon.fs.Path path)
             throws IOException {
         // open ORC file and create reader
         org.apache.hadoop.fs.Path hPath = new org.apache.hadoop.fs.Path(path.toUri());

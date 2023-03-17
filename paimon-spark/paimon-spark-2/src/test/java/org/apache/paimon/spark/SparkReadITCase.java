@@ -18,11 +18,10 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.fs.Path;
-
 import org.apache.commons.io.FileUtils;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;

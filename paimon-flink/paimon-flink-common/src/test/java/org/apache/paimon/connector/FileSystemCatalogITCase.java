@@ -18,15 +18,15 @@
 
 package org.apache.paimon.connector;
 
-import org.apache.flink.table.store.file.catalog.AbstractCatalog;
-import org.apache.flink.table.store.file.catalog.Catalog;
-import org.apache.flink.table.store.file.catalog.Identifier;
-import org.apache.flink.table.store.file.utils.BlockingIterator;
-import org.apache.flink.table.store.fs.Path;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 
 import org.apache.paimon.connector.kafka.KafkaTableTestBase;
+import org.apache.paimon.file.catalog.AbstractCatalog;
+import org.apache.paimon.file.catalog.Catalog;
+import org.apache.paimon.file.catalog.Identifier;
+import org.apache.paimon.file.utils.BlockingIterator;
+import org.apache.paimon.fs.Path;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

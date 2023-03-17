@@ -19,7 +19,7 @@
 
 package org.apache.paimon.connector.sink;
 
-import org.apache.flink.table.store.file.manifest.ManifestCommittable;
+import org.apache.paimon.file.manifest.ManifestCommittable;
 
 import java.io.IOException;
 import java.util.List;

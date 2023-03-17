@@ -19,14 +19,15 @@ package org.apache.paimon.connector.sink;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
-import org.apache.flink.table.store.file.manifest.ManifestCommittable;
+
+import org.apache.paimon.file.manifest.ManifestCommittable;
 
 import java.io.Serializable;
 import java.util.List;
 
 /**
  * Helper interface for {@link CommitterOperator}. This interface manages operator states about
- * {@link org.apache.flink.table.store.file.manifest.ManifestCommittable}.
+ * {@link org.apache.paimon.file.manifest.ManifestCommittable}.
  */
 public interface CommittableStateManager extends Serializable {
 

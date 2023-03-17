@@ -18,17 +18,6 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.flink.table.store.file.catalog.AbstractCatalog;
-import org.apache.flink.table.store.file.catalog.CatalogLock;
-import org.apache.flink.table.store.file.catalog.Identifier;
-import org.apache.flink.table.store.file.operation.Lock;
-import org.apache.flink.table.store.file.schema.Schema;
-import org.apache.flink.table.store.file.schema.SchemaChange;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.Path;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
@@ -44,6 +33,16 @@ import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.metastore.api.UnknownDBException;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
+import org.apache.paimon.file.catalog.AbstractCatalog;
+import org.apache.paimon.file.catalog.CatalogLock;
+import org.apache.paimon.file.catalog.Identifier;
+import org.apache.paimon.file.operation.Lock;
+import org.apache.paimon.file.schema.Schema;
+import org.apache.paimon.file.schema.SchemaChange;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.table.TableType;
 import org.apache.paimon.types.DataField;

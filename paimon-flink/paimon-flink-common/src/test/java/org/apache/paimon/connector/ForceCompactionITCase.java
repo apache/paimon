@@ -18,15 +18,14 @@
 
 package org.apache.paimon.connector;
 
-import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.manifest.ManifestFileMeta;
-import org.apache.flink.table.store.file.manifest.ManifestList;
-import org.apache.flink.table.store.file.stats.BinaryTableStats;
-import org.apache.flink.table.store.file.utils.FileStorePathFactory;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
-
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.file.Snapshot;
+import org.apache.paimon.file.manifest.ManifestFileMeta;
+import org.apache.paimon.file.manifest.ManifestList;
+import org.apache.paimon.file.stats.BinaryTableStats;
+import org.apache.paimon.file.utils.FileStorePathFactory;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;

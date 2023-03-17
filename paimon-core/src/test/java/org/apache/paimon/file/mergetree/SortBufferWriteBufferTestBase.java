@@ -18,8 +18,7 @@
 
 package org.apache.paimon.file.mergetree;
 
-import org.apache.flink.table.store.codegen.RecordComparator;
-
+import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.file.memory.HeapMemorySegmentPool;
 import org.apache.paimon.file.mergetree.compact.DeduplicateMergeFunction;

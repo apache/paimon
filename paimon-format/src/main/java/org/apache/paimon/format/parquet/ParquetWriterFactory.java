@@ -18,14 +18,13 @@
 
 package org.apache.paimon.format.parquet;
 
-import org.apache.flink.table.store.fs.PositionOutputStream;
-
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.parquet.writer.ParquetBuilder;
 import org.apache.paimon.format.parquet.writer.ParquetBulkWriter;
 import org.apache.paimon.format.parquet.writer.StreamOutputFile;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.io.OutputFile;
 

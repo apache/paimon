@@ -21,13 +21,13 @@ package org.apache.paimon.connector;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.jobgraph.SavepointConfigOptions;
-import org.apache.flink.table.store.file.Snapshot;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.file.schema.TableSchema;
-import org.apache.flink.table.store.file.utils.SnapshotManager;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.types.Row;
 
+import org.apache.paimon.file.Snapshot;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.file.schema.TableSchema;
+import org.apache.paimon.file.utils.SnapshotManager;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nullable;

@@ -18,14 +18,13 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.testutils.junit.DockerImageVersions;
-
 import com.amazonaws.auth.AWSStaticCredentialsProvider;
 import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.client.builder.AwsClientBuilder;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3Client;
 import com.github.dockerjava.api.command.InspectContainerResponse;
+import org.apache.paimon.testutils.junit.DockerImageVersions;
 import org.apache.paimon.utils.Preconditions;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;

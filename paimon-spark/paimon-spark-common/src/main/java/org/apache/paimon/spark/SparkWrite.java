@@ -18,8 +18,7 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.flink.table.store.file.operation.Lock;
-
+import org.apache.paimon.file.operation.Lock;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;

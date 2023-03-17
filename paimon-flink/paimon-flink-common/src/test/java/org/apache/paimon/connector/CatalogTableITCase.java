@@ -18,13 +18,13 @@
 
 package org.apache.paimon.connector;
 
-import org.apache.flink.table.store.file.schema.SchemaChange;
-import org.apache.flink.table.store.file.schema.SchemaManager;
-import org.apache.flink.table.store.fs.Path;
-import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.types.Row;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.paimon.file.schema.SchemaChange;
+import org.apache.paimon.file.schema.SchemaManager;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.types.IntType;
 import org.junit.jupiter.api.Test;
 

@@ -20,11 +20,11 @@ package org.apache.paimon.connector.sink;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.store.file.manifest.ManifestCommittableSerializer;
-import org.apache.flink.table.store.file.operation.Lock;
 import org.apache.flink.util.function.SerializableFunction;
 
 import org.apache.paimon.connector.VersionedSerializerWrapper;
+import org.apache.paimon.file.manifest.ManifestCommittableSerializer;
+import org.apache.paimon.file.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
 
 import javax.annotation.Nullable;

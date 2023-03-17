@@ -18,9 +18,6 @@
 
 package org.apache.paimon.format.orc.filter;
 
-import org.apache.flink.table.store.fs.FileIO;
-import org.apache.flink.table.store.fs.Path;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.orc.BooleanColumnStatistics;
 import org.apache.orc.ColumnStatistics;
@@ -38,6 +35,8 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.orc.OrcReaderFactory;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;

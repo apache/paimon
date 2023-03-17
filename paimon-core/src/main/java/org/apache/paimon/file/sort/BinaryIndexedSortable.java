@@ -18,9 +18,8 @@
 
 package org.apache.paimon.file.sort;
 
-import org.apache.flink.table.store.codegen.NormalizedKeyComputer;
-import org.apache.flink.table.store.codegen.RecordComparator;
-
+import org.apache.paimon.codegen.NormalizedKeyComputer;
+import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.AbstractPagedOutputView;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;

@@ -21,7 +21,8 @@ package org.apache.paimon.connector.source;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.SplitsAssignment;
-import org.apache.flink.table.store.file.Snapshot;
+
+import org.apache.paimon.file.Snapshot;
 
 import javax.annotation.Nullable;
 

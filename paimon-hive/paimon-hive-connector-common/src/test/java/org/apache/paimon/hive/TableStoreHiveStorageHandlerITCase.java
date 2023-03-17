@@ -19,7 +19,6 @@
 package org.apache.paimon.hive;
 
 import org.apache.flink.connectors.hive.FlinkEmbeddedHiveRunner;
-import org.apache.flink.table.store.file.WriteMode;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
@@ -33,6 +32,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.file.WriteMode;
 import org.apache.paimon.hive.objectinspector.TableStoreObjectInspectorFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;

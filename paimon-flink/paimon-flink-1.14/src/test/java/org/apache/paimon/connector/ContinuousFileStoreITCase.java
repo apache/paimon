@@ -18,7 +18,6 @@
 
 package org.apache.paimon.connector;
 
-import org.apache.flink.table.store.fs.local.LocalFileIO;
 import org.apache.flink.types.Row;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
@@ -26,6 +25,7 @@ import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.file.Snapshot;
 import org.apache.paimon.file.utils.BlockingIterator;
 import org.apache.paimon.file.utils.SnapshotManager;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.junit.Test;
 
 import java.util.ArrayList;
