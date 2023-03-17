@@ -21,10 +21,10 @@ package org.apache.paimon.schema;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
-import org.apache.paimon.file.utils.JsonDeserializer;
-import org.apache.paimon.file.utils.JsonSerializer;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeJsonParser;
+import org.apache.paimon.utils.JsonDeserializer;
+import org.apache.paimon.utils.JsonSerializer;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.IOException;

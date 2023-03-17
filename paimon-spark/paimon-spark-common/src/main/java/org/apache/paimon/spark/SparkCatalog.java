@@ -21,11 +21,11 @@ package org.apache.paimon.spark;
 import org.apache.flink.table.store.catalog.CatalogContext;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.file.catalog.CatalogFactory;
+import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.spark.sql.SparkSession;
@@ -354,13 +354,13 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         return namespace.length == 1;
     }
 
-    private org.apache.paimon.file.catalog.Identifier toIdentifier(Identifier ident)
+    private org.apache.paimon.catalog.Identifier toIdentifier(Identifier ident)
             throws NoSuchTableException {
         if (!isValidateNamespace(ident.namespace())) {
             throw new NoSuchTableException(ident);
         }
 
-        return new org.apache.paimon.file.catalog.Identifier(ident.namespace()[0], ident.name());
+        return new org.apache.paimon.catalog.Identifier(ident.namespace()[0], ident.name());
     }
 
     // --------------------- unsupported methods ----------------------------

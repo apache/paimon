@@ -18,8 +18,8 @@
 
 package org.apache.paimon.mergetree;
 
+import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.KeyValue;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.types.RowKind;
 

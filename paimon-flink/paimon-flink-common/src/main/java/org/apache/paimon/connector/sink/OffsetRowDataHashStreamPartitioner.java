@@ -26,8 +26,8 @@ import org.apache.flink.table.data.RowData;
 
 import org.apache.paimon.connector.FlinkRowWrapper;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.file.utils.OffsetRow;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.OffsetRow;
 
 /**
  * {@link StreamPartitioner} to partition {@link RowData} according to its hash value from an {@link

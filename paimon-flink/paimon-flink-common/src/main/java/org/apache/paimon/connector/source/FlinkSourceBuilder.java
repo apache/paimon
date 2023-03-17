@@ -34,8 +34,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.StartupMode;
 import org.apache.paimon.connector.Projection;
 import org.apache.paimon.connector.log.LogSourceProvider;
-import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.StreamDataTableScan;
 

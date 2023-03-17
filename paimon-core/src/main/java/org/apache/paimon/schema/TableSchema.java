@@ -18,9 +18,9 @@
 
 package org.apache.paimon.schema;
 
-import org.apache.paimon.file.utils.JsonSerdeUtil;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 

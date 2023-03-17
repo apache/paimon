@@ -18,7 +18,7 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.file.utils.ObjectSerializerTestBase;
+import org.apache.paimon.utils.ObjectSerializerTestBase;
 
 import java.util.Arrays;
 

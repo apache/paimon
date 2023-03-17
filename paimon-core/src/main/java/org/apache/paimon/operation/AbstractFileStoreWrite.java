@@ -18,19 +18,19 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.file.Snapshot;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.file.utils.CommitIncrement;
-import org.apache.paimon.file.utils.ExecutorThreadFactory;
-import org.apache.paimon.file.utils.RecordWriter;
-import org.apache.paimon.file.utils.Restorable;
-import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.Restorable;
+import org.apache.paimon.utils.SnapshotManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

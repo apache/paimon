@@ -18,11 +18,12 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.compact.CompactFutureManager;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactUnit;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.mergetree.Levels;
@@ -38,7 +39,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
-/** Compact manager for {@link org.apache.paimon.file.KeyValueFileStore}. */
+/** Compact manager for {@link KeyValueFileStore}. */
 public class MergeTreeCompactManager extends CompactFutureManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(MergeTreeCompactManager.class);

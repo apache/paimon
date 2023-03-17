@@ -37,7 +37,7 @@ import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.ExceptionUtils;
 
 import org.apache.paimon.connector.util.AbstractTestBase;
-import org.apache.paimon.file.utils.FailingFileIO;
+import org.apache.paimon.utils.FailingFileIO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;

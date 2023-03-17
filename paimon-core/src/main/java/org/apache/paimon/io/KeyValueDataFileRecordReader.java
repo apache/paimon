@@ -18,16 +18,16 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.file.KeyValue;
-import org.apache.paimon.file.KeyValueSerializer;
+import org.apache.paimon.KeyValue;
+import org.apache.paimon.KeyValueSerializer;
 import org.apache.paimon.casting.CastFieldGetter;
-import org.apache.paimon.file.utils.FileUtils;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileUtils;
 
 import javax.annotation.Nullable;
 

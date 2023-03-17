@@ -21,10 +21,10 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMetaSerializer;
-import org.apache.paimon.file.utils.VersionedObjectSerializer;
+import org.apache.paimon.utils.VersionedObjectSerializer;
 
-import static org.apache.paimon.file.utils.SerializationUtils.deserializeBinaryRow;
-import static org.apache.paimon.file.utils.SerializationUtils.serializeBinaryRow;
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** Serializer for {@link ManifestEntry}. */
 public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestEntry> {

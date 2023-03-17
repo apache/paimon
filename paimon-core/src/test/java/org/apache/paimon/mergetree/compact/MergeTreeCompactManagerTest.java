@@ -18,10 +18,10 @@
 
 package org.apache.paimon.mergetree.compact;
 
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactUnit;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileTestUtils;
 import org.apache.paimon.mergetree.Levels;

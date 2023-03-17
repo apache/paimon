@@ -18,6 +18,8 @@
 
 package org.apache.paimon.mergetree;
 
+import org.apache.paimon.KeyValue;
+import org.apache.paimon.KeyValueSerializer;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.NormalizedKeyComputer;
@@ -27,20 +29,18 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
-import org.apache.paimon.file.KeyValue;
-import org.apache.paimon.file.KeyValueSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
-import org.apache.paimon.file.sort.BinaryExternalSortBuffer;
-import org.apache.paimon.file.sort.BinaryInMemorySortBuffer;
-import org.apache.paimon.file.sort.SortBuffer;
-import org.apache.paimon.file.utils.MutableObjectIterator;
+import org.apache.paimon.sort.BinaryExternalSortBuffer;
+import org.apache.paimon.sort.BinaryInMemorySortBuffer;
+import org.apache.paimon.sort.SortBuffer;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.MutableObjectIterator;
 
 import javax.annotation.Nullable;
 

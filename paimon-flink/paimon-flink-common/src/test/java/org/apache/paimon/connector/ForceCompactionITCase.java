@@ -19,17 +19,17 @@
 package org.apache.paimon.connector;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.file.Snapshot;
-import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.manifest.ManifestList;
-import org.apache.paimon.file.stats.BinaryTableStats;
-import org.apache.paimon.file.utils.FileStorePathFactory;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

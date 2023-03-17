@@ -19,16 +19,16 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.file.stats.StatsTestUtils;
-import org.apache.paimon.file.utils.FailingFileIO;
-import org.apache.paimon.file.utils.FileStorePathFactory;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.stats.StatsTestUtils;
+import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -39,7 +39,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.file.TestKeyValueGenerator.DEFAULT_PART_TYPE;
+import static org.apache.paimon.TestKeyValueGenerator.DEFAULT_PART_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ManifestFile}. */

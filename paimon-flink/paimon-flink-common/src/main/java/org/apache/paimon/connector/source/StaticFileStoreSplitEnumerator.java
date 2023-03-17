@@ -22,7 +22,7 @@ import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.SplitsAssignment;
 
-import org.apache.paimon.file.Snapshot;
+import org.apache.paimon.Snapshot;
 
 import javax.annotation.Nullable;
 

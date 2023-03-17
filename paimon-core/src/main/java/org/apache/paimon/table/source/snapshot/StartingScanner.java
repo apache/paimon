@@ -18,10 +18,10 @@
 
 package org.apache.paimon.table.source.snapshot;
 
-import org.apache.paimon.file.utils.SnapshotManager;
 import org.apache.paimon.table.source.BatchDataTableScan;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.utils.SnapshotManager;
 
 /**
  * Helper class for the first planning of {@link BatchDataTableScan} and {@link

@@ -20,17 +20,17 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.io.NewFilesIncrement;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.Objects;
 
-import static org.apache.paimon.file.utils.SerializationUtils.deserializedBytes;
-import static org.apache.paimon.file.utils.SerializationUtils.serializeBytes;
+import static org.apache.paimon.utils.SerializationUtils.deserializedBytes;
+import static org.apache.paimon.utils.SerializationUtils.serializeBytes;
 
 /** File committable for sink. */
 public class CommitMessageImpl implements CommitMessage {

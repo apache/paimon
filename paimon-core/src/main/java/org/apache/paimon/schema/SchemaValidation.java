@@ -19,7 +19,7 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.file.WriteMode;
+import org.apache.paimon.WriteMode;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -40,7 +40,7 @@ import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
-import static org.apache.paimon.file.WriteMode.APPEND_ONLY;
+import static org.apache.paimon.WriteMode.APPEND_ONLY;
 import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 import static org.apache.paimon.schema.SystemColumns.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.utils.Preconditions.checkArgument;

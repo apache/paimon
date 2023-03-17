@@ -21,12 +21,12 @@ package org.apache.paimon.table;
 import org.apache.flink.table.store.catalog.CatalogContext;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.file.WriteMode;
-import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.WriteMode;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

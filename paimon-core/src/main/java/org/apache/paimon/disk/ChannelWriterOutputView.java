@@ -18,9 +18,9 @@
 
 package org.apache.paimon.disk;
 
-import org.apache.paimon.data.AbstractPagedOutputView;
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.BlockCompressor;
+import org.apache.paimon.data.AbstractPagedOutputView;
 import org.apache.paimon.memory.Buffer;
 import org.apache.paimon.memory.MemorySegment;
 

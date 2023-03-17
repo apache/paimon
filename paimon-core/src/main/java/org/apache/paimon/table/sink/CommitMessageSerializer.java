@@ -21,19 +21,19 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.data.serializer.VersionedSerializer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMetaSerializer;
-import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.io.NewFilesIncrement;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.file.utils.SerializationUtils.deserializeBinaryRow;
-import static org.apache.paimon.file.utils.SerializationUtils.serializeBinaryRow;
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
+import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** {@link VersionedSerializer} for {@link CommitMessage}. */
 public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
