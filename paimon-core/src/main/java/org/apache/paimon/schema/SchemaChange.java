@@ -43,11 +43,11 @@ public interface SchemaChange {
     }
 
     static SchemaChange addColumn(String fieldName, DataType dataType) {
-        return addColumn(fieldName, dataType, null);
+        return addColumn(fieldName, dataType, null, null);
     }
 
-    static SchemaChange addColumn(String fieldName, DataType dataType, String comment) {
-        return new AddColumn(fieldName, dataType, comment);
+    static SchemaChange addColumn(String fieldName, DataType dataType, String comment, Move move) {
+        return new AddColumn(fieldName, dataType, comment, move);
     }
 
     static SchemaChange renameColumn(String fieldName, String newName) {
@@ -145,11 +145,13 @@ public interface SchemaChange {
         private final String fieldName;
         private final DataType dataType;
         private final String description;
+        private final Move move;
 
-        private AddColumn(String fieldName, DataType dataType, String description) {
+        private AddColumn(String fieldName, DataType dataType, String description, Move move) {
             this.fieldName = fieldName;
             this.dataType = dataType;
             this.description = description;
+            this.move = move;
         }
 
         public String fieldName() {
@@ -165,6 +167,11 @@ public interface SchemaChange {
             return description;
         }
 
+        @Nullable
+        public Move move() {
+            return move;
+        }
+
         @Override
         public boolean equals(Object o) {
             if (this == o) {
@@ -176,13 +183,15 @@ public interface SchemaChange {
             AddColumn addColumn = (AddColumn) o;
             return Objects.equals(fieldName, addColumn.fieldName)
                     && dataType.equals(addColumn.dataType)
-                    && Objects.equals(description, addColumn.description);
+                    && Objects.equals(description, addColumn.description)
+                    && move.equals(addColumn.move);
         }
 
         @Override
         public int hashCode() {
             int result = Objects.hash(dataType, description);
             result = 31 * result + Objects.hashCode(fieldName);
+            result = 31 * result + Objects.hashCode(move);
             return result;
         }
     }
@@ -305,6 +314,23 @@ public interface SchemaChange {
 
         public Move move() {
             return move;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            UpdateColumnPosition updateColumnPosition = (UpdateColumnPosition) o;
+            return Objects.equals(move, updateColumnPosition.move);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(move);
         }
     }
 

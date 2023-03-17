@@ -125,7 +125,10 @@ public class SchemaEvolutionTest {
                                 schemaManager.commitChanges(
                                         Collections.singletonList(
                                                 SchemaChange.addColumn(
-                                                        "f4", new IntType().copy(false), null))))
+                                                        "f4",
+                                                        new IntType().copy(false),
+                                                        null,
+                                                        null))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("ADD COLUMN cannot specify NOT NULL.");
     }

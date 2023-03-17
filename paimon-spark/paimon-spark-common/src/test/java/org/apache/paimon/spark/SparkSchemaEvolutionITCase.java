@@ -107,27 +107,28 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @Test
     public void testAddColumnPosition() {
-        createTable("testAddNotNullColumn");
-
-        List<Row> beforeAdd =
-                spark.sql("SHOW CREATE TABLE tablestore.default.testAddNotNullColumn")
-                        .collectAsList();
-        assertThat(beforeAdd.toString())
-                .isEqualTo(
-                        "[[CREATE TABLE testAddNotNullColumn (\n"
+        createTable("testAddColumnPositionFirst");
+        spark.sql("ALTER TABLE testAddColumnPositionFirst ADD COLUMN d INT FIRST");
+        List<Row> result =
+                spark.sql("SHOW CREATE TABLE testAddColumnPositionFirst").collectAsList();
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE testAddColumnPositionFirst (\n"
+                                + "  `d` INT,\n"
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT,\n"
-                                + "  `c` STRING)\n"
-                                + buildTableProperties("default.db/testAddNotNullColumn")
-                                + "]]");
+                                + "  `c` STRING)");
 
-        assertThatThrownBy(
-                () ->
-                        spark.sql(
-                                "ALTER TABLE tablestore.default.testAddNotNullColumn ADD COLUMNS (d INT NOT NULL)"))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessage(
-                        "java.lang.IllegalArgumentException: ADD COLUMN cannot specify NOT NULL.");
+        createTable("testAddColumnPositionAfter");
+        spark.sql("ALTER TABLE testAddColumnPositionAfter ADD COLUMN d INT AFTER b");
+        result = spark.sql("SHOW CREATE TABLE testAddColumnPositionAfter").collectAsList();
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE testAddColumnPositionAfter (\n"
+                                + "  `a` INT NOT NULL,\n"
+                                + "  `b` BIGINT,\n"
+                                + "  `d` INT,\n"
+                                + "  `c` STRING)");
     }
 
     @Test

@@ -202,6 +202,7 @@ public class SchemaManager implements Serializable {
                     newOptions.remove(removeOption.key());
                 } else if (change instanceof AddColumn) {
                     AddColumn addColumn = (AddColumn) change;
+                    SchemaChange.Move move = addColumn.move();
                     if (newFields.stream().anyMatch(f -> f.name().equals(addColumn.fieldName()))) {
                         throw new IllegalArgumentException(
                                 String.format(
@@ -214,9 +215,28 @@ public class SchemaManager implements Serializable {
                     int id = highestFieldId.incrementAndGet();
                     DataType dataType =
                             ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);
-                    newFields.add(
+
+                    DataField dataField =
                             new DataField(
-                                    id, addColumn.fieldName(), dataType, addColumn.description()));
+                                    id, addColumn.fieldName(), dataType, addColumn.description());
+
+                    // key: name ; value : index
+                    Map<String, Integer> map = new HashMap<>();
+                    for (int i = 0; i < newFields.size(); i++) {
+                        map.put(newFields.get(i).name(), i);
+                    }
+
+                    if (null != move) {
+                        if (move.type().equals(SchemaChange.Move.MoveType.FIRST)) {
+                            newFields.add(0, dataField);
+                        } else if (move.type().equals(SchemaChange.Move.MoveType.AFTER)) {
+                            int fieldIndex = map.get(move.referenceFieldName());
+                            newFields.add(fieldIndex + 1, dataField);
+                        }
+                    } else {
+                        newFields.add(dataField);
+                    }
+
                 } else if (change instanceof RenameColumn) {
                     RenameColumn rename = (RenameColumn) change;
                     validateNotPrimaryAndPartitionKey(schema, rename.fieldName());
