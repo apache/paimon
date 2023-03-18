@@ -31,7 +31,7 @@ import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.TableStoreDataStreamScanProvider;
+import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.flink.lookup.FileStoreLookupFunction;
@@ -60,7 +60,7 @@ import static org.apache.paimon.CoreOptions.LOG_SCAN_REMOVE_NORMALIZE;
  * org.apache.flink.connector.base.source.hybrid.HybridSource} of {@link StaticFileStoreSource} and
  * kafka log source created by {@link LogSourceProvider}.
  */
-public class TableStoreSource extends FlinkTableSource
+public class DataTableSource extends FlinkTableSource
         implements LookupTableSource, SupportsWatermarkPushDown {
 
     private final ObjectIdentifier tableIdentifier;
@@ -71,7 +71,7 @@ public class TableStoreSource extends FlinkTableSource
 
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
 
-    public TableStoreSource(
+    public DataTableSource(
             ObjectIdentifier tableIdentifier,
             FileStoreTable table,
             boolean streaming,
@@ -89,7 +89,7 @@ public class TableStoreSource extends FlinkTableSource
                 null);
     }
 
-    private TableStoreSource(
+    private DataTableSource(
             ObjectIdentifier tableIdentifier,
             FileStoreTable table,
             boolean streaming,
@@ -135,7 +135,7 @@ public class TableStoreSource extends FlinkTableSource
             }
 
             // optimization: transaction consistency and all changelog mode avoid the generation of
-            // normalized nodes. See TableStoreSink.getChangelogMode validation.
+            // normalized nodes. See FlinkTableSink.getChangelogMode validation.
             return options.get(LOG_CONSISTENCY) == LogConsistency.TRANSACTIONAL
                             && options.get(LOG_CHANGELOG_MODE) == LogChangelogMode.ALL
                     ? ChangelogMode.all()
@@ -168,13 +168,13 @@ public class TableStoreSource extends FlinkTableSource
                                         .get(FlinkConnectorOptions.SCAN_PARALLELISM))
                         .withWatermarkStrategy(watermarkStrategy);
 
-        return new TableStoreDataStreamScanProvider(
+        return new PaimonDataStreamScanProvider(
                 !streaming, env -> sourceBuilder.withEnv(env).build());
     }
 
     @Override
     public DynamicTableSource copy() {
-        return new TableStoreSource(
+        return new DataTableSource(
                 tableIdentifier,
                 table,
                 streaming,
@@ -188,7 +188,7 @@ public class TableStoreSource extends FlinkTableSource
 
     @Override
     public String asSummaryString() {
-        return "TableStore-DataSource";
+        return "Paimon-DataSource";
     }
 
     @Override

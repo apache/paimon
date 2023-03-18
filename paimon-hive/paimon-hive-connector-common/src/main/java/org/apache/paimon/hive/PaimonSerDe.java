@@ -56,7 +56,7 @@ public class PaimonSerDe extends AbstractSerDe {
     @Override
     public Writable serialize(Object o, ObjectInspector objectInspector) throws SerDeException {
         throw new UnsupportedOperationException(
-                "TableStoreSerDe currently only supports deserialization.");
+                "PaimonSerDe currently only supports deserialization.");
     }
 
     @Override

@@ -37,7 +37,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 /** IT cases for testing create managed table ddl. */
-public class CreateTableITCase extends TableStoreTestBase {
+public class CreateTableITCase extends FlinkTestBase {
 
     @Override
     public void prepareEnv(

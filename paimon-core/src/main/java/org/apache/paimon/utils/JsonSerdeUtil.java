@@ -49,7 +49,7 @@ public class JsonSerdeUtil {
 
     static {
         OBJECT_MAPPER_INSTANCE = new ObjectMapper();
-        OBJECT_MAPPER_INSTANCE.registerModule(createTableStoreJacksonModule());
+        OBJECT_MAPPER_INSTANCE.registerModule(createPaimonJacksonModule());
     }
 
     public static <T> T fromJson(String json, Class<T> clazz) {
@@ -76,7 +76,7 @@ public class JsonSerdeUtil {
         }
     }
 
-    private static Module createTableStoreJacksonModule() {
+    private static Module createPaimonJacksonModule() {
         SimpleModule module = new SimpleModule("Paimon");
         registerJsonObjects(
                 module, TableSchema.class, SchemaSerializer.INSTANCE, SchemaSerializer.INSTANCE);

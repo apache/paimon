@@ -39,7 +39,7 @@ import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.Row;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.flink.sink.TableStoreSink;
+import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -57,10 +57,10 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
-import static org.apache.paimon.flink.AbstractTableStoreFactory.buildFileStoreTable;
+import static org.apache.paimon.flink.AbstractFlinkTableFactory.buildFileStoreTable;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_PARALLELISM;
-import static org.apache.paimon.flink.TableStoreTestBase.createResolvedTable;
+import static org.apache.paimon.flink.FlinkTestBase.createResolvedTable;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bExeEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildQuery;
@@ -1154,9 +1154,9 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 .createTable(FlinkCatalog.fromCatalogTable(context.getCatalogTable()));
 
         DynamicTableSink tableSink =
-                new TableStoreSink(
+                new FlinkTableSink(
                         context.getObjectIdentifier(), buildFileStoreTable(context), context, null);
-        assertThat(tableSink).isInstanceOf(TableStoreSink.class);
+        assertThat(tableSink).isInstanceOf(FlinkTableSink.class);
 
         // 2. get sink provider
         DynamicTableSink.SinkRuntimeProvider provider =
@@ -1169,7 +1169,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 bExeEnv.fromCollection(Collections.singletonList(GenericRowData.of()));
         DataStreamSink<?> sink = sinkProvider.consumeDataStream(null, mockSource);
         Transformation<?> transformation = sink.getTransformation();
-        // until a PartitionTransformation, see TableStore.SinkBuilder.build()
+        // until a PartitionTransformation, see FlinkSinkBuilder.build()
         while (!(transformation instanceof PartitionTransformation)) {
             assertThat(transformation.getParallelism()).isIn(1, expectedParallelism);
             transformation = transformation.getInputs().get(0);

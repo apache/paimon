@@ -49,8 +49,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link TableStoreRecordReader}. */
-public class TableStoreRecordReaderTest {
+/** Tests for {@link PaimonRecordReader}. */
+public class PaimonRecordReaderTest {
 
     @TempDir java.nio.file.Path tempDir;
     private String commitUser;
@@ -83,7 +83,7 @@ public class TableStoreRecordReaderTest {
         write.write(GenericRow.ofKind(RowKind.DELETE, 2L, BinaryString.fromString("Hello")));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        TableStoreRecordReader reader = read(table, BinaryRow.EMPTY_ROW, 0);
+        PaimonRecordReader reader = read(table, BinaryRow.EMPTY_ROW, 0);
         RowDataContainer container = reader.createValue();
         Set<String> actual = new HashSet<>();
         while (reader.next(null, container)) {
@@ -122,7 +122,7 @@ public class TableStoreRecordReaderTest {
         write.write(GenericRow.of(1, BinaryString.fromString("Hi")));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        TableStoreRecordReader reader = read(table, BinaryRow.EMPTY_ROW, 0);
+        PaimonRecordReader reader = read(table, BinaryRow.EMPTY_ROW, 0);
         RowDataContainer container = reader.createValue();
         Map<String, Integer> actual = new HashMap<>();
         while (reader.next(null, container)) {
@@ -160,8 +160,7 @@ public class TableStoreRecordReaderTest {
         write.write(GenericRow.of(1, 10L, BinaryString.fromString("Hi")));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        TableStoreRecordReader reader =
-                read(table, BinaryRow.EMPTY_ROW, 0, Arrays.asList("c", "a"));
+        PaimonRecordReader reader = read(table, BinaryRow.EMPTY_ROW, 0, Arrays.asList("c", "a"));
         RowDataContainer container = reader.createValue();
         Map<String, Integer> actual = new HashMap<>();
         while (reader.next(null, container)) {
@@ -176,19 +175,19 @@ public class TableStoreRecordReaderTest {
         assertThat(actual).isEqualTo(expected);
     }
 
-    private TableStoreRecordReader read(FileStoreTable table, BinaryRow partition, int bucket)
+    private PaimonRecordReader read(FileStoreTable table, BinaryRow partition, int bucket)
             throws Exception {
         return read(table, partition, bucket, table.schema().fieldNames());
     }
 
-    private TableStoreRecordReader read(
+    private PaimonRecordReader read(
             FileStoreTable table, BinaryRow partition, int bucket, List<String> selectedColumns)
             throws Exception {
         for (DataSplit split : table.newScan().plan().splits) {
             if (split.partition().equals(partition) && split.bucket() == bucket) {
-                return new TableStoreRecordReader(
+                return new PaimonRecordReader(
                         table.newReadBuilder(),
-                        new TableStoreInputSplit(tempDir.toString(), split),
+                        new PaimonInputSplit(tempDir.toString(), split),
                         table.schema().fieldNames(),
                         selectedColumns);
             }

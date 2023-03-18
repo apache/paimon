@@ -24,8 +24,8 @@ import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.kafka.KafkaLogStoreFactory;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
-import org.apache.paimon.flink.sink.TableStoreSink;
-import org.apache.paimon.flink.source.TableStoreSource;
+import org.apache.paimon.flink.sink.FlinkTableSink;
+import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -80,11 +80,11 @@ public class ChangelogModeTest {
                                 ""));
         FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), path);
 
-        TableStoreSource source =
-                new TableStoreSource(identifier, table, true, null, logStoreTableFactory);
+        DataTableSource source =
+                new DataTableSource(identifier, table, true, null, logStoreTableFactory);
         assertThat(source.getChangelogMode()).isEqualTo(expectSource);
 
-        TableStoreSink sink = new TableStoreSink(identifier, table, null, null);
+        FlinkTableSink sink = new FlinkTableSink(identifier, table, null, null);
         assertThat(sink.getChangelogMode(ChangelogMode.all())).isEqualTo(expectSink);
     }
 
