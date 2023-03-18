@@ -35,9 +35,9 @@ import org.apache.paimon.CoreOptions.LogConsistency;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
-import org.apache.paimon.flink.sink.TableStoreSink;
+import org.apache.paimon.flink.sink.FlinkTableSink;
+import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.flink.source.SystemTableSource;
-import org.apache.paimon.flink.source.TableStoreSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
@@ -60,7 +60,7 @@ import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.flink.log.LogStoreTableFactory.discoverLogStoreFactory;
 
 /** Abstract paimon factory to create table source and table sink. */
-public abstract class AbstractTableStoreFactory
+public abstract class AbstractFlinkTableFactory
         implements DynamicTableSourceFactory, DynamicTableSinkFactory {
 
     @Override
@@ -72,7 +72,7 @@ public abstract class AbstractTableStoreFactory
         if (origin instanceof SystemCatalogTable) {
             return new SystemTableSource(((SystemCatalogTable) origin).table(), isStreamingMode);
         } else {
-            return new TableStoreSource(
+            return new DataTableSource(
                     context.getObjectIdentifier(),
                     buildFileStoreTable(context),
                     isStreamingMode,
@@ -83,7 +83,7 @@ public abstract class AbstractTableStoreFactory
 
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
-        return new TableStoreSink(
+        return new FlinkTableSink(
                 context.getObjectIdentifier(),
                 buildFileStoreTable(context),
                 context,

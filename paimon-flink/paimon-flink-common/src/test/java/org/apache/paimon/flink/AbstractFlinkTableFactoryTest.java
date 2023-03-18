@@ -29,8 +29,8 @@ import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link AbstractTableStoreFactory}. */
-public class AbstractTableStoreFactoryTest {
+/** Test for {@link AbstractFlinkTableFactory}. */
+public class AbstractFlinkTableFactoryTest {
 
     @Test
     public void testSchemaEquals() {
@@ -55,6 +55,6 @@ public class AbstractTableStoreFactoryTest {
     }
 
     private void innerTest(RowType r1, RowType r2, boolean expectEquals) {
-        assertThat(AbstractTableStoreFactory.schemaEquals(r1, r2)).isEqualTo(expectEquals);
+        assertThat(AbstractFlinkTableFactory.schemaEquals(r1, r2)).isEqualTo(expectEquals);
     }
 }

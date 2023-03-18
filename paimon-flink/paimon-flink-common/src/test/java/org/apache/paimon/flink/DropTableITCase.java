@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 /** IT cases for testing drop managed table ddl. */
-public class DropTableITCase extends TableStoreTestBase {
+public class DropTableITCase extends FlinkTestBase {
 
     @Override
     public void prepareEnv(

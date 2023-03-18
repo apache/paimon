@@ -32,8 +32,8 @@ import org.apache.hadoop.hive.serde2.Deserializer;
 import org.apache.hadoop.mapred.InputFormat;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.OutputFormat;
-import org.apache.paimon.hive.mapred.TableStoreInputFormat;
-import org.apache.paimon.hive.mapred.TableStoreOutputFormat;
+import org.apache.paimon.hive.mapred.PaimonInputFormat;
+import org.apache.paimon.hive.mapred.PaimonOutputFormat;
 
 import java.util.Map;
 import java.util.Properties;
@@ -45,12 +45,12 @@ public class PaimonStorageHandler implements HiveStoragePredicateHandler, HiveSt
 
     @Override
     public Class<? extends InputFormat> getInputFormatClass() {
-        return TableStoreInputFormat.class;
+        return PaimonInputFormat.class;
     }
 
     @Override
     public Class<? extends OutputFormat> getOutputFormatClass() {
-        return TableStoreOutputFormat.class;
+        return PaimonOutputFormat.class;
     }
 
     @Override

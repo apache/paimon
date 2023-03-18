@@ -667,8 +667,7 @@ public class MergeIntoAction extends ActionBase {
     }
 
     private void checkSchema(String action, Table source) {
-        List<DataType> actualTypes =
-                toTableStoreDataTypes(source.getResolvedSchema().getColumnDataTypes());
+        List<DataType> actualTypes = toPaimonTypes(source.getResolvedSchema().getColumnDataTypes());
         List<DataType> expectedTypes = this.table.rowType().getFieldTypes();
         if (!compatibleCheck(actualTypes, expectedTypes)) {
             throw new IllegalStateException(

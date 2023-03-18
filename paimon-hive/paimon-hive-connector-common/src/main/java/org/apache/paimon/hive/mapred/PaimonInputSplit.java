@@ -33,7 +33,7 @@ import java.util.Objects;
 /**
  * {@link FileSplit} for paimon. It contains all files to read from a certain partition and bucket.
  */
-public class TableStoreInputSplit extends FileSplit {
+public class PaimonInputSplit extends FileSplit {
 
     private static final String[] ANYWHERE = new String[] {"*"};
 
@@ -41,9 +41,9 @@ public class TableStoreInputSplit extends FileSplit {
     private DataSplit split;
 
     // public no-argument constructor for deserialization
-    public TableStoreInputSplit() {}
+    public PaimonInputSplit() {}
 
-    public TableStoreInputSplit(String path, DataSplit split) {
+    public PaimonInputSplit(String path, DataSplit split) {
         this.path = path;
         this.split = split;
     }
@@ -103,7 +103,7 @@ public class TableStoreInputSplit extends FileSplit {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        TableStoreInputSplit that = (TableStoreInputSplit) o;
+        PaimonInputSplit that = (PaimonInputSplit) o;
         return Objects.equals(path, that.path) && Objects.equals(split, that.split);
     }
 

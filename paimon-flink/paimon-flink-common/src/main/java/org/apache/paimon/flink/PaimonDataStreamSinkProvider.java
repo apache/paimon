@@ -20,23 +20,24 @@ package org.apache.paimon.flink;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
+import org.apache.flink.table.connector.ProviderContext;
 import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
 import org.apache.flink.table.data.RowData;
 
 import java.util.function.Function;
 
 /** Paimon {@link DataStreamSinkProvider}. */
-public class TableStoreDataStreamSinkProvider implements DataStreamSinkProvider {
+public class PaimonDataStreamSinkProvider implements DataStreamSinkProvider {
 
     private final Function<DataStream<RowData>, DataStreamSink<?>> producer;
 
-    public TableStoreDataStreamSinkProvider(
-            Function<DataStream<RowData>, DataStreamSink<?>> producer) {
+    public PaimonDataStreamSinkProvider(Function<DataStream<RowData>, DataStreamSink<?>> producer) {
         this.producer = producer;
     }
 
     @Override
-    public DataStreamSink<?> consumeDataStream(DataStream<RowData> dataStream) {
+    public DataStreamSink<?> consumeDataStream(
+            ProviderContext providerContext, DataStream<RowData> dataStream) {
         return producer.apply(dataStream);
     }
 }

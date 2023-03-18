@@ -33,7 +33,7 @@ import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.TableStoreDataStreamSinkProvider;
+import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
 import org.apache.paimon.flink.log.LogSinkProvider;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.operation.Lock;
@@ -53,7 +53,7 @@ import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 
 /** Table sink to create sink. */
-public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning {
+public class FlinkTableSink implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning {
 
     private final ObjectIdentifier tableIdentifier;
     private final FileStoreTable table;
@@ -64,7 +64,7 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
     private boolean overwrite = false;
     @Nullable private CatalogLock.Factory lockFactory;
 
-    public TableStoreSink(
+    public FlinkTableSink(
             ObjectIdentifier tableIdentifier,
             FileStoreTable table,
             DynamicTableFactory.Context context,
@@ -128,7 +128,7 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
         // Do not sink to log store when overwrite mode
         final LogSinkFunction logSinkFunction =
                 overwrite ? null : (logSinkProvider == null ? null : logSinkProvider.createSink());
-        return new TableStoreDataStreamSinkProvider(
+        return new PaimonDataStreamSinkProvider(
                 (dataStream) ->
                         new FlinkSinkBuilder(table)
                                 .withInput(
@@ -148,8 +148,8 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
 
     @Override
     public DynamicTableSink copy() {
-        TableStoreSink copied =
-                new TableStoreSink(tableIdentifier, table, context, logStoreTableFactory);
+        FlinkTableSink copied =
+                new FlinkTableSink(tableIdentifier, table, context, logStoreTableFactory);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         copied.lockFactory = lockFactory;
@@ -158,7 +158,7 @@ public class TableStoreSink implements DynamicTableSink, SupportsOverwrite, Supp
 
     @Override
     public String asSummaryString() {
-        return "TableStoreSink";
+        return "PaimonSink";
     }
 
     @Override
