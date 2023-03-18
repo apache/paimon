@@ -57,8 +57,8 @@ public class HiveE2eTest extends E2eReaderTestBase {
     @Test
     public void testReadExternalTable() throws Exception {
         final String table = "table_store_pk";
-        String tableStorePkPath = HDFS_ROOT + "/" + UUID.randomUUID() + ".store";
-        String tableStorePkDdl =
+        String paimonPkPath = HDFS_ROOT + "/" + UUID.randomUUID() + ".store";
+        String paimonPkDdl =
                 String.format(
                         "CREATE TABLE IF NOT EXISTS %s (\n"
                                 + "  a int,\n"
@@ -69,17 +69,14 @@ public class HiveE2eTest extends E2eReaderTestBase {
                                 + "  'bucket' = '2'\n"
                                 + ");",
                         table);
-        runSql(
-                createInsertSql(table),
-                createCatalogSql("table_store", tableStorePkPath),
-                tableStorePkDdl);
+        runSql(createInsertSql(table), createCatalogSql("table_store", paimonPkPath), paimonPkDdl);
 
         String externalTablePkDdl =
                 String.format(
                         "CREATE EXTERNAL TABLE IF NOT EXISTS %s\n"
                                 + "STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'\n"
                                 + "LOCATION '%s/default.db/%s';\n",
-                        table, tableStorePkPath, table);
+                        table, paimonPkPath, table);
 
         checkQueryResults(table, this::executeQuery, externalTablePkDdl);
     }
