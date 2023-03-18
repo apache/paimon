@@ -132,7 +132,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                     allowQuick = true;
                 } else if (escape != null) {
                     if (escape.length() != 1) {
-                        throw new RuntimeException("Invalid escape character '" + escape + "'");
+                        throw new UnsupportedExpression();
                     }
                     char escapeChar = escape.charAt(0);
                     boolean matched = true;
@@ -142,8 +142,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                         char c = sqlPattern.charAt(i);
                         if (c == escapeChar) {
                             if (i == (sqlPattern.length() - 1)) {
-                                throw new RuntimeException(
-                                        "Invalid escape sequence '" + sqlPattern + "', " + i);
+                                throw new UnsupportedExpression();
                             }
                             char nextChar = sqlPattern.charAt(i + 1);
                             if (nextChar == '%') {
@@ -152,8 +151,7 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                                 sb.append(nextChar);
                                 i += 1;
                             } else {
-                                throw new RuntimeException(
-                                        "Invalid escape sequence '" + sqlPattern + "', " + i);
+                                throw new UnsupportedExpression();
                             }
                         } else if (c == '_') {
                             matched = false;
@@ -271,23 +269,22 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
     @Override
     public Predicate visit(ValueLiteralExpression valueLiteralExpression) {
-        throw new RuntimeException("Literal should be resolved in call expression.");
+        throw new UnsupportedExpression();
     }
 
     @Override
     public Predicate visit(FieldReferenceExpression fieldReferenceExpression) {
-        throw new RuntimeException("Field reference should be resolved in call expression.");
+        throw new UnsupportedExpression();
     }
 
     @Override
     public Predicate visit(TypeLiteralExpression typeLiteralExpression) {
-        throw new RuntimeException(
-                "Type literal is unsupported: " + typeLiteralExpression.asSummaryString());
+        throw new UnsupportedExpression();
     }
 
     @Override
     public Predicate visit(Expression expression) {
-        throw new RuntimeException("Unsupported expression: " + expression.asSummaryString());
+        throw new UnsupportedExpression();
     }
 
     /**

@@ -70,8 +70,7 @@ public class PredicateConverterTest {
             assertThat(CONVERTER.visit((CallExpression) expression)).isEqualTo(expected);
         } else {
             assertThatThrownBy(() -> CONVERTER.visit(expression))
-                    .isInstanceOf(RuntimeException.class)
-                    .hasMessageContaining("Unsupported expression");
+                    .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
         }
     }
 
@@ -738,6 +737,14 @@ public class PredicateConverterTest {
                         field(0, structType),
                         literal(Row.of(1), structType));
         assertThatThrownBy(() -> expression.accept(converter))
+                .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+    }
+
+    @Test
+    public void testUnsupportedFieldReferenceExpression() {
+        PredicateConverter converter = new PredicateConverter(RowType.of(new VarCharType()));
+        DataType structType = DataTypes.ROW(DataTypes.INT()).bridgedTo(Row.class);
+        assertThatThrownBy(() -> field(0, structType).accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
     }
 
