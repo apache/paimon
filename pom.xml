@@ -34,8 +34,8 @@ under the License.
     <version>0.4-SNAPSHOT</version>
     <packaging>pom</packaging>
 
-    <url>http://flink.apache.org</url>
-    <inceptionYear>2019</inceptionYear>
+    <url>http://paimon.apache.org</url>
+    <inceptionYear>2023</inceptionYear>
 
     <licenses>
         <license>
