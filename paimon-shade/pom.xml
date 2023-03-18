@@ -116,11 +116,11 @@ under the License.
                                     <include>org.apache.flink:flink-shaded-guava</include>
                                     <include>org.apache.flink:flink-shaded-asm-9</include>
 
-                                    <!-- Flink Table Store -->
-                                    <include>org.apache.flink:paimon-common</include>
-                                    <include>org.apache.flink:paimon-core</include>
-                                    <include>org.apache.flink:paimon-format</include>
-                                    <include>org.apache.flink:paimon-codegen-loader</include>
+                                    <!-- Paimon -->
+                                    <include>org.apache.paimon:paimon-common</include>
+                                    <include>org.apache.paimon:paimon-core</include>
+                                    <include>org.apache.paimon:paimon-format</include>
+                                    <include>org.apache.paimon:paimon-codegen-loader</include>
 
                                     <!-- Others, not shade to reduce conflicting -->
                                     <!-- <include>org.xerial.snappy:snappy-java</include> -->

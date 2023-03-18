@@ -25,7 +25,7 @@ import org.apache.flink.table.data.RowData;
 
 import java.util.function.Function;
 
-/** Table Store {@link DataStreamScanProvider}. */
+/** Paimon {@link DataStreamScanProvider}. */
 public class TableStoreDataStreamScanProvider implements DataStreamScanProvider {
 
     private final boolean isBounded;

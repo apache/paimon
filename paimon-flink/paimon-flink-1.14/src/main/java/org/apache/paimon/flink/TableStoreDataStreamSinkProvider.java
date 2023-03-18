@@ -25,7 +25,7 @@ import org.apache.flink.table.data.RowData;
 
 import java.util.function.Function;
 
-/** Table Store {@link DataStreamSinkProvider}. */
+/** Paimon {@link DataStreamSinkProvider}. */
 public class TableStoreDataStreamSinkProvider implements DataStreamSinkProvider {
 
     private final Function<DataStream<RowData>, DataStreamSink<?>> producer;

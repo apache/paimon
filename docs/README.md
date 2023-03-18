@@ -1,7 +1,7 @@
 This README gives an overview of how to build and contribute to the
-documentation of Flink Table Store.
+documentation of Paimon.
 
-The documentation is included with the source of Flink Table Store in order to ensure
+The documentation is included with the source of Paimon in order to ensure
 that you always have docs corresponding to your checked-out version.
 
 # Requirements
@@ -85,7 +85,7 @@ the page:
 
 ### ShortCodes 
 
-Flink Table Store uses [shortcodes](https://gohugo.io/content-management/shortcodes/) to add
+Paimon uses [shortcodes](https://gohugo.io/content-management/shortcodes/) to add
 custom functionality to its documentation markdown.
 
 Its implementation and documentation can be found at

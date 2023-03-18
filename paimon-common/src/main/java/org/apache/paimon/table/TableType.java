@@ -27,10 +27,10 @@ import static org.apache.paimon.options.description.TextElement.text;
 public enum TableType implements DescribedEnum {
     MANAGED(
             "managed",
-            "Table Store owned table where the entire lifecycle of the table data is managed."),
+            "Paimon owned table where the entire lifecycle of the table data is managed."),
     EXTERNAL(
             "external",
-            "The table where Table Store has loose coupling with the data stored in external locations.");
+            "The table where Paimon has loose coupling with the data stored in external locations.");
 
     private final String value;
     private final String description;

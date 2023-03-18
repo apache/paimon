@@ -119,11 +119,11 @@ public class HiveTableSchemaTest {
                         "Mismatched fields are:",
                         "Field #1",
                         "Hive DDL          : mismatched string",
-                        "Table Store Schema: b string",
+                        "Paimon Schema: b string",
                         "--------------------",
                         "Field #2",
                         "Hive DDL          : c decimal(6,3)",
-                        "Table Store Schema: c decimal(5,3)");
+                        "Paimon Schema: c decimal(5,3)");
         IllegalArgumentException exception =
                 assertThrows(
                         IllegalArgumentException.class, () -> HiveSchema.extract(null, properties));
@@ -148,11 +148,11 @@ public class HiveTableSchemaTest {
                         "Mismatched fields are:",
                         "Field #1",
                         "Hive DDL          : null",
-                        "Table Store Schema: b string",
+                        "Paimon Schema: b string",
                         "--------------------",
                         "Field #2",
                         "Hive DDL          : null",
-                        "Table Store Schema: c decimal(5,3)");
+                        "Paimon Schema: c decimal(5,3)");
         IllegalArgumentException exception =
                 assertThrows(
                         IllegalArgumentException.class, () -> HiveSchema.extract(null, properties));
@@ -186,11 +186,11 @@ public class HiveTableSchemaTest {
                         "Mismatched fields are:",
                         "Field #3",
                         "Hive DDL          : d int",
-                        "Table Store Schema: null",
+                        "Paimon Schema: null",
                         "--------------------",
                         "Field #4",
                         "Hive DDL          : e string",
-                        "Table Store Schema: null");
+                        "Paimon Schema: null");
         IllegalArgumentException exception =
                 assertThrows(
                         IllegalArgumentException.class, () -> HiveSchema.extract(null, properties));

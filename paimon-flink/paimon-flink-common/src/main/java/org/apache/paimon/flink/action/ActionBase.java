@@ -103,7 +103,7 @@ public abstract class ActionBase implements Action {
 
     /**
      * Extract {@link LogicalType}s from Flink {@link org.apache.flink.table.types.DataType}s and
-     * convert to Table Store {@link DataType}s.
+     * convert to Paimon {@link DataType}s.
      */
     protected List<DataType> toTableStoreDataTypes(
             List<org.apache.flink.table.types.DataType> flinkDataTypes) {

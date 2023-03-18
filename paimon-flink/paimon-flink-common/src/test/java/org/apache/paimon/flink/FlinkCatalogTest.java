@@ -212,7 +212,7 @@ public class FlinkCatalogTest {
         assertThatThrownBy(() -> catalog.createTable(this.path1, newTable, false))
                 .isInstanceOf(CatalogException.class)
                 .hasMessageContaining(
-                        "Table Store Catalog only supports paimon tables,"
+                        "Paimon Catalog only supports paimon tables,"
                                 + " not 'filesystem' connector. You can create TEMPORARY table instead.");
     }
 

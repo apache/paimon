@@ -26,11 +26,11 @@ under the License.
 
 # Spark3
 
-This documentation is a guide for using Table Store in Spark3.
+This documentation is a guide for using Paimon in Spark3.
 
-## Preparing Table Store Jar File
+## Preparing Paimon Jar File
 
-Table Store currently supports Spark 3.3, 3.2 and 3.1. We recommend the latest Spark version for a better experience.
+Paimon currently supports Spark 3.3, 3.2 and 3.1. We recommend the latest Spark version for a better experience.
 
 {{< stable >}}
 
@@ -48,7 +48,7 @@ You can also manually build bundled jar from the source code.
 
 {{< unstable >}}
 
-You are using an unreleased version of Table Store so you need to manually build bundled jar from the source code.
+You are using an unreleased version of Paimon so you need to manually build bundled jar from the source code.
 
 {{< /unstable >}}
 
@@ -70,7 +70,7 @@ If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or 
 
 {{< /hint >}}
 
-**Step 1: Specify Table Store Jar File**
+**Step 1: Specify Paimon Jar File**
 
 Append path to paimon jar file to the `--jars` argument when starting `spark-sql`.
 
@@ -80,9 +80,9 @@ spark-sql ... --jars /path/to/paimon-spark-3.3-{{< version >}}.jar
 
 Alternatively, you can copy `paimon-spark-3.3-{{< version >}}.jar` under `spark/jars` in your Spark installation directory.
 
-**Step 2: Specify Table Store Catalog**
+**Step 2: Specify Paimon Catalog**
 
-When starting `spark-sql`, use the following command to register Table Store’s Spark catalog with the name `paimon`. Table files of the warehouse is stored under `/tmp/table_store`.
+When starting `spark-sql`, use the following command to register Paimon’s Spark catalog with the name `paimon`. Table files of the warehouse is stored under `/tmp/table_store`.
 
 ```bash
 spark-sql ... \
@@ -135,7 +135,7 @@ SELECT * FROM my_table;
 
 **Step 6: Query Table with Scala API**
 
-If you don't want to use Table Store catalog, you can also run `spark-shell` and query the table with Scala API.
+If you don't want to use Paimon catalog, you can also run `spark-shell` and query the table with Scala API.
 
 ```bash
 spark-shell ... --jars /path/to/paimon-spark-3.3-{{< version >}}.jar

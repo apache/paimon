@@ -26,7 +26,7 @@ under the License.
 
 # Write Performance
 
-Performance of Table Store writers are related with the following factors.
+Performance of Paimon writers are related with the following factors.
 
 ## Parallelism
 
@@ -57,9 +57,9 @@ It is recommended that the parallelism of sink should be less than or equal to t
 
 ### Number of Sorted Runs to Trigger Compaction
 
-Table Store uses [LSM tree]({{< ref "concepts/file-layouts#lsm-trees" >}}) which supports a large number of updates. LSM organizes files in several [sorted runs]({{< ref "concepts/file-layouts#lsm-trees#sorted-runs" >}}). When querying records from an LSM tree, all sorted runs must be combined to produce a complete view of all records.
+Paimon uses [LSM tree]({{< ref "concepts/file-layouts#lsm-trees" >}}) which supports a large number of updates. LSM organizes files in several [sorted runs]({{< ref "concepts/file-layouts#lsm-trees#sorted-runs" >}}). When querying records from an LSM tree, all sorted runs must be combined to produce a complete view of all records.
 
-One can easily see that too many sorted runs will result in poor query performance. To keep the number of sorted runs in a reasonable range, Table Store writers will automatically perform [compactions]({{< ref "concepts/file-layouts#lsm-trees#compactions" >}}). The following table property determines the minimum number of sorted runs to trigger a compaction.
+One can easily see that too many sorted runs will result in poor query performance. To keep the number of sorted runs in a reasonable range, Paimon writers will automatically perform [compactions]({{< ref "concepts/file-layouts#lsm-trees#compactions" >}}). The following table property determines the minimum number of sorted runs to trigger a compaction.
 
 <table class="table table-bordered">
     <thead>
@@ -86,7 +86,7 @@ Compaction will become less frequent when `num-sorted-run.compaction-trigger` be
 
 ### Number of Sorted Runs to Pause Writing
 
-When number of sorted runs is small, Table Store writers will perform compaction asynchronously in separated threads, so records can be continuously written into the table. However to avoid unbounded growth of sorted runs, writers will have to pause writing when the number of sorted runs hits the threshold. The following table property determines the threshold.
+When number of sorted runs is small, Paimon writers will perform compaction asynchronously in separated threads, so records can be continuously written into the table. However to avoid unbounded growth of sorted runs, writers will have to pause writing when the number of sorted runs hits the threshold. The following table property determines the threshold.
 
 <table class="table table-bordered">
     <thead>
@@ -113,10 +113,10 @@ Write stalls will become less frequent when `num-sorted-run.stop-trigger` become
 
 ### Dedicated Compaction Job
 
-By default, Table Store writers will perform compaction as needed when writing records. This is sufficient for most use cases, but there are two downsides:
+By default, Paimon writers will perform compaction as needed when writing records. This is sufficient for most use cases, but there are two downsides:
 
 * This may result in unstable write throughput because throughput might temporarily drop when performing a compaction.
-* Compaction will mark some data files as "deleted" (not really deleted, see [expiring snapshots]({{< ref "maintenance/expiring-snapshots" >}}) for more info). If multiple writers mark the same file a conflict will occur when committing the changes. Table Store will automatically resolve the conflict, but this may result in job restarts.
+* Compaction will mark some data files as "deleted" (not really deleted, see [expiring snapshots]({{< ref "maintenance/expiring-snapshots" >}}) for more info). If multiple writers mark the same file a conflict will occur when committing the changes. Paimon will automatically resolve the conflict, but this may result in job restarts.
 
 To avoid these downsides, users can also choose to skip compactions in writers, and run a dedicated job only for compaction. As compactions are performed only by the dedicated job, writers can continuously write records without pausing and no conflicts will ever occur.
 
@@ -186,7 +186,7 @@ For more usage of the compact action, see
 
 ## Memory
 
-There are three main places in Table Store writer that takes up memory:
+There are three main places in Paimon writer that takes up memory:
 
 * Writer's memory buffer, shared and preempted by all writers of a single task. This memory value can be adjusted by the `write-buffer-size` table property.
 * Memory consumed when merging several sorted runs for compaction. Can be adjusted by the `num-sorted-run.compaction-trigger` option to change the number of sorted runs to be merged.
