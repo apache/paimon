@@ -78,7 +78,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
 
         String useCatalogCmd = "USE CATALOG ts_catalog;";
 
-        String tableStoreDdl =
+        String paimonDdl =
                 "CREATE TABLE IF NOT EXISTS ts_table (\n"
                         + "    dt VARCHAR,\n"
                         + "    hr VARCHAR,\n"
@@ -98,14 +98,14 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                 catalogDdl,
                 useCatalogCmd,
                 testDataSourceDdl,
-                tableStoreDdl);
+                paimonDdl);
 
         // test #1: read all data from paimon
         runSql(
                 "INSERT INTO result1 SELECT * FROM ts_table;",
                 catalogDdl,
                 useCatalogCmd,
-                tableStoreDdl,
+                paimonDdl,
                 createResultSink(
                         "result1",
                         "dt VARCHAR, hr VARCHAR, person VARCHAR, category VARCHAR, price INT"));
@@ -133,7 +133,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                 "INSERT INTO result2 SELECT * FROM ts_table WHERE dt > '20211110' AND hr < '09';",
                 catalogDdl,
                 useCatalogCmd,
-                tableStoreDdl,
+                paimonDdl,
                 createResultSink(
                         "result2",
                         "dt VARCHAR, hr VARCHAR, person VARCHAR, category VARCHAR, price INT"));
@@ -149,7 +149,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                 "INSERT INTO result3 SELECT * FROM ts_table WHERE person = 'Alice' AND category = 'Food';",
                 catalogDdl,
                 useCatalogCmd,
-                tableStoreDdl,
+                paimonDdl,
                 createResultSink(
                         "result3",
                         "dt VARCHAR, hr VARCHAR, person VARCHAR, category VARCHAR, price INT"));
@@ -166,7 +166,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
                         + "INSERT INTO result4 SELECT dt, category, sum(price) AS total FROM ts_table GROUP BY dt, category;",
                 catalogDdl,
                 useCatalogCmd,
-                tableStoreDdl,
+                paimonDdl,
                 createResultSink("result4", "dt VARCHAR, hr VARCHAR, total INT"));
         checkResult(
                 "20211110, Drink, 200",

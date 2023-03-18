@@ -51,7 +51,7 @@ public class FileStoreBuiltInFormatE2eTest extends E2eTestBase {
                         TEST_DATA_DIR + "/" + UUID.randomUUID() + ".store");
 
         String useCatalogCmd = "USE CATALOG ts_catalog;";
-        String tableStoreDdl =
+        String paimonDdl =
                 "CREATE TABLE IF NOT EXISTS ts_table (\n"
                         + schema
                         + ") WITH (\n"
@@ -92,13 +92,13 @@ public class FileStoreBuiltInFormatE2eTest extends E2eTestBase {
                         + "DATE '2022-05-23'"
                         + ")";
 
-        runSql(insertDml, catalogDdl, useCatalogCmd, tableStoreDdl);
+        runSql(insertDml, catalogDdl, useCatalogCmd, paimonDdl);
 
         runSql(
                 "INSERT INTO result1 SELECT * FROM ts_table where id > 1;",
                 catalogDdl,
                 useCatalogCmd,
-                tableStoreDdl,
+                paimonDdl,
                 createResultSink("result1", schema));
         checkResult(
                 "2, "

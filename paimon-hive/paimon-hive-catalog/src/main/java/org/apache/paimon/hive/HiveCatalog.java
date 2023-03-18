@@ -18,6 +18,8 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.flink.table.hive.LegacyHiveClasses;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
@@ -166,7 +168,7 @@ public class HiveCatalog extends AbstractCatalog {
                                 // tables.
                                 // so we just check the schema file first
                                 return schemaFileExists(identifier)
-                                        && tableStoreTableExists(identifier, false);
+                                        && paimonTableExists(identifier, false);
                             })
                     .collect(Collectors.toList());
         } catch (UnknownDBException e) {
@@ -178,7 +180,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
-        if (!tableStoreTableExists(identifier)) {
+        if (!paimonTableExists(identifier)) {
             throw new TableNotExistException(identifier);
         }
         Path tableLocation = getDataTableLocation(identifier);
@@ -191,7 +193,7 @@ public class HiveCatalog extends AbstractCatalog {
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
         checkNotSystemTable(identifier, "dropTable");
-        if (!tableStoreTableExists(identifier)) {
+        if (!paimonTableExists(identifier)) {
             if (ignoreIfNotExists) {
                 return;
             } else {
@@ -215,7 +217,7 @@ public class HiveCatalog extends AbstractCatalog {
         if (!databaseExists(databaseName)) {
             throw new DatabaseNotExistException(databaseName);
         }
-        if (tableStoreTableExists(identifier)) {
+        if (paimonTableExists(identifier)) {
             if (ignoreIfExists) {
                 return;
             } else {
@@ -256,7 +258,7 @@ public class HiveCatalog extends AbstractCatalog {
             throws TableNotExistException, TableAlreadyExistException {
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
-        if (!tableStoreTableExists(fromTable)) {
+        if (!paimonTableExists(fromTable)) {
             if (ignoreIfNotExists) {
                 return;
             } else {
@@ -264,7 +266,7 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
 
-        if (tableStoreTableExists(toTable)) {
+        if (paimonTableExists(toTable)) {
             throw new TableAlreadyExistException(toTable);
         }
 
@@ -285,7 +287,7 @@ public class HiveCatalog extends AbstractCatalog {
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException {
         checkNotSystemTable(identifier, "alterTable");
-        if (!tableStoreTableExists(identifier)) {
+        if (!paimonTableExists(identifier)) {
             if (ignoreIfNotExists) {
                 return;
             } else {
@@ -414,15 +416,15 @@ public class HiveCatalog extends AbstractCatalog {
                 dataField.description());
     }
 
-    private boolean tableStoreTableExists(Identifier identifier) {
-        return tableStoreTableExists(identifier, true);
+    private boolean paimonTableExists(Identifier identifier) {
+        return paimonTableExists(identifier, true);
     }
 
     private boolean schemaFileExists(Identifier identifier) {
         return new SchemaManager(fileIO, getDataTableLocation(identifier)).latest().isPresent();
     }
 
-    private boolean tableStoreTableExists(Identifier identifier, boolean throwException) {
+    private boolean paimonTableExists(Identifier identifier, boolean throwException) {
         Table table;
         try {
             table = client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
@@ -434,21 +436,22 @@ public class HiveCatalog extends AbstractCatalog {
                     e);
         }
 
-        if (!INPUT_FORMAT_CLASS_NAME.equals(table.getSd().getInputFormat())
-                || !OUTPUT_FORMAT_CLASS_NAME.equals(table.getSd().getOutputFormat())) {
-            if (throwException) {
-                throw new IllegalArgumentException(
-                        "Table "
-                                + identifier.getFullName()
-                                + " is not a paimon table. It's input format is "
-                                + table.getSd().getInputFormat()
-                                + " and its output format is "
-                                + table.getSd().getOutputFormat());
-            } else {
-                return false;
-            }
+        boolean isPaimonTable = isPaimonTable(table) || LegacyHiveClasses.isPaimonTable(table);
+        if (!isPaimonTable && throwException) {
+            throw new IllegalArgumentException(
+                    "Table "
+                            + identifier.getFullName()
+                            + " is not a paimon table. It's input format is "
+                            + table.getSd().getInputFormat()
+                            + " and its output format is "
+                            + table.getSd().getOutputFormat());
         }
-        return true;
+        return isPaimonTable;
+    }
+
+    private static boolean isPaimonTable(Table table) {
+        return INPUT_FORMAT_CLASS_NAME.equals(table.getSd().getInputFormat())
+                && OUTPUT_FORMAT_CLASS_NAME.equals(table.getSd().getOutputFormat());
     }
 
     private SchemaManager schemaManager(Identifier identifier) {
