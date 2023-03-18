@@ -26,7 +26,7 @@ import org.apache.flink.table.factories.FactoryUtil;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogLock;
-import org.apache.paimon.flink.sink.TableStoreSink;
+import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
@@ -38,15 +38,15 @@ import static org.apache.paimon.CoreOptions.AUTO_CREATE;
 import static org.apache.paimon.flink.FlinkCatalogFactory.IDENTIFIER;
 
 /** A paimon {@link DynamicTableFactory} to create source and sink. */
-public class TableStoreConnectorFactory extends AbstractTableStoreFactory {
+public class FlinkTableFactory extends AbstractFlinkTableFactory {
 
     @Nullable private final CatalogLock.Factory lockFactory;
 
-    public TableStoreConnectorFactory() {
+    public FlinkTableFactory() {
         this(null);
     }
 
-    public TableStoreConnectorFactory(@Nullable CatalogLock.Factory lockFactory) {
+    public FlinkTableFactory(@Nullable CatalogLock.Factory lockFactory) {
         this.lockFactory = lockFactory;
     }
 
@@ -84,7 +84,7 @@ public class TableStoreConnectorFactory extends AbstractTableStoreFactory {
                     context.isTemporary());
         }
         createTableIfNeeded(context);
-        TableStoreSink sink = (TableStoreSink) super.createDynamicTableSink(context);
+        FlinkTableSink sink = (FlinkTableSink) super.createDynamicTableSink(context);
         sink.setLockFactory(lockFactory);
         return sink;
     }

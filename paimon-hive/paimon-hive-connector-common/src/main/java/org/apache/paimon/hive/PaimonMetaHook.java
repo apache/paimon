@@ -21,8 +21,8 @@ package org.apache.paimon.hive;
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.Table;
-import org.apache.paimon.hive.mapred.TableStoreInputFormat;
-import org.apache.paimon.hive.mapred.TableStoreOutputFormat;
+import org.apache.paimon.hive.mapred.PaimonInputFormat;
+import org.apache.paimon.hive.mapred.PaimonOutputFormat;
 import org.apache.paimon.utils.Preconditions;
 
 /**
@@ -39,8 +39,8 @@ public class PaimonMetaHook implements HiveMetaHook {
                         + "with PARTITIONED BY clause. If you want to query from a partitioned table, "
                         + "please add partition columns into the ordinary table columns.");
 
-        table.getSd().setInputFormat(TableStoreInputFormat.class.getCanonicalName());
-        table.getSd().setOutputFormat(TableStoreOutputFormat.class.getCanonicalName());
+        table.getSd().setInputFormat(PaimonInputFormat.class.getCanonicalName());
+        table.getSd().setOutputFormat(PaimonOutputFormat.class.getCanonicalName());
     }
 
     @Override

@@ -33,6 +33,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.hive.mapred.PaimonInputFormat;
 import org.apache.paimon.hive.objectinspector.PaimonObjectInspectorFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -61,10 +62,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
-/**
- * IT cases for {@link PaimonStorageHandler} and {@link
- * org.apache.paimon.hive.mapred.TableStoreInputFormat}.
- */
+/** IT cases for {@link PaimonStorageHandler} and {@link PaimonInputFormat}. */
 @RunWith(FlinkEmbeddedHiveRunner.class)
 public class PaimonStorageHandlerITCase {
 

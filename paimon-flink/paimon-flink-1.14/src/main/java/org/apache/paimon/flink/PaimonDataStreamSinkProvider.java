@@ -19,33 +19,23 @@
 package org.apache.paimon.flink;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.connector.ProviderContext;
-import org.apache.flink.table.connector.source.DataStreamScanProvider;
+import org.apache.flink.streaming.api.datastream.DataStreamSink;
+import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
 import org.apache.flink.table.data.RowData;
 
 import java.util.function.Function;
 
-/** Paimon {@link DataStreamScanProvider}. */
-public class TableStoreDataStreamScanProvider implements DataStreamScanProvider {
+/** Paimon {@link DataStreamSinkProvider}. */
+public class PaimonDataStreamSinkProvider implements DataStreamSinkProvider {
 
-    private final boolean isBounded;
-    private final Function<StreamExecutionEnvironment, DataStream<RowData>> producer;
+    private final Function<DataStream<RowData>, DataStreamSink<?>> producer;
 
-    public TableStoreDataStreamScanProvider(
-            boolean isBounded, Function<StreamExecutionEnvironment, DataStream<RowData>> producer) {
-        this.isBounded = isBounded;
+    public PaimonDataStreamSinkProvider(Function<DataStream<RowData>, DataStreamSink<?>> producer) {
         this.producer = producer;
     }
 
     @Override
-    public DataStream<RowData> produceDataStream(
-            ProviderContext context, StreamExecutionEnvironment env) {
-        return producer.apply(env);
-    }
-
-    @Override
-    public boolean isBounded() {
-        return isBounded;
+    public DataStreamSink<?> consumeDataStream(DataStream<RowData> dataStream) {
+        return producer.apply(dataStream);
     }
 }

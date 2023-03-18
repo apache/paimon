@@ -47,7 +47,7 @@ import java.util.Optional;
  * {@link InputFormat} for paimon. It divides all files into {@link InputSplit}s (one split per
  * bucket) and creates {@link RecordReader} for each split.
  */
-public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer> {
+public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
 
     @Override
     public InputSplit[] getSplits(JobConf jobConf, int numSplits) {
@@ -55,18 +55,18 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
         DataTableScan scan = table.newScan();
         createPredicate(table.schema(), jobConf).ifPresent(scan::withFilter);
         return scan.plan().splits.stream()
-                .map(split -> new TableStoreInputSplit(table.location().toString(), split))
-                .toArray(TableStoreInputSplit[]::new);
+                .map(split -> new PaimonInputSplit(table.location().toString(), split))
+                .toArray(PaimonInputSplit[]::new);
     }
 
     @Override
     public RecordReader<Void, RowDataContainer> getRecordReader(
             InputSplit inputSplit, JobConf jobConf, Reporter reporter) throws IOException {
         FileStoreTable table = createFileStoreTable(jobConf);
-        TableStoreInputSplit split = (TableStoreInputSplit) inputSplit;
+        PaimonInputSplit split = (PaimonInputSplit) inputSplit;
         ReadBuilder readBuilder = table.newReadBuilder();
         createPredicate(table.schema(), jobConf).ifPresent(readBuilder::withFilter);
-        return new TableStoreRecordReader(
+        return new PaimonRecordReader(
                 readBuilder,
                 split,
                 table.schema().fieldNames(),

@@ -20,25 +20,27 @@ package org.apache.paimon.flink;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.connector.ProviderContext;
 import org.apache.flink.table.connector.source.DataStreamScanProvider;
 import org.apache.flink.table.data.RowData;
 
 import java.util.function.Function;
 
 /** Paimon {@link DataStreamScanProvider}. */
-public class TableStoreDataStreamScanProvider implements DataStreamScanProvider {
+public class PaimonDataStreamScanProvider implements DataStreamScanProvider {
 
     private final boolean isBounded;
     private final Function<StreamExecutionEnvironment, DataStream<RowData>> producer;
 
-    public TableStoreDataStreamScanProvider(
+    public PaimonDataStreamScanProvider(
             boolean isBounded, Function<StreamExecutionEnvironment, DataStream<RowData>> producer) {
         this.isBounded = isBounded;
         this.producer = producer;
     }
 
     @Override
-    public DataStream<RowData> produceDataStream(StreamExecutionEnvironment env) {
+    public DataStream<RowData> produceDataStream(
+            ProviderContext context, StreamExecutionEnvironment env) {
         return producer.apply(env);
     }
 

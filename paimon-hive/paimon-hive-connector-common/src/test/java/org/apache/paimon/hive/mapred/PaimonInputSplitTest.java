@@ -35,8 +35,8 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link TableStoreInputSplit}. */
-public class TableStoreInputSplitTest {
+/** Tests for {@link PaimonInputSplit}. */
+public class PaimonInputSplitTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -50,8 +50,8 @@ public class TableStoreInputSplitTest {
         }
 
         BinaryRow wantedPartition = generated.get(0).partition;
-        TableStoreInputSplit split =
-                new TableStoreInputSplit(
+        PaimonInputSplit split =
+                new PaimonInputSplit(
                         tempDir.toString(),
                         new DataSplit(
                                 ThreadLocalRandom.current().nextLong(100),
@@ -70,7 +70,7 @@ public class TableStoreInputSplitTest {
 
         ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
         DataInputStream input = new DataInputStream(bais);
-        TableStoreInputSplit actual = new TableStoreInputSplit();
+        PaimonInputSplit actual = new PaimonInputSplit();
         actual.readFields(input);
         assertThat(actual).isEqualTo(split);
     }

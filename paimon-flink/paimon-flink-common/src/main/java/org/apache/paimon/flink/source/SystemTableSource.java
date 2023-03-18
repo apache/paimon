@@ -86,6 +86,6 @@ public class SystemTableSource extends FlinkTableSource {
 
     @Override
     public String asSummaryString() {
-        return "TableStore-SystemTable-Source";
+        return "Paimon-SystemTable-Source";
     }
 }

@@ -28,7 +28,7 @@ import org.apache.paimon.data.InternalRow;
 import java.io.IOException;
 
 /** {@link OutputFormat} for table split. Currently useless. */
-public class TableStoreOutputFormat implements OutputFormat<InternalRow, InternalRow> {
+public class PaimonOutputFormat implements OutputFormat<InternalRow, InternalRow> {
 
     @Override
     public RecordWriter<InternalRow, InternalRow> getRecordWriter(

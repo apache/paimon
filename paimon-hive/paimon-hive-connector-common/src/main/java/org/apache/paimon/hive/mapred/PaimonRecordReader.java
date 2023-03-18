@@ -39,7 +39,7 @@ import java.util.List;
  * columnNames} this reader will still produce records of the original schema. However, columns not
  * in {@code selectedColumns} will be null.
  */
-public class TableStoreRecordReader implements RecordReader<Void, RowDataContainer> {
+public class PaimonRecordReader implements RecordReader<Void, RowDataContainer> {
 
     private final RecordReaderIterator<InternalRow> iterator;
     private final long splitLength;
@@ -48,9 +48,9 @@ public class TableStoreRecordReader implements RecordReader<Void, RowDataContain
 
     private float progress;
 
-    public TableStoreRecordReader(
+    public PaimonRecordReader(
             ReadBuilder readBuilder,
-            TableStoreInputSplit split,
+            PaimonInputSplit split,
             List<String> columnNames,
             List<String> selectedColumns)
             throws IOException {

@@ -35,8 +35,8 @@ import java.util.stream.Collectors;
 /** {@link StructObjectInspector} for {@link InternalRow}. */
 public class PaimonRowDataObjectInspector extends StructObjectInspector {
 
-    private final List<TableStoreStructField> structFields;
-    private final Map<String, TableStoreStructField> structFieldMap;
+    private final List<PaimonStructField> structFields;
+    private final Map<String, PaimonStructField> structFieldMap;
     private final String typeName;
 
     public PaimonRowDataObjectInspector(
@@ -48,8 +48,8 @@ public class PaimonRowDataObjectInspector extends StructObjectInspector {
         for (int i = 0; i < fieldNames.size(); i++) {
             String name = fieldNames.get(i);
             DataType logicalType = fieldTypes.get(i);
-            TableStoreStructField structField =
-                    new TableStoreStructField(
+            PaimonStructField structField =
+                    new PaimonStructField(
                             name,
                             PaimonObjectInspectorFactory.create(logicalType),
                             i,
@@ -84,7 +84,7 @@ public class PaimonRowDataObjectInspector extends StructObjectInspector {
     @Override
     public Object getStructFieldData(Object o, StructField structField) {
         InternalRow rowData = (InternalRow) o;
-        return ((TableStoreStructField) structField).fieldGetter.getFieldOrNull(rowData);
+        return ((PaimonStructField) structField).fieldGetter.getFieldOrNull(rowData);
     }
 
     @Override
@@ -105,7 +105,7 @@ public class PaimonRowDataObjectInspector extends StructObjectInspector {
         return Category.STRUCT;
     }
 
-    private static class TableStoreStructField implements StructField {
+    private static class PaimonStructField implements StructField {
 
         private final String name;
         private final ObjectInspector objectInspector;
@@ -113,7 +113,7 @@ public class PaimonRowDataObjectInspector extends StructObjectInspector {
         private final InternalRow.FieldGetter fieldGetter;
         private final String comment;
 
-        private TableStoreStructField(
+        private PaimonStructField(
                 String name,
                 ObjectInspector objectInspector,
                 int idx,
