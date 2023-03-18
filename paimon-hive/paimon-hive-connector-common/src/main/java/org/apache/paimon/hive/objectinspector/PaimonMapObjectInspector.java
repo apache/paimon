@@ -35,16 +35,16 @@ import java.util.Objects;
  * <p>Behaviors of this class when input is null are compatible with {@link
  * org.apache.hadoop.hive.serde2.objectinspector.StandardMapObjectInspector}.
  */
-public class TableStoreMapObjectInspector implements MapObjectInspector {
+public class PaimonMapObjectInspector implements MapObjectInspector {
 
     private final ObjectInspector keyObjectInspector;
     private final ObjectInspector valueObjectInspector;
     private final InternalArray.ElementGetter keyGetter;
     private final InternalArray.ElementGetter valueGetter;
 
-    public TableStoreMapObjectInspector(DataType keyType, DataType valueType) {
-        this.keyObjectInspector = TableStoreObjectInspectorFactory.create(keyType);
-        this.valueObjectInspector = TableStoreObjectInspectorFactory.create(valueType);
+    public PaimonMapObjectInspector(DataType keyType, DataType valueType) {
+        this.keyObjectInspector = PaimonObjectInspectorFactory.create(keyType);
+        this.valueObjectInspector = PaimonObjectInspectorFactory.create(valueType);
         this.keyGetter = InternalArray.createElementGetter(keyType);
         this.valueGetter = InternalArray.createElementGetter(valueType);
     }

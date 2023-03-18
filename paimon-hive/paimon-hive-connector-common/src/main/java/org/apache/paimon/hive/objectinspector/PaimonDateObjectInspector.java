@@ -18,41 +18,40 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.hadoop.hive.common.type.Timestamp;
-import org.apache.hadoop.hive.serde2.io.TimestampWritableV2;
+import org.apache.hadoop.hive.serde2.io.DateWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
-import org.apache.hadoop.hive.serde2.objectinspector.primitive.TimestampObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.primitive.DateObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
+import org.apache.paimon.utils.DateTimeUtils;
 
-/** {@link AbstractPrimitiveJavaObjectInspector} for TIMESTAMP type. */
-public class TableStoreTimestampObjectInspector extends AbstractPrimitiveJavaObjectInspector
-        implements TimestampObjectInspector {
+import java.sql.Date;
 
-    public TableStoreTimestampObjectInspector() {
-        super(TypeInfoFactory.timestampTypeInfo);
+/** {@link AbstractPrimitiveJavaObjectInspector} for DATE type. */
+public class PaimonDateObjectInspector extends AbstractPrimitiveJavaObjectInspector
+        implements DateObjectInspector {
+
+    public PaimonDateObjectInspector() {
+        super(TypeInfoFactory.dateTypeInfo);
     }
 
     @Override
-    public Timestamp getPrimitiveJavaObject(Object o) {
-        return o == null
-                ? null
-                : Timestamp.ofEpochMilli(((org.apache.paimon.data.Timestamp) o).getMillisecond());
+    public Date getPrimitiveJavaObject(Object o) {
+        // Flink stores date as an integer (epoch day, 1970-01-01 = day 0)
+        // while constructor of Date accepts epoch millis
+        return o == null ? null : DateTimeUtils.toSQLDate((Integer) o);
     }
 
     @Override
-    public TimestampWritableV2 getPrimitiveWritableObject(Object o) {
-        Timestamp ts = getPrimitiveJavaObject(o);
-        return ts == null ? null : new TimestampWritableV2(ts);
+    public DateWritable getPrimitiveWritableObject(Object o) {
+        Date date = getPrimitiveJavaObject(o);
+        return date == null ? null : new DateWritable(date);
     }
 
     @Override
     public Object copyObject(Object o) {
-        if (o instanceof org.apache.paimon.data.Timestamp) {
-            // immutable
-            return o;
-        } else if (o instanceof Timestamp) {
-            Timestamp timestamp = (Timestamp) o;
-            return timestamp.clone();
+        if (o instanceof Date) {
+            Date date = (Date) o;
+            return new Date(date.getTime());
         } else {
             return o;
         }

@@ -33,13 +33,13 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /** {@link StructObjectInspector} for {@link InternalRow}. */
-public class TableStoreRowDataObjectInspector extends StructObjectInspector {
+public class PaimonRowDataObjectInspector extends StructObjectInspector {
 
     private final List<TableStoreStructField> structFields;
     private final Map<String, TableStoreStructField> structFieldMap;
     private final String typeName;
 
-    public TableStoreRowDataObjectInspector(
+    public PaimonRowDataObjectInspector(
             List<String> fieldNames, List<DataType> fieldTypes, List<String> fieldComments) {
         this.structFields = new ArrayList<>();
         this.structFieldMap = new HashMap<>();
@@ -51,7 +51,7 @@ public class TableStoreRowDataObjectInspector extends StructObjectInspector {
             TableStoreStructField structField =
                     new TableStoreStructField(
                             name,
-                            TableStoreObjectInspectorFactory.create(logicalType),
+                            PaimonObjectInspectorFactory.create(logicalType),
                             i,
                             RowDataUtils.createNullCheckingFieldGetter(logicalType, i),
                             fieldComments.get(i));

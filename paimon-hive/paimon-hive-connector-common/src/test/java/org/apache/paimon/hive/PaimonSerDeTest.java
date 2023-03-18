@@ -23,7 +23,7 @@ import org.apache.hadoop.hive.serde2.objectinspector.StructField;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.hive.objectinspector.TableStoreRowDataObjectInspector;
+import org.apache.paimon.hive.objectinspector.PaimonRowDataObjectInspector;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.junit.jupiter.api.Test;
@@ -40,17 +40,17 @@ import static org.apache.paimon.hive.RandomGenericRowDataGenerator.ROW_TYPE;
 import static org.apache.paimon.hive.RandomGenericRowDataGenerator.generate;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link TableStoreSerDe}. */
-public class TableStoreSerDeTest {
+/** Tests for {@link PaimonSerDe}. */
+public class PaimonSerDeTest {
 
     @TempDir java.nio.file.Path tempDir;
 
     @Test
     public void testInitialize() throws Exception {
-        TableStoreSerDe serDe = createInitializedSerDe();
+        PaimonSerDe serDe = createInitializedSerDe();
         ObjectInspector o = serDe.getObjectInspector();
-        assertThat(o).isInstanceOf(TableStoreRowDataObjectInspector.class);
-        TableStoreRowDataObjectInspector oi = (TableStoreRowDataObjectInspector) o;
+        assertThat(o).isInstanceOf(PaimonRowDataObjectInspector.class);
+        PaimonRowDataObjectInspector oi = (PaimonRowDataObjectInspector) o;
         GenericRow rowData = generate();
         List<? extends StructField> structFields = oi.getAllStructFieldRefs();
         for (int i = 0; i < structFields.size(); i++) {
@@ -63,14 +63,14 @@ public class TableStoreSerDeTest {
 
     @Test
     public void testDeserialize() throws Exception {
-        TableStoreSerDe serDe = createInitializedSerDe();
+        PaimonSerDe serDe = createInitializedSerDe();
         GenericRow rowData = generate();
         RowDataContainer container = new RowDataContainer();
         container.set(rowData);
         assertThat(serDe.deserialize(container)).isEqualTo(rowData);
     }
 
-    private TableStoreSerDe createInitializedSerDe() throws Exception {
+    private PaimonSerDe createInitializedSerDe() throws Exception {
         new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()))
                 .createTable(
                         new Schema(
@@ -83,7 +83,7 @@ public class TableStoreSerDeTest {
         Properties properties = new Properties();
         properties.setProperty("location", tempDir.toString());
 
-        TableStoreSerDe serDe = new TableStoreSerDe();
+        PaimonSerDe serDe = new PaimonSerDe();
         serDe.initialize(null, properties);
         return serDe;
     }

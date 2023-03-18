@@ -363,7 +363,7 @@ Hive SQL only supports reading from an external table. The following SQL creates
 
 ```sql
 CREATE EXTERNAL TABLE my_table
-STORED BY 'org.apache.paimon.hive.TableStoreHiveStorageHandler'
+STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
 LOCATION 'hdfs://path/to/table';
 ```
 

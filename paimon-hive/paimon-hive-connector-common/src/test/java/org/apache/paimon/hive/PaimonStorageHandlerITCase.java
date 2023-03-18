@@ -33,7 +33,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.hive.objectinspector.TableStoreObjectInspectorFactory;
+import org.apache.paimon.hive.objectinspector.PaimonObjectInspectorFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -62,11 +62,11 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * IT cases for {@link TableStoreHiveStorageHandler} and {@link
+ * IT cases for {@link PaimonStorageHandler} and {@link
  * org.apache.paimon.hive.mapred.TableStoreInputFormat}.
  */
 @RunWith(FlinkEmbeddedHiveRunner.class)
-public class TableStoreHiveStorageHandlerITCase {
+public class PaimonStorageHandlerITCase {
 
     @ClassRule public static TemporaryFolder folder = new TemporaryFolder();
 
@@ -645,7 +645,7 @@ public class TableStoreHiveStorageHandlerITCase {
                         "\n",
                         Arrays.asList(
                                 "CREATE EXTERNAL TABLE " + tableName + " ",
-                                "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
                                 "LOCATION '" + path + "'")));
         return tableName;
     }
@@ -689,7 +689,7 @@ public class TableStoreHiveStorageHandlerITCase {
                         "\n",
                         Arrays.asList(
                                 "CREATE EXTERNAL TABLE test_table",
-                                "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
                                 "LOCATION '" + root + "'")));
         List<Object[]> actual =
                 hiveShell.executeStatement("SELECT * FROM test_table WHERE f_int > 0");
@@ -712,7 +712,7 @@ public class TableStoreHiveStorageHandlerITCase {
                     continue;
                 }
                 ObjectInspector oi =
-                        TableStoreObjectInspectorFactory.create(
+                        PaimonObjectInspectorFactory.create(
                                 RandomGenericRowDataGenerator.LOGICAL_TYPES.get(i));
                 switch (oi.getCategory()) {
                     case PRIMITIVE:
@@ -802,7 +802,7 @@ public class TableStoreHiveStorageHandlerITCase {
                         "\n",
                         Arrays.asList(
                                 "CREATE EXTERNAL TABLE test_table",
-                                "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
                                 "LOCATION '" + path + "'")));
         Assert.assertEquals(
                 Arrays.asList("1", "5"),
@@ -894,7 +894,7 @@ public class TableStoreHiveStorageHandlerITCase {
                         "\n",
                         Arrays.asList(
                                 "CREATE EXTERNAL TABLE test_table",
-                                "STORED BY '" + TableStoreHiveStorageHandler.class.getName() + "'",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
                                 "LOCATION '" + path + "'")));
         Assert.assertEquals(
                 Collections.singletonList("1971-01-11\t2022-05-17 17:29:20.1"),

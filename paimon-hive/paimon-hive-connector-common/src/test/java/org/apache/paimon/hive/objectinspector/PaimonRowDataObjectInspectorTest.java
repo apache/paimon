@@ -33,13 +33,13 @@ import static org.apache.paimon.hive.RandomGenericRowDataGenerator.TYPE_NAMES;
 import static org.apache.paimon.hive.RandomGenericRowDataGenerator.generate;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link TableStoreRowDataObjectInspector}. */
-public class TableStoreRowDataObjectInspectorTest {
+/** Tests for {@link PaimonRowDataObjectInspector}. */
+public class PaimonRowDataObjectInspectorTest {
 
     @Test
     public void testGetStructFieldRef() {
-        TableStoreRowDataObjectInspector oi =
-                new TableStoreRowDataObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
+        PaimonRowDataObjectInspector oi =
+                new PaimonRowDataObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
         List<? extends StructField> structFields = oi.getAllStructFieldRefs();
         List<ObjectInspector.Category> expectedOiCategories =
                 Arrays.asList(
@@ -75,8 +75,8 @@ public class TableStoreRowDataObjectInspectorTest {
 
     @Test
     public void testGetTypeName() {
-        TableStoreRowDataObjectInspector oi =
-                new TableStoreRowDataObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
+        PaimonRowDataObjectInspector oi =
+                new PaimonRowDataObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
         String expected =
                 "struct<"
                         + String.join(
@@ -105,8 +105,8 @@ public class TableStoreRowDataObjectInspectorTest {
 
     @Test
     public void testGetStructFieldData() {
-        TableStoreRowDataObjectInspector oi =
-                new TableStoreRowDataObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
+        PaimonRowDataObjectInspector oi =
+                new PaimonRowDataObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
         GenericRow rowData = generate();
         List<Object> structFieldsData = oi.getStructFieldsDataAsList(rowData);
         for (int i = 0; i < structFieldsData.size(); i++) {

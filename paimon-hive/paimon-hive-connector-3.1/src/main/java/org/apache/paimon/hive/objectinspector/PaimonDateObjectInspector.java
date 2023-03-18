@@ -18,42 +18,36 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.hadoop.hive.common.type.HiveChar;
-import org.apache.hadoop.hive.serde2.io.HiveCharWritable;
+import org.apache.hadoop.hive.common.type.Date;
+import org.apache.hadoop.hive.serde2.io.DateWritableV2;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
-import org.apache.hadoop.hive.serde2.objectinspector.primitive.HiveCharObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.primitive.DateObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
-import org.apache.paimon.data.BinaryString;
 
-/** {@link AbstractPrimitiveJavaObjectInspector} for CHAR type. */
-public class TableStoreCharObjectInspector extends AbstractPrimitiveJavaObjectInspector
-        implements HiveCharObjectInspector {
+/** {@link AbstractPrimitiveJavaObjectInspector} for DATE type. */
+public class PaimonDateObjectInspector extends AbstractPrimitiveJavaObjectInspector
+        implements DateObjectInspector {
 
-    private final int len;
-
-    public TableStoreCharObjectInspector(int len) {
-        super(TypeInfoFactory.getCharTypeInfo(len));
-        this.len = len;
+    public PaimonDateObjectInspector() {
+        super(TypeInfoFactory.dateTypeInfo);
     }
 
     @Override
-    public HiveChar getPrimitiveJavaObject(Object o) {
-        return o == null ? null : new HiveChar(o.toString(), len);
+    public Date getPrimitiveJavaObject(Object o) {
+        return o == null ? null : Date.ofEpochDay((Integer) o);
     }
 
     @Override
-    public HiveCharWritable getPrimitiveWritableObject(Object o) {
-        HiveChar hiveChar = getPrimitiveJavaObject(o);
-        return hiveChar == null ? null : new HiveCharWritable(hiveChar);
+    public DateWritableV2 getPrimitiveWritableObject(Object o) {
+        Date date = getPrimitiveJavaObject(o);
+        return date == null ? null : new DateWritableV2(date);
     }
 
     @Override
     public Object copyObject(Object o) {
-        if (o instanceof HiveChar) {
-            HiveChar hiveChar = (HiveChar) o;
-            return new HiveChar(hiveChar, len);
-        } else if (o instanceof BinaryString) {
-            return BinaryString.fromString(o.toString());
+        if (o instanceof Date) {
+            Date date = (Date) o;
+            return date.clone();
         } else {
             return o;
         }

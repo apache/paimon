@@ -18,36 +18,35 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.hadoop.hive.common.type.Date;
-import org.apache.hadoop.hive.serde2.io.DateWritableV2;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
-import org.apache.hadoop.hive.serde2.objectinspector.primitive.DateObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.primitive.StringObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
+import org.apache.hadoop.io.Text;
+import org.apache.paimon.data.BinaryString;
 
-/** {@link AbstractPrimitiveJavaObjectInspector} for DATE type. */
-public class TableStoreDateObjectInspector extends AbstractPrimitiveJavaObjectInspector
-        implements DateObjectInspector {
+/** {@link AbstractPrimitiveJavaObjectInspector} for STRING type. */
+public class PaimonStringObjectInspector extends AbstractPrimitiveJavaObjectInspector
+        implements StringObjectInspector {
 
-    public TableStoreDateObjectInspector() {
-        super(TypeInfoFactory.dateTypeInfo);
+    public PaimonStringObjectInspector() {
+        super(TypeInfoFactory.stringTypeInfo);
     }
 
     @Override
-    public Date getPrimitiveJavaObject(Object o) {
-        return o == null ? null : Date.ofEpochDay((Integer) o);
+    public String getPrimitiveJavaObject(Object o) {
+        return o == null ? null : o.toString();
     }
 
     @Override
-    public DateWritableV2 getPrimitiveWritableObject(Object o) {
-        Date date = getPrimitiveJavaObject(o);
-        return date == null ? null : new DateWritableV2(date);
+    public Text getPrimitiveWritableObject(Object o) {
+        String s = getPrimitiveJavaObject(o);
+        return s == null ? null : new Text(s);
     }
 
     @Override
     public Object copyObject(Object o) {
-        if (o instanceof Date) {
-            Date date = (Date) o;
-            return date.clone();
+        if (o instanceof BinaryString) {
+            return BinaryString.fromString(o.toString());
         } else {
             return o;
         }

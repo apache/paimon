@@ -77,7 +77,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
         String externalTablePkDdl =
                 String.format(
                         "CREATE EXTERNAL TABLE IF NOT EXISTS %s\n"
-                                + "STORED BY 'org.apache.paimon.hive.TableStoreHiveStorageHandler'\n"
+                                + "STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'\n"
                                 + "LOCATION '%s/default.db/%s';\n",
                         table, tableStorePkPath, table);
 
