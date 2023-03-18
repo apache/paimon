@@ -32,7 +32,7 @@ import java.util.Properties;
  * Utility class to convert Hive table property keys and get file store specific configurations from
  * {@link JobConf}.
  */
-public class TableStoreJobConf {
+public class PaimonJobConf {
 
     private static final String INTERNAL_LOCATION = "paimon.internal.location";
     private static final String INTERNAL_CATALOG_CONFIG = "paimon.catalog.config";
@@ -41,7 +41,7 @@ public class TableStoreJobConf {
 
     private final JobConf jobConf;
 
-    public TableStoreJobConf(JobConf jobConf) {
+    public PaimonJobConf(JobConf jobConf) {
         this.jobConf = jobConf;
     }
 

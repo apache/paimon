@@ -18,34 +18,41 @@
 
 package org.apache.paimon.hive.objectinspector;
 
+import org.apache.hadoop.hive.common.type.HiveChar;
+import org.apache.hadoop.hive.serde2.io.HiveCharWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
-import org.apache.hadoop.hive.serde2.objectinspector.primitive.StringObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.primitive.HiveCharObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
-import org.apache.hadoop.io.Text;
 import org.apache.paimon.data.BinaryString;
 
-/** {@link AbstractPrimitiveJavaObjectInspector} for STRING type. */
-public class TableStoreStringObjectInspector extends AbstractPrimitiveJavaObjectInspector
-        implements StringObjectInspector {
+/** {@link AbstractPrimitiveJavaObjectInspector} for CHAR type. */
+public class PaimonCharObjectInspector extends AbstractPrimitiveJavaObjectInspector
+        implements HiveCharObjectInspector {
 
-    public TableStoreStringObjectInspector() {
-        super(TypeInfoFactory.stringTypeInfo);
+    private final int len;
+
+    public PaimonCharObjectInspector(int len) {
+        super(TypeInfoFactory.getCharTypeInfo(len));
+        this.len = len;
     }
 
     @Override
-    public String getPrimitiveJavaObject(Object o) {
-        return o == null ? null : o.toString();
+    public HiveChar getPrimitiveJavaObject(Object o) {
+        return o == null ? null : new HiveChar(o.toString(), len);
     }
 
     @Override
-    public Text getPrimitiveWritableObject(Object o) {
-        String s = getPrimitiveJavaObject(o);
-        return s == null ? null : new Text(s);
+    public HiveCharWritable getPrimitiveWritableObject(Object o) {
+        HiveChar hiveChar = getPrimitiveJavaObject(o);
+        return hiveChar == null ? null : new HiveCharWritable(hiveChar);
     }
 
     @Override
     public Object copyObject(Object o) {
-        if (o instanceof BinaryString) {
+        if (o instanceof HiveChar) {
+            HiveChar hiveChar = (HiveChar) o;
+            return new HiveChar(hiveChar, len);
+        } else if (o instanceof BinaryString) {
             return BinaryString.fromString(o.toString());
         } else {
             return o;

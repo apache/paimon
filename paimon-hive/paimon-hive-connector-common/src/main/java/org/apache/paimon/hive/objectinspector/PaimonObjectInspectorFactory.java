@@ -30,7 +30,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.VarCharType;
 
 /** Factory to create {@link ObjectInspector}s according to the given {@link DataType}. */
-public class TableStoreObjectInspectorFactory {
+public class PaimonObjectInspectorFactory {
 
     public static ObjectInspector create(DataType logicalType) {
         switch (logicalType.getTypeRoot()) {
@@ -47,29 +47,28 @@ public class TableStoreObjectInspectorFactory {
                         (PrimitiveTypeInfo) HiveTypeUtils.logicalTypeToTypeInfo(logicalType));
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) logicalType;
-                return new TableStoreDecimalObjectInspector(
+                return new PaimonDecimalObjectInspector(
                         decimalType.getPrecision(), decimalType.getScale());
             case CHAR:
                 CharType charType = (CharType) logicalType;
-                return new TableStoreCharObjectInspector(charType.getLength());
+                return new PaimonCharObjectInspector(charType.getLength());
             case VARCHAR:
                 VarCharType varCharType = (VarCharType) logicalType;
                 if (varCharType.getLength() == VarCharType.MAX_LENGTH) {
-                    return new TableStoreStringObjectInspector();
+                    return new PaimonStringObjectInspector();
                 } else {
-                    return new TableStoreVarcharObjectInspector(varCharType.getLength());
+                    return new PaimonVarcharObjectInspector(varCharType.getLength());
                 }
             case DATE:
-                return new TableStoreDateObjectInspector();
+                return new PaimonDateObjectInspector();
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-                return new TableStoreTimestampObjectInspector();
+                return new PaimonTimestampObjectInspector();
             case ARRAY:
                 ArrayType arrayType = (ArrayType) logicalType;
-                return new TableStoreListObjectInspector(arrayType.getElementType());
+                return new PaimonListObjectInspector(arrayType.getElementType());
             case MAP:
                 MapType mapType = (MapType) logicalType;
-                return new TableStoreMapObjectInspector(
-                        mapType.getKeyType(), mapType.getValueType());
+                return new PaimonMapObjectInspector(mapType.getKeyType(), mapType.getValueType());
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported logical type " + logicalType.asSQLString());

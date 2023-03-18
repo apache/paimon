@@ -75,9 +75,9 @@ public class HiveCatalog extends AbstractCatalog {
             "org.apache.paimon.hive.mapred.TableStoreInputFormat";
     private static final String OUTPUT_FORMAT_CLASS_NAME =
             "org.apache.paimon.hive.mapred.TableStoreOutputFormat";
-    private static final String SERDE_CLASS_NAME = "org.apache.paimon.hive.TableStoreSerDe";
+    private static final String SERDE_CLASS_NAME = "org.apache.paimon.hive.PaimonSerDe";
     private static final String STORAGE_HANDLER_CLASS_NAME =
-            "org.apache.paimon.hive.TableStoreHiveStorageHandler";
+            "org.apache.paimon.hive.PaimonStorageHandler";
 
     private final HiveConf hiveConf;
     private final String clientClassName;

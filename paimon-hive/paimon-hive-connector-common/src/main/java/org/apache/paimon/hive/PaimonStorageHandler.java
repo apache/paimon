@@ -39,8 +39,7 @@ import java.util.Map;
 import java.util.Properties;
 
 /** {@link HiveStorageHandler} for paimon. This is the entrance class of Hive API. */
-public class TableStoreHiveStorageHandler
-        implements HiveStoragePredicateHandler, HiveStorageHandler {
+public class PaimonStorageHandler implements HiveStoragePredicateHandler, HiveStorageHandler {
 
     private Configuration conf;
 
@@ -56,12 +55,12 @@ public class TableStoreHiveStorageHandler
 
     @Override
     public Class<? extends AbstractSerDe> getSerDeClass() {
-        return TableStoreSerDe.class;
+        return PaimonSerDe.class;
     }
 
     @Override
     public HiveMetaHook getMetaHook() {
-        return new TableStoreHiveMetaHook();
+        return new PaimonMetaHook();
     }
 
     @Override
@@ -72,7 +71,7 @@ public class TableStoreHiveStorageHandler
     @Override
     public void configureInputJobProperties(TableDesc tableDesc, Map<String, String> map) {
         Properties properties = tableDesc.getProperties();
-        TableStoreJobConf.configureInputJobProperties(conf, properties, map);
+        PaimonJobConf.configureInputJobProperties(conf, properties, map);
     }
 
     public void configureInputJobCredentials(TableDesc tableDesc, Map<String, String> map) {}

@@ -164,7 +164,7 @@ To access existing paimon table, you can also register them as external tables i
 -- Pointing the location to the path of table is enough.
 
 CREATE EXTERNAL TABLE external_test_table
-STORED BY 'org.apache.paimon.hive.TableStoreHiveStorageHandler'
+STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
 LOCATION '/path/to/table/store/warehouse/default.db/test_table';
 
 -- Read records from external_test_table

@@ -18,62 +18,69 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.hadoop.hive.serde2.io.DateWritable;
+import org.apache.hadoop.hive.serde2.io.TimestampWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
+import org.apache.paimon.data.Timestamp;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 
-import java.sql.Date;
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link TableStoreDateObjectInspector}. */
-public class TableStoreDateObjectInspectorTest {
+/** Tests for {@link PaimonTimestampObjectInspector}. */
+public class PaimonTimestampObjectInspectorTest {
 
     @DisabledIfSystemProperty(named = "hive.main.version", matches = "3")
     @Test
     public void testCategoryAndClass() {
-        TableStoreDateObjectInspector oi = new TableStoreDateObjectInspector();
+        PaimonTimestampObjectInspector oi = new PaimonTimestampObjectInspector();
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.PRIMITIVE);
         assertThat(oi.getPrimitiveCategory())
-                .isEqualTo(PrimitiveObjectInspector.PrimitiveCategory.DATE);
+                .isEqualTo(PrimitiveObjectInspector.PrimitiveCategory.TIMESTAMP);
 
-        assertThat(oi.getJavaPrimitiveClass()).isEqualTo(Date.class);
-        assertThat(oi.getPrimitiveWritableClass()).isEqualTo(DateWritable.class);
+        assertThat(oi.getJavaPrimitiveClass()).isEqualTo(java.sql.Timestamp.class);
+        assertThat(oi.getPrimitiveWritableClass()).isEqualTo(TimestampWritable.class);
     }
 
     @Test
     public void testGetPrimitiveJavaObject() {
-        TableStoreDateObjectInspector oi = new TableStoreDateObjectInspector();
+        PaimonTimestampObjectInspector oi = new PaimonTimestampObjectInspector();
 
-        int input = 375;
-        assertThat(oi.getPrimitiveJavaObject(input).toString()).isEqualTo("1971-01-11");
+        LocalDateTime local = LocalDateTime.of(2022, 4, 27, 15, 0, 0, 100_000_000);
+        Timestamp input = Timestamp.fromLocalDateTime(local);
+        assertThat(oi.getPrimitiveJavaObject(input).toString()).isEqualTo("2022-04-27 15:00:00.1");
         assertThat(oi.getPrimitiveJavaObject(null)).isNull();
     }
 
     @Test
     public void testGetPrimitiveWritableObject() {
-        TableStoreDateObjectInspector oi = new TableStoreDateObjectInspector();
+        PaimonTimestampObjectInspector oi = new PaimonTimestampObjectInspector();
 
-        int input = 375;
-        assertThat(oi.getPrimitiveWritableObject(input).get().toString()).isEqualTo("1971-01-11");
+        LocalDateTime local = LocalDateTime.of(2022, 4, 27, 15, 0, 0, 100_000_000);
+        Timestamp input = Timestamp.fromLocalDateTime(local);
+        assertThat(oi.getPrimitiveWritableObject(input).getTimestamp().toString())
+                .isEqualTo("2022-04-27 15:00:00.1");
         assertThat(oi.getPrimitiveWritableObject(null)).isNull();
     }
 
     @DisabledIfSystemProperty(named = "hive.main.version", matches = "3")
     @Test
     public void testCopyObject() {
-        TableStoreDateObjectInspector oi = new TableStoreDateObjectInspector();
+        PaimonTimestampObjectInspector oi = new PaimonTimestampObjectInspector();
 
-        Date input = Date.valueOf(LocalDate.ofEpochDay(375));
-        Object copy = oi.copyObject(input);
-        assertThat(copy).isEqualTo(input);
-        assertThat(copy).isNotSameAs(input);
+        // TimestampData is immutable
+        Timestamp input1 = Timestamp.fromEpochMillis(10007);
+        Object copy1 = oi.copyObject(input1);
+        assertThat(copy1).isEqualTo(input1);
 
-        assertThat(oi.copyObject(375)).isEqualTo(375);
+        java.sql.Timestamp input2 = new java.sql.Timestamp(10007);
+        Object copy2 = oi.copyObject(input2);
+        assertThat(copy2).isEqualTo(input2);
+        assertThat(copy2).isNotSameAs(input2);
+
         assertThat(oi.copyObject(null)).isNull();
     }
 }

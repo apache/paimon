@@ -28,12 +28,12 @@ import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link TableStoreListObjectInspector}. */
-public class TableStoreListObjectInspectorTest {
+/** Tests for {@link PaimonListObjectInspector}. */
+public class PaimonListObjectInspectorTest {
 
     @Test
     public void testCategoryAndTypeName() {
-        TableStoreListObjectInspector oi = new TableStoreListObjectInspector(DataTypes.STRING());
+        PaimonListObjectInspector oi = new PaimonListObjectInspector(DataTypes.STRING());
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.LIST);
         assertThat(oi.getTypeName()).isEqualTo("array<string>");
@@ -41,7 +41,7 @@ public class TableStoreListObjectInspectorTest {
 
     @Test
     public void testGetListAndElement() {
-        TableStoreListObjectInspector oi = new TableStoreListObjectInspector(DataTypes.STRING());
+        PaimonListObjectInspector oi = new PaimonListObjectInspector(DataTypes.STRING());
 
         BinaryString[] stringDataArray =
                 new BinaryString[] {

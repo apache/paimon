@@ -26,10 +26,10 @@ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.apache.paimon.data.Decimal;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for DECIMAL type. */
-public class TableStoreDecimalObjectInspector extends AbstractPrimitiveJavaObjectInspector
+public class PaimonDecimalObjectInspector extends AbstractPrimitiveJavaObjectInspector
         implements HiveDecimalObjectInspector {
 
-    public TableStoreDecimalObjectInspector(int precision, int scale) {
+    public PaimonDecimalObjectInspector(int precision, int scale) {
         super(TypeInfoFactory.getDecimalTypeInfo(precision, scale));
     }
 

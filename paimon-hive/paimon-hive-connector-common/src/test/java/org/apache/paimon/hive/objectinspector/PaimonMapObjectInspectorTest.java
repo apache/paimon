@@ -29,13 +29,13 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link TableStoreMapObjectInspector}. */
-public class TableStoreMapObjectInspectorTest {
+/** Tests for {@link PaimonMapObjectInspector}. */
+public class PaimonMapObjectInspectorTest {
 
     @Test
     public void testCategoryAndTypeName() {
-        TableStoreMapObjectInspector oi =
-                new TableStoreMapObjectInspector(DataTypes.STRING(), DataTypes.BIGINT());
+        PaimonMapObjectInspector oi =
+                new PaimonMapObjectInspector(DataTypes.STRING(), DataTypes.BIGINT());
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.MAP);
         assertThat(oi.getTypeName()).isEqualTo("map<string,bigint>");
@@ -43,8 +43,8 @@ public class TableStoreMapObjectInspectorTest {
 
     @Test
     public void testGetMapAndValue() {
-        TableStoreMapObjectInspector oi =
-                new TableStoreMapObjectInspector(DataTypes.STRING(), DataTypes.BIGINT());
+        PaimonMapObjectInspector oi =
+                new PaimonMapObjectInspector(DataTypes.STRING(), DataTypes.BIGINT());
 
         BinaryString[] keyArray =
                 new BinaryString[] {

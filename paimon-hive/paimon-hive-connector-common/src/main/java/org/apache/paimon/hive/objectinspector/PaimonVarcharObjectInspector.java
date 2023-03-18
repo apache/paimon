@@ -26,12 +26,12 @@ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.apache.paimon.data.BinaryString;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for VARCHAR type. */
-public class TableStoreVarcharObjectInspector extends AbstractPrimitiveJavaObjectInspector
+public class PaimonVarcharObjectInspector extends AbstractPrimitiveJavaObjectInspector
         implements HiveVarcharObjectInspector {
 
     private final int len;
 
-    public TableStoreVarcharObjectInspector(int len) {
+    public PaimonVarcharObjectInspector(int len) {
         super(TypeInfoFactory.getVarcharTypeInfo(len));
         this.len = len;
     }

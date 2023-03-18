@@ -18,66 +18,62 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.hadoop.hive.common.type.HiveChar;
-import org.apache.hadoop.hive.serde2.io.HiveCharWritable;
+import org.apache.hadoop.hive.common.type.HiveDecimal;
+import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
-import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
 import org.junit.jupiter.api.Test;
+
+import java.math.BigDecimal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link TableStoreCharObjectInspector}. */
-public class TableStoreCharObjectInspectorTest {
+/** Tests for {@link PaimonDecimalObjectInspector}. */
+public class PaimonDecimalObjectInspectorTest {
 
     @Test
     public void testCategoryAndClass() {
-        TableStoreCharObjectInspector oi = new TableStoreCharObjectInspector(10);
+        PaimonDecimalObjectInspector oi = new PaimonDecimalObjectInspector(5, 3);
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.PRIMITIVE);
         assertThat(oi.getPrimitiveCategory())
-                .isEqualTo(PrimitiveObjectInspector.PrimitiveCategory.CHAR);
+                .isEqualTo(PrimitiveObjectInspector.PrimitiveCategory.DECIMAL);
 
-        assertThat(oi.getJavaPrimitiveClass()).isEqualTo(HiveChar.class);
-        assertThat(oi.getPrimitiveWritableClass()).isEqualTo(HiveCharWritable.class);
+        assertThat(oi.getJavaPrimitiveClass()).isEqualTo(HiveDecimal.class);
+        assertThat(oi.getPrimitiveWritableClass()).isEqualTo(HiveDecimalWritable.class);
     }
 
     @Test
     public void testGetPrimitiveJavaObject() {
-        TableStoreCharObjectInspector oi = new TableStoreCharObjectInspector(10);
+        PaimonDecimalObjectInspector oi = new PaimonDecimalObjectInspector(5, 3);
 
-        BinaryString input1 = BinaryString.fromString("testString");
-        HiveChar expected1 = new HiveChar("testString", 10);
-        BinaryString input2 = BinaryString.fromString("test");
-        HiveChar expected2 = new HiveChar("test", 10);
-        assertThat(oi.getPrimitiveJavaObject(input1)).isEqualTo(expected1);
-        assertThat(oi.getPrimitiveJavaObject(input2)).isEqualTo(expected2);
+        Decimal input = Decimal.fromBigDecimal(new BigDecimal("12.345"), 5, 3);
+        HiveDecimal expected = HiveDecimal.create("12.345");
+        assertThat(oi.getPrimitiveJavaObject(input)).isEqualTo(expected);
         assertThat(oi.getPrimitiveJavaObject(null)).isNull();
     }
 
     @Test
     public void testGetPrimitiveWritableObject() {
-        TableStoreCharObjectInspector oi = new TableStoreCharObjectInspector(10);
+        PaimonDecimalObjectInspector oi = new PaimonDecimalObjectInspector(5, 3);
 
-        BinaryString input1 = BinaryString.fromString("testString");
-        HiveCharWritable expected1 = new HiveCharWritable(new HiveChar("testString", 10));
-        BinaryString input2 = BinaryString.fromString("test");
-        HiveCharWritable expected2 = new HiveCharWritable(new HiveChar("test", 10));
-        assertThat(oi.getPrimitiveWritableObject(input1)).isEqualTo(expected1);
-        assertThat(oi.getPrimitiveWritableObject(input2)).isEqualTo(expected2);
+        Decimal input = Decimal.fromBigDecimal(new BigDecimal("12.345"), 5, 3);
+        HiveDecimalWritable expected = new HiveDecimalWritable(HiveDecimal.create("12.345"));
+        assertThat(oi.getPrimitiveWritableObject(input)).isEqualTo(expected);
         assertThat(oi.getPrimitiveWritableObject(null)).isNull();
     }
 
     @Test
     public void testCopyObject() {
-        TableStoreCharObjectInspector oi = new TableStoreCharObjectInspector(10);
+        PaimonDecimalObjectInspector oi = new PaimonDecimalObjectInspector(5, 3);
 
-        BinaryString input1 = BinaryString.fromString("testString");
+        Decimal input1 = Decimal.fromBigDecimal(new BigDecimal("12.345"), 5, 3);
         Object copy1 = oi.copyObject(input1);
         assertThat(copy1).isEqualTo(input1);
         assertThat(copy1).isNotSameAs(input1);
 
-        HiveChar input2 = new HiveChar("test", 10);
+        HiveDecimal input2 = HiveDecimal.create("12.345");
         Object copy2 = oi.copyObject(input2);
         assertThat(copy2).isEqualTo(input2);
         assertThat(copy2).isNotSameAs(input2);

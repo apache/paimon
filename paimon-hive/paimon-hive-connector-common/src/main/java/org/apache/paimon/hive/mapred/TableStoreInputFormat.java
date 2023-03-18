@@ -28,9 +28,9 @@ import org.apache.hadoop.mapred.RecordReader;
 import org.apache.hadoop.mapred.Reporter;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.hive.PaimonJobConf;
 import org.apache.paimon.hive.RowDataContainer;
 import org.apache.paimon.hive.SearchArgumentToPredicateConverter;
-import org.apache.paimon.hive.TableStoreJobConf;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
@@ -74,7 +74,7 @@ public class TableStoreInputFormat implements InputFormat<Void, RowDataContainer
     }
 
     private FileStoreTable createFileStoreTable(JobConf jobConf) {
-        TableStoreJobConf wrapper = new TableStoreJobConf(jobConf);
+        PaimonJobConf wrapper = new PaimonJobConf(jobConf);
         Options options = new Options();
         options.set(CoreOptions.PATH, wrapper.getLocation());
         CatalogContext catalogContext = CatalogContext.create(options, jobConf);
