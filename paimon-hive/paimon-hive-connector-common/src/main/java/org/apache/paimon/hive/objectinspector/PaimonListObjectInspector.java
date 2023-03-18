@@ -33,13 +33,13 @@ import java.util.List;
  * <p>Behaviors of this class when input is null are compatible with {@link
  * org.apache.hadoop.hive.serde2.objectinspector.StandardListObjectInspector}.
  */
-public class TableStoreListObjectInspector implements ListObjectInspector {
+public class PaimonListObjectInspector implements ListObjectInspector {
 
     private final ObjectInspector elementObjectInspector;
     private final InternalArray.ElementGetter elementGetter;
 
-    public TableStoreListObjectInspector(DataType elementType) {
-        this.elementObjectInspector = TableStoreObjectInspectorFactory.create(elementType);
+    public PaimonListObjectInspector(DataType elementType) {
+        this.elementObjectInspector = PaimonObjectInspectorFactory.create(elementType);
         this.elementGetter = InternalArray.createElementGetter(elementType);
     }
 

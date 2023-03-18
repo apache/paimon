@@ -18,65 +18,66 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.hadoop.hive.serde2.io.TimestampWritable;
+import org.apache.hadoop.hive.common.type.HiveChar;
+import org.apache.hadoop.hive.serde2.io.HiveCharWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
-import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.BinaryString;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
-
-import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link TableStoreTimestampObjectInspector}. */
-public class TableStoreTimestampObjectInspectorTest {
+/** Tests for {@link PaimonCharObjectInspector}. */
+public class PaimonCharObjectInspectorTest {
 
-    @DisabledIfSystemProperty(named = "hive.main.version", matches = "3")
     @Test
     public void testCategoryAndClass() {
-        TableStoreTimestampObjectInspector oi = new TableStoreTimestampObjectInspector();
+        PaimonCharObjectInspector oi = new PaimonCharObjectInspector(10);
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.PRIMITIVE);
         assertThat(oi.getPrimitiveCategory())
-                .isEqualTo(PrimitiveObjectInspector.PrimitiveCategory.TIMESTAMP);
+                .isEqualTo(PrimitiveObjectInspector.PrimitiveCategory.CHAR);
 
-        assertThat(oi.getJavaPrimitiveClass()).isEqualTo(java.sql.Timestamp.class);
-        assertThat(oi.getPrimitiveWritableClass()).isEqualTo(TimestampWritable.class);
+        assertThat(oi.getJavaPrimitiveClass()).isEqualTo(HiveChar.class);
+        assertThat(oi.getPrimitiveWritableClass()).isEqualTo(HiveCharWritable.class);
     }
 
     @Test
     public void testGetPrimitiveJavaObject() {
-        TableStoreTimestampObjectInspector oi = new TableStoreTimestampObjectInspector();
+        PaimonCharObjectInspector oi = new PaimonCharObjectInspector(10);
 
-        LocalDateTime local = LocalDateTime.of(2022, 4, 27, 15, 0, 0, 100_000_000);
-        Timestamp input = Timestamp.fromLocalDateTime(local);
-        assertThat(oi.getPrimitiveJavaObject(input).toString()).isEqualTo("2022-04-27 15:00:00.1");
+        BinaryString input1 = BinaryString.fromString("testString");
+        HiveChar expected1 = new HiveChar("testString", 10);
+        BinaryString input2 = BinaryString.fromString("test");
+        HiveChar expected2 = new HiveChar("test", 10);
+        assertThat(oi.getPrimitiveJavaObject(input1)).isEqualTo(expected1);
+        assertThat(oi.getPrimitiveJavaObject(input2)).isEqualTo(expected2);
         assertThat(oi.getPrimitiveJavaObject(null)).isNull();
     }
 
     @Test
     public void testGetPrimitiveWritableObject() {
-        TableStoreTimestampObjectInspector oi = new TableStoreTimestampObjectInspector();
+        PaimonCharObjectInspector oi = new PaimonCharObjectInspector(10);
 
-        LocalDateTime local = LocalDateTime.of(2022, 4, 27, 15, 0, 0, 100_000_000);
-        Timestamp input = Timestamp.fromLocalDateTime(local);
-        assertThat(oi.getPrimitiveWritableObject(input).getTimestamp().toString())
-                .isEqualTo("2022-04-27 15:00:00.1");
+        BinaryString input1 = BinaryString.fromString("testString");
+        HiveCharWritable expected1 = new HiveCharWritable(new HiveChar("testString", 10));
+        BinaryString input2 = BinaryString.fromString("test");
+        HiveCharWritable expected2 = new HiveCharWritable(new HiveChar("test", 10));
+        assertThat(oi.getPrimitiveWritableObject(input1)).isEqualTo(expected1);
+        assertThat(oi.getPrimitiveWritableObject(input2)).isEqualTo(expected2);
         assertThat(oi.getPrimitiveWritableObject(null)).isNull();
     }
 
-    @DisabledIfSystemProperty(named = "hive.main.version", matches = "3")
     @Test
     public void testCopyObject() {
-        TableStoreTimestampObjectInspector oi = new TableStoreTimestampObjectInspector();
+        PaimonCharObjectInspector oi = new PaimonCharObjectInspector(10);
 
-        // TimestampData is immutable
-        Timestamp input1 = Timestamp.fromEpochMillis(10007);
+        BinaryString input1 = BinaryString.fromString("testString");
         Object copy1 = oi.copyObject(input1);
         assertThat(copy1).isEqualTo(input1);
+        assertThat(copy1).isNotSameAs(input1);
 
-        java.sql.Timestamp input2 = new java.sql.Timestamp(10007);
+        HiveChar input2 = new HiveChar("test", 10);
         Object copy2 = oi.copyObject(input2);
         assertThat(copy2).isEqualTo(input2);
         assertThat(copy2).isNotSameAs(input2);

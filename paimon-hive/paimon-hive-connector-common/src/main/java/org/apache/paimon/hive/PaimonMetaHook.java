@@ -29,7 +29,7 @@ import org.apache.paimon.utils.Preconditions;
  * {@link HiveMetaHook} for paimon. Currently this class is only used to set input and output
  * formats.
  */
-public class TableStoreHiveMetaHook implements HiveMetaHook {
+public class PaimonMetaHook implements HiveMetaHook {
 
     @Override
     public void preCreateTable(Table table) throws MetaException {

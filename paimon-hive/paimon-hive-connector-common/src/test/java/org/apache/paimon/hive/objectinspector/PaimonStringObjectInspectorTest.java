@@ -26,12 +26,12 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link TableStoreStringObjectInspector}. */
-public class TableStoreStringObjectInspectorTest {
+/** Tests for {@link PaimonStringObjectInspector}. */
+public class PaimonStringObjectInspectorTest {
 
     @Test
     public void testCategoryAndClass() {
-        TableStoreStringObjectInspector oi = new TableStoreStringObjectInspector();
+        PaimonStringObjectInspector oi = new PaimonStringObjectInspector();
 
         assertThat(oi.getCategory()).isEqualTo(ObjectInspector.Category.PRIMITIVE);
         assertThat(oi.getPrimitiveCategory())
@@ -43,7 +43,7 @@ public class TableStoreStringObjectInspectorTest {
 
     @Test
     public void testGetPrimitiveJavaObject() {
-        TableStoreStringObjectInspector oi = new TableStoreStringObjectInspector();
+        PaimonStringObjectInspector oi = new PaimonStringObjectInspector();
 
         BinaryString input = BinaryString.fromString("testString");
         String expected = "testString";
@@ -53,7 +53,7 @@ public class TableStoreStringObjectInspectorTest {
 
     @Test
     public void testGetPrimitiveWritableObject() {
-        TableStoreStringObjectInspector oi = new TableStoreStringObjectInspector();
+        PaimonStringObjectInspector oi = new PaimonStringObjectInspector();
 
         BinaryString input = BinaryString.fromString("testString");
         Text expected = new Text("testString");
@@ -63,7 +63,7 @@ public class TableStoreStringObjectInspectorTest {
 
     @Test
     public void testCopyObject() {
-        TableStoreStringObjectInspector oi = new TableStoreStringObjectInspector();
+        PaimonStringObjectInspector oi = new PaimonStringObjectInspector();
 
         BinaryString input = BinaryString.fromString("testString");
         Object copy = oi.copyObject(input);

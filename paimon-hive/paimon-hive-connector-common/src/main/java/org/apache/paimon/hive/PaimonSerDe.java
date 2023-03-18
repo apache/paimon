@@ -24,7 +24,7 @@ import org.apache.hadoop.hive.serde2.SerDeException;
 import org.apache.hadoop.hive.serde2.SerDeStats;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.io.Writable;
-import org.apache.paimon.hive.objectinspector.TableStoreRowDataObjectInspector;
+import org.apache.paimon.hive.objectinspector.PaimonRowDataObjectInspector;
 
 import javax.annotation.Nullable;
 
@@ -35,16 +35,16 @@ import java.util.Properties;
  *
  * <p>Currently this class only supports deserialization.
  */
-public class TableStoreSerDe extends AbstractSerDe {
+public class PaimonSerDe extends AbstractSerDe {
 
-    private TableStoreRowDataObjectInspector inspector;
+    private PaimonRowDataObjectInspector inspector;
 
     @Override
     public void initialize(@Nullable Configuration configuration, Properties properties)
             throws SerDeException {
         HiveSchema schema = HiveSchema.extract(configuration, properties);
         inspector =
-                new TableStoreRowDataObjectInspector(
+                new PaimonRowDataObjectInspector(
                         schema.fieldNames(), schema.fieldTypes(), schema.fieldComments());
     }
 
