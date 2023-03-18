@@ -35,7 +35,7 @@ public class TableStoreHiveMetaHook implements HiveMetaHook {
     public void preCreateTable(Table table) throws MetaException {
         Preconditions.checkArgument(
                 !table.isSetPartitionKeys() || table.getPartitionKeys().isEmpty(),
-                "Flink Table Store currently does not support creating partitioned table "
+                "Paimon currently does not support creating partitioned table "
                         + "with PARTITIONED BY clause. If you want to query from a partitioned table, "
                         + "please add partition columns into the ordinary table columns.");
 

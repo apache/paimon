@@ -142,9 +142,7 @@ public class HiveSchema {
                                 : schemaNames.get(i) + " " + schemaTypeInfos.get(i).getTypeName();
                 mismatched.add(
                         String.format(
-                                "Field #%d\n"
-                                        + "Hive DDL          : %s\n"
-                                        + "Table Store Schema: %s\n",
+                                "Field #%d\n" + "Hive DDL          : %s\n" + "Paimon Schema: %s\n",
                                 i, ddlField, schemaField));
             }
         }

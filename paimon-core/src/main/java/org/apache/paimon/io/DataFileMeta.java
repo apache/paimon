@@ -197,10 +197,10 @@ public class DataFileMeta {
      * Usage:
      *
      * <ul>
-     *   <li>Table Store 0.2
+     *   <li>Paimon 0.2
      *       <ul>
      *         <li>Stores changelog files for {@link CoreOptions.ChangelogProducer#INPUT}. Changelog
-     *             files are moved to {@link NewFilesIncrement} since Table Store 0.3.
+     *             files are moved to {@link NewFilesIncrement} since Paimon 0.3.
      *       </ul>
      * </ul>
      */

@@ -25,6 +25,6 @@ under the License.
 
 # Versions
 
-An appendix of hosted documentation for all versions of Apache Flink Table Store.
+An appendix of hosted documentation for all versions of Apache Paimon.
 
 {{< all_versions >}}

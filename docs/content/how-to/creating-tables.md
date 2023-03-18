@@ -28,9 +28,9 @@ under the License.
 
 ## Creating Catalog Managed Tables
 
-Tables created in Table Store [catalogs]({{< ref "how-to/creating-catalogs" >}}) are managed by the catalog. When the table is dropped from catalog, its table files will also be deleted.
+Tables created in Paimon [catalogs]({{< ref "how-to/creating-catalogs" >}}) are managed by the catalog. When the table is dropped from catalog, its table files will also be deleted.
 
-The following SQL assumes that you have registered and are using a Table Store catalog. It creates a managed table named `MyTable` with five columns in the catalog's `default` database, where `dt`, `hh` and `user_id` are the primary keys.
+The following SQL assumes that you have registered and are using a Paimon catalog. It creates a managed table named `MyTable` with five columns in the catalog's `default` database, where `dt`, `hh` and `user_id` are the primary keys.
 
 {{< tabs "primary-keys-example" >}}
 
@@ -263,7 +263,7 @@ CREATE TABLE MyTableLike LIKE MyTable;
 
 ### Table Properties
 
-Users can specify table properties to enable features or improve performance of Table Store. For a complete list of such properties, see [configurations]({{< ref "maintenance/configurations" >}}).
+Users can specify table properties to enable features or improve performance of Paimon. For a complete list of such properties, see [configurations]({{< ref "maintenance/configurations" >}}).
 
 The following SQL creates a table named `MyTable` with five columns partitioned by `dt` and `hh`, where `dt`, `hh` and `user_id` are the primary keys. This table has two properties: `'bucket' = '2'` and `'bucket-key' = 'user_id'`.
 
@@ -311,13 +311,13 @@ CREATE TABLE MyTable (
 
 External tables are recorded but not managed by catalogs. If an external table is dropped, its table files will not be deleted.
 
-Table Store external tables can be used in any catalog. If you do not want to create a Table Store catalog and just want to read / write a table, you can consider external tables.
+Paimon external tables can be used in any catalog. If you do not want to create a Paimon catalog and just want to read / write a table, you can consider external tables.
 
 {{< tabs "external-table-example" >}}
 
 {{< tab "Flink" >}}
 
-Flink SQL supports reading and writing an external table. External Table Store tables are created by specifying the `connector` and `path` table properties. The following SQL creates an external table named `MyTable` with five columns, where the base path of table files is `hdfs://path/to/table`.
+Flink SQL supports reading and writing an external table. External Paimon tables are created by specifying the `connector` and `path` table properties. The following SQL creates an external table named `MyTable` with five columns, where the base path of table files is `hdfs://path/to/table`.
 
 ```sql
 CREATE TABLE MyTable (
@@ -379,7 +379,7 @@ LOCATION 'hdfs://path/to/table';
 
 Temporary tables are only supported by Flink. Like external tables, temporary tables are just recorded but not managed by the current Flink SQL session. If the temporary table is dropped, its resources will not be deleted. Temporary tables are also dropped when Flink SQL session is closed.
 
-If you want to use Table Store catalog along with other tables but do not want to store them in other catalogs, you can create a temporary table. The following Flink SQL creates a Table Store catalog and a temporary table and also illustrates how to use both tables together.
+If you want to use Paimon catalog along with other tables but do not want to store them in other catalogs, you can create a temporary table. The following Flink SQL creates a Paimon catalog and a temporary table and also illustrates how to use both tables together.
 
 ```sql
 CREATE CATALOG my_catalog WITH (

@@ -26,7 +26,7 @@ under the License.
 
 # Rescale Bucket
 
-Since the number of total buckets dramatically influences the performance, Table Store allows users to 
+Since the number of total buckets dramatically influences the performance, Paimon allows users to 
 tune bucket numbers by `ALTER TABLE` command and reorganize data layout by `INSERT OVERWRITE` 
 without recreating the table/partition. When executing overwrite jobs, the framework will automatically 
 scan the data with the old bucket number and hash the record according to the current bucket number.

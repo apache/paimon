@@ -26,11 +26,11 @@ under the License.
 
 # Overview
 
-Apache Flink Table Store utilizes the same pluggable file systems as Apache Flink. Users can follow the
+Apache Paimon utilizes the same pluggable file systems as Apache Flink. Users can follow the
 [standard plugin mechanism](https://nightlies.apache.org/flink/flink-docs-stable/docs/deployment/filesystems/plugins/)
 to configure the plugin structure if using Flink as compute engine. However, for other engines like Spark
 or Hive, the provided opt jars (by Flink) may get conflicts and cannot be used directly. It is not convenient
-for users to fix class conflicts, thus Flink Table Store provides the self-contained and engine-unified
+for users to fix class conflicts, thus Paimon provides the self-contained and engine-unified
 FileSystem pluggable jars for user to query tables from Spark/Hive side.
 
 ## Supported FileSystems

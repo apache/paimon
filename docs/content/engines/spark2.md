@@ -26,13 +26,13 @@ under the License.
 
 # Spark2
 
-This documentation is a guide for using Table Store in Spark2. 
+This documentation is a guide for using Paimon in Spark2. 
 
 ## Version
 
-Table Store supports Spark 2.4+. It is highly recommended to use Spark 2.4+ version with many improvements.
+Paimon supports Spark 2.4+. It is highly recommended to use Spark 2.4+ version with many improvements.
 
-## Preparing Table Store Jar File
+## Preparing Paimon Jar File
 
 {{< stable >}}
 
@@ -44,7 +44,7 @@ You can also manually build bundled jar from the source code.
 
 {{< unstable >}}
 
-You are using an unreleased version of Table Store so you need to manually build bundled jar from the source code.
+You are using an unreleased version of Paimon so you need to manually build bundled jar from the source code.
 
 {{< /unstable >}}
 
@@ -68,11 +68,11 @@ If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or 
 
 **Step 1: Prepare Test Data**
 
-Table Store currently only supports reading tables through Spark2. To create a Table Store table with records, please follow our [Flink quick start guide]({{< ref "engines/flink#quick-start" >}}).
+Paimon currently only supports reading tables through Spark2. To create a Paimon table with records, please follow our [Flink quick start guide]({{< ref "engines/flink#quick-start" >}}).
 
 After the guide, all table files should be stored under the path `/tmp/table_store`, or the warehouse path you've specified.
 
-**Step 2: Specify Table Store Jar File**
+**Step 2: Specify Paimon Jar File**
 
 You can append path to paimon jar file to the `--jars` argument when starting `spark-shell`.
 

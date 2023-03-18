@@ -26,11 +26,11 @@ under the License.
 
 # Lookup Joins
 
-[Lookup Joins](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/joins/) are a type of join in streaming queries. It is used to enrich a table with data that is queried from Table Store. The join requires one table to have a processing time attribute and the other table to be backed by a lookup source connector.
+[Lookup Joins](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/joins/) are a type of join in streaming queries. It is used to enrich a table with data that is queried from Paimon. The join requires one table to have a processing time attribute and the other table to be backed by a lookup source connector.
 
-Table Store supports lookup joins on unpartitioned tables with primary keys in Flink. The following example illustrates this feature.
+Paimon supports lookup joins on unpartitioned tables with primary keys in Flink. The following example illustrates this feature.
 
-First, let's create a Table Store table and update it in real-time.
+First, let's create a Paimon table and update it in real-time.
 
 ```sql
 -- Create a paimon catalog

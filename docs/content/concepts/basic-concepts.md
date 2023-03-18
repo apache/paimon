@@ -32,7 +32,7 @@ A snapshot captures the state of a table at some point in time. Users can access
 
 ## Partition
 
-Table Store adopts the same partitioning concept as Apache Hive to separate data.
+Paimon adopts the same partitioning concept as Apache Hive to separate data.
 
 Partitioning is an optional way of dividing a table into related parts based on the values of particular columns like date, city, and department. Each table can have one or more partition keys to identify a particular partition.
 
@@ -56,6 +56,6 @@ See [file layouts]({{< ref "concepts/file-layouts" >}}) for how files are divide
 
 ## Consistency Guarantees
 
-Table Store writers uses two-phase commit protocol to atomically commit a batch of records to the table. Each commit produces at most two [snapshots]({{< ref "concepts/basic-concepts#snapshot" >}}) at commit time.
+Paimon writers uses two-phase commit protocol to atomically commit a batch of records to the table. Each commit produces at most two [snapshots]({{< ref "concepts/basic-concepts#snapshot" >}}) at commit time.
 
 For any two writers modifying a table at the same time, as long as they do not modify the same bucket, their commits are serializable. If they modify the same bucket, only snapshot isolation is guaranteed. That is, the final table state may be a mix of the two commits, but no changes are lost.

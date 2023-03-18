@@ -19,7 +19,7 @@ under the License.
 
 # Documentation generators
 
-This module contains generators that create HTML files directly from Flink Table Store's source code.
+This module contains generators that create HTML files directly from Paimon's source code.
 
 ## Configuration documentation
 

@@ -96,7 +96,7 @@ Use `INSERT INTO` to apply records and changes to tables.
 INSERT INTO MyTable SELECT ...
 ```
 
-Table Store supports shuffle data by bucket in sink phase. To improve data skew, Table Store also
+Paimon supports shuffle data by bucket in sink phase. To improve data skew, Paimon also
 supports shuffling data by partition fields. You can add option `sink.partition-shuffle` to the table.
 
 {{< /tab >}}
@@ -115,7 +115,7 @@ INSERT INTO MyTable SELECT ...
 
 ## Overwriting the Whole Table
 
-For unpartitioned tables, Table Store supports overwriting the whole table.
+For unpartitioned tables, Paimon supports overwriting the whole table.
 
 {{< tabs "insert-overwrite-unpartitioned-example" >}}
 
@@ -133,7 +133,7 @@ INSERT OVERWRITE MyTable SELECT ...
 
 ## Overwriting a Partition
 
-For partitioned tables, Table Store supports overwriting a partition.
+For partitioned tables, Paimon supports overwriting a partition.
 
 {{< tabs "insert-overwrite-partitioned-example" >}}
 
@@ -167,7 +167,7 @@ INSERT OVERWRITE MyTable SELECT * FROM MyTable WHERE false
 
 ## Purging Partitions
 
-Currently, Table Store supports two ways to purge partitions.
+Currently, Paimon supports two ways to purge partitions.
 
 1. Like purging tables, you can use `INSERT OVERWRITE` to purge data of partitions by inserting empty value to them.
 
@@ -234,7 +234,7 @@ For more information of drop-partition, see
 
 ## Deleting from table
 
-Currently, Table Store supports deleting records via submitting the 'delete' job through `flink run`.
+Currently, Paimon supports deleting records via submitting the 'delete' job through `flink run`.
 
 {{< tabs "delete-from-table" >}}
 
@@ -275,7 +275,7 @@ For more information of 'delete', see
 
 ## Merging into table
 
-Table Store supports "MERGE INTO" via submitting the 'merge-into' job through `flink run`.
+Paimon supports "MERGE INTO" via submitting the 'merge-into' job through `flink run`.
 
 {{< hint info >}}
 Important table properties setting:

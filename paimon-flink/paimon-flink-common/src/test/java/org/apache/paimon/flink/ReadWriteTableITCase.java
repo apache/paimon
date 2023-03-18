@@ -81,7 +81,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.validateStream
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Table Store reading and writing IT cases. */
+/** Paimon reading and writing IT cases. */
 public class ReadWriteTableITCase extends AbstractTestBase {
 
     private final Map<String, String> streamingReadOverwrite =

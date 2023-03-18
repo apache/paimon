@@ -26,11 +26,11 @@ under the License.
 
 # Querying Tables
 
-Just like all other tables, Table Store tables can be queried with `SELECT` statement.
+Just like all other tables, Paimon tables can be queried with `SELECT` statement.
 
 ## Scan Mode
 
-By specifying the `scan.mode` table property, users can specify where and how Table Store sources should produce records.
+By specifying the `scan.mode` table property, users can specify where and how Paimon sources should produce records.
 
 <table class="table table-bordered">
 <thead>

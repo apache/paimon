@@ -261,7 +261,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                     return snapshot.changelogManifests(manifestList);
                 }
 
-                // compatible with Table Store 0.2, we'll read extraFiles in DataFileMeta
+                // compatible with Paimon 0.2, we'll read extraFiles in DataFileMeta
                 // see comments on DataFileMeta#extraFiles
                 if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
                     return snapshot.deltaManifests(manifestList);
