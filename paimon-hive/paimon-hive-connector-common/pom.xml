@@ -520,8 +520,8 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <include>org.apache.flink:paimon-hive-common</include>
-                                    <include>org.apache.flink:paimon-shade</include>
+                                    <include>org.apache.paimon:paimon-hive-common</include>
+                                    <include>org.apache.paimon:paimon-shade</include>
                                 </includes>
                             </artifactSet>
                         </configuration>

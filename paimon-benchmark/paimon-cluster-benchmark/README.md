@@ -1,6 +1,6 @@
-# Flink Table Store Benchmark
+# Paimon Benchmark
 
-This is the cluster benchmark module for Flink Table Store. Inspired by [Nexmark](https://github.com/nexmark/nexmark).
+This is the cluster benchmark module for Paimon. Inspired by [Nexmark](https://github.com/nexmark/nexmark).
 
 ## How To Run
 ### Environment Preparation

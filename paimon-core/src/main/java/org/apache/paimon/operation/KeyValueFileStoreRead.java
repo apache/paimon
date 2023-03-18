@@ -159,7 +159,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             for (DataFileMeta file : split.files()) {
                 suppliers.add(
                         () -> {
-                            // We need to check extraFiles to be compatible with Table Store 0.2.
+                            // We need to check extraFiles to be compatible with Paimon 0.2.
                             // See comments on DataFileMeta#extraFiles.
                             String fileName = changelogFile(file).orElse(file.fileName());
                             return readerFactory.createRecordReader(

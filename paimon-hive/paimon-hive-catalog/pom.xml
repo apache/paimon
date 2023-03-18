@@ -577,7 +577,7 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes>
-                                    <include>org.apache.flink:paimon-hive-common</include>
+                                    <include>org.apache.paimon:paimon-hive-common</include>
                                     <include>org.apache.thrift:libthrift</include>
                                     <include>org.apache.thrift:libfb303</include>
                                     <include>com.google.guava:guava</include>

@@ -98,7 +98,7 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <include>org.apache.flink:paimon-hive-connector-common</include>
+                                    <include>org.apache.paimon:paimon-hive-connector-common</include>
                                 </includes>
                             </artifactSet>
                         </configuration>

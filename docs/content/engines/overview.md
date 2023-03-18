@@ -26,7 +26,7 @@ under the License.
 
 # Overview
 
-Table Store not only supports Flink SQL writes and queries natively,
+Paimon not only supports Flink SQL writes and queries natively,
 but also provides queries from other popular engines, such as
 Apache Spark and Apache Hive.
 

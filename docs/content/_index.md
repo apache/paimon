@@ -1,5 +1,5 @@
 ---
-title: Apache Flink Table Store
+title: Apache Paimon
 type: docs
 bookToc: false
 ---
@@ -22,26 +22,26 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Apache Flink Table Store
+# Apache Paimon
 
-Flink Table Store is a unified storage to build dynamic tables for both streaming and
+Paimon is a unified storage to build dynamic tables for both streaming and
 batch processing in Flink, supporting high-speed data ingestion and timely data query.
-Table Store offers the following core capabilities:
+Paimon offers the following core capabilities:
 - Support storage of large datasets and allow read/write in both batch and streaming mode.
 - Support streaming queries with minimum latency down to milliseconds.
 - Support Batch/OLAP queries with minimum latency down to the second level.
 - Support incremental snapshots for stream consumption by default. So users do not need to combine different pipelines by themself.
 
 {{< columns >}}
-## Try Table Store
+## Try Paimon
 
-If you’re interested in playing around with Flink Table Store, check out our
+If you’re interested in playing around with Paimon, check out our
 quick start guide with [Flink]({{< ref "engines/flink" >}}), [Spark]({{< ref "engines/spark3" >}}) or [Hive]({{< ref "engines/hive" >}}). It provides a step by
 step introduction to the APIs and guides you through real applications.
 
 <--->
 
-## Get Help with Table Store
+## Get Help with Paimon
 
 If you get stuck, check out our [community support
 resources](https://flink.apache.org/community.html). In particular, Apache
@@ -50,5 +50,5 @@ any Apache project, and is a great way to get help quickly.
 
 {{< /columns >}}
 
-Flink Table Store is developed under the umbrella of
+Paimon is developed under the umbrella of
 [Apache Flink](https://flink.apache.org/).

@@ -26,15 +26,15 @@ under the License.
 
 # Hive
 
-This documentation is a guide for using Table Store in Hive.
+This documentation is a guide for using Paimon in Hive.
 
 ## Version
 
-Table Store currently supports Hive 2.1, 2.1-cdh-6.3, 2.2, 2.3 and 3.1.
+Paimon currently supports Hive 2.1, 2.1-cdh-6.3, 2.2, 2.3 and 3.1.
 
 ## Execution Engine
 
-Table Store currently supports MR and Tez execution engine for Hive.
+Paimon currently supports MR and Tez execution engine for Hive.
 
 ## Installation
 
@@ -56,7 +56,7 @@ You can also manually build bundled jar from the source code.
 
 {{< unstable >}}
 
-You are using an unreleased version of Table Store so you need to manually build bundled jar from the source code.
+You are using an unreleased version of Paimon so you need to manually build bundled jar from the source code.
 
 {{< /unstable >}}
 
@@ -74,17 +74,17 @@ There are several ways to add this jar to Hive.
 
 NOTE: If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
 
-## Quick Start with Table Store Hive Catalog
+## Quick Start with Paimon Hive Catalog
 
 By using paimon Hive catalog, you can create, drop and insert into paimon tables from Flink. These operations directly affect the corresponding Hive metastore. Tables created in this way can also be accessed directly from Hive.
 
-**Step 1: Prepare Table Store Hive Catalog Jar File for Flink**
+**Step 1: Prepare Paimon Hive Catalog Jar File for Flink**
 
 See [creating a catalog with Hive metastore]({{< ref "how-to/creating-catalogs#creating-a-catalog-with-hive-metastore" >}}).
 
 **Step 2: Create Test Data with Flink SQL**
 
-Execute the following Flink SQL script in Flink SQL client to define a Table Store Hive catalog and create a table.
+Execute the following Flink SQL script in Flink SQL client to define a Paimon Hive catalog and create a table.
 
 ```sql
 -- Flink SQL CLI

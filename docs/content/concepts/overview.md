@@ -26,7 +26,7 @@ under the License.
 
 # Overview
 
-Flink Table Store is a unified storage to build dynamic tables for both streaming and
+Paimon is a unified storage to build dynamic tables for both streaming and
 batch processing in Flink, supporting high-speed data ingestion and timely data query.
 
 ## Architecture
@@ -35,7 +35,7 @@ batch processing in Flink, supporting high-speed data ingestion and timely data 
 
 As shown in the architecture above:
 
-**Read/Write:** Table Store supports a versatile way to read/write data and perform OLAP queries.
+**Read/Write:** Paimon supports a versatile way to read/write data and perform OLAP queries.
 - For reads, it supports consuming data
   - from historical snapshots (in batch mode),
   - from the latest offset (in streaming mode), or 
@@ -43,10 +43,10 @@ As shown in the architecture above:
 - For writes, it supports streaming synchronization from the changelog of databases (CDC) or batch
   insert/overwrite from offline data.
 
-**Ecosystem:** In addition to Apache Flink, Table Store also supports read by other computation
+**Ecosystem:** In addition to Apache Flink, Paimon also supports read by other computation
 engines like Apache Hive, Apache Spark and Trino.
 
-**Internal:** Under the hood, Table Store uses a hybrid storage architecture with a lake format to store
+**Internal:** Under the hood, Paimon uses a hybrid storage architecture with a lake format to store
 historical data and a queue system to store incremental data. The former stores the columnar files on
 the filesystem/object-store and uses the LSM tree structure to support a large volume of data updates
 and high-performance queries. The latter uses Apache Kafka to capture data in real-time.
@@ -62,7 +62,7 @@ There are three types of connectors in Flink SQL.
 - Batch storage, such as Apache Hive, it supports various operations
   of the traditional batch processing, including `INSERT OVERWRITE`.
 
-Flink Table Store provides table abstraction. It is used in a way that
+Paimon provides table abstraction. It is used in a way that
 does not differ from the traditional database:
 - In Flink `batch` execution mode, it acts like a Hive table and
   supports various operations of Batch SQL. Query it to see the

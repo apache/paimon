@@ -116,7 +116,7 @@ under the License.
             <scope>provided</scope>
         </dependency>
 
-        <!-- Flink Table Store dependencies -->
+        <!-- Paimon dependencies -->
 
         <dependency>
             <groupId>org.apache.paimon</groupId>

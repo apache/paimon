@@ -26,7 +26,7 @@ under the License.
 
 # External Log Systems
 
-Aside from [underlying table files]({{< ref "concepts/primary-key-table#changelog-producers" >}}), changelog of Table Store can also be stored into or consumed from an external log system, such as Kafka. By specifying `log.system` table property, users can choose which external log system to use.
+Aside from [underlying table files]({{< ref "concepts/primary-key-table#changelog-producers" >}}), changelog of Paimon can also be stored into or consumed from an external log system, such as Kafka. By specifying `log.system` table property, users can choose which external log system to use.
 
 If an external log system is used, all records written into table files will also be written into the log system. Changes produced by the streaming queries will thus come from the log system instead of table files.
 
@@ -36,7 +36,7 @@ By default, changes in the log systems are visible to consumers only after a sna
 
 However, users can also specify the table property `'log.consistency' = 'eventual'` so that changelog written into the log system can be immediately consumed by the consumers, without waiting for the next snapshot. This behavior decreases the latency of changelog, but it can only guarantee the at-least-once semantics (that is, consumers might see duplicated records) due to possible failures.
 
-If `'log.consistency' = 'eventual'` is set, in order to achieve correct results, Table Store source in Flink will automatically adds a "normalize" operator for deduplication. This operator persists the values of each key in states. As one can easily tell, this operator will be very costly and should be avoided.
+If `'log.consistency' = 'eventual'` is set, in order to achieve correct results, Paimon source in Flink will automatically adds a "normalize" operator for deduplication. This operator persists the values of each key in states. As one can easily tell, this operator will be very costly and should be avoided.
 
 ## Supported Log Systems
 

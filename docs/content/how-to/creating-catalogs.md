@@ -26,7 +26,7 @@ under the License.
 
 # Creating Catalogs
 
-Table Store catalogs currently support two types of metastores:
+Paimon catalogs currently support two types of metastores:
 
 * `filesystem` metastore (default), which stores both metadata and table files in filesystems.
 * `hive` metastore, which additionally stores metadata in Hive metastore. Users can directly access the tables from Hive.
@@ -39,7 +39,7 @@ See [CatalogOptions]({{< ref "maintenance/configurations#catalogoptions" >}}) fo
 
 {{< tab "Flink" >}}
 
-The following Flink SQL registers and uses a Table Store catalog named `my_catalog`. Metadata and table files are stored under `hdfs://path/to/warehouse`.
+The following Flink SQL registers and uses a Paimon catalog named `my_catalog`. Metadata and table files are stored under `hdfs://path/to/warehouse`.
 
 ```sql
 CREATE CATALOG my_catalog WITH (
@@ -74,9 +74,9 @@ USE paimon.default;
 
 ## Creating a Catalog with Hive Metastore
 
-By using Table Store Hive catalog, changes to the catalog will directly affect the corresponding Hive metastore. Tables created in such catalog can also be accessed directly from Hive.
+By using Paimon Hive catalog, changes to the catalog will directly affect the corresponding Hive metastore. Tables created in such catalog can also be accessed directly from Hive.
 
-### Preparing Table Store Hive Catalog Jar File
+### Preparing Paimon Hive Catalog Jar File
 
 {{< stable >}}
 
@@ -92,7 +92,7 @@ You can also manually build bundled jar from the source code.
 
 {{< unstable >}}
 
-You are using an unreleased version of Table Store so you need to manually build bundled jar from the source code.
+You are using an unreleased version of Paimon so you need to manually build bundled jar from the source code.
 
 {{< /unstable >}}
 
@@ -109,12 +109,12 @@ You can find Hive catalog jar in `./paimon-hive/paimon-hive-catalog/target/paimo
 
 {{< tab "Flink" >}}
 
-To enable Table Store Hive catalog support in Flink, you can pick one of the following two methods.
+To enable Paimon Hive catalog support in Flink, you can pick one of the following two methods.
 
-* Copy Table Store Hive catalog jar file into the `lib` directory of your Flink installation directory. Note that this must be done before starting your Flink cluster.
+* Copy Paimon Hive catalog jar file into the `lib` directory of your Flink installation directory. Note that this must be done before starting your Flink cluster.
 * If you're using Flink's SQL client, append `--jar /path/to/paimon-hive-catalog-{{< version >}}.jar` to the starting command of SQL client.
 
-The following Flink SQL registers and uses a Table Store Hive catalog named `my_hive`. Metadata and table files are stored under `hdfs://path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
+The following Flink SQL registers and uses a Paimon Hive catalog named `my_hive`. Metadata and table files are stored under `hdfs://path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
 
 ```sql
 CREATE CATALOG my_hive WITH (
@@ -131,7 +131,7 @@ USE CATALOG my_hive;
 
 {{< tab "Spark3" >}}
 
-To enable Table Store Hive catalog support in Spark3, append the path of Table Store Hive catalog jar file to `--jars` argument when starting spark.
+To enable Paimon Hive catalog support in Spark3, append the path of Paimon Hive catalog jar file to `--jars` argument when starting spark.
 
 The following shell command registers a Table tore Hive catalog named `paimon`. Metadata and table files are stored under `hdfs://path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
 

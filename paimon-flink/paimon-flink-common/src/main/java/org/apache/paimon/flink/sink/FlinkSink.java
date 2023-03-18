@@ -140,12 +140,12 @@ public abstract class FlinkSink implements Serializable {
     private void assertCheckpointConfiguration(StreamExecutionEnvironment env) {
         Preconditions.checkArgument(
                 !env.getCheckpointConfig().isUnalignedCheckpointsEnabled(),
-                "Table Store sink currently does not support unaligned checkpoints. Please set "
+                "Paimon sink currently does not support unaligned checkpoints. Please set "
                         + ExecutionCheckpointingOptions.ENABLE_UNALIGNED.key()
                         + " to false.");
         Preconditions.checkArgument(
                 env.getCheckpointConfig().getCheckpointingMode() == CheckpointingMode.EXACTLY_ONCE,
-                "Table Store sink currently only supports EXACTLY_ONCE checkpoint mode. Please set "
+                "Paimon sink currently only supports EXACTLY_ONCE checkpoint mode. Please set "
                         + ExecutionCheckpointingOptions.CHECKPOINTING_MODE.key()
                         + " to exactly-once");
     }

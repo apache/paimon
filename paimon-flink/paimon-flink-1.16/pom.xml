@@ -60,7 +60,7 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <include>org.apache.flink:paimon-flink-common</include>
+                                    <include>org.apache.paimon:paimon-flink-common</include>
                                 </includes>
                             </artifactSet>
                         </configuration>

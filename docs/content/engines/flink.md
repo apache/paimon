@@ -26,11 +26,11 @@ under the License.
 
 # Flink
 
-This documentation is a guide for using Table Store in Flink.
+This documentation is a guide for using Paimon in Flink.
 
-## Preparing Table Store Jar File
+## Preparing Paimon Jar File
 
-Table Store currently supports Flink 1.16, 1.15 and 1.14. We recommend the latest Flink version for a better experience.
+Paimon currently supports Flink 1.16, 1.15 and 1.14. We recommend the latest Flink version for a better experience.
 
 {{< stable >}}
 
@@ -48,7 +48,7 @@ You can also manually build bundled jar from the source code.
 
 {{< unstable >}}
 
-You are using an unreleased version of Table Store so you need to manually build bundled jar from the source code.
+You are using an unreleased version of Paimon so you need to manually build bundled jar from the source code.
 
 {{< /unstable >}}
 
@@ -69,7 +69,7 @@ If you haven't downloaded Flink, you can [download Flink 1.16](https://flink.apa
 tar -xzf flink-*.tgz
 ```
 
-**Step 2: Copy Table Store Bundled Jar**
+**Step 2: Copy Paimon Bundled Jar**
 
 Copy paimon bundled jar to the `lib` directory of your Flink home.
 
@@ -111,7 +111,7 @@ You can now start Flink SQL client to execute SQL scripts.
 **Step 5: Create a Catalog and a Table**
 
 ```sql
--- if you're trying out Table Store in a distributed environment,
+-- if you're trying out Paimon in a distributed environment,
 -- warehouse path should be set to a shared file system, such as HDFS or OSS
 CREATE CATALOG my_catalog WITH (
     'type'='paimon',

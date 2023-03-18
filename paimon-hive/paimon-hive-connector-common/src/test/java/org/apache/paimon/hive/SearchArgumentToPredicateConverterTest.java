@@ -65,9 +65,9 @@ public class SearchArgumentToPredicateConverterTest {
                 Decimal.fromBigDecimal(new BigDecimal("123456789123456789.123456789"), 27, 9));
         testLiteral(
                 PredicateLeaf.Type.STRING,
-                "Table Store",
+                "Paimon",
                 DataTypes.STRING(),
-                BinaryString.fromString("Table Store"));
+                BinaryString.fromString("Paimon"));
         testLiteral(PredicateLeaf.Type.DATE, Date.valueOf("1971-01-11"), DataTypes.DATE(), 375);
         testLiteral(
                 PredicateLeaf.Type.TIMESTAMP,
