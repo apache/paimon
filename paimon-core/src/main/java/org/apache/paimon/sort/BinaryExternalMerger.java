@@ -33,7 +33,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-/** Record merger for sort of BinaryRow. Copied from Flink. */
+/** Record merger for sort of BinaryRow. */
 public class BinaryExternalMerger extends AbstractBinaryExternalMerger<BinaryRow> {
 
     private final BinaryRowSerializer serializer;

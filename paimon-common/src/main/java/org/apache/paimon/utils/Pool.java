@@ -18,22 +18,11 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.reader.RecordReader;
-
 import javax.annotation.Nullable;
 
 import java.util.concurrent.ArrayBlockingQueue;
 
-/**
- * A pool to cache and recycle heavyweight objects, to reduce object allocation.
- *
- * <p>This pool can be used in the {@link RecordReader}, when the returned objects are heavyweight
- * and need to be reused for efficiency. Because the reading happens in I/O threads while the record
- * processing happens in Flink's main processing threads, these objects cannot be reused immediately
- * after being returned. They can be reused, once they are recycled back to the pool.
- *
- * @param <T> The type of object cached in the pool.
- */
+/** A pool to cache and recycle heavyweight objects, to reduce object allocation. */
 public class Pool<T> {
 
     private final ArrayBlockingQueue<T> pool;

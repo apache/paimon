@@ -34,7 +34,7 @@ import org.apache.hadoop.hive.ql.exec.vector.MapColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.StructColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.TimestampColumnVector;
 
-/** This column vector is used to adapt hive's ColumnVector to Flink's ColumnVector. */
+/** This column vector is used to adapt hive's ColumnVector to Paimon's ColumnVector. */
 public abstract class AbstractOrcColumnVector
         implements org.apache.paimon.data.columnar.ColumnVector {
 
@@ -49,7 +49,7 @@ public abstract class AbstractOrcColumnVector
         return !vector.noNulls && vector.isNull[vector.isRepeating ? 0 : i];
     }
 
-    public static org.apache.paimon.data.columnar.ColumnVector createFlinkVector(
+    public static org.apache.paimon.data.columnar.ColumnVector createPaimonVector(
             ColumnVector vector, DataType dataType) {
         if (vector instanceof LongColumnVector) {
             if (dataType.getTypeRoot() == DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE) {

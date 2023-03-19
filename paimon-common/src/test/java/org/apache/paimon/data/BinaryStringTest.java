@@ -131,7 +131,7 @@ public class BinaryStringTest {
         checkBasic(",", 1);
         checkBasic("hello", 5);
         checkBasic("hello world", 11);
-        checkBasic("Flink中文社区", 9);
+        checkBasic("Paimon中文社区", 10);
         checkBasic("中 文 社 区", 7);
 
         checkBasic("¡", 1); // 2 bytes char

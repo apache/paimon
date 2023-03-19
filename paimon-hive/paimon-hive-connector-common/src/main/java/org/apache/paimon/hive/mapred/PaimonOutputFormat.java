@@ -36,7 +36,7 @@ public class PaimonOutputFormat implements OutputFormat<InternalRow, InternalRow
             FileSystem fileSystem, JobConf jobConf, String s, Progressable progressable)
             throws IOException {
         throw new UnsupportedOperationException(
-                "Flink paimon currently can only be used as an input format for Hive.");
+                "Paimon currently can only be used as an input format for Hive.");
     }
 
     @Override

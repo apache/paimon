@@ -44,8 +44,8 @@ public class OSSFileIO extends HadoopCompliantFileIO {
     private static final Logger LOG = LoggerFactory.getLogger(OSSFileIO.class);
 
     /**
-     * In order to simplify, we make flink oss configuration keys same with hadoop oss module. So,
-     * we add all configuration key with prefix `fs.oss` in flink conf to hadoop conf.
+     * In order to simplify, we make paimon oss configuration keys same with hadoop oss module. So,
+     * we add all configuration key with prefix `fs.oss` in paimon conf to hadoop conf.
      */
     private static final String[] CONFIG_PREFIXES = {"fs.oss."};
 

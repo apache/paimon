@@ -68,11 +68,11 @@ public class S3FileIO extends HadoopCompliantFileIO {
 
     @Override
     public void configure(CatalogContext context) {
-        this.hadoopOptions = mirrorCertainHadoopConfig(loadHadoopConfigFromFlink(context));
+        this.hadoopOptions = mirrorCertainHadoopConfig(loadHadoopConfigFromContext(context));
     }
 
     // add additional config entries from the IO config to the Hadoop config
-    private Options loadHadoopConfigFromFlink(CatalogContext context) {
+    private Options loadHadoopConfigFromContext(CatalogContext context) {
         Options hadoopConfig = new Options();
         for (String key : context.options().keySet()) {
             for (String prefix : CONFIG_PREFIXES) {

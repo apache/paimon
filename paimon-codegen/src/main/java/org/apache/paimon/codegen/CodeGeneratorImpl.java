@@ -56,7 +56,6 @@ public class CodeGeneratorImpl implements CodeGenerator {
     private SortSpec getAscendingSortSpec(int numFields) {
         SortSpec.SortSpecBuilder builder = SortSpec.builder();
         for (int i = 0; i < numFields; i++) {
-            // Flink's default null collation is NullCollation.LOW, see FlinkPlannerImpl
             builder.addField(i, true, false);
         }
         return builder.build();

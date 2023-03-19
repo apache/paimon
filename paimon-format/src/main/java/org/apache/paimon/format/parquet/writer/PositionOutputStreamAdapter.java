@@ -24,16 +24,16 @@ import java.io.IOException;
 
 import static org.apache.parquet.Preconditions.checkNotNull;
 
-/** An adapter to turn Flink's {@link PositionOutputStream} into a {@link PositionOutputStream}. */
+/** An adapter to turn Paimon's {@link PositionOutputStream} into a {@link PositionOutputStream}. */
 class PositionOutputStreamAdapter extends PositionOutputStream {
 
-    /** The Flink stream written to. */
+    /** The Paimon stream written to. */
     private final org.apache.paimon.fs.PositionOutputStream out;
 
     /**
      * Create a new PositionOutputStreamAdapter.
      *
-     * @param out The Flink stream written to.
+     * @param out The Paimon stream written to.
      */
     PositionOutputStreamAdapter(org.apache.paimon.fs.PositionOutputStream out) {
         this.out = checkNotNull(out, "out");

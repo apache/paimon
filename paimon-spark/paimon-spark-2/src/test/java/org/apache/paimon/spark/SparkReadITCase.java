@@ -62,7 +62,7 @@ public class SparkReadITCase {
         Path warehousePath = new Path("file:" + warehouse);
         spark = SparkSession.builder().master("local[2]").getOrCreate();
 
-        // Flink sink
+        // Paimon sink
         tablePath1 = new Path(warehousePath, "default.db/t1");
         SimpleTableTestHelper testHelper1 = createTestHelper(tablePath1);
         testHelper1.write(GenericRow.of(1, 2L, BinaryString.fromString("1")));

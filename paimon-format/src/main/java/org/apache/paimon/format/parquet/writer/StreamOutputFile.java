@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
- * An implementation of Parquet's {@link OutputFile} interface that goes against a Flink {@link
+ * An implementation of Parquet's {@link OutputFile} interface that goes against a Paimon {@link
  * PositionOutputStream}.
  *
  * <p>Because the implementation goes against an open stream, rather than open its own streams

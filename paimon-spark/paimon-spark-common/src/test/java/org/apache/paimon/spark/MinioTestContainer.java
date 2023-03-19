@@ -43,7 +43,7 @@ import java.util.Map;
 public class MinioTestContainer extends GenericContainer<MinioTestContainer>
         implements BeforeAllCallback, AfterAllCallback {
 
-    private static final String FLINK_CONFIG_S3_ENDPOINT = "s3.endpoint";
+    private static final String PAIMON_CONFIG_S3_ENDPOINT = "s3.endpoint";
 
     private static final int DEFAULT_PORT = 9000;
 
@@ -110,7 +110,7 @@ public class MinioTestContainer extends GenericContainer<MinioTestContainer>
 
     public Map<String, String> getS3ConfigOptions() {
         Map<String, String> config = new HashMap<>();
-        config.put(FLINK_CONFIG_S3_ENDPOINT, getHttpEndpoint());
+        config.put(PAIMON_CONFIG_S3_ENDPOINT, getHttpEndpoint());
         config.put("s3.path.style.access", "true");
         config.put("s3.access.key", accessKey);
         config.put("s3.secret.key", secretKey);

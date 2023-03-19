@@ -28,7 +28,7 @@ import org.apache.paimon.types.VarCharType;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
-/** Utils for converting types related classes between Flink and Hive. */
+/** Utils for converting types related classes between Paimon and Hive. */
 public class HiveTypeUtils {
 
     public static TypeInfo logicalTypeToTypeInfo(DataType logicalType) {

@@ -23,7 +23,7 @@ import org.apache.paimon.options.description.InlineElement;
 
 import static org.apache.paimon.options.description.TextElement.text;
 
-/** Defines the write mode for flink paimon. */
+/** Defines the write mode for paimon. */
 public enum WriteMode implements DescribedEnum {
     APPEND_ONLY(
             "append-only",

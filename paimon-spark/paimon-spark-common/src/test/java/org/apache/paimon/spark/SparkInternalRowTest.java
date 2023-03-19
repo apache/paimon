@@ -81,7 +81,7 @@ public class SparkInternalRowTest {
 
         Function1<Object, Object> sparkConverter =
                 CatalystTypeConverters.createToScalaConverter(
-                        SparkTypeUtils.fromFlinkType(ALL_TYPES));
+                        SparkTypeUtils.fromPaimonType(ALL_TYPES));
         org.apache.spark.sql.Row sparkRow =
                 (org.apache.spark.sql.Row)
                         sparkConverter.apply(new SparkInternalRow(ALL_TYPES).replace(rowData));

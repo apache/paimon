@@ -37,11 +37,7 @@ import static java.time.temporal.ChronoField.NANO_OF_SECOND;
 import static java.time.temporal.ChronoField.SECOND_OF_MINUTE;
 import static java.time.temporal.ChronoField.YEAR;
 
-/**
- * Utils for date time.
- *
- * <p>NOTE: Copied from Flink.
- */
+/** Utils for date time. */
 public class DateTimeUtils {
 
     /** The julian date of the epoch, 1970-01-01. */

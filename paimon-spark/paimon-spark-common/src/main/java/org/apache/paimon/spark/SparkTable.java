@@ -74,7 +74,7 @@ public class SparkTable
 
     @Override
     public StructType schema() {
-        return SparkTypeUtils.fromFlinkRowType(table.rowType());
+        return SparkTypeUtils.fromPaimonRowType(table.rowType());
     }
 
     @Override

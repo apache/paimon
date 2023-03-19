@@ -777,7 +777,7 @@ public class PaimonStorageHandlerITCase {
                         Collections.emptyList(),
                         Collections.emptyList());
 
-        // TODO add NaN related tests after FLINK-27627 and FLINK-27628 are fixed
+        // TODO add NaN related tests
 
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);

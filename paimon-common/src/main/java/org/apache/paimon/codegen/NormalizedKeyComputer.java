@@ -23,7 +23,7 @@ import org.apache.paimon.memory.MemorySegment;
 
 /**
  * Normalized key computer for {@code SortBuffer}. For performance, subclasses are usually
- * implemented through CodeGenerator. Copied from Flink.
+ * implemented through CodeGenerator.
  */
 public interface NormalizedKeyComputer {
 

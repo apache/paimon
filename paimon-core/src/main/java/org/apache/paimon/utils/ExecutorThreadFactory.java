@@ -26,9 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
- * A thread factory intended for use by critical thread pools. Critical thread pools here mean
- * thread pools that support Flink's core coordination and processing work, and which must not
- * simply cause unnoticed errors.
+ * A thread factory intended for use by critical thread pools.
  *
  * <p>The thread factory can be given an {@link Thread.UncaughtExceptionHandler} for the threads. If
  * no handler is explicitly given, the default handler for uncaught exceptions will log the
@@ -42,9 +40,6 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  */
 public class ExecutorThreadFactory implements ThreadFactory {
 
-    /** The thread pool name used when no explicit pool name has been specified. */
-    private static final String DEFAULT_POOL_NAME = "flink-executor-pool";
-
     private final AtomicInteger threadNumber = new AtomicInteger(1);
 
     private final ThreadGroup group;
@@ -56,14 +51,6 @@ public class ExecutorThreadFactory implements ThreadFactory {
     @Nullable private final Thread.UncaughtExceptionHandler exceptionHandler;
 
     // ------------------------------------------------------------------------
-
-    /**
-     * Creates a new thread factory using the default thread pool name ('flink-executor-pool') and
-     * the default uncaught exception handler (log exception and kill process).
-     */
-    public ExecutorThreadFactory() {
-        this(DEFAULT_POOL_NAME);
-    }
 
     /**
      * Creates a new thread factory using the given thread pool name and the default uncaught
