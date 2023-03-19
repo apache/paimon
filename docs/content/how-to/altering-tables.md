@@ -136,9 +136,9 @@ To add a new column with specified position, use FIRST or AFTER col_name.
 {{< tab "Spark3" >}}
 
 ```sql
-ALTER TABLE my_table ADD COLUMN c FIRST;
+ALTER TABLE my_table ADD COLUMN c INT FIRST;
 
-ALTER TABLE my_table ADD COLUMN c AFTER b;
+ALTER TABLE my_table ADD COLUMN c INT AFTER b;
 ```
 
 {{< /tab >}}
