@@ -18,14 +18,15 @@
 
 package org.apache.paimon.benchmark.metric.cpu;
 
+import org.apache.paimon.benchmark.metric.cpu.clock.Clock;
+import org.apache.paimon.benchmark.metric.cpu.clock.SystemClock;
+
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.filefilter.AndFileFilter;
 import org.apache.commons.io.filefilter.DirectoryFileFilter;
 import org.apache.commons.io.filefilter.RegexFileFilter;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.paimon.benchmark.metric.cpu.clock.Clock;
-import org.apache.paimon.benchmark.metric.cpu.clock.SystemClock;
 
 import java.io.BufferedReader;
 import java.io.File;
