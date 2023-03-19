@@ -18,15 +18,15 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.system.BucketsTable;
+
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.data.RowData;
-
-import org.apache.paimon.operation.Lock;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.system.BucketsTable;
 
 /** Builder for {@link CompactorSink}. */
 public class CompactorSinkBuilder {

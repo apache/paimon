@@ -18,8 +18,9 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.avro.file.DataFileWriter;
 import org.apache.paimon.fs.PositionOutputStream;
+
+import org.apache.avro.file.DataFileWriter;
 
 import java.io.IOException;
 

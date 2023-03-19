@@ -20,7 +20,6 @@ package org.apache.paimon.benchmark.utils;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.IllegalConfigurationException;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

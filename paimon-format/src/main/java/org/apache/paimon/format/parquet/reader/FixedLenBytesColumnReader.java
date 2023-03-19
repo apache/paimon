@@ -22,6 +22,7 @@ import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
 import org.apache.paimon.data.columnar.writable.WritableLongVector;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
+
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReader;
 import org.apache.parquet.io.api.Binary;

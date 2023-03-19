@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format.orc.reader;
 
-import org.apache.orc.TypeDescription;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataType;
@@ -27,6 +26,8 @@ import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+
+import org.apache.orc.TypeDescription;
 
 /** Util for orc types. */
 public class OrcSplitReaderUtil {

@@ -18,9 +18,10 @@
 
 package org.apache.paimon.format.orc.reader;
 
+import org.apache.paimon.data.Timestamp;
+
 import org.apache.hadoop.hive.ql.exec.vector.ColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.TimestampColumnVector;
-import org.apache.paimon.data.Timestamp;
 
 /**
  * This column vector is used to adapt hive's TimestampColumnVector to Flink's

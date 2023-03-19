@@ -20,7 +20,6 @@ package org.apache.paimon.flink.source;
 
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.SingletonResultIterator;
-
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;

@@ -18,18 +18,18 @@
 
 package org.apache.paimon.flink.kafka;
 
+import org.apache.paimon.CoreOptions.LogConsistency;
+import org.apache.paimon.CoreOptions.StartupMode;
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.flink.log.LogSourceProvider;
+
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.DataType;
-
 import org.apache.kafka.common.TopicPartition;
-import org.apache.paimon.CoreOptions.LogConsistency;
-import org.apache.paimon.CoreOptions.StartupMode;
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.flink.log.LogSourceProvider;
 
 import javax.annotation.Nullable;
 

@@ -7,7 +7,6 @@ public class TestWhileLoopRewrite {
         a[0] += b[1];
         b[1] += a[1];
 
-
         while (counter < 10) {
             myFun_0_0_rewriteGroup2(a, b, c);
 

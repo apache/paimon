@@ -22,6 +22,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.LongColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
+
 import org.apache.parquet.Preconditions;
 
 /**

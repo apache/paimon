@@ -18,9 +18,6 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.flink.table.catalog.ObjectIdentifier;
-import org.apache.flink.table.connector.ChangelogMode;
-
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.kafka.KafkaLogStoreFactory;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
@@ -35,6 +32,9 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+
+import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.connector.ChangelogMode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

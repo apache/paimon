@@ -18,6 +18,11 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
+
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.Catalog;
@@ -35,11 +40,6 @@ import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
-
-import org.apache.paimon.catalog.AbstractCatalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.Options;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

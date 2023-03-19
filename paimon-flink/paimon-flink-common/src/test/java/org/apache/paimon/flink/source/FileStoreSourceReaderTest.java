@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
-
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.Schema;
@@ -28,6 +26,8 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+
+import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

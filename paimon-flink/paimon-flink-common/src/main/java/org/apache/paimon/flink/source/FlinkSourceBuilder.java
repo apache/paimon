@@ -18,6 +18,15 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.StartupMode;
+import org.apache.paimon.flink.Projection;
+import org.apache.paimon.flink.log.LogSourceProvider;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.StreamDataTableScan;
+
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
@@ -29,15 +38,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
-
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.CoreOptions.StartupMode;
-import org.apache.paimon.flink.Projection;
-import org.apache.paimon.flink.log.LogSourceProvider;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.source.StreamDataTableScan;
 
 import javax.annotation.Nullable;
 

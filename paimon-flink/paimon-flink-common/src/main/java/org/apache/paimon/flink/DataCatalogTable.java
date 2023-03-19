@@ -18,12 +18,12 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.table.FileStoreTable;
+
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.CatalogTableImpl;
-
-import org.apache.paimon.table.FileStoreTable;
 
 import java.util.ArrayList;
 import java.util.HashMap;

@@ -18,14 +18,13 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.flink.types.Row;
-
-import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
-
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.SnapshotManager;
+
+import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
+import org.apache.flink.types.Row;
 import org.junit.Test;
 
 import java.util.ArrayList;

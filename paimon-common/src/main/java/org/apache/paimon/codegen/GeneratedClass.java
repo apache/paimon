@@ -19,6 +19,7 @@
 package org.apache.paimon.codegen;
 
 import org.apache.paimon.codegen.codesplit.JavaCodeSplitter;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

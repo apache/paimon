@@ -22,7 +22,6 @@ import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
-
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

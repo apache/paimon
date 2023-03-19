@@ -18,7 +18,6 @@
 
 package org.apache.paimon.benchmark;
 
-import org.apache.commons.math3.random.RandomDataGenerator;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -34,6 +33,8 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
+
+import org.apache.commons.math3.random.RandomDataGenerator;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;

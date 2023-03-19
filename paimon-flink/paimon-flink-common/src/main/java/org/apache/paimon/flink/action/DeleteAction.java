@@ -27,7 +27,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.conversion.DataStructureConverter;
 import org.apache.flink.table.data.conversion.DataStructureConverters;
 import org.apache.flink.types.RowKind;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

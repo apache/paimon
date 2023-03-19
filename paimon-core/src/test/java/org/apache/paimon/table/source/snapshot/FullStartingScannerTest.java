@@ -23,6 +23,7 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.SnapshotManager;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

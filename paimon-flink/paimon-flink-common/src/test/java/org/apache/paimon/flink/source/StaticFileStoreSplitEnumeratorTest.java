@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
-
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

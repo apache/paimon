@@ -18,8 +18,9 @@
 
 package org.apache.paimon.format.orc.reader;
 
-import org.apache.hadoop.hive.ql.exec.vector.DecimalColumnVector;
 import org.apache.paimon.data.Decimal;
+
+import org.apache.hadoop.hive.ql.exec.vector.DecimalColumnVector;
 
 import java.math.BigDecimal;
 

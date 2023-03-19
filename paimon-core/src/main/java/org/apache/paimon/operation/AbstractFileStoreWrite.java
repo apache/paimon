@@ -31,6 +31,7 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.Restorable;
 import org.apache.paimon.utils.SnapshotManager;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

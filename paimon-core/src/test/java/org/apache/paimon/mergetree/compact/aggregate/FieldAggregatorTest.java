@@ -29,6 +29,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
+
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;

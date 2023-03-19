@@ -19,7 +19,6 @@
 package org.apache.paimon.flink;
 
 import org.apache.flink.configuration.ConfigConstants;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.HdfsConfiguration;
 import org.slf4j.Logger;

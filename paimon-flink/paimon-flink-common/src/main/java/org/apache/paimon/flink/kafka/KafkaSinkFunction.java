@@ -18,15 +18,15 @@
 
 package org.apache.paimon.flink.kafka;
 
+import org.apache.paimon.flink.sink.LogSinkFunction;
+import org.apache.paimon.table.sink.SinkRecord;
+
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaException;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer;
 import org.apache.flink.streaming.connectors.kafka.KafkaSerializationSchema;
-
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.paimon.flink.sink.LogSinkFunction;
-import org.apache.paimon.table.sink.SinkRecord;
 
 import java.util.Properties;
 

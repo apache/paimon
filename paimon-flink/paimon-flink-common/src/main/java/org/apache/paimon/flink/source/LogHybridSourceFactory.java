@@ -18,13 +18,13 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.flink.log.LogSourceProvider;
+
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.connector.base.source.hybrid.HybridSource;
 import org.apache.flink.connector.base.source.hybrid.HybridSource.SourceFactory;
 import org.apache.flink.table.data.RowData;
-
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.flink.log.LogSourceProvider;
 
 import java.util.Map;
 

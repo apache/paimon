@@ -20,6 +20,7 @@ package org.apache.paimon.append;
 
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

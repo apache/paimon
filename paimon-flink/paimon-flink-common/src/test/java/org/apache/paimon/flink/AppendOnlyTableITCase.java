@@ -18,11 +18,11 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.Snapshot;
+
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
-
-import org.apache.paimon.Snapshot;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

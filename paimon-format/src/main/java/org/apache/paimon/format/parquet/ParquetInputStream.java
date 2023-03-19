@@ -19,6 +19,7 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.fs.SeekableInputStream;
+
 import org.apache.parquet.io.DelegatingSeekableInputStream;
 
 import java.io.IOException;

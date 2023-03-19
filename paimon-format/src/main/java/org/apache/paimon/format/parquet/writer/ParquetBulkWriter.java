@@ -20,6 +20,7 @@ package org.apache.paimon.format.parquet.writer;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
+
 import org.apache.parquet.hadoop.ParquetWriter;
 
 import java.io.IOException;

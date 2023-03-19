@@ -18,12 +18,12 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.flink.kafka.KafkaTableTestBase;
+import org.apache.paimon.utils.BlockingIterator;
+
 import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.types.Row;
-
-import org.apache.paimon.flink.kafka.KafkaTableTestBase;
-import org.apache.paimon.utils.BlockingIterator;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;

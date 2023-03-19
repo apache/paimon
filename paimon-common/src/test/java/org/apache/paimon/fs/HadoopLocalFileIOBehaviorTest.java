@@ -18,10 +18,11 @@
 
 package org.apache.paimon.fs;
 
+import org.apache.paimon.fs.hadoop.HadoopFileIO;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.RawLocalFileSystem;
 import org.apache.hadoop.util.VersionInfo;
-import org.apache.paimon.fs.hadoop.HadoopFileIO;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.net.URI;

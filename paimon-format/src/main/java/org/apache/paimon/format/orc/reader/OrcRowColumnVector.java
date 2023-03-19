@@ -18,11 +18,12 @@
 
 package org.apache.paimon.format.orc.reader;
 
-import org.apache.hadoop.hive.ql.exec.vector.StructColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.types.RowType;
+
+import org.apache.hadoop.hive.ql.exec.vector.StructColumnVector;
 
 /** This column vector is used to adapt hive's StructColumnVector to Flink's RowColumnVector. */
 public class OrcRowColumnVector extends AbstractOrcColumnVector

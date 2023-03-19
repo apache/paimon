@@ -18,17 +18,17 @@
 
 package org.apache.paimon.benchmark;
 
-import org.apache.flink.configuration.Configuration;
-
-import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.DefaultParser;
-import org.apache.commons.cli.Option;
-import org.apache.commons.cli.Options;
 import org.apache.paimon.benchmark.metric.FlinkRestClient;
 import org.apache.paimon.benchmark.metric.JobBenchmarkMetric;
 import org.apache.paimon.benchmark.metric.cpu.CpuMetricReceiver;
 import org.apache.paimon.benchmark.utils.BenchmarkGlobalConfiguration;
 import org.apache.paimon.benchmark.utils.BenchmarkUtils;
+
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.Option;
+import org.apache.commons.cli.Options;
+import org.apache.flink.configuration.Configuration;
 
 import java.io.File;
 import java.nio.file.Path;

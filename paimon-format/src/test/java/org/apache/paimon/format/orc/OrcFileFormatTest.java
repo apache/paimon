@@ -19,6 +19,7 @@
 package org.apache.paimon.format.orc;
 
 import org.apache.paimon.options.Options;
+
 import org.junit.jupiter.api.Test;
 
 import static org.apache.paimon.format.orc.OrcFileFormatFactory.IDENTIFIER;

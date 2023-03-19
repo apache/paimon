@@ -18,16 +18,16 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.flink.FlinkRowWrapper;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.OffsetRow;
+
 import org.apache.flink.runtime.io.network.api.writer.SubtaskStateMapper;
 import org.apache.flink.runtime.plugable.SerializationDelegate;
 import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
-
-import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.flink.FlinkRowWrapper;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.OffsetRow;
 
 /**
  * {@link StreamPartitioner} to partition {@link RowData} according to its hash value from an {@link

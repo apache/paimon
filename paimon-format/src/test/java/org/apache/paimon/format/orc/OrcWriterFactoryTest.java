@@ -18,15 +18,16 @@
 
 package org.apache.paimon.format.orc;
 
-import org.apache.hadoop.fs.Path;
-import org.apache.orc.MemoryManager;
-import org.apache.orc.OrcFile;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.orc.writer.RowDataVectorizer;
 import org.apache.paimon.format.orc.writer.Vectorizer;
 import org.apache.paimon.fs.local.LocalFileIO.LocalPositionOutputStream;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+
+import org.apache.hadoop.fs.Path;
+import org.apache.orc.MemoryManager;
+import org.apache.orc.OrcFile;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

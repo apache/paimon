@@ -25,6 +25,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.RowDataUtils;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

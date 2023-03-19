@@ -18,6 +18,11 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.flink.FlinkRowWrapper;
+import org.apache.paimon.flink.log.LogWriteCallback;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.SinkRecord;
+
 import org.apache.flink.api.common.functions.util.FunctionUtils;
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.configuration.Configuration;
@@ -33,11 +38,6 @@ import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
 import org.apache.flink.streaming.util.functions.StreamingFunctionUtils;
 import org.apache.flink.table.data.RowData;
-
-import org.apache.paimon.flink.FlinkRowWrapper;
-import org.apache.paimon.flink.log.LogWriteCallback;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.SinkRecord;
 
 import javax.annotation.Nullable;
 

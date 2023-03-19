@@ -18,8 +18,22 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.flink.table.hive.LegacyHiveClasses;
+import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.OptionsUtils;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.TableType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.StringUtils;
 
+import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
@@ -35,20 +49,6 @@ import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.metastore.api.UnknownDBException;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
-import org.apache.paimon.catalog.AbstractCatalog;
-import org.apache.paimon.catalog.CatalogLock;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.operation.Lock;
-import org.apache.paimon.options.OptionsUtils;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.TableType;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.utils.StringUtils;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
