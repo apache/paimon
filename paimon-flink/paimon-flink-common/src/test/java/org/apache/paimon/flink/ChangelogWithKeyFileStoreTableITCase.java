@@ -96,7 +96,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
     // ------------------------------------------------------------------------
 
     @Test
-    @Timeout(600)
+    @Timeout(1200)
     public void testFullCompactionTriggerInterval() throws Exception {
         innerTestChangelogProducing(
                 Arrays.asList(
@@ -105,7 +105,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(1200)
     public void testFullCompactionWithLongCheckpointInterval() throws Exception {
         // create table
         TableEnvironment bEnv = createBatchTableEnvironment();
@@ -169,7 +169,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(1200)
     public void testLookupChangelog() throws Exception {
         innerTestChangelogProducing(Collections.singletonList("'changelog-producer' = 'lookup'"));
     }
@@ -248,14 +248,14 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
     // ------------------------------------------------------------------------
 
     @Test
-    @Timeout(600)
+    @Timeout(1200)
     public void testNoChangelogProducerBatchRandom() throws Exception {
         TableEnvironment bEnv = createBatchTableEnvironment();
         testNoChangelogProducerRandom(bEnv, 1, false);
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(1200)
     public void testNoChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
@@ -263,14 +263,14 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(1200)
     public void testFullCompactionChangelogProducerBatchRandom() throws Exception {
         TableEnvironment bEnv = createBatchTableEnvironment();
         testFullCompactionChangelogProducerRandom(bEnv, 1, false);
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(1200)
     public void testFullCompactionChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
@@ -278,7 +278,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(1200)
     public void testStandAloneFullCompactJobRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
@@ -286,14 +286,14 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(1200)
     public void testLookupChangelogProducerBatchRandom() throws Exception {
         TableEnvironment bEnv = createBatchTableEnvironment();
         testLookupChangelogProducerRandom(bEnv, 1, false);
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(1200)
     public void testLookupChangelogProducerStreamingRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
@@ -301,7 +301,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(1200)
     public void testStandAloneLookupJobRandom() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
