@@ -21,6 +21,7 @@ package org.apache.paimon.format.orc;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -42,7 +43,6 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Projection;
 
-import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.orc.TypeDescription;
 
 import javax.annotation.Nullable;
@@ -64,12 +64,15 @@ public class OrcFileFormat extends FileFormat {
     private final org.apache.hadoop.conf.Configuration readerConf;
     private final org.apache.hadoop.conf.Configuration writerConf;
 
-    public OrcFileFormat(Options formatOptions) {
+    private final FormatContext formatContext;
+
+    public OrcFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
-        this.orcProperties = getOrcProperties(formatOptions);
+        this.orcProperties = getOrcProperties(formatContext.formatOptions());
         this.readerConf = new org.apache.hadoop.conf.Configuration();
         this.orcProperties.forEach((k, v) -> readerConf.set(k.toString(), v.toString()));
         this.writerConf = new org.apache.hadoop.conf.Configuration();
+        this.formatContext = formatContext;
     }
 
     @VisibleForTesting
@@ -100,8 +103,7 @@ public class OrcFileFormat extends FileFormat {
                 (RowType) refineDataType(type),
                 Projection.of(projection).toTopLevelIndexes(),
                 orcPredicates,
-                // same as the default value to avoid the orc bug
-                VectorizedRowBatch.DEFAULT_SIZE);
+                formatContext.readBatchSize());
     }
 
     /**

@@ -25,5 +25,24 @@ public interface FileFormatFactory {
 
     String identifier();
 
-    FileFormat create(Options formatOptions);
+    FileFormat create(FormatContext formatContext);
+
+    /** the format context. */
+    class FormatContext {
+        private final Options formatOptions;
+        private final int readBatchSize;
+
+        public FormatContext(Options formatOptions, int readBatchSize) {
+            this.formatOptions = formatOptions;
+            this.readBatchSize = readBatchSize;
+        }
+
+        public Options formatOptions() {
+            return formatOptions;
+        }
+
+        public int readBatchSize() {
+            return readBatchSize;
+        }
+    }
 }

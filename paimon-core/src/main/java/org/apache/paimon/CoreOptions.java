@@ -21,6 +21,7 @@ package org.apache.paimon;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.MemorySize;
@@ -523,6 +524,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("256 mb"))
                     .withDescription("Max memory size for lookup cache.");
 
+    public static final ConfigOption<Integer> READ_BATCH_SIZE =
+            key("read.batch-size")
+                    .intType()
+                    .defaultValue(1024)
+                    .withDescription("Read batch size for orc and parquet.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -558,11 +565,11 @@ public class CoreOptions implements Serializable {
     }
 
     public FileFormat fileFormat() {
-        return FileFormat.fromTableOptions(options, FILE_FORMAT);
+        return createFileFormat(options, FILE_FORMAT);
     }
 
     public FileFormat manifestFormat() {
-        return FileFormat.fromTableOptions(options, MANIFEST_FORMAT);
+        return createFileFormat(options, MANIFEST_FORMAT);
     }
 
     public MemorySize manifestTargetSize() {
@@ -571,6 +578,15 @@ public class CoreOptions implements Serializable {
 
     public String partitionDefaultName() {
         return options.get(PARTITION_DEFAULT_NAME);
+    }
+
+    public static FileFormat createFileFormat(Options options, ConfigOption<String> formatOption) {
+        String formatIdentifier = options.get(formatOption);
+        int readBatchSize = options.get(READ_BATCH_SIZE);
+        return FileFormat.fromIdentifier(
+                formatIdentifier,
+                new FileFormatFactory.FormatContext(
+                        options.removePrefix(formatIdentifier + "."), readBatchSize));
     }
 
     public Map<Integer, String> fileCompressionPerLevel() {
@@ -750,6 +766,10 @@ public class CoreOptions implements Serializable {
 
     public String partitionTimestampPattern() {
         return options.get(PARTITION_TIMESTAMP_PATTERN);
+    }
+
+    public int readBatchSize() {
+        return options.get(READ_BATCH_SIZE);
     }
 
     /** Specifies the merge engine for table with primary key. */

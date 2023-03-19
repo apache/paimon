@@ -36,7 +36,10 @@ public interface FileFormatDiscover {
             }
 
             private FileFormat create(String identifier) {
-                return FileFormat.fromIdentifier(identifier, options.toConfiguration());
+                return FileFormat.fromIdentifier(
+                        identifier,
+                        new FileFormatFactory.FormatContext(
+                                options.toConfiguration(), options.readBatchSize()));
             }
         };
     }
