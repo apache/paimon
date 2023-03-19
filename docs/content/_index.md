@@ -24,13 +24,15 @@ under the License.
 
 # Apache Paimon
 
-Paimon is a unified storage to build dynamic tables for both streaming and
-batch processing in Flink, supporting high-speed data ingestion and timely data query.
+Apache Paimon(incubating) is a streaming data lake platform that supports high-speed data ingestion, change data tracking and efficient real-time analytics.
+
 Paimon offers the following core capabilities:
-- Support storage of large datasets and allow read/write in both batch and streaming mode.
-- Support streaming queries with minimum latency down to milliseconds.
-- Support Batch/OLAP queries with minimum latency down to the second level.
-- Support incremental snapshots for stream consumption by default. So users do not need to combine different pipelines by themself.
+
+- Unified Batch & Streaming: Paimon supports batch write and batch read, as well as streaming write changes and streaming read table changelogs.
+- Data Lake: As a data lake storage, Paimon has the following advantages: low cost, high reliability, and scalable metadata.
+- Merge Engines: Paimon supports rich Merge Engines. By default, the last entry of the primary key is reserved. You can also use the "partial-update" or "aggregation" engine.
+- Changelog producer: Paimon supports rich Changelog producers, such as "lookup" and "full-compaction". The correct changelog can simplify the construction of a streaming pipeline.
+- Append Only Tables: Paimon supports Append Only tables, automatically compact small files, and provides orderly stream reading. You can use this to replace message queues.
 
 {{< columns >}}
 ## Try Paimon
@@ -43,12 +45,7 @@ step introduction to the APIs and guides you through real applications.
 
 ## Get Help with Paimon
 
-If you get stuck, check out our [community support
-resources](https://flink.apache.org/community.html). In particular, Apache
-Flink’s user mailing list is consistently ranked as one of the most active of
-any Apache project, and is a great way to get help quickly.
+If you get stuck, you can subscribe User Mailing List (user-subscribe@paimon.apache.org),
+Paimon tracks issues in GitHub and prefers to receive contributions as pull requests. You can also create an issue.
 
 {{< /columns >}}
-
-Paimon is developed under the umbrella of
-[Apache Flink](https://flink.apache.org/).
