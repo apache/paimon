@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.cdc.Record;
+import org.apache.paimon.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
 import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
@@ -93,11 +93,12 @@ public class SchemaAwareStoreWriteOperatorTest {
     @Timeout(30)
     public void testProcessRecord() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        OneInputStreamOperatorTestHarness<Record, Committable> harness = createTestHarness(table);
+        OneInputStreamOperatorTestHarness<CdcRecord, Committable> harness =
+                createTestHarness(table);
         harness.open();
 
-        BlockingQueue<Record> toProcess = new LinkedBlockingQueue<>();
-        BlockingQueue<Record> processed = new LinkedBlockingQueue<>();
+        BlockingQueue<CdcRecord> toProcess = new LinkedBlockingQueue<>();
+        BlockingQueue<CdcRecord> processed = new LinkedBlockingQueue<>();
         AtomicBoolean running = new AtomicBoolean(true);
         Runnable r =
                 () -> {
@@ -109,7 +110,7 @@ public class SchemaAwareStoreWriteOperatorTest {
                                 continue;
                             }
 
-                            Record record = toProcess.poll();
+                            CdcRecord record = toProcess.poll();
                             harness.processElement(record, ++timestamp);
                             processed.offer(record);
                         }
@@ -127,15 +128,15 @@ public class SchemaAwareStoreWriteOperatorTest {
         fields.put("pt", "0");
         fields.put("k", "1");
         fields.put("v", "10");
-        Record expected = new Record(RowKind.INSERT, fields);
+        CdcRecord expected = new CdcRecord(RowKind.INSERT, fields);
         toProcess.offer(expected);
-        Record actual = processed.take();
+        CdcRecord actual = processed.take();
         assertThat(actual).isEqualTo(expected);
 
         fields = new HashMap<>();
         fields.put("pt", "0");
         fields.put("k", "2");
-        expected = new Record(RowKind.INSERT, fields);
+        expected = new CdcRecord(RowKind.INSERT, fields);
         toProcess.offer(expected);
         actual = processed.take();
         assertThat(actual).isEqualTo(expected);
@@ -147,7 +148,7 @@ public class SchemaAwareStoreWriteOperatorTest {
         fields.put("k", "3");
         fields.put("v", "30");
         fields.put("v2", "300");
-        expected = new Record(RowKind.INSERT, fields);
+        expected = new CdcRecord(RowKind.INSERT, fields);
         toProcess.offer(expected);
         actual = processed.poll(1, TimeUnit.SECONDS);
         assertThat(actual).isNull();
@@ -162,7 +163,7 @@ public class SchemaAwareStoreWriteOperatorTest {
         harness.close();
     }
 
-    private OneInputStreamOperatorTestHarness<Record, Committable> createTestHarness(
+    private OneInputStreamOperatorTestHarness<CdcRecord, Committable> createTestHarness(
             FileStoreTable table) throws Exception {
         SchemaAwareStoreWriteOperator operator =
                 new SchemaAwareStoreWriteOperator(
@@ -170,10 +171,10 @@ public class SchemaAwareStoreWriteOperatorTest {
                         null,
                         (t, context, ioManager) ->
                                 new StoreSinkWriteImpl(t, context, commitUser, ioManager, false));
-        TypeSerializer<Record> inputSerializer = new JavaSerializer<>();
+        TypeSerializer<CdcRecord> inputSerializer = new JavaSerializer<>();
         TypeSerializer<Committable> outputSerializer =
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());
-        OneInputStreamOperatorTestHarness<Record, Committable> harness =
+        OneInputStreamOperatorTestHarness<CdcRecord, Committable> harness =
                 new OneInputStreamOperatorTestHarness<>(operator, inputSerializer);
         harness.setup(outputSerializer);
         return harness;
@@ -181,7 +182,7 @@ public class SchemaAwareStoreWriteOperatorTest {
 
     private FileStoreTable createFileStoreTable() throws Exception {
         Options conf = new Options();
-        conf.set(SchemaAwareStoreWriteOperator.SCHEMA_UPDATE_WAIT_TIME, Duration.ofMillis(10));
+        conf.set(SchemaAwareStoreWriteOperator.RETRY_SLEEP_TIME, Duration.ofMillis(10));
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(

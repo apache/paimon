@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.cdc.Record;
+import org.apache.paimon.cdc.CdcRecord;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.sink.AbstractStoreWriteOperator;
 import org.apache.paimon.flink.sink.LogSinkFunction;
@@ -40,29 +40,28 @@ import java.util.Map;
 /**
  * An {@link AbstractStoreWriteOperator} which is aware of schema changes.
  *
- * <p>When the input {@link Record} contains a field name not in the current {@link TableSchema}, it
- * periodically queries the latest schema, until the latest schema contains that field name.
+ * <p>When the input {@link CdcRecord} contains a field name not in the current {@link TableSchema},
+ * it periodically queries the latest schema, until the latest schema contains that field name.
  */
-public class SchemaAwareStoreWriteOperator extends AbstractStoreWriteOperator<Record> {
+public class SchemaAwareStoreWriteOperator extends AbstractStoreWriteOperator<CdcRecord> {
 
-    static final ConfigOption<Duration> SCHEMA_UPDATE_WAIT_TIME =
-            ConfigOptions.key("cdc.schema-update-wait-time")
+    static final ConfigOption<Duration> RETRY_SLEEP_TIME =
+            ConfigOptions.key("cdc.retry-sleep-time")
                     .durationType()
                     .defaultValue(Duration.ofMillis(500));
 
-    private final long schemaUpdateWaitMillis;
+    private final long retrySleepMillis;
 
     public SchemaAwareStoreWriteOperator(
             FileStoreTable table,
             @Nullable LogSinkFunction logSinkFunction,
             StoreSinkWrite.Provider storeSinkWriteProvider) {
         super(table, logSinkFunction, storeSinkWriteProvider);
-        schemaUpdateWaitMillis =
-                table.options().toConfiguration().get(SCHEMA_UPDATE_WAIT_TIME).toMillis();
+        retrySleepMillis = table.options().toConfiguration().get(RETRY_SLEEP_TIME).toMillis();
     }
 
     @Override
-    protected SinkRecord processRecord(Record record) throws Exception {
+    protected SinkRecord processRecord(CdcRecord record) throws Exception {
         Map<String, String> fields = record.fields();
 
         if (!schemaMatched(fields)) {
@@ -71,7 +70,7 @@ public class SchemaAwareStoreWriteOperator extends AbstractStoreWriteOperator<Re
                 if (schemaMatched(fields)) {
                     break;
                 }
-                Thread.sleep(schemaUpdateWaitMillis);
+                Thread.sleep(retrySleepMillis);
             }
             write.replace(commitUser -> table.newWrite(commitUser));
         }
@@ -84,6 +83,8 @@ public class SchemaAwareStoreWriteOperator extends AbstractStoreWriteOperator<Re
             String value = field.getValue();
             int idx = schema.fieldNames().indexOf(key);
             DataType type = schema.fields().get(idx).type();
+            // TODO TypeUtils.castFromString cannot deal with complex types like arrays and maps.
+            //  Change type of CdcRecord#field if needed.
             row.setField(idx, TypeUtils.castFromString(value, type));
         }
 

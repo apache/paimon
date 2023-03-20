@@ -25,14 +25,14 @@ import java.util.Map;
 import java.util.Objects;
 
 /** A data change message from the CDC source. */
-public class Record implements Serializable {
+public class CdcRecord implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     private final RowKind kind;
     private final Map<String, String> fields;
 
-    public Record(RowKind kind, Map<String, String> fields) {
+    public CdcRecord(RowKind kind, Map<String, String> fields) {
         this.kind = kind;
         this.fields = fields;
     }
@@ -41,17 +41,18 @@ public class Record implements Serializable {
         return kind;
     }
 
+    /** Map key is the field's name, and map value is the field's value. */
     public Map<String, String> fields() {
         return fields;
     }
 
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof Record)) {
+        if (!(o instanceof CdcRecord)) {
             return false;
         }
 
-        Record that = (Record) o;
+        CdcRecord that = (CdcRecord) o;
         return Objects.equals(kind, that.kind) && Objects.equals(fields, that.fields);
     }
 }
