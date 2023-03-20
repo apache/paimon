@@ -30,7 +30,7 @@ This is the cluster benchmark module for Paimon. Inspired by [Nexmark](https://g
 * Run `paimon-benchmark/bin/setup_cluster.sh` in master node. This activates the CPU metrics collector in worker nodes. Note that if you restart your Flink cluster, you must also restart the CPU metrics collectors. To stop CPU metrics collectors, run `paimon-benchmark/bin/shutdown_cluster.sh` in master node.
 
 ### Run Benchmark
-* Run `paimon-benchmark/bin/run_benchmark.sh <query> <sink>` to run `<query>` for `<sink>`. Currently `<query>` can be `q1` or `all`, and sink can only be `table_store`.
+* Run `paimon-benchmark/bin/run_benchmark.sh <query> <sink>` to run `<query>` for `<sink>`. Currently `<query>` can be `q1` or `all`, and sink can only be `paimon`.
 * By default, each query writes for 30 minutes and then reads all records back from the sink to measure read throughput.
 
 ## Queries

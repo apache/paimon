@@ -82,12 +82,12 @@ Alternatively, you can copy `paimon-spark-3.3-{{< version >}}.jar` under `spark/
 
 **Step 2: Specify Paimon Catalog**
 
-When starting `spark-sql`, use the following command to register Paimon’s Spark catalog with the name `paimon`. Table files of the warehouse is stored under `/tmp/table_store`.
+When starting `spark-sql`, use the following command to register Paimon’s Spark catalog with the name `paimon`. Table files of the warehouse is stored under `/tmp/paimon`.
 
 ```bash
 spark-sql ... \
     --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.paimon.warehouse=file:/tmp/table_store
+    --conf spark.sql.catalog.paimon.warehouse=file:/tmp/paimon
 ```
 
 After `spark-sql` command line has started, run the following SQL to create and switch to database `paimon.default`.
@@ -142,7 +142,7 @@ spark-shell ... --jars /path/to/paimon-spark-3.3-{{< version >}}.jar
 ```
 
 ```scala
-val dataset = spark.read.format("paimon").load("file:/tmp/table_store/default.db/my_table")
+val dataset = spark.read.format("paimon").load("file:/tmp/paimon/default.db/my_table")
 dataset.createOrReplaceTempView("my_table")
 spark.sql("SELECT * FROM my_table").show()
 ```

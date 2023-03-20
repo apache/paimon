@@ -91,7 +91,7 @@ public class ReadWriteTableTestUtil {
         bEnv = StreamTableEnvironment.create(bExeEnv, EnvironmentSettings.inBatchMode());
 
         ReadWriteTableTestUtil.warehouse = warehouse;
-        String catalog = "TABLE_STORE";
+        String catalog = "PAIMON";
         sEnv.executeSql(
                 String.format(
                         "CREATE CATALOG %s WITH ('type'='paimon', 'warehouse'='%s');",

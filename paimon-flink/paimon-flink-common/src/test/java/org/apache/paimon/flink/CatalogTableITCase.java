@@ -99,7 +99,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         assertThat(sql("SHOW CREATE TABLE T$schemas").toString())
                 .isEqualTo(
-                        "[+I[CREATE TABLE `TABLE_STORE`.`default`.`T$schemas` (\n"
+                        "[+I[CREATE TABLE `PAIMON`.`default`.`T$schemas` (\n"
                                 + "  `schema_id` BIGINT NOT NULL,\n"
                                 + "  `fields` VARCHAR(2147483647) NOT NULL,\n"
                                 + "  `partition_keys` VARCHAR(2147483647) NOT NULL,\n"

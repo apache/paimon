@@ -115,7 +115,7 @@ You can now start Flink SQL client to execute SQL scripts.
 -- warehouse path should be set to a shared file system, such as HDFS or OSS
 CREATE CATALOG my_catalog WITH (
     'type'='paimon',
-    'warehouse'='file:/tmp/table_store'
+    'warehouse'='file:/tmp/paimon'
 );
 
 USE CATALOG my_catalog;
