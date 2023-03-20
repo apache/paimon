@@ -50,7 +50,7 @@ the LSM tree structure to support a large volume of data updates and high-perfor
 
 ## Unified Storage
 
-There are three types of connectors in Flink SQL.
+For streaming engines like Apache Flink, there are typically three types of connectors:
 - Message queue, such as Apache Kafka, it is used in both source and 
   intermediate stages in this pipeline, to guarantee the latency stay
   within seconds.
@@ -61,9 +61,9 @@ There are three types of connectors in Flink SQL.
 
 Paimon provides table abstraction. It is used in a way that
 does not differ from the traditional database:
-- In Flink `batch` execution mode, it acts like a Hive table and
+- In `batch` execution mode, it acts like a Hive table and
   supports various operations of Batch SQL. Query it to see the
   latest snapshot.
-- In Flink `streaming` execution mode, it acts like a message queue.
+- In `streaming` execution mode, it acts like a message queue.
   Query it acts like querying a stream changelog from a message queue
   where historical data never expires.
