@@ -63,7 +63,7 @@ public class CacheManager {
         value =
                 cache.get(
                         key,
-                        key1 -> {
+                        cacheKey -> {
                             try {
                                 return createValue(key, cleanCallback);
                             } catch (IOException e) {
