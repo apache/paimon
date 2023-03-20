@@ -1,5 +1,6 @@
 name: Feature
 description: Add new feature, improve code, and more
+title: "[Feature] "
 labels: [ "enhancement" ]
 body:
   - type: markdown
