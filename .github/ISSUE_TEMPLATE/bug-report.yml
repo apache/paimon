@@ -1,0 +1,56 @@
+name: Bug report
+description: Problems with the software
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you very much for your feedback!
+  - type: checkboxes
+    attributes:
+      label: Search before asking
+      description: >
+        Please search [issues](https://github.com/apache/incubator-paimon/issues) to check if your issue has already been reported.
+      options:
+        - label: >
+            I searched in the [issues](https://github.com/apache/incubator-paimon/issues) and found nothing similar.
+          required: true
+  - type: textarea
+    attributes:
+      label: Paimon version
+      description: >
+        Please provide the version of Paimon you are using. If you are using the master branch, please provide the commit id.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Compute Engine
+      description: >
+        Please provide the compute engine you use and its version. Flink or Spark or Hive or Trino or Presto or JavaAPI.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Minimal reproduce step
+      description: Please try to give reproducing steps to facilitate quick location of the problem.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: What doesn't meet your expectations?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Anything else?
+  - type: checkboxes
+    attributes:
+      label: Are you willing to submit a PR?
+      description: >
+        We look forward to the community of developers or users helping solve Paimon problems together. If you are willing to submit a PR to fix this problem, please check the box.
+      options:
+        - label: I'm willing to submit a PR!
+  - type: markdown
+    attributes:
+      value: "Thanks for completing our form!"
