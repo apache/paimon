@@ -26,8 +26,7 @@ under the License.
 
 # Overview
 
-Paimon is a unified storage to build dynamic tables for both streaming and
-batch processing in Flink, supporting high-speed data ingestion and timely data query.
+Apache Paimon(incubating) is a streaming data lake platform that supports high-speed data ingestion, change data tracking and efficient real-time analytics.
 
 ## Architecture
 
@@ -46,10 +45,8 @@ As shown in the architecture above:
 **Ecosystem:** In addition to Apache Flink, Paimon also supports read by other computation
 engines like Apache Hive, Apache Spark and Trino.
 
-**Internal:** Under the hood, Paimon uses a hybrid storage architecture with a lake format to store
-historical data and a queue system to store incremental data. The former stores the columnar files on
-the filesystem/object-store and uses the LSM tree structure to support a large volume of data updates
-and high-performance queries. The latter uses Apache Kafka to capture data in real-time.
+**Internal:** Under the hood, Paimon stores the columnar files on the filesystem/object-store and uses
+the LSM tree structure to support a large volume of data updates and high-performance queries.
 
 ## Unified Storage
 
