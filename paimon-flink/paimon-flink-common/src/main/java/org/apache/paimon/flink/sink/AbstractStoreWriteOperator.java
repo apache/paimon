@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.log.LogWriteCallback;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
@@ -37,7 +36,6 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
 import org.apache.flink.streaming.util.functions.StreamingFunctionUtils;
-import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
 
@@ -45,17 +43,17 @@ import java.io.IOException;
 import java.util.List;
 
 /** A {@link PrepareCommitOperator} to write records. */
-public class StoreWriteOperator extends PrepareCommitOperator {
+public abstract class AbstractStoreWriteOperator<T> extends PrepareCommitOperator<T> {
 
     private static final long serialVersionUID = 2L;
 
-    protected final FileStoreTable table;
+    protected FileStoreTable table;
 
     @Nullable private final LogSinkFunction logSinkFunction;
 
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
 
-    private transient StoreSinkWrite write;
+    protected transient StoreSinkWrite write;
 
     private transient SimpleContext sinkContext;
 
@@ -64,7 +62,7 @@ public class StoreWriteOperator extends PrepareCommitOperator {
 
     @Nullable private transient LogWriteCallback logCallback;
 
-    public StoreWriteOperator(
+    public AbstractStoreWriteOperator(
             FileStoreTable table,
             @Nullable LogSinkFunction logSinkFunction,
             StoreSinkWrite.Provider storeSinkWriteProvider) {
@@ -119,15 +117,10 @@ public class StoreWriteOperator extends PrepareCommitOperator {
     }
 
     @Override
-    public void processElement(StreamRecord<RowData> element) throws Exception {
+    public void processElement(StreamRecord<T> element) throws Exception {
         sinkContext.timestamp = element.hasTimestamp() ? element.getTimestamp() : null;
 
-        SinkRecord record;
-        try {
-            record = write.write(new FlinkRowWrapper(element.getValue()));
-        } catch (Exception e) {
-            throw new IOException(e);
-        }
+        SinkRecord record = processRecord(element.getValue());
 
         if (logSinkFunction != null) {
             // write to log store, need to preserve original pk (which includes partition fields)
@@ -135,6 +128,8 @@ public class StoreWriteOperator extends PrepareCommitOperator {
             logSinkFunction.invoke(logRecord, sinkContext);
         }
     }
+
+    protected abstract SinkRecord processRecord(T record) throws Exception;
 
     @Override
     public void snapshotState(StateSnapshotContext context) throws Exception {

@@ -42,7 +42,7 @@ import java.util.List;
  * org.apache.paimon.flink.source.CompactorSourceBuilder}. The records will contain partition keys
  * in the first few columns, and bucket number in the last column.
  */
-public class StoreCompactOperator extends PrepareCommitOperator {
+public class StoreCompactOperator extends PrepareCommitOperator<RowData> {
 
     private final FileStoreTable table;
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
