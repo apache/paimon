@@ -78,6 +78,7 @@ public class SchemaAwareStoreWriteOperator extends AbstractStoreWriteOperator<Re
 
         TableSchema schema = table.schema();
         GenericRow row = new GenericRow(schema.fields().size());
+        row.setRowKind(record.kind());
         for (Map.Entry<String, String> field : fields.entrySet()) {
             String key = field.getKey();
             String value = field.getValue();
