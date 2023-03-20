@@ -127,6 +127,24 @@ ALTER TABLE my_table ADD COLUMNS (
 
 {{< /tabs >}}
 
+## Adding Column Position
+
+To add a new column with specified position, use FIRST or AFTER col_name.
+
+{{< tabs "add-column-position" >}}
+
+{{< tab "Spark3" >}}
+
+```sql
+ALTER TABLE my_table ADD COLUMN c INT FIRST;
+
+ALTER TABLE my_table ADD COLUMN c INT AFTER b;
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 ## Renaming Column Name
 The following SQL renames column `c0` in table `my_table` to `c1`.
 

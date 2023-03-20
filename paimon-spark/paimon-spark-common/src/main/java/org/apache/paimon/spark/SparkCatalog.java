@@ -265,10 +265,12 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         } else if (change instanceof AddColumn) {
             AddColumn add = (AddColumn) change;
             validateAlterNestedField(add.fieldNames());
+            SchemaChange.Move move = getMove(add.position(), add.fieldNames());
             return SchemaChange.addColumn(
                     add.fieldNames()[0],
                     toFlinkType(add.dataType()).copy(add.isNullable()),
-                    add.comment());
+                    add.comment(),
+                    move);
         } else if (change instanceof RenameColumn) {
             RenameColumn rename = (RenameColumn) change;
             validateAlterNestedField(rename.fieldNames());
@@ -290,21 +292,25 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
             return SchemaChange.updateColumnComment(update.fieldNames(), update.newComment());
         } else if (change instanceof UpdateColumnPosition) {
             UpdateColumnPosition update = (UpdateColumnPosition) change;
-            TableChange.ColumnPosition columnPosition = update.position();
-            SchemaChange.Move move = null;
-            if (columnPosition instanceof TableChange.First) {
-                move = SchemaChange.Move.first(update.fieldNames()[0]);
-            } else if (columnPosition instanceof TableChange.After) {
-                move =
-                        SchemaChange.Move.after(
-                                update.fieldNames()[0],
-                                ((TableChange.After) columnPosition).column());
-            }
+            SchemaChange.Move move = getMove(update.position(), update.fieldNames());
             return SchemaChange.updateColumnPosition(move);
         } else {
             throw new UnsupportedOperationException(
                     "Change is not supported: " + change.getClass());
         }
+    }
+
+    private static SchemaChange.Move getMove(
+            TableChange.ColumnPosition columnPosition, String[] fieldNames) {
+        SchemaChange.Move move = null;
+        if (columnPosition instanceof TableChange.First) {
+            move = SchemaChange.Move.first(fieldNames[0]);
+        } else if (columnPosition instanceof TableChange.After) {
+            move =
+                    SchemaChange.Move.after(
+                            fieldNames[0], ((TableChange.After) columnPosition).column());
+        }
+        return move;
     }
 
     private Schema toUpdateSchema(

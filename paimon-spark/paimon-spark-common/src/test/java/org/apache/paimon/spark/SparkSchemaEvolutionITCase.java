@@ -106,6 +106,32 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testAddColumnPosition() {
+        createTable("testAddColumnPositionFirst");
+        spark.sql("ALTER TABLE testAddColumnPositionFirst ADD COLUMN d INT FIRST");
+        List<Row> result =
+                spark.sql("SHOW CREATE TABLE testAddColumnPositionFirst").collectAsList();
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE testAddColumnPositionFirst (\n"
+                                + "  `d` INT,\n"
+                                + "  `a` INT NOT NULL,\n"
+                                + "  `b` BIGINT,\n"
+                                + "  `c` STRING)");
+
+        createTable("testAddColumnPositionAfter");
+        spark.sql("ALTER TABLE testAddColumnPositionAfter ADD COLUMN d INT AFTER b");
+        result = spark.sql("SHOW CREATE TABLE testAddColumnPositionAfter").collectAsList();
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE testAddColumnPositionAfter (\n"
+                                + "  `a` INT NOT NULL,\n"
+                                + "  `b` BIGINT,\n"
+                                + "  `d` INT,\n"
+                                + "  `c` STRING)");
+    }
+
+    @Test
     public void testRenameTable() {
         // TODO: add test case for hive catalog table
         assertThatThrownBy(() -> spark.sql("ALTER TABLE t3 RENAME TO t4"))
