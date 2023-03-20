@@ -18,6 +18,9 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.flink.source.RecordsFunction.IterateRecordsFunction;
+import org.apache.paimon.flink.source.RecordsFunction.SingleRecordsFunction;
+
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.ArrayResultIterator;
@@ -26,9 +29,6 @@ import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderOutput;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
-
-import org.apache.paimon.flink.source.RecordsFunction.IterateRecordsFunction;
-import org.apache.paimon.flink.source.RecordsFunction.SingleRecordsFunction;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.Column;
@@ -26,8 +27,6 @@ import org.apache.flink.table.catalog.ResolvedCatalogBaseTable;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.UniqueConstraint;
 import org.apache.flink.table.utils.EncodingUtils;
-
-import org.apache.commons.lang3.StringUtils;
 
 import java.util.Objects;
 import java.util.Optional;

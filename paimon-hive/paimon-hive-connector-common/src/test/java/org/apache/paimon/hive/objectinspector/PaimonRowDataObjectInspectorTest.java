@@ -18,9 +18,10 @@
 
 package org.apache.paimon.hive.objectinspector;
 
+import org.apache.paimon.data.GenericRow;
+
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
-import org.apache.paimon.data.GenericRow;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

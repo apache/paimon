@@ -17,10 +17,10 @@
 
 package org.apache.paimon.plugin;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
-
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.utils.FunctionWithException;
+
+import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 
 import java.io.IOException;
 import java.net.URL;

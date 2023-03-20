@@ -23,7 +23,6 @@ import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
-
 import org.junit.jupiter.params.provider.Arguments;
 
 import java.nio.file.Paths;

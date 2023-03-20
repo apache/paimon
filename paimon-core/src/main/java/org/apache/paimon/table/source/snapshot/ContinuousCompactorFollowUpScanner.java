@@ -21,6 +21,7 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.table.source.DataTableScan;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

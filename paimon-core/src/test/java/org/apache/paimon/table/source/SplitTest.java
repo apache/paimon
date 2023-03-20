@@ -22,6 +22,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileTestDataGenerator;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;

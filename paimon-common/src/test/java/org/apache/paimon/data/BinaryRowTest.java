@@ -32,6 +32,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.InstantiationUtil;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.EOFException;

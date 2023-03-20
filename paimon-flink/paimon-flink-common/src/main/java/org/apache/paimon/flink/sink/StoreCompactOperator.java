@@ -18,10 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.apache.flink.table.data.RowData;
-
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -31,6 +27,10 @@ import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.OffsetRow;
 import org.apache.paimon.utils.Preconditions;
+
+import org.apache.flink.runtime.state.StateInitializationContext;
+import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.table.data.RowData;
 
 import java.io.IOException;
 import java.util.List;

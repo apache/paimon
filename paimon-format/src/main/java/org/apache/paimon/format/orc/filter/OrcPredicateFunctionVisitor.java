@@ -18,12 +18,13 @@
 
 package org.apache.paimon.format.orc.filter;
 
-import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.types.DataType;
+
+import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
 
 import javax.annotation.Nullable;
 

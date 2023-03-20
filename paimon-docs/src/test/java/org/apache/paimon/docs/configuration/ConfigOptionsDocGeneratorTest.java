@@ -30,6 +30,7 @@ import org.apache.paimon.options.description.Formatter;
 import org.apache.paimon.options.description.HtmlFormatter;
 import org.apache.paimon.options.description.InlineElement;
 import org.apache.paimon.utils.Pair;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

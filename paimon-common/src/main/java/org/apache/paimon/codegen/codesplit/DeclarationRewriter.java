@@ -17,12 +17,13 @@
 
 package org.apache.paimon.codegen.codesplit;
 
+import org.apache.paimon.utils.Preconditions;
+
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.TokenStreamRewriter;
 import org.antlr.v4.runtime.atn.PredictionMode;
-import org.apache.paimon.utils.Preconditions;
 
 import java.util.HashMap;
 import java.util.HashSet;

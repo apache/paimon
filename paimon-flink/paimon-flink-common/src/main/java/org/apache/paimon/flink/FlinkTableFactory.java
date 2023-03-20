@@ -18,12 +18,6 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.flink.table.catalog.ResolvedCatalogTable;
-import org.apache.flink.table.connector.sink.DynamicTableSink;
-import org.apache.flink.table.connector.source.DynamicTableSource;
-import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.factories.FactoryUtil;
-
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.flink.sink.FlinkTableSink;
@@ -31,6 +25,12 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
+
+import org.apache.flink.table.catalog.ResolvedCatalogTable;
+import org.apache.flink.table.connector.sink.DynamicTableSink;
+import org.apache.flink.table.connector.source.DynamicTableSource;
+import org.apache.flink.table.factories.DynamicTableFactory;
+import org.apache.flink.table.factories.FactoryUtil;
 
 import javax.annotation.Nullable;
 

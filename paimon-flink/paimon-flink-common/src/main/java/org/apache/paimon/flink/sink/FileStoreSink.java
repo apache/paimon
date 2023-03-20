@@ -18,14 +18,14 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.util.function.SerializableFunction;
-
 import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
+
+import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.util.function.SerializableFunction;
 
 import javax.annotation.Nullable;
 

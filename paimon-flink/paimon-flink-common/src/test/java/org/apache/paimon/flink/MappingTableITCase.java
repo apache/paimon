@@ -18,14 +18,13 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.flink.util.AbstractTestBase;
+
+import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.types.Row;
-
-import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
-
-import org.apache.paimon.flink.util.AbstractTestBase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

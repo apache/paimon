@@ -18,17 +18,17 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.flink.runtime.io.network.api.writer.SubtaskStateMapper;
-import org.apache.flink.runtime.plugable.SerializationDelegate;
-import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
-import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.apache.flink.table.data.RowData;
-
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.BucketComputer;
 import org.apache.paimon.table.sink.PartitionComputer;
+
+import org.apache.flink.runtime.io.network.api.writer.SubtaskStateMapper;
+import org.apache.flink.runtime.plugable.SerializationDelegate;
+import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
+import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.table.data.RowData;
 
 import java.util.Objects;
 import java.util.function.Function;

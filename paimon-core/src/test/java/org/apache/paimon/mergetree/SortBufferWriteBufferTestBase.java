@@ -32,6 +32,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ReusingKeyValue;
 import org.apache.paimon.utils.ReusingTestData;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.EOFException;

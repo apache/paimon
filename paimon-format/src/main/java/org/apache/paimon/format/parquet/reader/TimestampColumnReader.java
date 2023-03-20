@@ -20,6 +20,7 @@ package org.apache.paimon.format.parquet.reader;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.writable.WritableIntVector;
 import org.apache.paimon.data.columnar.writable.WritableTimestampVector;
+
 import org.apache.parquet.Preconditions;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReader;

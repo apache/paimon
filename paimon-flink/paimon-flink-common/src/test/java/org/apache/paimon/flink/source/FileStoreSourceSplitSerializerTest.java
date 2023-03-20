@@ -18,12 +18,12 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.flink.core.io.SimpleVersionedSerialization;
-
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.source.DataSplit;
+
+import org.apache.flink.core.io.SimpleVersionedSerialization;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;

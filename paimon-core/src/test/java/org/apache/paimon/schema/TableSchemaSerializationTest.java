@@ -24,6 +24,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.utils.JsonSerdeUtil;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

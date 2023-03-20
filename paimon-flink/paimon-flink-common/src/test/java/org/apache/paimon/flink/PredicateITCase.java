@@ -19,7 +19,6 @@
 package org.apache.paimon.flink;
 
 import org.apache.flink.types.Row;
-
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

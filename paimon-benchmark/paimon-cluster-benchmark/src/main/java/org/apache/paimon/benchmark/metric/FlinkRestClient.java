@@ -18,9 +18,10 @@
 
 package org.apache.paimon.benchmark.metric;
 
+import org.apache.paimon.benchmark.utils.BenchmarkUtils;
+
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
-
 import org.apache.http.Consts;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
@@ -35,7 +36,6 @@ import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.apache.http.util.EntityUtils;
-import org.apache.paimon.benchmark.utils.BenchmarkUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

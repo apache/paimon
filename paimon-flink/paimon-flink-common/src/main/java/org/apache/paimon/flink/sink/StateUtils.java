@@ -17,11 +17,11 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.utils.Preconditions;
+
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.runtime.state.StateInitializationContext;
-
-import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 

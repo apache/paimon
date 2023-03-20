@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.flink.core.io.SimpleVersionedSerialization;
-
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;

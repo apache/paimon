@@ -18,9 +18,9 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.flink.core.io.SimpleVersionedSerializer;
-
 import org.apache.paimon.data.serializer.VersionedSerializer;
+
+import org.apache.flink.core.io.SimpleVersionedSerializer;
 
 import java.io.IOException;
 

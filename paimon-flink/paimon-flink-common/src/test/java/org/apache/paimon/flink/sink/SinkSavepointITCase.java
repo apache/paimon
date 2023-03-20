@@ -18,6 +18,9 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.flink.util.AbstractTestBase;
+import org.apache.paimon.utils.FailingFileIO;
+
 import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.Configuration;
@@ -35,9 +38,6 @@ import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.ExceptionUtils;
-
-import org.apache.paimon.flink.util.AbstractTestBase;
-import org.apache.paimon.utils.FailingFileIO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;

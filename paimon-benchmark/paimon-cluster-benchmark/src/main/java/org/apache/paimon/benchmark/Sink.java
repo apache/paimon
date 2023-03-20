@@ -18,10 +18,10 @@
 
 package org.apache.paimon.benchmark;
 
-import org.apache.flink.util.FileUtils;
+import org.apache.paimon.benchmark.utils.BenchmarkUtils;
 
 import org.apache.commons.io.FilenameUtils;
-import org.apache.paimon.benchmark.utils.BenchmarkUtils;
+import org.apache.flink.util.FileUtils;
 
 import java.io.IOException;
 import java.nio.file.Files;

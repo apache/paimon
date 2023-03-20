@@ -25,6 +25,7 @@ import org.apache.paimon.data.columnar.DecimalColumnVector;
 import org.apache.paimon.data.columnar.IntColumnVector;
 import org.apache.paimon.data.columnar.LongColumnVector;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
+
 import org.apache.parquet.Preconditions;
 
 /**

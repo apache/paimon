@@ -18,9 +18,6 @@
 
 package org.apache.paimon.benchmark;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.FileSystem;
-
 import org.apache.paimon.benchmark.metric.FlinkRestClient;
 import org.apache.paimon.benchmark.metric.JobBenchmarkMetric;
 import org.apache.paimon.benchmark.metric.MetricReporter;
@@ -28,6 +25,9 @@ import org.apache.paimon.benchmark.metric.cpu.CpuMetricReceiver;
 import org.apache.paimon.benchmark.utils.AutoClosableProcess;
 import org.apache.paimon.benchmark.utils.BenchmarkGlobalConfiguration;
 import org.apache.paimon.benchmark.utils.BenchmarkUtils;
+
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.FileSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

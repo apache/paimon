@@ -18,10 +18,10 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.flink.types.Row;
-
 import org.apache.paimon.flink.action.DeleteAction;
 import org.apache.paimon.utils.BlockingIterator;
+
+import org.apache.flink.types.Row;
 import org.junit.Test;
 
 import java.util.Collections;

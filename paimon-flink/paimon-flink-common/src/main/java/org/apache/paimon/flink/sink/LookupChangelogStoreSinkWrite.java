@@ -18,11 +18,11 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.flink.runtime.io.disk.iomanager.IOManager;
-import org.apache.flink.runtime.state.StateInitializationContext;
-
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.table.FileStoreTable;
+
+import org.apache.flink.runtime.io.disk.iomanager.IOManager;
+import org.apache.flink.runtime.state.StateInitializationContext;
 
 import java.io.IOException;
 import java.util.List;

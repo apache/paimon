@@ -18,12 +18,13 @@
 
 package org.apache.paimon.hive.objectinspector;
 
+import org.apache.paimon.data.Decimal;
+
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.HiveDecimalObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
-import org.apache.paimon.data.Decimal;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for DECIMAL type. */
 public class PaimonDecimalObjectInspector extends AbstractPrimitiveJavaObjectInspector

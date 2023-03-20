@@ -18,12 +18,12 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.operation.Lock;
+import org.apache.paimon.table.FileStoreTable;
+
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.util.function.SerializableFunction;
-
-import org.apache.paimon.operation.Lock;
-import org.apache.paimon.table.FileStoreTable;
 
 /** {@link FlinkSink} for dedicated compact jobs. */
 public class CompactorSink extends FlinkSink {

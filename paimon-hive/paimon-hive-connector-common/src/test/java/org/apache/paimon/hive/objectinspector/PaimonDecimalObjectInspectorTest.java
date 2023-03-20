@@ -18,11 +18,12 @@
 
 package org.apache.paimon.hive.objectinspector;
 
+import org.apache.paimon.data.Decimal;
+
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
-import org.apache.paimon.data.Decimal;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;

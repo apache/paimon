@@ -18,13 +18,14 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.hive.objectinspector.PaimonRowDataObjectInspector;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.serde2.AbstractSerDe;
 import org.apache.hadoop.hive.serde2.SerDeException;
 import org.apache.hadoop.hive.serde2.SerDeStats;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.io.Writable;
-import org.apache.paimon.hive.objectinspector.PaimonRowDataObjectInspector;
 
 import javax.annotation.Nullable;
 

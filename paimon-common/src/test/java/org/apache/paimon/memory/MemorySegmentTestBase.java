@@ -19,6 +19,7 @@
 package org.apache.paimon.memory;
 
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
+
 import org.junit.jupiter.api.TestTemplate;
 
 import java.io.ByteArrayInputStream;

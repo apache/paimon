@@ -32,6 +32,7 @@ import org.apache.paimon.options.description.TextElement;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ThrowingConsumer;
 import org.apache.paimon.utils.TimeUtils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

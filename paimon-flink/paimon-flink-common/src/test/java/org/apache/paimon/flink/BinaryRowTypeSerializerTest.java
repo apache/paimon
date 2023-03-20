@@ -18,10 +18,10 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.data.BinaryRow;
+
 import org.apache.flink.api.common.typeutils.SerializerTestBase;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-
-import org.apache.paimon.data.BinaryRow;
 
 import java.util.Random;
 

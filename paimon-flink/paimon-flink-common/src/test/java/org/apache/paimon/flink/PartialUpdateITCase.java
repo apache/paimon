@@ -22,7 +22,6 @@ import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
-
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Test;
 

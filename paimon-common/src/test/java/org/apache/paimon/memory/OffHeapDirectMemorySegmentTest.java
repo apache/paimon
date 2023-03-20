@@ -19,6 +19,7 @@
 package org.apache.paimon.memory;
 
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
+
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 

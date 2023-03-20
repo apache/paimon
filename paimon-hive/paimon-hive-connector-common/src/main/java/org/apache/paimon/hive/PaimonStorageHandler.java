@@ -18,6 +18,9 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.hive.mapred.PaimonInputFormat;
+import org.apache.paimon.hive.mapred.PaimonOutputFormat;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
 import org.apache.hadoop.hive.ql.metadata.HiveException;
@@ -32,8 +35,6 @@ import org.apache.hadoop.hive.serde2.Deserializer;
 import org.apache.hadoop.mapred.InputFormat;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.OutputFormat;
-import org.apache.paimon.hive.mapred.PaimonInputFormat;
-import org.apache.paimon.hive.mapred.PaimonOutputFormat;
 
 import java.util.Map;
 import java.util.Properties;

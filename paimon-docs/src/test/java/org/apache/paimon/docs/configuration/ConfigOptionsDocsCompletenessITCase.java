@@ -21,6 +21,7 @@ package org.apache.paimon.docs.configuration;
 import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.utils.Pair;
+
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.junit.jupiter.api.Test;

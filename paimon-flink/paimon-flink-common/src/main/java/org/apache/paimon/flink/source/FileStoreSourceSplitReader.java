@@ -18,6 +18,13 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.RecordReader.RecordIterator;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
+
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitReader;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
@@ -27,13 +34,6 @@ import org.apache.flink.connector.file.src.util.MutableRecordAndPosition;
 import org.apache.flink.connector.file.src.util.Pool;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
-
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.flink.FlinkRowData;
-import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.reader.RecordReader.RecordIterator;
-import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.TableRead;
 
 import javax.annotation.Nullable;
 

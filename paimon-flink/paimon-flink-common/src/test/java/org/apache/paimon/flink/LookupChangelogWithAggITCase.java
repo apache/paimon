@@ -18,10 +18,10 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.utils.BlockingIterator;
+
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
-
-import org.apache.paimon.utils.BlockingIterator;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

@@ -18,8 +18,9 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.hadoop.io.Writable;
 import org.apache.paimon.data.InternalRow;
+
+import org.apache.hadoop.io.Writable;
 
 import java.io.DataInput;
 import java.io.DataOutput;

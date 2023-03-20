@@ -18,10 +18,11 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.types.DataTypes;
+
+import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
