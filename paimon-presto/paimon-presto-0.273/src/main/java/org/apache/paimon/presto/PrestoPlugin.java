@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,8 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.hive;
+package org.apache.paimon.presto;
 
-/** A {@link org.apache.paimon.hive.PaimonSerDe} to be compatible to table store 0.3. */
-@Deprecated
-public class TableStoreSerDe extends PaimonSerDe {}
+import com.facebook.presto.spi.Plugin;
+import com.facebook.presto.spi.connector.ConnectorFactory;
+
+import java.util.Collections;
+
+/** Presto {@link Plugin}. */
+public class PrestoPlugin implements Plugin {
+    @Override
+    public Iterable<ConnectorFactory> getConnectorFactories() {
+        return Collections.singletonList(new org.apache.paimon.presto.PrestoConnectorFactory());
+    }
+}

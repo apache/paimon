@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.mapred;
+package org.apache.paimon.mapred;
 
 import org.apache.paimon.hive.mapred.PaimonInputFormat;
 

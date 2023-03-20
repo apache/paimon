@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,8 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.hive;
+package org.apache.paimon.presto;
 
-/** A {@link org.apache.paimon.hive.PaimonSerDe} to be compatible to table store 0.3. */
-@Deprecated
-public class TableStoreSerDe extends PaimonSerDe {}
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+/** Utils for fieldName. */
+public class FieldNameUtils {
+
+    public static List<String> fieldNames(RowType rowType) {
+        return rowType.getFields().stream()
+                .map(DataField::name)
+                .map(String::toLowerCase)
+                .collect(Collectors.toList());
+    }
+}

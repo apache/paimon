@@ -16,10 +16,8 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.hive;
+package org.apache.paimon.hive;
 
-import org.apache.paimon.hive.PaimonStorageHandler;
-
-/** A {@link PaimonStorageHandler} to be compatible to table store 0.3. */
+/** A {@link org.apache.paimon.hive.PaimonStorageHandler} to be compatible to table store 0.3. */
 @Deprecated
 public class TableStoreHiveStorageHandler extends PaimonStorageHandler {}

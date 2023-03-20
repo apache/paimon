@@ -25,9 +25,9 @@ import org.apache.hadoop.hive.metastore.api.Table;
 public class LegacyHiveClasses {
 
     private static final String LEGACY_INPUT_FORMAT_CLASS_NAME =
-            "org.apache.flink.table.store.mapred.TableStoreInputFormat";
+            "org.apache.paimon.mapred.TableStoreInputFormat";
     private static final String LEGACY_OUTPUT_FORMAT_CLASS_NAME =
-            "org.apache.flink.table.store.mapred.TableStoreOutputFormat";
+            "org.apache.paimon.mapred.TableStoreOutputFormat";
 
     public static boolean isPaimonTable(Table table) {
         return LEGACY_INPUT_FORMAT_CLASS_NAME.equals(table.getSd().getInputFormat())
