@@ -38,9 +38,9 @@ public class LogSystemITCase extends KafkaTableTestBase {
     public void before() throws IOException {
         tEnv.executeSql(
                 String.format(
-                        "CREATE CATALOG TABLE_STORE WITH (" + "'type'='paimon', 'warehouse'='%s')",
+                        "CREATE CATALOG PAIMON WITH (" + "'type'='paimon', 'warehouse'='%s')",
                         getTempDirPath()));
-        tEnv.useCatalog("TABLE_STORE");
+        tEnv.useCatalog("PAIMON");
     }
 
     @Test

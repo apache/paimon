@@ -21,6 +21,6 @@ before: |
     'type' = 'paimon',
     'warehouse' = '${SINK_PATH}'
   );
-sink-name: test_catalog.`default`.table_store_sink
+sink-name: test_catalog.`default`.paimon_sink
 sink-properties: |
   'bucket' = '16'

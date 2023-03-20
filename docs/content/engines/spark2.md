@@ -70,7 +70,7 @@ If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or 
 
 Paimon currently only supports reading tables through Spark2. To create a Paimon table with records, please follow our [Flink quick start guide]({{< ref "engines/flink#quick-start" >}}).
 
-After the guide, all table files should be stored under the path `/tmp/table_store`, or the warehouse path you've specified.
+After the guide, all table files should be stored under the path `/tmp/paimon`, or the warehouse path you've specified.
 
 **Step 2: Specify Paimon Jar File**
 
@@ -87,7 +87,7 @@ Alternatively, you can copy `paimon-spark-2-{{< version >}}.jar` under `spark/ja
 Paimon with Spark 2.4 does not support DDL. You can use the `Dataset` reader and register the `Dataset` as a temporary table. In spark shell:
 
 ```scala
-val dataset = spark.read.format("paimon").load("file:/tmp/table_store/default.db/word_count")
+val dataset = spark.read.format("paimon").load("file:/tmp/paimon/default.db/word_count")
 dataset.createOrReplaceTempView("word_count")
 spark.sql("SELECT * FROM word_count").show()
 ```

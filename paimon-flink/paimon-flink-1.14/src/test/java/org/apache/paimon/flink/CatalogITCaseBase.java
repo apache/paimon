@@ -61,8 +61,8 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
     @Before
     public void before() throws IOException {
         tEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
-        String catalog = "TABLE_STORE";
-        path = getTempDirPath("table_store");
+        String catalog = "PAIMON";
+        path = getTempDirPath("paimon");
         tEnv.executeSql(
                 String.format(
                         "CREATE CATALOG %s WITH (" + "'type'='paimon', 'warehouse'='%s')",
