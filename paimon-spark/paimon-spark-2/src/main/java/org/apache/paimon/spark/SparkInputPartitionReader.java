@@ -25,7 +25,7 @@ import org.apache.spark.sql.sources.v2.reader.InputPartitionReader;
 
 import java.io.IOException;
 
-/** A spark 2 {@link InputPartitionReader} for paimon, created by {@link InputPartition} */
+/** A spark 2 {@link InputPartitionReader} for paimon, created by {@link InputPartition}. */
 public class SparkInputPartitionReader implements InputPartitionReader<InternalRow> {
 
     private final RecordReaderIterator<org.apache.paimon.data.InternalRow> iterator;
