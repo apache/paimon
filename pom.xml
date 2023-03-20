@@ -66,6 +66,7 @@ under the License.
         <module>paimon-hive</module>
         <module>paimon-spark</module>
         <module>paimon-test-utils</module>
+        <module>paimon-presto</module>
     </modules>
 
     <properties>
