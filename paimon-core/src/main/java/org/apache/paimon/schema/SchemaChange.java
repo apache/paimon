@@ -23,6 +23,7 @@ import org.apache.paimon.types.DataType;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -32,7 +33,7 @@ import java.util.Objects;
  * @since 0.4.0
  */
 @Experimental
-public interface SchemaChange {
+public interface SchemaChange extends Serializable {
 
     static SchemaChange setOption(String key, String value) {
         return new SetOption(key, value);
@@ -76,6 +77,9 @@ public interface SchemaChange {
 
     /** A SchemaChange to set a table option. */
     final class SetOption implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
         private final String key;
         private final String value;
 
@@ -112,6 +116,9 @@ public interface SchemaChange {
 
     /** A SchemaChange to remove a table option. */
     final class RemoveOption implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
         private final String key;
 
         private RemoveOption(String key) {
@@ -142,6 +149,9 @@ public interface SchemaChange {
 
     /** A SchemaChange to add a field. */
     final class AddColumn implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
         private final String fieldName;
         private final DataType dataType;
         private final String description;
@@ -198,6 +208,9 @@ public interface SchemaChange {
 
     /** A SchemaChange to rename a field. */
     final class RenameColumn implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
         private final String fieldName;
         private final String newName;
 
@@ -237,6 +250,9 @@ public interface SchemaChange {
 
     /** A SchemaChange to drop a field. */
     final class DropColumn implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
         private final String fieldName;
 
         private DropColumn(String fieldName) {
@@ -267,6 +283,9 @@ public interface SchemaChange {
 
     /** A SchemaChange to update the field type. */
     final class UpdateColumnType implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
         private final String fieldName;
         private final DataType newDataType;
 
@@ -306,6 +325,9 @@ public interface SchemaChange {
 
     /** A SchemaChange to update the field position. */
     final class UpdateColumnPosition implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
         private final Move move;
 
         private UpdateColumnPosition(Move move) {
@@ -374,6 +396,9 @@ public interface SchemaChange {
 
     /** A SchemaChange to update the (nested) field nullability. */
     final class UpdateColumnNullability implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
         private final String[] fieldNames;
         private final boolean newNullability;
 
@@ -413,6 +438,9 @@ public interface SchemaChange {
 
     /** A SchemaChange to update the (nested) field comment. */
     final class UpdateColumnComment implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
         private final String[] fieldNames;
         private final String newDescription;
 
