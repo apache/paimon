@@ -39,6 +39,9 @@ import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -51,9 +54,11 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreTable.class);
+
     protected final FileIO fileIO;
     protected final Path path;
-    protected final TableSchema tableSchema;
+    protected TableSchema tableSchema;
 
     public AbstractFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
         this.fileIO = fileIO;
@@ -119,11 +124,14 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         // set dynamic options with default values
         CoreOptions.setDefaultValues(newOptions);
 
-        // copy a new paimon to contain dynamic options
+        // copy a new table schema to contain dynamic options
         TableSchema newTableSchema = tableSchema.copy(newOptions.toMap());
 
-        // validate schema wit new options
+        // validate schema with new options
         SchemaValidation.validateTableSchema(newTableSchema);
+
+        // see if merged options contain time travel option
+        newTableSchema = tryTimeTravel(newOptions).orElse(newTableSchema);
 
         return copy(newTableSchema);
     }
@@ -178,5 +186,33 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 store().newCommit(commitUser),
                 options().writeOnly() ? null : store().newExpire(),
                 options().writeOnly() ? null : store().newPartitionExpire(commitUser));
+    }
+
+    private Optional<TableSchema> tryTimeTravel(Options options) {
+        CoreOptions coreOptions = new CoreOptions(options);
+
+        if (coreOptions.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT) {
+            long snapshotId = coreOptions.scanSnapshotId();
+            if (snapshotManager().snapshotExists(snapshotId)) {
+                long schemaId = snapshotManager().snapshot(snapshotId).schemaId();
+                LOG.info("Time traveling to snapshot {}, schemaId is {}.", snapshotId, schemaId);
+                return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
+            }
+        }
+
+        if (coreOptions.startupMode() == CoreOptions.StartupMode.FROM_TIMESTAMP) {
+            long timestamp = coreOptions.scanTimestampMills();
+            Long snapshotId = snapshotManager().earlierOrEqualTimeMills(timestamp);
+            if (snapshotId != null) {
+                long schemaId = snapshotManager().snapshot(snapshotId).schemaId();
+                LOG.info(
+                        "Time traveling to timestamp {} milliseconds, schemaId is {}.",
+                        timestamp,
+                        schemaId);
+                return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
+            }
+        }
+
+        return Optional.empty();
     }
 }
