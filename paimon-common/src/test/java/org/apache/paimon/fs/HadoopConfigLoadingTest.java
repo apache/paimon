@@ -39,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests that validate the loading of the Hadoop configuration, relative to entries in the Flink
+ * Tests that validate the loading of the Hadoop configuration, relative to entries in the Paimon
  * configuration and the environment variables.
  */
 @SuppressWarnings("deprecation")
@@ -188,8 +188,8 @@ public class HadoopConfigLoadingTest {
         final String k5 = "key5";
 
         final String v1 = "from HADOOP_CONF_DIR";
-        final String v2 = "from Flink config `fs.hdfs.hadoopconf`";
-        final String v3 = "from Flink config `fs.hdfs.hdfsdefault`";
+        final String v2 = "from Paimon config `fs.hdfs.hadoopconf`";
+        final String v3 = "from Paimon config `fs.hdfs.hdfsdefault`";
         final String v4 = "from HADOOP_HOME/etc/hadoop";
         final String v5 = "from HADOOP_HOME/conf";
 
@@ -270,7 +270,7 @@ public class HadoopConfigLoadingTest {
     }
 
     @Test
-    public void loadFromFlinkConfEntry() throws Exception {
+    public void loadFromPaimonConfEntry() {
         final String prefix = "hadoop.";
 
         final String k1 = "brooklyn";

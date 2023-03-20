@@ -21,10 +21,7 @@ package org.apache.paimon.codegen;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 
-/**
- * Interface for code generated projection, which will map a RowData to another BinaryRowData.
- * Copied from Flink.
- */
+/** Interface for code generated projection, which will map a RowData to another BinaryRowData. */
 public interface Projection {
 
     BinaryRow apply(InternalRow row);

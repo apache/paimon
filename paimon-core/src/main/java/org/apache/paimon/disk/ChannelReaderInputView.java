@@ -21,6 +21,7 @@ package org.apache.paimon.disk;
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.BlockDecompressor;
 import org.apache.paimon.data.AbstractPagedInputView;
+import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.memory.Buffer;
 import org.apache.paimon.memory.MemorySegment;
 
@@ -30,10 +31,10 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * A {@link org.apache.flink.core.memory.DataInputView} that is backed by a {@link
- * BufferFileReader}, making it effectively a data input stream. The view reads it data in blocks
- * from the underlying channel and decompress it before returning to caller. The view can only read
- * data that has been written by {@link ChannelWriterOutputView}, due to block formatting.
+ * A {@link DataInputView} that is backed by a {@link BufferFileReader}, making it effectively a
+ * data input stream. The view reads it data in blocks from the underlying channel and decompress it
+ * before returning to caller. The view can only read data that has been written by {@link
+ * ChannelWriterOutputView}, due to block formatting.
  */
 public class ChannelReaderInputView extends AbstractPagedInputView {
 

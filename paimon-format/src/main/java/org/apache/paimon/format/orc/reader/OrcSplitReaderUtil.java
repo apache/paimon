@@ -32,7 +32,6 @@ import org.apache.orc.TypeDescription;
 /** Util for orc types. */
 public class OrcSplitReaderUtil {
 
-    /** See {@code org.apache.flink.table.catalog.hive.util.HiveTypeUtil}. */
     public static TypeDescription toOrcType(DataType type) {
         type = type.copy(true);
         switch (type.getTypeRoot()) {

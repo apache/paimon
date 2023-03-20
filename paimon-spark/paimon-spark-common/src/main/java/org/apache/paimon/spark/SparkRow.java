@@ -94,7 +94,7 @@ public class SparkRow implements InternalRow {
     @Override
     public int getInt(int i) {
         if (type.getTypeAt(i) instanceof DateType) {
-            return toFlinkDate(row.get(i));
+            return toPaimonDate(row.get(i));
         }
         return row.getInt(i);
     }
@@ -126,7 +126,7 @@ public class SparkRow implements InternalRow {
 
     @Override
     public Timestamp getTimestamp(int i, int precision) {
-        return toFlinkTimestamp(row.get(i));
+        return toPaimonTimestamp(row.get(i));
     }
 
     @Override
@@ -136,12 +136,12 @@ public class SparkRow implements InternalRow {
 
     @Override
     public InternalArray getArray(int i) {
-        return new FlinkArray(((ArrayType) type.getTypeAt(i)).getElementType(), row.getList(i));
+        return new PaimonArray(((ArrayType) type.getTypeAt(i)).getElementType(), row.getList(i));
     }
 
     @Override
     public InternalMap getMap(int i) {
-        return toFlinkMap((MapType) type.getTypeAt(i), row.getJavaMap(i));
+        return toPaimonMap((MapType) type.getTypeAt(i), row.getJavaMap(i));
     }
 
     @Override
@@ -149,7 +149,7 @@ public class SparkRow implements InternalRow {
         return new SparkRow((RowType) type.getTypeAt(i), row.getStruct(i));
     }
 
-    private static int toFlinkDate(Object object) {
+    private static int toPaimonDate(Object object) {
         if (object instanceof Date) {
             return DateTimeUtils.toInternal((Date) object);
         } else {
@@ -157,7 +157,7 @@ public class SparkRow implements InternalRow {
         }
     }
 
-    private static Timestamp toFlinkTimestamp(Object object) {
+    private static Timestamp toPaimonTimestamp(Object object) {
         if (object instanceof java.sql.Timestamp) {
             return Timestamp.fromSQLTimestamp((java.sql.Timestamp) object);
         } else {
@@ -165,7 +165,7 @@ public class SparkRow implements InternalRow {
         }
     }
 
-    private static InternalMap toFlinkMap(MapType mapType, Map<Object, Object> map) {
+    private static InternalMap toPaimonMap(MapType mapType, Map<Object, Object> map) {
         List<Object> keys = new ArrayList<>();
         List<Object> values = new ArrayList<>();
         map.forEach(
@@ -174,8 +174,8 @@ public class SparkRow implements InternalRow {
                     values.add(v);
                 });
 
-        FlinkArray key = new FlinkArray(mapType.getKeyType(), keys);
-        FlinkArray value = new FlinkArray(mapType.getValueType(), values);
+        PaimonArray key = new PaimonArray(mapType.getKeyType(), keys);
+        PaimonArray value = new PaimonArray(mapType.getValueType(), values);
         return new InternalMap() {
             @Override
             public int size() {
@@ -194,12 +194,12 @@ public class SparkRow implements InternalRow {
         };
     }
 
-    private static class FlinkArray implements InternalArray {
+    private static class PaimonArray implements InternalArray {
 
         private final DataType elementType;
         private final List<Object> list;
 
-        private FlinkArray(DataType elementType, List<Object> list) {
+        private PaimonArray(DataType elementType, List<Object> list) {
             this.list = list;
             this.elementType = elementType;
         }
@@ -237,7 +237,7 @@ public class SparkRow implements InternalRow {
         @Override
         public int getInt(int i) {
             if (elementType instanceof DateType) {
-                return toFlinkDate(getAs(i));
+                return toPaimonDate(getAs(i));
             }
             return getAs(i);
         }
@@ -269,7 +269,7 @@ public class SparkRow implements InternalRow {
 
         @Override
         public Timestamp getTimestamp(int i, int precision) {
-            return toFlinkTimestamp(getAs(i));
+            return toPaimonTimestamp(getAs(i));
         }
 
         @Override
@@ -279,12 +279,12 @@ public class SparkRow implements InternalRow {
 
         @Override
         public InternalArray getArray(int i) {
-            return new FlinkArray(((ArrayType) elementType).getElementType(), getAs(i));
+            return new PaimonArray(((ArrayType) elementType).getElementType(), getAs(i));
         }
 
         @Override
         public InternalMap getMap(int i) {
-            return toFlinkMap((MapType) elementType, getAs(i));
+            return toPaimonMap((MapType) elementType, getAs(i));
         }
 
         @Override

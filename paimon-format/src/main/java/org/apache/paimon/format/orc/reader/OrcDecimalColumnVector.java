@@ -25,7 +25,7 @@ import org.apache.hadoop.hive.ql.exec.vector.DecimalColumnVector;
 import java.math.BigDecimal;
 
 /**
- * This column vector is used to adapt hive's DecimalColumnVector to Flink's DecimalColumnVector.
+ * This column vector is used to adapt hive's DecimalColumnVector to Paimon's DecimalColumnVector.
  */
 public class OrcDecimalColumnVector extends AbstractOrcColumnVector
         implements org.apache.paimon.data.columnar.DecimalColumnVector {

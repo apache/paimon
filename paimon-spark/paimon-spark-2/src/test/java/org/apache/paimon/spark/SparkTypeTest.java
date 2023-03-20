@@ -24,7 +24,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
 
-import static org.apache.paimon.spark.SparkTypeUtils.fromFlinkRowType;
+import static org.apache.paimon.spark.SparkTypeUtils.fromPaimonRowType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link SparkTypeUtils}. */
@@ -90,7 +90,7 @@ public class SparkTypeTest {
                         + "StructField(decimal2,DecimalType(38,2),true), "
                         + "StructField(decimal3,DecimalType(10,1),true))";
 
-        StructType sparkType = fromFlinkRowType(ALL_TYPES);
+        StructType sparkType = fromPaimonRowType(ALL_TYPES);
         assertThat(sparkType.toString()).isEqualTo(expected);
     }
 }

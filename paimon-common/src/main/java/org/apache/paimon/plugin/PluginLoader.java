@@ -51,8 +51,6 @@ public class PluginLoader {
             Stream.concat(
                             Arrays.stream(PARENT_FIRST_LOGGING_PATTERNS),
                             Stream.of(
-                                    // These packages are shipped either by
-                                    // flink-table-runtime or flink-dist itself
                                     "org.codehaus.janino",
                                     "org.codehaus.commons",
                                     "org.apache.commons.lang3"))

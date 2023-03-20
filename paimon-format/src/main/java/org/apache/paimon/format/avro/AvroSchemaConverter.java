@@ -35,7 +35,7 @@ import org.apache.avro.SchemaBuilder;
 
 import java.util.List;
 
-/** Converts an Avro schema into Flink's type information. */
+/** Converts an Avro schema into Paimon's type information. */
 public class AvroSchemaConverter {
 
     private AvroSchemaConverter() {
@@ -43,20 +43,20 @@ public class AvroSchemaConverter {
     }
 
     /**
-     * Converts Flink SQL {@link DataType} (can be nested) into an Avro schema.
+     * Converts Paimon {@link DataType} (can be nested) into an Avro schema.
      *
-     * <p>Use "org.apache.flink.avro.generated.record" as the type name.
+     * <p>Use "org.apache.paimon.avro.generated.record" as the type name.
      *
      * @param schema the schema type, usually it should be the top level record type, e.g. not a
      *     nested type
      * @return Avro's {@link Schema} matching this logical type.
      */
     public static Schema convertToSchema(DataType schema) {
-        return convertToSchema(schema, "org.apache.flink.avro.generated.record");
+        return convertToSchema(schema, "org.apache.paimon.avro.generated.record");
     }
 
     /**
-     * Converts Flink SQL {@link DataType} (can be nested) into an Avro schema.
+     * Converts Paimon {@link DataType} (can be nested) into an Avro schema.
      *
      * <p>The "{rowName}_" is used as the nested row type name prefix in order to generate the right
      * schema. Nested record type that only differs with type name is still compatible.

@@ -55,7 +55,7 @@ public class SparkScan implements Scan, SupportsReportStatistics {
 
     @Override
     public StructType readSchema() {
-        return SparkTypeUtils.fromFlinkRowType(readBuilder.readType());
+        return SparkTypeUtils.fromPaimonRowType(readBuilder.readType());
     }
 
     @Override

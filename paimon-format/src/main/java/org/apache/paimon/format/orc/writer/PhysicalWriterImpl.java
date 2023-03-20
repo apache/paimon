@@ -47,7 +47,7 @@ import static org.apache.orc.impl.WriterImpl.getEstimatedBufferSize;
  * A slightly customised clone of {@link org.apache.orc.impl.PhysicalFsWriter}.
  *
  * <p>Whereas PhysicalFsWriter implementation works on the basis of a Path, this implementation
- * leverages Flink's {@link PositionOutputStream} to write the compressed data.
+ * leverages Paimon's {@link PositionOutputStream} to write the compressed data.
  *
  * <p>NOTE: If the ORC dependency version is updated, this file may have to be updated as well to be
  * in sync with the new version's PhysicalFsWriter.
@@ -222,7 +222,7 @@ public class PhysicalWriterImpl implements PhysicalWriter {
     @Override
     public void close() {
         // Just release the codec but don't close the internal stream here to avoid
-        // Stream Closed or ClosedChannelException when Flink performs checkpoint.
+        // Stream Closed or ClosedChannelException when performs checkpoint.
         OrcCodecPool.returnCodec(compress, codec);
         codec = null;
     }

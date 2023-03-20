@@ -55,7 +55,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.types.DataTypeChecks.getFieldTypes;
 
-/** Orc {@link FileFormat}. The main code is copied from Flink {@code OrcFileFormatFactory}. */
+/** Orc {@link FileFormat}. */
 public class OrcFileFormat extends FileFormat {
 
     public static final String IDENTIFIER = "orc";

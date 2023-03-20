@@ -19,6 +19,7 @@
 package org.apache.paimon.format.fs;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.utils.IOUtils;
 
 import org.apache.hadoop.fs.FSDataInputStream;
@@ -52,7 +53,7 @@ public class HadoopReadOnlyFileSystem extends FileSystem {
     @Override
     public FSDataInputStream open(Path path) throws IOException {
         return new FSDataInputStream(
-                new FSDataWrappedInputStream(fileIO.newInputStream(toFlinkPath(path))));
+                new FSDataWrappedInputStream(fileIO.newInputStream(toPaimonPath(path))));
     }
 
     @Override
@@ -62,10 +63,10 @@ public class HadoopReadOnlyFileSystem extends FileSystem {
 
     @Override
     public FileStatus getFileStatus(Path path) throws IOException {
-        return toHadoopStatus(fileIO.getFileStatus(toFlinkPath(path)));
+        return toHadoopStatus(fileIO.getFileStatus(toPaimonPath(path)));
     }
 
-    private static org.apache.paimon.fs.Path toFlinkPath(Path path) {
+    private static org.apache.paimon.fs.Path toPaimonPath(Path path) {
         return new org.apache.paimon.fs.Path(path.toUri());
     }
 
@@ -138,17 +139,13 @@ public class HadoopReadOnlyFileSystem extends FileSystem {
         throw new UnsupportedOperationException();
     }
 
-    /**
-     * A {@link InputStream} to wrap {@link org.apache.paimon.fs.SeekableInputStream} for Flink's
-     * input streams.
-     */
+    /** A {@link InputStream} to wrap {@link SeekableInputStream} for Paimon's input streams. */
     private static class FSDataWrappedInputStream extends InputStream
             implements Seekable, PositionedReadable {
 
-        private final org.apache.paimon.fs.SeekableInputStream seekableInputStream;
+        private final SeekableInputStream seekableInputStream;
 
-        private FSDataWrappedInputStream(
-                org.apache.paimon.fs.SeekableInputStream seekableInputStream) {
+        private FSDataWrappedInputStream(SeekableInputStream seekableInputStream) {
             this.seekableInputStream = seekableInputStream;
         }
 

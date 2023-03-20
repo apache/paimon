@@ -20,10 +20,10 @@ package org.apache.paimon.codegen;
 
 import org.apache.paimon.plugin.PluginLoader;
 
-/** Copied and modified from the flink-table-planner-loader module. */
+/** Loader to load codegen classes. */
 public class CodeGenLoader {
 
-    private static final String FLINK_TABLE_STORE_CODEGEN_FAT_JAR = "paimon-codegen.jar";
+    private static final String CODEGEN_FAT_JAR = "paimon-codegen.jar";
 
     // Singleton lazy initialization
 
@@ -32,7 +32,7 @@ public class CodeGenLoader {
     private static synchronized PluginLoader getLoader() {
         if (loader == null) {
             // Avoid NoClassDefFoundError without cause by exception
-            loader = new PluginLoader(FLINK_TABLE_STORE_CODEGEN_FAT_JAR);
+            loader = new PluginLoader(CODEGEN_FAT_JAR);
         }
         return loader;
     }

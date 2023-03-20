@@ -114,7 +114,7 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
 
     private long getTimestampMicros(int ordinal) {
         DataType type = rowType.getTypeAt(ordinal);
-        return fromFlink(row.getTimestamp(ordinal, timestampPrecision(type)));
+        return fromPaimon(row.getTimestamp(ordinal, timestampPrecision(type)));
     }
 
     @Override
@@ -130,12 +130,12 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
     @Override
     public Decimal getDecimal(int ordinal, int precision, int scale) {
         org.apache.paimon.data.Decimal decimal = row.getDecimal(ordinal, precision, scale);
-        return fromFlink(decimal);
+        return fromPaimon(decimal);
     }
 
     @Override
     public UTF8String getUTF8String(int ordinal) {
-        return fromFlink(row.getString(ordinal));
+        return fromPaimon(row.getString(ordinal));
     }
 
     @Override
@@ -150,17 +150,17 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
 
     @Override
     public org.apache.spark.sql.catalyst.InternalRow getStruct(int ordinal, int numFields) {
-        return fromFlink(row.getRow(ordinal, numFields), (RowType) rowType.getTypeAt(ordinal));
+        return fromPaimon(row.getRow(ordinal, numFields), (RowType) rowType.getTypeAt(ordinal));
     }
 
     @Override
     public ArrayData getArray(int ordinal) {
-        return fromFlink(row.getArray(ordinal), (ArrayType) rowType.getTypeAt(ordinal));
+        return fromPaimon(row.getArray(ordinal), (ArrayType) rowType.getTypeAt(ordinal));
     }
 
     @Override
     public MapData getMap(int ordinal) {
-        return fromFlink(row.getMap(ordinal), rowType.getTypeAt(ordinal));
+        return fromPaimon(row.getMap(ordinal), rowType.getTypeAt(ordinal));
     }
 
     @Override
@@ -168,57 +168,57 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
         return SpecializedGettersReader.read(this, ordinal, dataType);
     }
 
-    public static Object fromFlink(Object o, DataType type) {
+    public static Object fromPaimon(Object o, DataType type) {
         if (o == null) {
             return null;
         }
         switch (type.getTypeRoot()) {
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return fromFlink((Timestamp) o);
+                return fromPaimon((Timestamp) o);
             case CHAR:
             case VARCHAR:
-                return fromFlink((BinaryString) o);
+                return fromPaimon((BinaryString) o);
             case DECIMAL:
-                return fromFlink((org.apache.paimon.data.Decimal) o);
+                return fromPaimon((org.apache.paimon.data.Decimal) o);
             case ARRAY:
-                return fromFlink((InternalArray) o, (ArrayType) type);
+                return fromPaimon((InternalArray) o, (ArrayType) type);
             case MAP:
             case MULTISET:
-                return fromFlink((InternalMap) o, type);
+                return fromPaimon((InternalMap) o, type);
             case ROW:
-                return fromFlink((InternalRow) o, (RowType) type);
+                return fromPaimon((InternalRow) o, (RowType) type);
             default:
                 return o;
         }
     }
 
-    public static UTF8String fromFlink(BinaryString string) {
+    public static UTF8String fromPaimon(BinaryString string) {
         return UTF8String.fromBytes(string.toBytes());
     }
 
-    public static Decimal fromFlink(org.apache.paimon.data.Decimal decimal) {
+    public static Decimal fromPaimon(org.apache.paimon.data.Decimal decimal) {
         return Decimal.apply(decimal.toBigDecimal());
     }
 
-    public static org.apache.spark.sql.catalyst.InternalRow fromFlink(
+    public static org.apache.spark.sql.catalyst.InternalRow fromPaimon(
             InternalRow row, RowType rowType) {
         return new SparkInternalRow(rowType).replace(row);
     }
 
-    public static long fromFlink(Timestamp timestamp) {
+    public static long fromPaimon(Timestamp timestamp) {
         return DateTimeUtils.fromJavaTimestamp(timestamp.toSQLTimestamp());
     }
 
-    public static ArrayData fromFlink(InternalArray array, ArrayType arrayType) {
-        return fromFlinkArrayElementType(array, arrayType.getElementType());
+    public static ArrayData fromPaimon(InternalArray array, ArrayType arrayType) {
+        return fromPaimonArrayElementType(array, arrayType.getElementType());
     }
 
-    private static ArrayData fromFlinkArrayElementType(InternalArray array, DataType elementType) {
+    private static ArrayData fromPaimonArrayElementType(InternalArray array, DataType elementType) {
         return new SparkArrayData(elementType).replace(array);
     }
 
-    public static MapData fromFlink(InternalMap map, DataType mapType) {
+    public static MapData fromPaimon(InternalMap map, DataType mapType) {
         DataType keyType;
         DataType valueType;
         if (mapType instanceof MapType) {
@@ -232,7 +232,7 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
         }
 
         return new ArrayBasedMapData(
-                fromFlinkArrayElementType(map.keyArray(), keyType),
-                fromFlinkArrayElementType(map.valueArray(), valueType));
+                fromPaimonArrayElementType(map.keyArray(), keyType),
+                fromPaimonArrayElementType(map.valueArray(), valueType));
     }
 }

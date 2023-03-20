@@ -33,11 +33,11 @@ import org.apache.spark.sql.types.Decimal;
 import org.apache.spark.unsafe.types.CalendarInterval;
 import org.apache.spark.unsafe.types.UTF8String;
 
-import static org.apache.paimon.spark.SparkInternalRow.fromFlink;
+import static org.apache.paimon.spark.SparkInternalRow.fromPaimon;
 import static org.apache.paimon.utils.RowDataUtils.copyArray;
 import static org.apache.paimon.utils.TypeUtils.timestampPrecision;
 
-/** Spark {@link ArrayData} to wrap flink {@code ArrayData}. */
+/** Spark {@link ArrayData} to wrap Paimon {@link InternalArray}. */
 public class SparkArrayData extends ArrayData {
 
     private final DataType elementType;
@@ -67,7 +67,7 @@ public class SparkArrayData extends ArrayData {
     public Object[] array() {
         Object[] objects = new Object[numElements()];
         for (int i = 0; i < objects.length; i++) {
-            objects[i] = fromFlink(RowDataUtils.get(array, i, elementType), elementType);
+            objects[i] = fromPaimon(RowDataUtils.get(array, i, elementType), elementType);
         }
         return objects;
     }
@@ -117,7 +117,7 @@ public class SparkArrayData extends ArrayData {
     }
 
     private long getTimestampMicros(int ordinal) {
-        return fromFlink(array.getTimestamp(ordinal, timestampPrecision(elementType)));
+        return fromPaimon(array.getTimestamp(ordinal, timestampPrecision(elementType)));
     }
 
     @Override
@@ -132,12 +132,12 @@ public class SparkArrayData extends ArrayData {
 
     @Override
     public Decimal getDecimal(int ordinal, int precision, int scale) {
-        return fromFlink(array.getDecimal(ordinal, precision, scale));
+        return fromPaimon(array.getDecimal(ordinal, precision, scale));
     }
 
     @Override
     public UTF8String getUTF8String(int ordinal) {
-        return fromFlink(array.getString(ordinal));
+        return fromPaimon(array.getString(ordinal));
     }
 
     @Override
@@ -152,17 +152,17 @@ public class SparkArrayData extends ArrayData {
 
     @Override
     public InternalRow getStruct(int ordinal, int numFields) {
-        return fromFlink(array.getRow(ordinal, numFields), (RowType) elementType);
+        return fromPaimon(array.getRow(ordinal, numFields), (RowType) elementType);
     }
 
     @Override
     public ArrayData getArray(int ordinal) {
-        return fromFlink(array.getArray(ordinal), (ArrayType) elementType);
+        return fromPaimon(array.getArray(ordinal), (ArrayType) elementType);
     }
 
     @Override
     public MapData getMap(int ordinal) {
-        return fromFlink(array.getMap(ordinal), elementType);
+        return fromPaimon(array.getMap(ordinal), elementType);
     }
 
     @Override
