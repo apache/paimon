@@ -24,11 +24,11 @@ import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.testutils.FlinkAssertions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
@@ -813,7 +813,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                         Collections.singletonList("dt"),
                                         streamingReadOverwrite))
                 .satisfies(
-                        FlinkAssertions.anyCauseMatches(
+                        AssertionUtils.anyCauseMatches(
                                 RuntimeException.class,
                                 "Doesn't support streaming read the changes from overwrite when the primary keys are not defined."));
     }
