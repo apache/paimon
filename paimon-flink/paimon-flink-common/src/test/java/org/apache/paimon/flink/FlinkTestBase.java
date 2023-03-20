@@ -18,6 +18,9 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.flink.util.AbstractTestBase;
+
+import org.apache.commons.io.FileUtils;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -36,9 +39,6 @@ import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.table.types.utils.TypeConversions;
 import org.apache.flink.types.Row;
-
-import org.apache.commons.io.FileUtils;
-import org.apache.paimon.flink.util.AbstractTestBase;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 

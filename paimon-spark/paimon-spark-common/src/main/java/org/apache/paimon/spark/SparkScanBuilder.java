@@ -20,6 +20,7 @@ package org.apache.paimon.spark;
 
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.Table;
+
 import org.apache.spark.sql.connector.read.Scan;
 import org.apache.spark.sql.connector.read.ScanBuilder;
 import org.apache.spark.sql.connector.read.SupportsPushDownFilters;

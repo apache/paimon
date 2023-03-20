@@ -18,15 +18,15 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableRead;
+
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.table.data.RowData;
-
-import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.TableRead;
 
 import javax.annotation.Nullable;
 

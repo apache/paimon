@@ -18,16 +18,16 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.flink.api.connector.source.Boundedness;
-import org.apache.flink.api.connector.source.SplitEnumerator;
-import org.apache.flink.api.connector.source.SplitEnumeratorContext;
-
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.source.BatchDataTableScan;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.utils.SnapshotManager;
+
+import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.api.connector.source.SplitEnumerator;
+import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 
 import javax.annotation.Nullable;
 

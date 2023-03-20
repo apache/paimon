@@ -18,13 +18,14 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.hadoop.conf.Configuration;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.HadoopUtils;
+
+import org.apache.hadoop.conf.Configuration;
 
 import javax.annotation.Nullable;
 

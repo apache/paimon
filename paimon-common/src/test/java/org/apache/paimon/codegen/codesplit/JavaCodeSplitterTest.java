@@ -18,6 +18,7 @@
 package org.apache.paimon.codegen.codesplit;
 
 import org.apache.paimon.utils.FileIOUtils;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.File;

@@ -25,6 +25,7 @@ import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldSumAgg;
 import org.apache.paimon.types.DataTypes;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;

@@ -18,9 +18,6 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
-import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
-import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
 import org.apache.paimon.hive.HiveTypeUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.CharType;
@@ -28,6 +25,10 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.VarCharType;
+
+import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
+import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
 
 /** Factory to create {@link ObjectInspector}s according to the given {@link DataType}. */
 public class PaimonObjectInspectorFactory {

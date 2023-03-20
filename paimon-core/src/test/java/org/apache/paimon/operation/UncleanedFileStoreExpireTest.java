@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.fs.Path;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;

@@ -21,6 +21,7 @@ package org.apache.paimon.fs;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.local.LocalFileIO;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

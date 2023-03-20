@@ -21,6 +21,7 @@ package org.apache.paimon.format.parquet;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+
 import org.apache.parquet.io.InputFile;
 import org.apache.parquet.io.SeekableInputStream;
 

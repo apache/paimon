@@ -17,12 +17,13 @@
 
 package org.apache.paimon.codegen.codesplit;
 
+import org.apache.paimon.codegen.codesplit.BlockStatementGrouper.RewriteGroupedCode;
+import org.apache.paimon.codegen.codesplit.JavaParser.StatementContext;
+
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.TokenStreamRewriter;
 import org.antlr.v4.runtime.atn.PredictionMode;
-import org.apache.paimon.codegen.codesplit.BlockStatementGrouper.RewriteGroupedCode;
-import org.apache.paimon.codegen.codesplit.JavaParser.StatementContext;
 
 import java.util.LinkedHashSet;
 import java.util.List;

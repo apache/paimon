@@ -18,6 +18,18 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.FlinkCatalog;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.SchemaManager;
+
+import com.klarna.hiverunner.HiveShell;
+import com.klarna.hiverunner.annotations.HiveRunnerSetup;
+import com.klarna.hiverunner.annotations.HiveSQL;
+import com.klarna.hiverunner.config.HiveRunnerConfig;
 import org.apache.flink.connectors.hive.FlinkEmbeddedHiveRunner;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.EnvironmentSettings;
@@ -27,19 +39,7 @@ import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.ExceptionUtils;
-
-import com.klarna.hiverunner.HiveShell;
-import com.klarna.hiverunner.annotations.HiveRunnerSetup;
-import com.klarna.hiverunner.annotations.HiveSQL;
-import com.klarna.hiverunner.config.HiveRunnerConfig;
 import org.apache.hadoop.hive.ql.lockmgr.DbTxnManager;
-import org.apache.paimon.catalog.AbstractCatalog;
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogLock;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.FlinkCatalog;
-import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.schema.SchemaManager;
 import org.assertj.core.api.Assertions;
 import org.junit.After;
 import org.junit.Assert;

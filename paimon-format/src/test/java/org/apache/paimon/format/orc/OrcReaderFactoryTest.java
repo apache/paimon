@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format.orc;
 
-import org.apache.hadoop.conf.Configuration;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.fs.Path;
@@ -29,6 +28,8 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DecimalUtils;
+
+import org.apache.hadoop.conf.Configuration;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

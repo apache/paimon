@@ -18,9 +18,9 @@
 
 package org.apache.paimon.benchmark.metric;
 
-import org.apache.flink.api.common.time.Deadline;
-
 import org.apache.paimon.benchmark.metric.cpu.CpuMetricReceiver;
+
+import org.apache.flink.api.common.time.Deadline;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

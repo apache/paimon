@@ -18,6 +18,11 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.utils.TypeUtils;
+
 import org.apache.flink.table.data.conversion.DataStructureConverters;
 import org.apache.flink.table.expressions.CallExpression;
 import org.apache.flink.table.expressions.Expression;
@@ -32,11 +37,6 @@ import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.LogicalTypeFamily;
 import org.apache.flink.table.types.logical.RowType;
-
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.utils.TypeUtils;
 
 import java.util.ArrayList;
 import java.util.List;

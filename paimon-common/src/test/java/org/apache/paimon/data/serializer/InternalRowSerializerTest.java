@@ -27,6 +27,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Objects;

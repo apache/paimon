@@ -18,8 +18,6 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
-
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.LazyGenericRow;
@@ -51,6 +49,8 @@ import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SerializationUtils;
+
+import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 
 import javax.annotation.Nullable;
 

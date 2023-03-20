@@ -18,6 +18,9 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+
 import org.apache.flink.table.types.logical.ArrayType;
 import org.apache.flink.table.types.logical.BigIntType;
 import org.apache.flink.table.types.logical.BinaryType;
@@ -40,9 +43,6 @@ import org.apache.flink.table.types.logical.TinyIntType;
 import org.apache.flink.table.types.logical.VarBinaryType;
 import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.table.types.logical.utils.LogicalTypeDefaultVisitor;
-
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
 
 import java.util.ArrayList;
 import java.util.List;

@@ -18,13 +18,6 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.connector.source.Source;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
-
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -35,6 +28,13 @@ import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanne
 import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.system.BucketsTable;
 import org.apache.paimon.types.RowType;
+
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
 import javax.annotation.Nullable;
 

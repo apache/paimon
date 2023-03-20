@@ -18,10 +18,10 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.flink.configuration.ReadableConfig;
-
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.Options;
+
+import org.apache.flink.configuration.ReadableConfig;
 
 import java.util.Map;
 

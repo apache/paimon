@@ -36,6 +36,7 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowKind;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

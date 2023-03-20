@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.flink.api.java.tuple.Tuple2;
-
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
@@ -52,6 +50,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
+
+import org.apache.flink.api.java.tuple.Tuple2;
 
 import java.util.ArrayList;
 import java.util.Collections;

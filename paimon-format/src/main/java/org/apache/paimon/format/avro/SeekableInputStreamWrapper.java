@@ -18,8 +18,9 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.avro.file.SeekableInput;
 import org.apache.paimon.fs.SeekableInputStream;
+
+import org.apache.avro.file.SeekableInput;
 
 import java.io.Closeable;
 import java.io.IOException;

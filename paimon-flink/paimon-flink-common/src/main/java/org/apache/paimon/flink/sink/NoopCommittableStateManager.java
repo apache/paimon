@@ -17,10 +17,10 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.manifest.ManifestCommittable;
+
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
-
-import org.apache.paimon.manifest.ManifestCommittable;
 
 import java.util.List;
 

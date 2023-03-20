@@ -23,6 +23,7 @@ import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;

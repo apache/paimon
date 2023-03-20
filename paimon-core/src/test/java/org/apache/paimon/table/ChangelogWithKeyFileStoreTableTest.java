@@ -55,6 +55,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CompatibilityTestUtils;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

@@ -18,10 +18,11 @@
 
 package org.apache.paimon.hive.objectinspector;
 
+import org.apache.paimon.data.Timestamp;
+
 import org.apache.hadoop.hive.serde2.io.TimestampWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
-import org.apache.paimon.data.Timestamp;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 

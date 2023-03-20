@@ -20,7 +20,6 @@ package org.apache.paimon.benchmark.utils;
 
 import org.apache.flink.api.common.time.Deadline;
 import org.apache.flink.util.Preconditions;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

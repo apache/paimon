@@ -18,10 +18,10 @@
 
 package org.apache.paimon.benchmark.metric.cpu;
 
-import org.apache.flink.configuration.Configuration;
-
 import org.apache.paimon.benchmark.BenchmarkOptions;
 import org.apache.paimon.benchmark.utils.BenchmarkGlobalConfiguration;
+
+import org.apache.flink.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

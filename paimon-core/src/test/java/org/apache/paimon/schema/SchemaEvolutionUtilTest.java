@@ -34,6 +34,7 @@ import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Projection;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

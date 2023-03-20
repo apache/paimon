@@ -18,10 +18,11 @@
 
 package org.apache.paimon.format.orc;
 
+import org.apache.paimon.format.orc.writer.Vectorizer;
+
 import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
-import org.apache.paimon.format.orc.writer.Vectorizer;
 
 import java.io.IOException;
 import java.io.Serializable;

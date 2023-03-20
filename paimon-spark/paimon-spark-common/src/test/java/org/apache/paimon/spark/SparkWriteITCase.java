@@ -19,6 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.fs.Path;
+
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.AfterAll;

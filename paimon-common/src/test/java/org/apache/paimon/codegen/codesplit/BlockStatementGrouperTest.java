@@ -18,6 +18,7 @@
 package org.apache.paimon.codegen.codesplit;
 
 import org.apache.paimon.codegen.codesplit.BlockStatementGrouper.RewriteGroupedCode;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

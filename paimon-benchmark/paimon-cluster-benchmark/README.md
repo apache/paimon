@@ -31,7 +31,7 @@ This is the cluster benchmark module for Paimon. Inspired by [Nexmark](https://g
 
 ### Run Benchmark
 * Run `paimon-benchmark/bin/run_benchmark.sh <query> <sink>` to run `<query>` for `<sink>`. Currently `<query>` can be `q1` or `all`, and sink can only be `table_store`.
-* By default, each query writes for 30 minutes and then reads all records back from the sink to measure read throughput. 
+* By default, each query writes for 30 minutes and then reads all records back from the sink to measure read throughput.
 
 ## Queries
 

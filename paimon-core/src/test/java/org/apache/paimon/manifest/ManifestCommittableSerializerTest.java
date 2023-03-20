@@ -24,6 +24,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;

@@ -22,6 +22,7 @@ import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.mergetree.SortedRun;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

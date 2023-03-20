@@ -18,12 +18,12 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.table.sink.CommitMessageSerializer;
+
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
-
-import org.apache.paimon.table.sink.CommitMessageSerializer;
 
 /** Type information of {@link Committable}. */
 public class CommittableTypeInfo extends TypeInformation<Committable> {

@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
-
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

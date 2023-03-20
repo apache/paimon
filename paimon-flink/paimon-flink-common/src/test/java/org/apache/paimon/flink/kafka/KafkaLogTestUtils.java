@@ -18,6 +18,13 @@
 
 package org.apache.paimon.flink.kafka;
 
+import org.apache.paimon.CoreOptions.LogChangelogMode;
+import org.apache.paimon.CoreOptions.LogConsistency;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.flink.log.LogStoreTableFactory;
+import org.apache.paimon.table.sink.SinkRecord;
+import org.apache.paimon.types.RowKind;
+
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.api.Schema;
@@ -39,13 +46,6 @@ import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.utils.TypeConversions;
-
-import org.apache.paimon.CoreOptions.LogChangelogMode;
-import org.apache.paimon.CoreOptions.LogConsistency;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.flink.log.LogStoreTableFactory;
-import org.apache.paimon.table.sink.SinkRecord;
-import org.apache.paimon.types.RowKind;
 
 import java.util.Arrays;
 import java.util.Collections;

@@ -18,9 +18,9 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.flink.types.Row;
-
 import org.apache.paimon.flink.kafka.KafkaTableTestBase;
+
+import org.apache.flink.types.Row;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

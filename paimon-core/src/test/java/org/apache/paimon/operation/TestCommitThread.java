@@ -28,6 +28,7 @@ import org.apache.paimon.mergetree.MergeTreeWriter;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

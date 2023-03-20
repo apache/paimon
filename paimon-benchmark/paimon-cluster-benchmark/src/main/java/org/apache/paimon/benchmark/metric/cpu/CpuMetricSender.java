@@ -18,13 +18,13 @@
 
 package org.apache.paimon.benchmark.metric.cpu;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.runtime.net.ConnectionUtils;
-
 import org.apache.paimon.benchmark.BenchmarkOptions;
 import org.apache.paimon.benchmark.utils.AutoClosableProcess;
 import org.apache.paimon.benchmark.utils.BenchmarkGlobalConfiguration;
 import org.apache.paimon.benchmark.utils.BenchmarkUtils;
+
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.runtime.net.ConnectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

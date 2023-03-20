@@ -30,6 +30,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.FileStorePathFactory;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

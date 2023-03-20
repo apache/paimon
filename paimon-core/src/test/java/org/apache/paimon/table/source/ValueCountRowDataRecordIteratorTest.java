@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.ReusingTestData;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;

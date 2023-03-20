@@ -18,18 +18,18 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.flink.LogicalTypeConversion;
+import org.apache.paimon.flink.PredicateConverter;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.Table;
+
 import org.apache.flink.table.connector.source.ScanTableSource;
 import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsLimitPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.types.logical.RowType;
-
-import org.apache.paimon.flink.LogicalTypeConversion;
-import org.apache.paimon.flink.PredicateConverter;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.table.Table;
 
 import javax.annotation.Nullable;
 

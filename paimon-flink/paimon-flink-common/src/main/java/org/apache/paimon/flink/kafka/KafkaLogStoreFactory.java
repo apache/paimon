@@ -18,6 +18,10 @@
 
 package org.apache.paimon.flink.kafka;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.log.LogStoreTableFactory;
+import org.apache.paimon.options.Options;
+
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.configuration.ConfigOption;
@@ -31,10 +35,6 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.utils.DataTypeUtils;
-
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.flink.log.LogStoreTableFactory;
-import org.apache.paimon.options.Options;
 
 import javax.annotation.Nullable;
 

@@ -18,6 +18,23 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.sink.FileStoreSink;
+import org.apache.paimon.flink.sink.FlinkSinkBuilder;
+import org.apache.paimon.flink.source.ContinuousFileStoreSource;
+import org.apache.paimon.flink.source.FlinkSourceBuilder;
+import org.apache.paimon.flink.source.StaticFileStoreSource;
+import org.apache.paimon.flink.util.AbstractTestBase;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.utils.BlockingIterator;
+import org.apache.paimon.utils.FailingFileIO;
+
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
@@ -41,23 +58,6 @@ import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
-
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.flink.sink.FileStoreSink;
-import org.apache.paimon.flink.sink.FlinkSinkBuilder;
-import org.apache.paimon.flink.source.ContinuousFileStoreSource;
-import org.apache.paimon.flink.source.FlinkSourceBuilder;
-import org.apache.paimon.flink.source.StaticFileStoreSource;
-import org.apache.paimon.flink.util.AbstractTestBase;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.utils.BlockingIterator;
-import org.apache.paimon.utils.FailingFileIO;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 
