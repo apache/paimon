@@ -38,8 +38,6 @@ import static org.apache.paimon.types.DataTypeRoot.ROW;
 /**
  * {@link Projection} represents a list of (possibly nested) indexes that can be used to project
  * data types. A row projection includes both reducing the accessible fields and reordering them.
- *
- * <p>NOTE: Copied from Flink.
  */
 public abstract class Projection {
 

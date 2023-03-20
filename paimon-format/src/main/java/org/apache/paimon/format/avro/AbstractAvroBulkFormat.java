@@ -39,11 +39,7 @@ import java.io.IOException;
 import java.util.Iterator;
 import java.util.function.Function;
 
-/**
- * Provides a {@link FormatReaderFactory} for Avro records.
- *
- * <p>NOTE: Copied from Flink.
- */
+/** Provides a {@link FormatReaderFactory} for Avro records. */
 public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
 
     private static final long serialVersionUID = 1L;

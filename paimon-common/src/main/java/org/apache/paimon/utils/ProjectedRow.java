@@ -36,8 +36,6 @@ import java.util.Arrays;
  * <p>Projection includes both reducing the accessible fields and reordering them.
  *
  * <p>Note: This class supports only top-level projections, not nested projections.
- *
- * <p>NOTE: Copied from Flink.
  */
 public class ProjectedRow implements InternalRow {
 

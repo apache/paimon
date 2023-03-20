@@ -71,8 +71,6 @@ public class DataInputDeserializer implements DataInputView, java.io.Serializabl
             this.position = buffer.arrayOffset() + buffer.position();
             this.end = this.position + buffer.remaining();
         } else if (buffer.isDirect() || buffer.isReadOnly()) {
-            // TODO: FLINK-8585 handle readonly and other non array based buffers more efficiently
-            // without data copy
             this.buffer = new byte[buffer.remaining()];
             this.position = 0;
             this.end = this.buffer.length;

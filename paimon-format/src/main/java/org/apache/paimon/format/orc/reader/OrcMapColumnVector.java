@@ -25,25 +25,25 @@ import org.apache.paimon.types.MapType;
 
 import org.apache.hadoop.hive.ql.exec.vector.MapColumnVector;
 
-/** This column vector is used to adapt hive's MapColumnVector to Flink's MapColumnVector. */
+/** This column vector is used to adapt hive's MapColumnVector to Paimon's MapColumnVector. */
 public class OrcMapColumnVector extends AbstractOrcColumnVector
         implements org.apache.paimon.data.columnar.MapColumnVector {
 
     private final MapColumnVector hiveVector;
-    private final ColumnVector keyFlinkVector;
-    private final ColumnVector valueFlinkVector;
+    private final ColumnVector keyPaimonVector;
+    private final ColumnVector valuePaimonVector;
 
     public OrcMapColumnVector(MapColumnVector hiveVector, MapType type) {
         super(hiveVector);
         this.hiveVector = hiveVector;
-        this.keyFlinkVector = createFlinkVector(hiveVector.keys, type.getKeyType());
-        this.valueFlinkVector = createFlinkVector(hiveVector.values, type.getValueType());
+        this.keyPaimonVector = createPaimonVector(hiveVector.keys, type.getKeyType());
+        this.valuePaimonVector = createPaimonVector(hiveVector.values, type.getValueType());
     }
 
     @Override
     public InternalMap getMap(int i) {
         long offset = hiveVector.offsets[i];
         long length = hiveVector.lengths[i];
-        return new ColumnarMap(keyFlinkVector, valueFlinkVector, (int) offset, (int) length);
+        return new ColumnarMap(keyPaimonVector, valuePaimonVector, (int) offset, (int) length);
     }
 }

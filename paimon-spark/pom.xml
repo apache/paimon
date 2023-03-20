@@ -46,8 +46,6 @@ under the License.
     </modules>
 
     <dependencies>
-        <!-- Flink All dependencies -->
-
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-shade</artifactId>

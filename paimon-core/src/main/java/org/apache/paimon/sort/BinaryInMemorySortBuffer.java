@@ -36,16 +36,11 @@ import java.util.ArrayList;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * In memory sort buffer for binary row. The main code is copied from Flink {@code
- * BinaryInMemorySortBuffer} instead of extended because it's a final class.
- *
- * <p>The main differences in the new sort buffer are:
+ * In memory sort buffer for binary row.
  *
  * <ul>
- *   <li>1. Add clear method to clean all memory.
- *   <li>2. Add tryInitialized() method to initialize memory before write and read in buffer, while
- *       the old buffer will do it in the constructor and reset().
- *   <li>3. Remove reset() and etc. methods which are not used in flink paimon.
+ *   <li>{@link #clear}: Clean all memory.
+ *   <li>{@link #tryInitialize}: initialize memory before write and read in buffer.
  * </ul>
  */
 public class BinaryInMemorySortBuffer extends BinaryIndexedSortable implements SortBuffer {
@@ -127,11 +122,6 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable implements S
         }
     }
 
-    /**
-     * We add clear() method here instead of reset() to release all memory segments. The reset()
-     * method in flink sort buffer will clear memory and grab two buffers for
-     * currentSortIndexSegment and recordCollector.
-     */
     @Override
     public void clear() {
         if (this.isInitialized) {

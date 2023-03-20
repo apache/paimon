@@ -21,15 +21,16 @@ package org.apache.paimon.disk;
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.BlockCompressor;
 import org.apache.paimon.data.AbstractPagedOutputView;
+import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.memory.Buffer;
 import org.apache.paimon.memory.MemorySegment;
 
 import java.io.IOException;
 
 /**
- * A {@link org.apache.flink.core.memory.DataOutputView} that is backed by a {@link FileIOChannel},
- * making it effectively a data output stream. The view will compress its data before writing it in
- * blocks to the underlying channel.
+ * A {@link DataOutputView} that is backed by a {@link FileIOChannel}, making it effectively a data
+ * output stream. The view will compress its data before writing it in blocks to the underlying
+ * channel.
  */
 public final class ChannelWriterOutputView extends AbstractPagedOutputView {
 

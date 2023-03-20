@@ -24,7 +24,7 @@ import org.apache.hadoop.hive.ql.exec.vector.ColumnVector;
 import org.apache.hadoop.hive.ql.exec.vector.TimestampColumnVector;
 
 /**
- * This column vector is used to adapt hive's TimestampColumnVector to Flink's
+ * This column vector is used to adapt hive's TimestampColumnVector to Paimon's
  * TimestampColumnVector.
  */
 public class OrcTimestampColumnVector extends AbstractOrcColumnVector

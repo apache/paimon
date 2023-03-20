@@ -151,7 +151,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             }
         }
 
-        return Types.buildMessage().addFields(types).named("flink-parquet");
+        return Types.buildMessage().addFields(types).named("paimon-parquet");
     }
 
     private void checkSchema(MessageType fileSchema, MessageType requestedSchema)

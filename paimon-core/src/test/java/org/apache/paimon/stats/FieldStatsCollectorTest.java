@@ -43,14 +43,14 @@ public class FieldStatsCollectorTest {
 
         collector.collect(
                 GenericRow.of(
-                        1, BinaryString.fromString("Flink"), new GenericArray(new int[] {1, 10})));
+                        1, BinaryString.fromString("Paimon"), new GenericArray(new int[] {1, 10})));
         assertThat(collector.extract())
                 .isEqualTo(
                         new FieldStats[] {
                             new FieldStats(1, 1, 0L),
                             new FieldStats(
-                                    BinaryString.fromString("Flink"),
-                                    BinaryString.fromString("Flink"),
+                                    BinaryString.fromString("Paimon"),
+                                    BinaryString.fromString("Paimon"),
                                     0L),
                             new FieldStats(null, null, 0L)
                         });
@@ -61,8 +61,8 @@ public class FieldStatsCollectorTest {
                         new FieldStats[] {
                             new FieldStats(1, 3, 0L),
                             new FieldStats(
-                                    BinaryString.fromString("Flink"),
-                                    BinaryString.fromString("Flink"),
+                                    BinaryString.fromString("Paimon"),
+                                    BinaryString.fromString("Paimon"),
                                     1L),
                             new FieldStats(null, null, 0L)
                         });
@@ -78,7 +78,7 @@ public class FieldStatsCollectorTest {
                             new FieldStats(1, 3, 1L),
                             new FieldStats(
                                     BinaryString.fromString("Apache"),
-                                    BinaryString.fromString("Flink"),
+                                    BinaryString.fromString("Paimon"),
                                     1L),
                             new FieldStats(null, null, 0L)
                         });
@@ -90,7 +90,7 @@ public class FieldStatsCollectorTest {
                             new FieldStats(1, 3, 1L),
                             new FieldStats(
                                     BinaryString.fromString("Apache"),
-                                    BinaryString.fromString("Flink"),
+                                    BinaryString.fromString("Paimon"),
                                     1L),
                             new FieldStats(null, null, 1L)
                         });

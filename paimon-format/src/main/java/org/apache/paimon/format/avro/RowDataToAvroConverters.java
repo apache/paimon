@@ -50,8 +50,8 @@ public class RowDataToAvroConverters {
     // --------------------------------------------------------------------------------
 
     /**
-     * Runtime converter that converts objects of Flink Table & SQL internal data structures to
-     * corresponding Avro data structures.
+     * Runtime converter that converts objects of Paimon internal data structures to corresponding
+     * Avro data structures.
      */
     @FunctionalInterface
     public interface RowDataToAvroConverter extends Serializable {
@@ -67,7 +67,7 @@ public class RowDataToAvroConverters {
 
     /**
      * Creates a runtime converter according to the given logical type that converts objects of
-     * Flink Table & SQL internal data structures to corresponding Avro data structures.
+     * Paimon internal data structures to corresponding Avro data structures.
      */
     public static RowDataToAvroConverter createConverter(DataType type) {
         final RowDataToAvroConverter converter;

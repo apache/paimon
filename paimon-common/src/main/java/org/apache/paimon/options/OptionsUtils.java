@@ -20,12 +20,8 @@ package org.apache.paimon.options;
 
 import org.apache.paimon.utils.TimeUtils;
 
-import javax.annotation.Nonnull;
-
-import java.io.File;
 import java.time.Duration;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -35,53 +31,6 @@ import static org.apache.paimon.options.StructuredOptionsSplitter.escapeWithSing
 
 /** Utility class for {@link Options} related helper functions. */
 public class OptionsUtils {
-
-    private static final String[] EMPTY = new String[0];
-
-    /**
-     * Parses a string as a map of strings. The expected format of the map is:
-     *
-     * <pre>
-     * key1:value1,key2:value2
-     * </pre>
-     *
-     * <p>Parts of the string can be escaped by wrapping with single or double quotes.
-     *
-     * @param stringSerializedMap a string to parse
-     * @return parsed map
-     */
-    public static Map<String, String> parseMap(String stringSerializedMap) {
-        return StructuredOptionsSplitter.splitEscaped(stringSerializedMap, ',').stream()
-                .map(p -> StructuredOptionsSplitter.splitEscaped(p, ':'))
-                .collect(
-                        Collectors.toMap(
-                                arr -> arr.get(0), // key name
-                                arr -> arr.get(1) // value
-                                ));
-    }
-
-    @Nonnull
-    public static String[] splitPaths(@Nonnull String separatedPaths) {
-        return separatedPaths.length() > 0
-                ? separatedPaths.split(",|" + File.pathSeparator)
-                : EMPTY;
-    }
-
-    /**
-     * Extract and parse Flink configuration properties with a given name prefix and return the
-     * result as a Map.
-     */
-    public static Map<String, String> getPrefixedKeyValuePairs(
-            String prefix, Options configuration) {
-        Map<String, String> result = new HashMap<>();
-        for (Map.Entry<String, String> entry : configuration.toMap().entrySet()) {
-            if (entry.getKey().startsWith(prefix) && entry.getKey().length() > prefix.length()) {
-                String key = entry.getKey().substring(prefix.length());
-                result.put(key, entry.getValue());
-            }
-        }
-        return result;
-    }
 
     // --------------------------------------------------------------------------------------------
     //  Type conversion

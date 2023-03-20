@@ -61,7 +61,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.spark.SparkTypeUtils.toFlinkType;
+import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 
 /** Spark {@link TableCatalog} for paimon. */
 public class SparkCatalog implements TableCatalog, SupportsNamespaces {
@@ -269,7 +269,7 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
             SchemaChange.Move move = getMove(add.position(), add.fieldNames());
             return SchemaChange.addColumn(
                     add.fieldNames()[0],
-                    toFlinkType(add.dataType()).copy(add.isNullable()),
+                    toPaimonType(add.dataType()).copy(add.isNullable()),
                     add.comment(),
                     move);
         } else if (change instanceof RenameColumn) {
@@ -284,7 +284,7 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
             UpdateColumnType update = (UpdateColumnType) change;
             validateAlterNestedField(update.fieldNames());
             return SchemaChange.updateColumnType(
-                    update.fieldNames()[0], toFlinkType(update.newDataType()));
+                    update.fieldNames()[0], toPaimonType(update.newDataType()));
         } else if (change instanceof UpdateColumnNullability) {
             UpdateColumnNullability update = (UpdateColumnNullability) change;
             return SchemaChange.updateColumnNullability(update.fieldNames(), update.nullable());
@@ -334,7 +334,7 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
                                 .map(String::trim)
                                 .collect(Collectors.toList());
         return new Schema(
-                ((RowType) toFlinkType(schema)).getFields(),
+                ((RowType) toPaimonType(schema)).getFields(),
                 Arrays.stream(partitions)
                         .map(partition -> partition.references()[0].describe())
                         .collect(Collectors.toList()),

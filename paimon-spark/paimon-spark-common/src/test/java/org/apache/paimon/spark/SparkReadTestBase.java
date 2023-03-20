@@ -79,7 +79,7 @@ public abstract class SparkReadTestBase {
     @BeforeEach
     public void beforeEach() throws Exception {
 
-        // flink sink
+        // Paimon sink
         tablePath1 = new Path(warehousePath, "default.db/t1");
         createTable("t1");
         writeTable(

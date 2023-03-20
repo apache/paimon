@@ -93,7 +93,7 @@ public class LocalFileIO implements FileIO {
                     "File "
                             + file
                             + " does not exist or the user running "
-                            + "Flink ('"
+                            + "Paimon ('"
                             + System.getProperty("user.name")
                             + "') has insufficient permissions to access it.");
         }

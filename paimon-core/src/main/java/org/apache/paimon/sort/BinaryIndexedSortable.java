@@ -33,7 +33,6 @@ import java.util.ArrayList;
 
 /**
  * An abstract sortable, provide basic compare and swap. Support writing of index and normalizedKey.
- * Copied from Flink.
  */
 public abstract class BinaryIndexedSortable implements IndexedSortable {
 

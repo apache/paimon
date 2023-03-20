@@ -29,7 +29,7 @@ import java.util.Objects;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Utilities to compile a generated code to a Class. Copied from Flink. */
+/** Utilities to compile a generated code to a Class. */
 public final class CompileUtils {
 
     // used for logging the generated codes to a same place

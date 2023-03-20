@@ -182,11 +182,10 @@ class SortCodeGenerator(val input: RowType, val sortSpec: SortSpec) {
   def generatePutNormalizedKeys(numKeyBytes: Int): mutable.ArrayBuffer[String] = {
     /* Example generated code, for int:
     if (record.isNullAt(0)) {
-      org.apache.flink.table.data.binary.BinaryRowDataUtil.minNormalizedKey(target, offset+0, 5);
+      SortUtil.minNormalizedKey(target, offset+0, 5);
     } else {
       target.put(offset+0, (byte) 1);
-      org.apache.flink.table.data.binary.BinaryRowDataUtil.putIntNormalizedKey(
-        record.getInt(0), target, offset+1, 4);
+      SortUtil.putIntNormalizedKey(record.getInt(0), target, offset+1, 4);
     }
      */
     val putKeys = new mutable.ArrayBuffer[String]
