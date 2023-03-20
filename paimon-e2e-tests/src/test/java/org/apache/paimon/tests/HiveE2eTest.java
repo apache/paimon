@@ -35,7 +35,7 @@ import java.util.UUID;
 @DisabledIfSystemProperty(named = "test.flink.version", matches = "1.14.*")
 public class HiveE2eTest extends E2eReaderTestBase {
 
-    private static final String TABLE_STORE_HIVE_CONNECTOR_JAR_NAME = "paimon-hive-connector.jar";
+    private static final String PAIMON_HIVE_CONNECTOR_JAR_NAME = "paimon-hive-connector.jar";
 
     public HiveE2eTest() {
         super(false, true, false);
@@ -50,13 +50,13 @@ public class HiveE2eTest extends E2eReaderTestBase {
                         "/bin/bash",
                         "-c",
                         "mkdir /opt/hive/auxlib && cp /jars/"
-                                + TABLE_STORE_HIVE_CONNECTOR_JAR_NAME
+                                + PAIMON_HIVE_CONNECTOR_JAR_NAME
                                 + " /opt/hive/auxlib");
     }
 
     @Test
     public void testReadExternalTable() throws Exception {
-        final String table = "table_store_pk";
+        final String table = "paimon_pk";
         String paimonPkPath = HDFS_ROOT + "/" + UUID.randomUUID() + ".store";
         String paimonPkDdl =
                 String.format(
@@ -69,7 +69,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
                                 + "  'bucket' = '2'\n"
                                 + ");",
                         table);
-        runSql(createInsertSql(table), createCatalogSql("table_store", paimonPkPath), paimonPkDdl);
+        runSql(createInsertSql(table), createCatalogSql("paimon", paimonPkPath), paimonPkDdl);
 
         String externalTablePkDdl =
                 String.format(

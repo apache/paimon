@@ -59,7 +59,7 @@ public class Benchmark {
     public static void main(String[] args) throws Exception {
         if (args.length != 6) {
             throw new RuntimeException(
-                    "Usage: --location /path/to/benchmark --queries q1,q3 --sinks table_store,hudi_merge_on_read");
+                    "Usage: --location /path/to/benchmark --queries q1,q3 --sinks paimon,hudi_merge_on_read");
         }
 
         Options options = getOptions();

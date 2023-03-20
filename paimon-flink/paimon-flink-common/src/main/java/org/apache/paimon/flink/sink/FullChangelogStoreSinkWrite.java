@@ -97,8 +97,7 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
                 context.getOperatorStateStore()
                         .getListState(
                                 new ListStateDescriptor<>(
-                                        "table_store_written_buckets",
-                                        writtenBucketStateSerializer));
+                                        "paimon_written_buckets", writtenBucketStateSerializer));
         writtenBuckets = new TreeMap<>();
         writtenBucketState
                 .get()

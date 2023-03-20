@@ -62,7 +62,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
     @BeforeEach
     public void before() throws IOException {
         tEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
-        String catalog = "TABLE_STORE";
+        String catalog = "PAIMON";
         path = getTempDirPath();
         tEnv.executeSql(
                 String.format(
