@@ -33,7 +33,7 @@ import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Spark {@link TableCatalog} for table store. */
+/** Spark {@link TableCatalog} for paimon. */
 public class SparkCatalog extends SparkCatalogBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);

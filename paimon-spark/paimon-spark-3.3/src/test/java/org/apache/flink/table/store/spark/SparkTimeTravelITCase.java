@@ -173,4 +173,15 @@ public class SparkTimeTravelITCase extends SparkTestBase {
                                 IllegalArgumentException.class,
                                 "Version for time travel should be a LONG value representing snapshot id but was '1.5'."));
     }
+
+    @Test
+    public void testUnsupportedSystemTableTimeTravel() {
+        spark.sql("CREATE TABLE t (k INT, v STRING)");
+
+        assertThatThrownBy(() -> spark.sql("SELECT * FROM `t$snapshots` VERSION AS OF 1"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Only FileStoreTable supports time travel but given table type is 'org.apache.paimon.table.system.SnapshotsTable'"));
+    }
 }
