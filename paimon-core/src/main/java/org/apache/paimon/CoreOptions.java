@@ -21,7 +21,7 @@ package org.apache.paimon;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FileFormatFactory;
+import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.MemorySize;
@@ -585,8 +585,7 @@ public class CoreOptions implements Serializable {
         int readBatchSize = options.get(READ_BATCH_SIZE);
         return FileFormat.fromIdentifier(
                 formatIdentifier,
-                new FileFormatFactory.FormatContext(
-                        options.removePrefix(formatIdentifier + "."), readBatchSize));
+                new FormatContext(options.removePrefix(formatIdentifier + "."), readBatchSize));
     }
 
     public Map<Integer, String> fileCompressionPerLevel() {
