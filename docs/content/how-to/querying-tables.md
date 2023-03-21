@@ -161,20 +161,20 @@ SELECT * FROM paimon_table /*+ OPTIONS('scan.bounded.watermark'='...') */;
 
 ## Time Travel
 
-Currently, Table Store supports time travel for Flink and Spark 3 (requires Spark 3.3+).
+Currently, Paimon supports time travel for Flink and Spark 3 (requires Spark 3.3+).
 
 {{< tabs "time-travel-example" >}}
 
 {{< tab "Flink" >}}
-
-you can use [dynamic table options](https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/sql/queries/hints/#dynamic-table-options) to specify scan mode and from where to start:
+****
+you can use [dynamic table options](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql/queries/hints/#dynamic-table-options) to specify scan mode and from where to start:
 
 ```sql
 -- travel to snapshot with id 1L
-SELECT * FROM t /*+ OPTIONS('scan.mode' = 'from-snapshot', 'scan.snapshot-id' = '1') */;
+SELECT * FROM t /*+ OPTIONS('scan.snapshot-id' = '1') */;
 
 -- travel to specified timestamp with a long value in milliseconds
-SELECT * FROM t /*+ OPTIONS('scan.mode' = 'from-timestamp', 'scan.timestamp-millis' = '1678883047356') */;
+SELECT * FROM t /*+ OPTIONS('scan.timestamp-millis' = '1678883047356') */;
 ```
 {{< /tab >}}
 

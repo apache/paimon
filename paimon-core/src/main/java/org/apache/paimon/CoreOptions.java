@@ -966,6 +966,10 @@ public class CoreOptions implements Serializable {
         if (options.contains(SCAN_TIMESTAMP_MILLIS) && !options.contains(SCAN_MODE)) {
             options.set(SCAN_MODE, StartupMode.FROM_TIMESTAMP);
         }
+
+        if (options.contains(SCAN_SNAPSHOT_ID) && !options.contains(SCAN_MODE)) {
+            options.set(SCAN_MODE, StartupMode.FROM_SNAPSHOT);
+        }
     }
 
     public static List<ConfigOption<?>> getOptions() {

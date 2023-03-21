@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -37,10 +38,8 @@ import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.StreamDataTableScanImpl;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
+import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.Objects;
@@ -53,8 +52,6 @@ import static org.apache.paimon.CoreOptions.PATH;
 public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
-
-    private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreTable.class);
 
     protected final FileIO fileIO;
     protected final Path path;
@@ -190,29 +187,27 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private Optional<TableSchema> tryTimeTravel(Options options) {
         CoreOptions coreOptions = new CoreOptions(options);
+        Long snapshotId;
 
-        if (coreOptions.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT) {
-            long snapshotId = coreOptions.scanSnapshotId();
-            if (snapshotManager().snapshotExists(snapshotId)) {
-                long schemaId = snapshotManager().snapshot(snapshotId).schemaId();
-                LOG.info("Time traveling to snapshot {}, schemaId is {}.", snapshotId, schemaId);
-                return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
-            }
+        switch (coreOptions.startupMode()) {
+            case FROM_SNAPSHOT:
+                snapshotId = coreOptions.scanSnapshotId();
+                if (snapshotManager().snapshotExists(snapshotId)) {
+                    long schemaId = snapshotManager().snapshot(snapshotId).schemaId();
+                    return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
+                }
+                return Optional.empty();
+            case FROM_TIMESTAMP:
+                Snapshot snapshot =
+                        StaticFromTimestampStartingScanner.getSnapshot(
+                                snapshotManager(), coreOptions.scanTimestampMills());
+                if (snapshot != null) {
+                    long schemaId = snapshot.schemaId();
+                    return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
+                }
+                return Optional.empty();
+            default:
+                return Optional.empty();
         }
-
-        if (coreOptions.startupMode() == CoreOptions.StartupMode.FROM_TIMESTAMP) {
-            long timestamp = coreOptions.scanTimestampMills();
-            Long snapshotId = snapshotManager().earlierOrEqualTimeMills(timestamp);
-            if (snapshotId != null) {
-                long schemaId = snapshotManager().snapshot(snapshotId).schemaId();
-                LOG.info(
-                        "Time traveling to timestamp {} milliseconds, schemaId is {}.",
-                        timestamp,
-                        schemaId);
-                return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
-            }
-        }
-
-        return Optional.empty();
     }
 }

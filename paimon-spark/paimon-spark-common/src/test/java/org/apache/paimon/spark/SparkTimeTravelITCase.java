@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.table.store.spark;
+package org.apache.paimon.spark;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -29,21 +29,20 @@ import java.time.LocalDateTime;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** IT case for Spark time travel syntax (VERSION AS OF, TIMESTAMP AS OF). */
-public class SparkTimeTravelITCase extends SparkTestBase {
-
+/** IT case for Spark 3.3+ time travel syntax (VERSION AS OF, TIMESTAMP AS OF). */
+public class SparkTimeTravelITCase extends SparkReadTestBase {
     @Test
     public void testTravelToVersion() throws Exception {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
-        writeData(
+        writeTable(
                 "t",
                 GenericRow.of(1, BinaryString.fromString("Hello")),
                 GenericRow.of(2, BinaryString.fromString("Paimon")));
 
         // snapshot 2
-        writeData(
+        writeTable(
                 "t",
                 GenericRow.of(3, BinaryString.fromString("Test")),
                 GenericRow.of(4, BinaryString.fromString("Case")));
@@ -61,7 +60,7 @@ public class SparkTimeTravelITCase extends SparkTestBase {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
-        writeData(
+        writeTable(
                 "t",
                 GenericRow.of(1, BinaryString.fromString("Hello")),
                 GenericRow.of(2, BinaryString.fromString("Paimon")));
@@ -70,7 +69,7 @@ public class SparkTimeTravelITCase extends SparkTestBase {
         // Thread.sleep(1000);
 
         // snapshot 2
-        writeData(
+        writeTable(
                 "t",
                 GenericRow.of(3, BinaryString.fromString("Test")),
                 GenericRow.of(4, BinaryString.fromString("Case")));
@@ -91,7 +90,7 @@ public class SparkTimeTravelITCase extends SparkTestBase {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
-        writeData(
+        writeTable(
                 "t",
                 GenericRow.of(1, BinaryString.fromString("Hello")),
                 GenericRow.of(2, BinaryString.fromString("Paimon")));
@@ -100,7 +99,7 @@ public class SparkTimeTravelITCase extends SparkTestBase {
         long anchor = System.currentTimeMillis() / 1000; // convert to seconds
 
         // snapshot 2
-        writeData(
+        writeTable(
                 "t",
                 GenericRow.of(3, BinaryString.fromString("Test")),
                 GenericRow.of(4, BinaryString.fromString("Case")));
@@ -122,7 +121,7 @@ public class SparkTimeTravelITCase extends SparkTestBase {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
-        writeData(
+        writeTable(
                 "t",
                 GenericRow.of(1, BinaryString.fromString("Hello")),
                 GenericRow.of(2, BinaryString.fromString("Paimon")));
@@ -131,7 +130,7 @@ public class SparkTimeTravelITCase extends SparkTestBase {
         spark.sql("ALTER TABLE t ADD COLUMN dt STRING");
 
         // snapshot 2
-        writeData(
+        writeTable(
                 "t",
                 GenericRow.of(3, BinaryString.fromString("Test"), BinaryString.fromString("0401")),
                 GenericRow.of(4, BinaryString.fromString("Case"), BinaryString.fromString("0402")));
@@ -182,6 +181,6 @@ public class SparkTimeTravelITCase extends SparkTestBase {
                 .satisfies(
                         AssertionUtils.anyCauseMatches(
                                 UnsupportedOperationException.class,
-                                "Only FileStoreTable supports time travel but given table type is 'org.apache.paimon.table.system.SnapshotsTable'"));
+                                "Only DataTable supports time travel but given table type is 'org.apache.paimon.table.system.SnapshotsTable'"));
     }
 }
