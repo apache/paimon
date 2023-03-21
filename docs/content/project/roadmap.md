@@ -52,4 +52,4 @@ If you have other requirements, please contact us.
 - Spark Writer supports `INSERT OVERWRITE`
 - Spark Time Traveling
 - Presto Reader
-- Apache Doris Reader
+- Doris Reader
