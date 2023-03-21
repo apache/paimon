@@ -38,6 +38,7 @@ If you have other requirements, please contact us.
 - Enhance Flink Lookup Join from True Lookup
 - Provide stable Java Programing API
 - Savepoint support
+- More Metrics, such as the busyness of compaction thread
 - Multi table consistency for real-time materialized views
 
 ### Ingestion
