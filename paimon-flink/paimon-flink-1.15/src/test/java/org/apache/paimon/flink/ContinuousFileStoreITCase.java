@@ -31,7 +31,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.TimeoutException;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.STREAMING_READ_ATOMIC;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -115,7 +114,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         testProjection("T2");
     }
 
-    private void testSimple(String table) throws TimeoutException {
+    private void testSimple(String table) throws Exception {
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(streamSqlIter("SELECT * FROM %s", table));
 
@@ -125,9 +124,10 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
         batchSql("INSERT INTO %s VALUES ('7', '8', '9')", table);
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("7", "8", "9"));
+        iterator.close();
     }
 
-    private void testProjection(String table) throws TimeoutException {
+    private void testProjection(String table) throws Exception {
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(streamSqlIter("SELECT b, c FROM %s", table));
 
@@ -137,10 +137,11 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
         batchSql("INSERT INTO %s VALUES ('7', '8', '9')", table);
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("8", "9"));
+        iterator.close();
     }
 
     @Test
-    public void testContinuousLatestChangelogFileTrue() throws TimeoutException {
+    public void testContinuousLatestChangelogFileTrue() throws Exception {
         changelogFile = true;
         batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
 
@@ -151,10 +152,11 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         batchSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')");
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of("7", "8", "9"), Row.of("10", "11", "12"));
+        iterator.close();
     }
 
     @Test
-    public void testContinuousLatestChangelogFileFalse() throws TimeoutException {
+    public void testContinuousLatestChangelogFileFalse() throws Exception {
         changelogFile = false;
         batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
 
@@ -165,6 +167,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         batchSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')");
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of("7", "8", "9"), Row.of("10", "11", "12"));
+        iterator.close();
     }
 
     @Test
@@ -424,7 +427,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIgnoreOverwriteChangelogTrue() throws TimeoutException {
+    public void testIgnoreOverwriteChangelogTrue() throws Exception {
         changelogFile = true;
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(streamSqlIter("SELECT * FROM T1"));
@@ -438,10 +441,11 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
         batchSql("INSERT INTO T1 VALUES ('9', '10', '11')");
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("9", "10", "11"));
+        iterator.close();
     }
 
     @Test
-    public void testIgnoreOverwriteChangelogFalse() throws TimeoutException {
+    public void testIgnoreOverwriteChangelogFalse() throws Exception {
         changelogFile = false;
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(streamSqlIter("SELECT * FROM T1"));
@@ -455,6 +459,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
         batchSql("INSERT INTO T1 VALUES ('9', '10', '11')");
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("9", "10", "11"));
+        iterator.close();
     }
 
     @Test
