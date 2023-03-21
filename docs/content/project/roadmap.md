@@ -47,7 +47,7 @@ If you have other requirements, please contact us.
 
 ### Compute Engines
 - Flink DELETE/UPDATE support
-- More management DMLs to Flink/Spark `CALL` procedures. 
+- More management via Flink/Spark `CALL` procedures. 
 - Hive Writer
 - Spark Writer supports `INSERT OVERWRITE`
 - Spark Time Traveling
