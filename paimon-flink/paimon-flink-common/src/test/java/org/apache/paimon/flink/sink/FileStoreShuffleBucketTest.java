@@ -27,6 +27,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.SinkRecord;
+import org.apache.paimon.table.sink.TableWriteImpl;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.runtime.state.StateSnapshotContext;
@@ -45,6 +46,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -159,5 +161,9 @@ public class FileStoreShuffleBucketTest extends CatalogITCaseBase {
 
         @Override
         public void close() throws Exception {}
+
+        @Override
+        public void replace(Function<String, TableWriteImpl<?>> newWriteProvider)
+                throws Exception {}
     }
 }

@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
+import org.apache.paimon.table.sink.TableWriteImpl;
 
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
@@ -31,9 +32,10 @@ import org.apache.flink.runtime.state.StateSnapshotContext;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.List;
+import java.util.function.Function;
 
-/** Helper class of {@link StoreWriteOperator} for different types of paimon sinks. */
-interface StoreSinkWrite {
+/** Helper class of {@link AbstractStoreWriteOperator} for different types of paimon sinks. */
+public interface StoreSinkWrite {
 
     SinkRecord write(InternalRow rowData) throws Exception;
 
@@ -49,6 +51,19 @@ interface StoreSinkWrite {
 
     void close() throws Exception;
 
+    /**
+     * Replace the internal {@link TableWriteImpl} with the one provided by {@code
+     * newWriteProvider}. The state of the old {@link TableWriteImpl} will also be transferred to
+     * the new {@link TableWriteImpl} by {@link TableWriteImpl#checkpoint()} and {@link
+     * TableWriteImpl#restore(List)}.
+     *
+     * <p>Currently, this method is only used by CDC sinks because they need to deal with schema
+     * changes. {@link TableWriteImpl} with the new schema will be provided by {@code
+     * newWriteProvider}.
+     */
+    void replace(Function<String, TableWriteImpl<?>> newWriteProvider) throws Exception;
+
+    /** Provider of {@link StoreSinkWrite}. */
     @FunctionalInterface
     interface Provider extends Serializable {
 
