@@ -59,7 +59,6 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGN
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_EMIT_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Table source to create {@link StaticFileStoreSource} or {@link ContinuousFileStoreSource} under
@@ -177,16 +176,18 @@ public class DataTableSource extends FlinkTableSource
             }
             String watermarkAlignGroup = options.get(SCAN_WATERMARK_ALIGNMENT_GROUP);
             if (watermarkAlignGroup != null) {
-                Duration drift = options.get(SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT);
-                Duration updateInterval = options.get(SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL);
-                checkArgument(
-                        drift != null,
-                        String.format(
-                                "Watermark alignment max drift can not be null when group (%s) configured.",
-                                watermarkAlignGroup));
-                watermarkStrategy =
-                        watermarkStrategy.withWatermarkAlignment(
-                                watermarkAlignGroup, drift, updateInterval);
+                try {
+                    watermarkStrategy =
+                            WatermarkAlignUtils.withWatermarkAlignment(
+                                    watermarkStrategy,
+                                    watermarkAlignGroup,
+                                    options.get(SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT),
+                                    options.get(SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL));
+                } catch (NoSuchMethodError error) {
+                    throw new RuntimeException(
+                            "Flink 1.14 dose not support watermark alignment, please check your Flink version.",
+                            error);
+                }
             }
         }
 

@@ -21,11 +21,12 @@ package org.apache.paimon.flink;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 
 import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** SQL ITCase for watermark definition. */
 public class WatermarkITCase extends CatalogITCaseBase {
@@ -41,13 +42,17 @@ public class WatermarkITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testWatermarkAlignment() throws Exception {
-        innerTestWatermark(
-                "'scan.watermark.idle-timeout'='1s'",
-                "'scan.watermark.emit.strategy'='on-event'",
-                "'scan.watermark.alignment.group'='group'",
-                "'scan.watermark.alignment.update-interval'='2s'",
-                "'scan.watermark.alignment.max-drift'='1s',");
+    public void testWatermarkAlignment() {
+        assertThatThrownBy(
+                        () ->
+                                innerTestWatermark(
+                                        "'scan.watermark.idle-timeout'='1s'",
+                                        "'scan.watermark.emit.strategy'='on-event'",
+                                        "'scan.watermark.alignment.group'='group'",
+                                        "'scan.watermark.alignment.update-interval'='2s'",
+                                        "'scan.watermark.alignment.max-drift'='1s',"))
+                .hasMessageContaining(
+                        "Flink 1.14 dose not support watermark alignment, please check your Flink version");
     }
 
     private void innerTestWatermark(String... options) throws Exception {
@@ -61,7 +66,7 @@ public class WatermarkITCase extends CatalogITCaseBase {
                         streamSqlIter(
                                 "SELECT window_start, window_end, SUM(f0) FROM TABLE("
                                         + "TUMBLE(TABLE T, DESCRIPTOR(ts), INTERVAL '10' MINUTES))\n"
-                                        + "  GROUP BY window_start, window_end;"));
+                                        + "  GROUP BY window_start, window_end"));
 
         sql("INSERT INTO T VALUES (1, TIMESTAMP '2023-02-02 12:00:00')");
         sql("INSERT INTO T VALUES (1, TIMESTAMP '2023-02-02 12:10:01')");
