@@ -24,17 +24,15 @@ import org.apache.flink.api.common.eventtime.WatermarkOutput;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.table.data.RowData;
 
-/** Paimon {@link WatermarkStrategy} to emit watermark per records. */
-public class PaimonWatermarkStrategy implements WatermarkStrategy<RowData> {
+/** Paimon {@link WatermarkStrategy} to emit watermark on event. */
+public class OnEventWatermarkStrategy implements WatermarkStrategy<RowData> {
 
     private static final long serialVersionUID = 1L;
 
     private final WatermarkStrategy<RowData> strategy;
-    private final int emitPerRecords;
 
-    public PaimonWatermarkStrategy(WatermarkStrategy<RowData> strategy, int emitPerRecords) {
+    public OnEventWatermarkStrategy(WatermarkStrategy<RowData> strategy) {
         this.strategy = strategy;
-        this.emitPerRecords = emitPerRecords;
     }
 
     @Override
@@ -43,21 +41,14 @@ public class PaimonWatermarkStrategy implements WatermarkStrategy<RowData> {
         WatermarkGenerator<RowData> generator = strategy.createWatermarkGenerator(context);
         return new WatermarkGenerator<RowData>() {
 
-            private int emit = 0;
-
             @Override
             public void onEvent(RowData event, long eventTimestamp, WatermarkOutput output) {
                 generator.onEvent(event, eventTimestamp, output);
-                emit++;
-                if (emit % emitPerRecords == 0) {
-                    generator.onPeriodicEmit(output);
-                }
+                generator.onPeriodicEmit(output);
             }
 
             @Override
-            public void onPeriodicEmit(WatermarkOutput output) {
-                generator.onPeriodicEmit(output);
-            }
+            public void onPeriodicEmit(WatermarkOutput output) {}
         };
     }
 }

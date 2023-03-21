@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.FlinkConnectorOptions.WatermarkEmitStrategy;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
@@ -53,10 +54,11 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.paimon.CoreOptions.LOG_SCAN_REMOVE_NORMALIZE;
-import static org.apache.paimon.flink.FlinkConnectorOptions.WATERMARK_ALIGNMENT_GROUP;
-import static org.apache.paimon.flink.FlinkConnectorOptions.WATERMARK_ALIGNMENT_MAX_DRIFT;
-import static org.apache.paimon.flink.FlinkConnectorOptions.WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
-import static org.apache.paimon.flink.FlinkConnectorOptions.WATERMARK_GENERATION_PER_RECORDS;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_GROUP;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_EMIT_STRATEGY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -165,12 +167,18 @@ public class DataTableSource extends FlinkTableSource
         WatermarkStrategy<RowData> watermarkStrategy = this.watermarkStrategy;
         Options options = table.options().toConfiguration();
         if (watermarkStrategy != null) {
-            int emitPerRecords = options.get(WATERMARK_GENERATION_PER_RECORDS);
-            watermarkStrategy = new PaimonWatermarkStrategy(watermarkStrategy, emitPerRecords);
-            String watermarkAlignGroup = options.get(WATERMARK_ALIGNMENT_GROUP);
+            WatermarkEmitStrategy emitStrategy = options.get(SCAN_WATERMARK_EMIT_STRATEGY);
+            if (emitStrategy == WatermarkEmitStrategy.ON_EVENT) {
+                watermarkStrategy = new OnEventWatermarkStrategy(watermarkStrategy);
+            }
+            Duration idleTimeout = options.get(SCAN_WATERMARK_IDLE_TIMEOUT);
+            if (idleTimeout != null) {
+                watermarkStrategy = watermarkStrategy.withIdleness(idleTimeout);
+            }
+            String watermarkAlignGroup = options.get(SCAN_WATERMARK_ALIGNMENT_GROUP);
             if (watermarkAlignGroup != null) {
-                Duration drift = options.get(WATERMARK_ALIGNMENT_MAX_DRIFT);
-                Duration updateInterval = options.get(WATERMARK_ALIGNMENT_UPDATE_INTERVAL);
+                Duration drift = options.get(SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT);
+                Duration updateInterval = options.get(SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL);
                 checkArgument(
                         drift != null,
                         String.format(

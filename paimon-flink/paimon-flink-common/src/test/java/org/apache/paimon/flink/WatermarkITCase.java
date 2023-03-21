@@ -43,7 +43,9 @@ public class WatermarkITCase extends CatalogITCaseBase {
     @Test
     public void testWatermarkAlignment() throws Exception {
         innerTestWatermark(
-                "'watermark-alignment.group'='group'", "'watermark-alignment.max-drift'='1s',");
+                "'scan.watermark.idle-timeout'='1s'",
+                "'scan.watermark-alignment.group'='group'",
+                "'scan.watermark-alignment.max-drift'='1s',");
     }
 
     private void innerTestWatermark(String... options) throws Exception {
@@ -51,7 +53,7 @@ public class WatermarkITCase extends CatalogITCaseBase {
                 "CREATE TABLE T (f0 INT, ts TIMESTAMP(3), WATERMARK FOR ts AS ts) WITH ("
                         + "'write-mode'='append-only',"
                         + String.join(",", options)
-                        + " 'watermark-generation.emit-per-records'='1')");
+                        + " 'scan.watermark.emit.strategy'='on-event')");
 
         BlockingIterator<Row, Row> select =
                 BlockingIterator.of(
