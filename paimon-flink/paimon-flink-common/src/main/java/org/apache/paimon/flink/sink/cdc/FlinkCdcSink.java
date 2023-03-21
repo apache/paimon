@@ -16,45 +16,50 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink;
+package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.cdc.CdcRecord;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
+import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.CommittableStateManager;
+import org.apache.paimon.flink.sink.Committer;
+import org.apache.paimon.flink.sink.FlinkSink;
+import org.apache.paimon.flink.sink.LogSinkFunction;
+import org.apache.paimon.flink.sink.RestoreAndFailCommittableStateManager;
+import org.apache.paimon.flink.sink.StoreCommitter;
+import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.util.function.SerializableFunction;
 
 import javax.annotation.Nullable;
 
-import java.util.Map;
-
-/** {@link FlinkSink} for writing records into paimon. */
-public class FileStoreSink extends FlinkSink<RowData> {
+/**
+ * A {@link FlinkSink} which accepts {@link CdcRecord} and waits for a schema change if necessary.
+ */
+public class FlinkCdcSink extends FlinkSink<CdcRecord> {
 
     private static final long serialVersionUID = 1L;
 
     private final Lock.Factory lockFactory;
-    @Nullable private final Map<String, String> overwritePartition;
     @Nullable private final LogSinkFunction logSinkFunction;
 
-    public FileStoreSink(
+    public FlinkCdcSink(
             FileStoreTable table,
             Lock.Factory lockFactory,
-            @Nullable Map<String, String> overwritePartition,
             @Nullable LogSinkFunction logSinkFunction) {
-        super(table, overwritePartition != null);
+        super(table, false);
         this.lockFactory = lockFactory;
-        this.overwritePartition = overwritePartition;
         this.logSinkFunction = logSinkFunction;
     }
 
     @Override
-    protected OneInputStreamOperator<RowData, Committable> createWriteOperator(
+    protected OneInputStreamOperator<CdcRecord, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, boolean isStreaming) {
-        return new RowDataStoreWriteOperator(table, logSinkFunction, writeProvider);
+        return new SchemaAwareStoreWriteOperator(table, logSinkFunction, writeProvider);
     }
 
     @Override
@@ -67,7 +72,6 @@ public class FileStoreSink extends FlinkSink<RowData> {
         return user ->
                 new StoreCommitter(
                         table.newCommit(user)
-                                .withOverwrite(overwritePartition)
                                 .withLock(lockFactory.create())
                                 .ignoreEmptyCommit(!streamingCheckpointEnabled));
     }
