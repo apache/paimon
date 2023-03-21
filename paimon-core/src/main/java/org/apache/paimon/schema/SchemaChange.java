@@ -357,7 +357,8 @@ public interface SchemaChange extends Serializable {
     }
 
     /** Represents a requested column move in a struct. */
-    class Move {
+    class Move implements Serializable {
+
         public enum MoveType {
             FIRST,
             AFTER
@@ -370,6 +371,8 @@ public interface SchemaChange extends Serializable {
         public static Move after(String fieldName, String referenceFieldName) {
             return new Move(fieldName, referenceFieldName, MoveType.AFTER);
         }
+
+        private static final long serialVersionUID = 1L;
 
         private final String fieldName;
         private final String referenceFieldName;
@@ -391,6 +394,25 @@ public interface SchemaChange extends Serializable {
 
         public MoveType type() {
             return type;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Move move = (Move) o;
+            return Objects.equals(fieldName, move.fieldName)
+                    && Objects.equals(referenceFieldName, move.referenceFieldName)
+                    && Objects.equals(type, move.type);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(fieldName, referenceFieldName, type);
         }
     }
 
