@@ -89,6 +89,6 @@ public class FileFormatTest {
         Options tableOptions = new Options();
         tableOptions.set(CoreOptions.FILE_FORMAT, "avro");
         tableOptions.setString("avro.codec", codec);
-        return FileFormat.fromTableOptions(tableOptions, CoreOptions.FILE_FORMAT);
+        return CoreOptions.createFileFormat(tableOptions, CoreOptions.FILE_FORMAT);
     }
 }
