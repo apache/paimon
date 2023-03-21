@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.FlinkConnectorOptions.WatermarkEmitStrategy;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
@@ -46,12 +47,18 @@ import org.apache.flink.table.factories.DynamicTableFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.paimon.CoreOptions.LOG_SCAN_REMOVE_NORMALIZE;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_GROUP;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_EMIT_STRATEGY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
 
 /**
  * Table source to create {@link StaticFileStoreSource} or {@link ContinuousFileStoreSource} under
@@ -154,6 +161,34 @@ public class DataTableSource extends FlinkTableSource
         if (logStoreTableFactory != null) {
             logSourceProvider =
                     logStoreTableFactory.createSourceProvider(context, scanContext, projectFields);
+        }
+
+        WatermarkStrategy<RowData> watermarkStrategy = this.watermarkStrategy;
+        Options options = table.options().toConfiguration();
+        if (watermarkStrategy != null) {
+            WatermarkEmitStrategy emitStrategy = options.get(SCAN_WATERMARK_EMIT_STRATEGY);
+            if (emitStrategy == WatermarkEmitStrategy.ON_EVENT) {
+                watermarkStrategy = new OnEventWatermarkStrategy(watermarkStrategy);
+            }
+            Duration idleTimeout = options.get(SCAN_WATERMARK_IDLE_TIMEOUT);
+            if (idleTimeout != null) {
+                watermarkStrategy = watermarkStrategy.withIdleness(idleTimeout);
+            }
+            String watermarkAlignGroup = options.get(SCAN_WATERMARK_ALIGNMENT_GROUP);
+            if (watermarkAlignGroup != null) {
+                try {
+                    watermarkStrategy =
+                            WatermarkAlignUtils.withWatermarkAlignment(
+                                    watermarkStrategy,
+                                    watermarkAlignGroup,
+                                    options.get(SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT),
+                                    options.get(SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL));
+                } catch (NoSuchMethodError error) {
+                    throw new RuntimeException(
+                            "Flink 1.14 dose not support watermark alignment, please check your Flink version.",
+                            error);
+                }
+            }
         }
 
         FlinkSourceBuilder sourceBuilder =

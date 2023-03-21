@@ -21,7 +21,9 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
+import org.apache.paimon.options.description.InlineElement;
 import org.apache.paimon.options.description.TextElement;
 
 import java.lang.reflect.Field;
@@ -30,6 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.apache.paimon.options.ConfigOptions.key;
+import static org.apache.paimon.options.description.TextElement.text;
 
 /** Options for flink connector. */
 public class FlinkConnectorOptions {
@@ -121,6 +124,43 @@ public class FlinkConnectorOptions {
                                     + CoreOptions.ChangelogProducer.LOOKUP.name()
                                     + ", commit will wait for changelog generation by lookup.");
 
+    public static final ConfigOption<WatermarkEmitStrategy> SCAN_WATERMARK_EMIT_STRATEGY =
+            key("scan.watermark.emit.strategy")
+                    .enumType(WatermarkEmitStrategy.class)
+                    .defaultValue(WatermarkEmitStrategy.ON_EVENT)
+                    .withDescription("Emit strategy for watermark generation.");
+
+    public static final ConfigOption<String> SCAN_WATERMARK_ALIGNMENT_GROUP =
+            key("scan.watermark.alignment.group")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("A group of sources to align watermarks.");
+
+    public static final ConfigOption<Duration> SCAN_WATERMARK_IDLE_TIMEOUT =
+            key("scan.watermark.idle-timeout")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "If no records flow in a partition of a stream for that amount of time, then"
+                                    + " that partition is considered \"idle\" and will not hold back the progress of"
+                                    + " watermarks in downstream operators.");
+
+    public static final ConfigOption<Duration> SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT =
+            key("scan.watermark.alignment.max-drift")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Maximal drift to align watermarks, "
+                                    + "before we pause consuming from the source/task/partition.");
+
+    public static final ConfigOption<Duration> SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL =
+            key("scan.watermark.alignment.update-interval")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(1))
+                    .withDescription(
+                            "How often tasks should notify coordinator about the current watermark "
+                                    + "and how often the coordinator should announce the maximal aligned watermark.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
@@ -134,5 +174,32 @@ public class FlinkConnectorOptions {
             }
         }
         return list;
+    }
+
+    /** Watermark emit strategy for scan. */
+    public enum WatermarkEmitStrategy implements DescribedEnum {
+        ON_PERIODIC(
+                "on-periodic",
+                "Emit watermark periodically, interval is controlled by Flink 'pipeline.auto-watermark-interval'."),
+
+        ON_EVENT("on-event", "Emit watermark per record.");
+
+        private final String value;
+        private final String description;
+
+        WatermarkEmitStrategy(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
     }
 }
