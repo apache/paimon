@@ -46,12 +46,18 @@ import org.apache.flink.table.factories.DynamicTableFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.paimon.CoreOptions.LOG_SCAN_REMOVE_NORMALIZE;
+import static org.apache.paimon.flink.FlinkConnectorOptions.WATERMARK_ALIGNMENT_GROUP;
+import static org.apache.paimon.flink.FlinkConnectorOptions.WATERMARK_ALIGNMENT_MAX_DRIFT;
+import static org.apache.paimon.flink.FlinkConnectorOptions.WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
+import static org.apache.paimon.flink.FlinkConnectorOptions.WATERMARK_GENERATION_PER_RECORDS;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Table source to create {@link StaticFileStoreSource} or {@link ContinuousFileStoreSource} under
@@ -154,6 +160,26 @@ public class DataTableSource extends FlinkTableSource
         if (logStoreTableFactory != null) {
             logSourceProvider =
                     logStoreTableFactory.createSourceProvider(context, scanContext, projectFields);
+        }
+
+        WatermarkStrategy<RowData> watermarkStrategy = this.watermarkStrategy;
+        Options options = table.options().toConfiguration();
+        if (watermarkStrategy != null) {
+            int emitPerRecords = options.get(WATERMARK_GENERATION_PER_RECORDS);
+            watermarkStrategy = new PaimonWatermarkStrategy(watermarkStrategy, emitPerRecords);
+            String watermarkAlignGroup = options.get(WATERMARK_ALIGNMENT_GROUP);
+            if (watermarkAlignGroup != null) {
+                Duration drift = options.get(WATERMARK_ALIGNMENT_MAX_DRIFT);
+                Duration updateInterval = options.get(WATERMARK_ALIGNMENT_UPDATE_INTERVAL);
+                checkArgument(
+                        drift != null,
+                        String.format(
+                                "Watermark alignment max drift can not be null when group (%s) configured.",
+                                watermarkAlignGroup));
+                watermarkStrategy =
+                        watermarkStrategy.withWatermarkAlignment(
+                                watermarkAlignGroup, drift, updateInterval);
+            }
         }
 
         FlinkSourceBuilder sourceBuilder =

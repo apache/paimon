@@ -121,6 +121,36 @@ public class FlinkConnectorOptions {
                                     + CoreOptions.ChangelogProducer.LOOKUP.name()
                                     + ", commit will wait for changelog generation by lookup.");
 
+    public static final ConfigOption<Integer> WATERMARK_GENERATION_PER_RECORDS =
+            key("watermark-generation.emit-per-records")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription(
+                            "How many records to emit watermark once, "
+                                    + "this ensures that split can emit a valid watermark before it ends.");
+
+    public static final ConfigOption<String> WATERMARK_ALIGNMENT_GROUP =
+            key("watermark-alignment.group")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("A group of sources to align watermarks.");
+
+    public static final ConfigOption<Duration> WATERMARK_ALIGNMENT_MAX_DRIFT =
+            key("watermark-alignment.max-drift")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Maximal drift to align watermarks, "
+                                    + "before we pause consuming from the source/task/partition.");
+
+    public static final ConfigOption<Duration> WATERMARK_ALIGNMENT_UPDATE_INTERVAL =
+            key("watermark-alignment.update-interval")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(1))
+                    .withDescription(
+                            "How often tasks should notify coordinator about the current watermark "
+                                    + "and how often the coordinator should announce the maximal aligned watermark.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);

@@ -50,5 +50,29 @@
             <td>Boolean</td>
             <td>The option to enable return per iterator instead of per record in streaming read.This can ensure that there will be no checkpoint segmentation in iterator consumption.<br />By default, streaming source checkpoint will be performed in any time, this means 'UPDATE_BEFORE' and 'UPDATE_AFTER' can be split into two checkpoint. Downstream can see intermediate state.</td>
         </tr>
+        <tr>
+            <td><h5>watermark-alignment.group</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>A group of sources to align watermarks.</td>
+        </tr>
+        <tr>
+            <td><h5>watermark-alignment.max-drift</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>Maximal drift to align watermarks, before we pause consuming from the source/task/partition.</td>
+        </tr>
+        <tr>
+            <td><h5>watermark-alignment.update-interval</h5></td>
+            <td style="word-wrap: break-word;">1 s</td>
+            <td>Duration</td>
+            <td>How often tasks should notify coordinator about the current watermark and how often the coordinator should announce the maximal aligned watermark.</td>
+        </tr>
+        <tr>
+            <td><h5>watermark-generation.emit-per-records</h5></td>
+            <td style="word-wrap: break-word;">100</td>
+            <td>Integer</td>
+            <td>How many records to emit watermark once, this ensures that split can emit a valid watermark before it ends.</td>
+        </tr>
     </tbody>
 </table>
