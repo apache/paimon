@@ -22,6 +22,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -53,41 +54,39 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     @Test
     public void testNormal() {
-        innerTestSimpleType(spark.table("paimon.default.t1"));
+        innerTestSimpleType(spark.table("t1"));
 
-        innerTestNestedType(spark.table("paimon.default.t2"));
+        innerTestNestedType(spark.table("t2"));
     }
 
     @Test
     public void testFilterPushDown() {
-        innerTestSimpleTypeFilterPushDown(spark.table("paimon.default.t1"));
+        innerTestSimpleTypeFilterPushDown(spark.table("t1"));
 
-        innerTestNestedTypeFilterPushDown(spark.table("paimon.default.t2"));
+        innerTestNestedTypeFilterPushDown(spark.table("t2"));
     }
 
     @Test
     public void testCatalogNormal() {
-        innerTestSimpleType(spark.table("paimon.default.t1"));
-        innerTestNestedType(spark.table("paimon.default.t2"));
+        innerTestSimpleType(spark.table("t1"));
+        innerTestNestedType(spark.table("t2"));
     }
 
     @Test
     public void testSnapshotsTable() {
         List<Row> rows =
-                spark.table("paimon.default.`t1$snapshots`")
+                spark.table("`t1$snapshots`")
                         .select("snapshot_id", "schema_id", "commit_user", "commit_kind")
                         .collectAsList();
         assertThat(rows.toString()).isEqualTo("[[1,0,user,APPEND]]");
 
-        spark.sql("USE paimon");
         spark.sql(
-                "CREATE TABLE default.schemasTable (\n"
+                "CREATE TABLE schemasTable (\n"
                         + "a BIGINT,\n"
-                        + "b STRING) USING paimon\n"
-                        + "COMMENT 'table comment'\n"
+                        + "b STRING)\n"
                         + "TBLPROPERTIES ('primary-key' = 'a')");
-        spark.sql("ALTER TABLE default.schemasTable ADD COLUMN c STRING");
-        List<Row> schemas = spark.table("paimon.default.`schemasTable$schemas`").collectAsList();
+        spark.sql("ALTER TABLE schemasTable ADD COLUMN c STRING");
+        List<Row> schemas = spark.table("`schemasTable$schemas`").collectAsList();
         List<?> fieldsList = schemas.stream().map(row -> row.get(1)).collect(Collectors.toList());
         assertThat(fieldsList.stream().map(Object::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
@@ -101,7 +100,7 @@ public class SparkReadITCase extends SparkReadTestBase {
     @Test
     public void testSnapshotsTableWithRecordCount() {
         List<Row> rows =
-                spark.table("paimon.default.`t1$snapshots`")
+                spark.table("`t1$snapshots`")
                         .select(
                                 "snapshot_id",
                                 "total_record_count",
@@ -113,14 +112,13 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     @Test
     public void testCatalogFilterPushDown() {
-        innerTestSimpleTypeFilterPushDown(spark.table("paimon.default.t1"));
+        innerTestSimpleTypeFilterPushDown(spark.table("t1"));
 
-        innerTestNestedTypeFilterPushDown(spark.table("paimon.default.t2"));
+        innerTestNestedTypeFilterPushDown(spark.table("t2"));
     }
 
     @Test
     public void testDefaultNamespace() {
-        spark.sql("USE paimon");
         assertThat(spark.sql("SHOW CURRENT NAMESPACE").collectAsList().toString())
                 .isEqualTo("[[paimon,default]]");
     }
@@ -128,12 +126,12 @@ public class SparkReadITCase extends SparkReadTestBase {
     @Test
     public void testCreateTable() {
         spark.sql(
-                "CREATE TABLE paimon.default.testCreateTable(\n"
+                "CREATE TABLE testCreateTable(\n"
                         + "a BIGINT,\n"
                         + "b VARCHAR(10),\n"
                         + "c CHAR(10))");
         assertThat(
-                        spark.sql("SELECT fields FROM paimon.default.`testCreateTable$schemas`")
+                        spark.sql("SELECT fields FROM `testCreateTable$schemas`")
                                 .collectAsList()
                                 .toString())
                 .isEqualTo(
@@ -146,101 +144,87 @@ public class SparkReadITCase extends SparkReadTestBase {
     @Test
     public void testCreateTableAs() {
         spark.sql(
-                "CREATE TABLE default.testCreateTable(\n"
+                "CREATE TABLE testCreateTable(\n"
                         + "a BIGINT,\n"
                         + "b VARCHAR(10),\n"
                         + "c CHAR(10))");
-        spark.sql("INSERT INTO default.testCreateTable VALUES(1,'a','b')");
-        spark.sql(
-                "CREATE TABLE default.testCreateTableAs AS SELECT * FROM default.testCreateTable");
-        List<Row> result = spark.sql("SELECT * FROM default.testCreateTableAs").collectAsList();
+        spark.sql("INSERT INTO testCreateTable VALUES(1,'a','b')");
+        spark.sql("CREATE TABLE testCreateTableAs AS SELECT * FROM testCreateTable");
+        List<Row> result = spark.sql("SELECT * FROM testCreateTableAs").collectAsList();
 
         assertThat(result.stream().map(Row::toString)).containsExactlyInAnyOrder("[1,a,b]");
 
         // partitioned table
         spark.sql(
-                "CREATE TABLE default.partitionedTable (\n"
+                "CREATE TABLE partitionedTable (\n"
                         + "a BIGINT,\n"
-                        + "b STRING,"
-                        + "c STRING) USING paimon\n"
-                        + "COMMENT 'table comment'\n"
+                        + "b STRING,\n"
+                        + "c STRING)\n"
                         + "PARTITIONED BY (a,b)");
-        spark.sql("INSERT INTO default.partitionedTable VALUES(1,'aaa','bbb')");
+        spark.sql("INSERT INTO partitionedTable VALUES(1,'aaa','bbb')");
         spark.sql(
-                "CREATE TABLE default.partitionedTableAs PARTITIONED BY (a) AS SELECT * FROM default.partitionedTable");
-        assertThat(
-                        spark.sql("SHOW CREATE TABLE default.partitionedTableAs")
-                                .collectAsList()
-                                .toString())
+                "CREATE TABLE partitionedTableAs PARTITIONED BY (a) AS SELECT * FROM partitionedTable");
+        assertThat(spark.sql("SHOW CREATE TABLE partitionedTableAs").collectAsList().toString())
                 .isEqualTo(
                         String.format(
-                                "[[CREATE TABLE partitionedTableAs (\n"
-                                        + "  `a` BIGINT,\n"
-                                        + "  `b` STRING,\n"
-                                        + "  `c` STRING)\n"
+                                "[[%s"
                                         + "PARTITIONED BY (a)\n"
-                                        + "TBLPROPERTIES(\n"
+                                        + "TBLPROPERTIES (\n"
                                         + "  'path' = '%s')\n"
                                         + "]]",
+                                showCreateString(
+                                        "partitionedTableAs", "a BIGINT", "b STRING", "c STRING"),
                                 new Path(warehousePath, "default.db/partitionedTableAs")));
-        List<Row> resultPartition =
-                spark.sql("SELECT * FROM default.partitionedTableAs").collectAsList();
+        List<Row> resultPartition = spark.sql("SELECT * FROM partitionedTableAs").collectAsList();
         assertThat(resultPartition.stream().map(Row::toString))
                 .containsExactlyInAnyOrder("[1,aaa,bbb]");
 
         // change TBLPROPERTIES
         spark.sql(
-                "CREATE TABLE default.testTable(\n"
+                "CREATE TABLE testTable(\n"
                         + "a BIGINT,\n"
                         + "b VARCHAR(10),\n"
-                        + "c CHAR(10))"
-                        + " TBLPROPERTIES("
-                        + " 'file.format' = 'orc'"
+                        + "c CHAR(10))\n"
+                        + " TBLPROPERTIES(\n"
+                        + " 'file.format' = 'orc'\n"
                         + ")");
-        spark.sql("INSERT INTO default.testTable VALUES(1,'a','b')");
+        spark.sql("INSERT INTO testTable VALUES(1,'a','b')");
         spark.sql(
-                "CREATE TABLE default.testTableAs TBLPROPERTIES ('file.format' = 'parquet') AS SELECT * FROM default.testTable");
-        assertThat(spark.sql("SHOW CREATE TABLE default.testTableAs").collectAsList().toString())
+                "CREATE TABLE testTableAs TBLPROPERTIES ('file.format' = 'parquet') AS SELECT * FROM testTable");
+        assertThat(spark.sql("SHOW CREATE TABLE testTableAs").collectAsList().toString())
                 .isEqualTo(
                         String.format(
-                                "[[CREATE TABLE testTableAs (\n"
-                                        + "  `a` BIGINT,\n"
-                                        + "  `b` STRING,\n"
-                                        + "  `c` STRING)\n"
-                                        + "TBLPROPERTIES(\n"
+                                "[[%s"
+                                        + "TBLPROPERTIES (\n"
                                         + "  'file.format' = 'parquet',\n"
                                         + "  'path' = '%s')\n"
                                         + "]]",
+                                showCreateString("testTableAs", "a BIGINT", "b STRING", "c STRING"),
                                 new Path(warehousePath, "default.db/testTableAs")));
-        List<Row> resultProp = spark.sql("SELECT * FROM default.testTableAs").collectAsList();
+        List<Row> resultProp = spark.sql("SELECT * FROM testTableAs").collectAsList();
 
         assertThat(resultProp.stream().map(Row::toString)).containsExactlyInAnyOrder("[1,a,b]");
 
         // primary key
         spark.sql(
-                "CREATE TABLE default.t_pk (\n"
+                "CREATE TABLE t_pk (\n"
                         + "a BIGINT,\n"
                         + "b STRING,\n"
                         + "c STRING\n"
-                        + ") TBLPROPERTIES ("
-                        + "  'primary-key' = 'a,b'"
+                        + ") TBLPROPERTIES (\n"
+                        + "  'primary-key' = 'a,b'\n"
                         + ")\n"
                         + "COMMENT 'table comment'");
-        spark.sql("INSERT INTO default.t_pk VALUES(1,'aaa','bbb')");
-        spark.sql(
-                "CREATE TABLE default.t_pk_as TBLPROPERTIES ('primary-key' = 'a') AS SELECT * FROM default.t_pk");
-        assertThat(spark.sql("SHOW CREATE TABLE  default.t_pk_as").collectAsList().toString())
+        spark.sql("INSERT INTO t_pk VALUES(1,'aaa','bbb')");
+        spark.sql("CREATE TABLE t_pk_as TBLPROPERTIES ('primary-key' = 'a') AS SELECT * FROM t_pk");
+        assertThat(spark.sql("SHOW CREATE TABLE t_pk_as").collectAsList().toString())
                 .isEqualTo(
                         String.format(
-                                "[[CREATE TABLE t_pk_as (\n"
-                                        + "  `a` BIGINT NOT NULL,\n"
-                                        + "  `b` STRING,\n"
-                                        + "  `c` STRING)\n"
-                                        + "TBLPROPERTIES(\n"
-                                        + "  'path' = '%s')\n"
-                                        + "]]",
+                                "[[%sTBLPROPERTIES (\n  'path' = '%s')\n]]",
+                                showCreateString(
+                                        "t_pk_as", "a BIGINT NOT NULL", "b STRING", "c STRING"),
                                 new Path(warehousePath, "default.db/t_pk_as")));
-        List<Row> resultPk = spark.sql("SELECT * FROM default.t_pk_as").collectAsList();
+        List<Row> resultPk = spark.sql("SELECT * FROM t_pk_as").collectAsList();
 
         assertThat(resultPk.stream().map(Row::toString)).containsExactlyInAnyOrder("[1,aaa,bbb]");
 
@@ -257,34 +241,34 @@ public class SparkReadITCase extends SparkReadTestBase {
                         + ")");
         spark.sql("INSERT INTO t_all VALUES(1,2,'bbb','2020-01-01','12')");
         spark.sql(
-                "CREATE TABLE default.t_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM default.t_all");
-        assertThat(spark.sql("SHOW CREATE TABLE default.t_all_as").collectAsList().toString())
+                "CREATE TABLE t_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM t_all");
+        assertThat(spark.sql("SHOW CREATE TABLE t_all_as").collectAsList().toString())
                 .isEqualTo(
                         String.format(
-                                "[[CREATE TABLE t_all_as (\n"
-                                        + "  `user_id` BIGINT,\n"
-                                        + "  `item_id` BIGINT,\n"
-                                        + "  `behavior` STRING,\n"
-                                        + "  `dt` STRING NOT NULL,\n"
-                                        + "  `hh` STRING NOT NULL)\n"
+                                "[[%s"
                                         + "PARTITIONED BY (dt)\n"
-                                        + "TBLPROPERTIES(\n"
+                                        + "TBLPROPERTIES (\n"
                                         + "  'path' = '%s')\n"
                                         + "]]",
+                                showCreateString(
+                                        "t_all_as",
+                                        "user_id BIGINT",
+                                        "item_id BIGINT",
+                                        "behavior STRING",
+                                        "dt STRING NOT NULL",
+                                        "hh STRING NOT NULL"),
                                 new Path(warehousePath, "default.db/t_all_as")));
-        List<Row> resultAll = spark.sql("SELECT * FROM default.t_all_as").collectAsList();
+        List<Row> resultAll = spark.sql("SELECT * FROM t_all_as").collectAsList();
         assertThat(resultAll.stream().map(Row::toString))
                 .containsExactlyInAnyOrder("[1,2,bbb,2020-01-01,12]");
     }
 
     @Test
     public void testCreateTableWithNullablePk() {
-        spark.sql("USE paimon");
         spark.sql(
-                "CREATE TABLE default.PkTable (\n"
+                "CREATE TABLE PkTable (\n"
                         + "a BIGINT,\n"
-                        + "b STRING) USING paimon\n"
-                        + "COMMENT 'table comment'\n"
+                        + "b STRING)\n"
                         + "TBLPROPERTIES ('primary-key' = 'a')");
         Path tablePath = new Path(warehousePath, "default.db/PkTable");
         TableSchema schema = FileStoreTableFactory.create(LocalFileIO.create(), tablePath).schema();
@@ -293,31 +277,58 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     @Test
     public void testDescribeTable() {
-        spark.sql("USE paimon");
         spark.sql(
-                "CREATE TABLE default.PartitionedTable (\n"
+                "CREATE TABLE PartitionedTable (\n"
                         + "a BIGINT,\n"
-                        + "b STRING) USING paimon\n"
-                        + "COMMENT 'table comment'\n"
-                        + "PARTITIONED BY (a)\n"
-                        + "TBLPROPERTIES ('foo' = 'bar')");
-        assertThat(spark.sql("DESCRIBE default.PartitionedTable").collectAsList().toString())
+                        + "b STRING)\n"
+                        + "PARTITIONED BY (a)\n");
+        assertThat(spark.sql("DESCRIBE PartitionedTable").collectAsList().toString())
                 .isEqualTo("[[a,bigint,], [b,string,], [,,], [# Partitioning,,], [Part 0,a,]]");
     }
 
     @Test
-    public void testShowTableProperties() {
-        spark.sql("USE paimon");
+    public void testShowCreateTable() {
         spark.sql(
-                "CREATE TABLE default.tbl (\n"
-                        + "a INT\n"
-                        + ") TBLPROPERTIES (\n"
-                        + "'k1' = 'v1',\n"
-                        + "'k2' = 'v2'"
+                "CREATE TABLE tbl (\n"
+                        + "  a INT COMMENT 'a comment',\n"
+                        + "  b STRING\n"
+                        + ") USING paimon\n"
+                        + "PARTITIONED BY (b)\n"
+                        + "COMMENT 'tbl comment'\n"
+                        + "TBLPROPERTIES (\n"
+                        + "  'primary-key' = 'a,b',\n"
+                        + "  'k1' = 'v1'\n"
+                        + ")");
+
+        assertThat(spark.sql("SHOW CREATE TABLE tbl").collectAsList().toString())
+                .isEqualTo(
+                        String.format(
+                                "[[%s"
+                                        + "USING paimon\n"
+                                        + "PARTITIONED BY (b)\n"
+                                        + "COMMENT 'tbl comment'\n"
+                                        + "TBLPROPERTIES (\n"
+                                        + "  'k1' = 'v1',\n"
+                                        + "  'path' = '%s')\n]]",
+                                showCreateString(
+                                        "tbl",
+                                        "a INT NOT NULL COMMENT 'a comment'",
+                                        "b STRING NOT NULL"),
+                                new Path(warehousePath, "default.db/tbl")));
+    }
+
+    @Test
+    public void testShowTableProperties() {
+        spark.sql(
+                "CREATE TABLE tbl (\n"
+                        + "  a INT)\n"
+                        + "TBLPROPERTIES (\n"
+                        + "  'k1' = 'v1',\n"
+                        + "  'k2' = 'v2'\n"
                         + ")");
 
         assertThat(
-                        spark.sql("SHOW TBLPROPERTIES default.tbl").collectAsList().stream()
+                        spark.sql("SHOW TBLPROPERTIES tbl").collectAsList().stream()
                                 .map(Row::toString)
                                 .collect(Collectors.toList()))
                 .contains("[k1,v1]", "[k2,v2]");
@@ -325,16 +336,14 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     @Test
     public void testCreateTableWithInvalidPk() {
-        spark.sql("USE paimon");
         assertThatThrownBy(
                         () ->
                                 spark.sql(
-                                        "CREATE TABLE default.PartitionedPkTable (\n"
+                                        "CREATE TABLE PartitionedPkTable (\n"
                                                 + "a BIGINT,\n"
                                                 + "b STRING,\n"
-                                                + "c DOUBLE) USING paimon\n"
-                                                + "COMMENT 'table comment'\n"
-                                                + "PARTITIONED BY (b)"
+                                                + "c DOUBLE)\n"
+                                                + "PARTITIONED BY (b)\n"
                                                 + "TBLPROPERTIES ('primary-key' = 'a')"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(
@@ -352,7 +361,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                                                 + "b STRING,\n"
                                                 + "c DOUBLE) USING paimon\n"
                                                 + "COMMENT 'table comment'\n"
-                                                + "PARTITIONED BY (b)"
+                                                + "PARTITIONED BY (b)\n"
                                                 + "TBLPROPERTIES ('primary-key' = 'd')"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(
@@ -361,23 +370,21 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     @Test
     public void testCreateTableWithNonexistentPartition() {
-        spark.sql("USE paimon");
         assertThatThrownBy(
                         () ->
                                 spark.sql(
-                                        "CREATE TABLE default.PartitionedPkTable (\n"
+                                        "CREATE TABLE PartitionedPkTable (\n"
                                                 + "a BIGINT,\n"
                                                 + "b STRING,\n"
-                                                + "c DOUBLE) USING paimon\n"
-                                                + "COMMENT 'table comment'\n"
-                                                + "PARTITIONED BY (d)"
+                                                + "c DOUBLE)\n"
+                                                + "PARTITIONED BY (d)\n"
                                                 + "TBLPROPERTIES ('primary-key' = 'a')"))
                 .isInstanceOf(AnalysisException.class)
                 .hasMessageContaining("Couldn't find column d");
     }
 
     @Test
-    public void testCreateAndDropTable() throws Exception {
+    public void testCreateAndDropTable() {
         innerTest("MyTable1", true, true, false);
         innerTest("MyTable2", true, false, false);
         innerTest("MyTable3", false, false, false);
@@ -388,7 +395,6 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     private void innerTest(
             String tableName, boolean hasPk, boolean partitioned, boolean appendOnly) {
-        spark.sql("USE paimon");
         String ddlTemplate =
                 "CREATE TABLE default.%s (\n"
                         + "order_id BIGINT NOT NULL comment 'order_id',\n"
@@ -396,7 +402,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                         + "coupon_info ARRAY<STRING> NOT NULL COMMENT 'coupon_info',\n"
                         + "order_amount DOUBLE NOT NULL COMMENT 'order_amount',\n"
                         + "dt STRING NOT NULL COMMENT 'dt',\n"
-                        + "hh STRING NOT NULL COMMENT 'hh') USING paimon\n"
+                        + "hh STRING NOT NULL COMMENT 'hh')\n"
                         + "COMMENT 'table comment'\n"
                         + "%s\n"
                         + "TBLPROPERTIES (%s)";
@@ -454,7 +460,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                         () ->
                                 spark.sql(
                                         String.format(
-                                                "ALTER TABLE default.%s UNSET TBLPROPERTIES('primary-key')",
+                                                "ALTER TABLE %s UNSET TBLPROPERTIES('primary-key')",
                                                 tableName)))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("Alter primary key is not supported");
@@ -462,11 +468,12 @@ public class SparkReadITCase extends SparkReadTestBase {
                         () ->
                                 spark.sql(
                                         String.format(
-                                                "ALTER TABLE default.%s SET TBLPROPERTIES('write-mode' = 'append-only')",
+                                                "ALTER TABLE %s SET TBLPROPERTIES('write-mode' = 'append-only')",
                                                 tableName)))
-                .getRootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Change 'write-mode' is not supported yet");
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Change 'write-mode' is not supported yet"));
 
         Path tablePath = new Path(warehousePath, String.format("default.db/%s", tableName));
         TableSchema schema = FileStoreTableFactory.create(LocalFileIO.create(), tablePath).schema();
@@ -520,7 +527,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                                 .toString())
                 .isEqualTo(String.format("[[default,%s]]", tableName));
 
-        spark.sql(String.format("DROP TABLE paimon.default.%s", tableName));
+        spark.sql(String.format("DROP TABLE %s", tableName));
 
         assertThat(
                         spark.sql(
@@ -538,7 +545,6 @@ public class SparkReadITCase extends SparkReadTestBase {
     @Test
     public void testCreateAndDropNamespace() {
         // create namespace
-        spark.sql("USE paimon");
         spark.sql("CREATE NAMESPACE bar");
 
         assertThatThrownBy(() -> spark.sql("CREATE NAMESPACE bar"))
@@ -631,19 +637,12 @@ public class SparkReadITCase extends SparkReadTestBase {
     @Test
     public void testCreateNestedField() {
         spark.sql(
-                "CREATE TABLE paimon.default.nested_table ( a INT, b STRUCT<b1: STRUCT<b11: INT, b12 INT>, b2 BIGINT>)");
-        assertThat(
-                        spark.sql("SHOW CREATE TABLE paimon.default.nested_table")
-                                .collectAsList()
-                                .toString())
-                .isEqualTo(
-                        String.format(
-                                "[[CREATE TABLE nested_table (\n"
-                                        + "  `a` INT,\n"
-                                        + "  `b` STRUCT<`b1`: STRUCT<`b11`: INT, `b12`: INT>, `b2`: BIGINT>)\n"
-                                        + "TBLPROPERTIES(\n"
-                                        + "  'path' = '%s')\n"
-                                        + "]]",
-                                new Path(warehousePath, "default.db/nested_table")));
+                "CREATE TABLE nested_table ( a INT, b STRUCT<b1: STRUCT<b11: INT, b12 INT>, b2 BIGINT>)");
+        assertThat(spark.sql("SHOW CREATE TABLE nested_table").collectAsList().toString())
+                .contains(
+                        showCreateString(
+                                "nested_table",
+                                "a INT",
+                                "b STRUCT<b1: STRUCT<b11: INT, b12: INT>, b2: BIGINT>"));
     }
 }

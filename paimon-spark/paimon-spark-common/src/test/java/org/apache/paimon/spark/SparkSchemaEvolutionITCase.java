@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.testutils.assertj.AssertionUtils;
+
 import org.apache.commons.lang3.StringUtils;
 import org.apache.spark.sql.AnalysisException;
 import org.apache.spark.sql.Dataset;
@@ -37,21 +39,18 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @Test
     public void testSetAndRemoveOption() {
-        spark.sql("ALTER TABLE paimon.default.t1 SET TBLPROPERTIES('xyc' 'unknown1')");
+        spark.sql("ALTER TABLE t1 SET TBLPROPERTIES('xyc' 'unknown1')");
 
         Map<String, String> options =
-                rowsToMap(spark.sql("SELECT * FROM paimon.default.`t1$options`").collectAsList());
+                rowsToMap(spark.sql("SELECT * FROM `t1$options`").collectAsList());
         assertThat(options).containsEntry("xyc", "unknown1");
 
-        spark.sql("ALTER TABLE paimon.default.t1 UNSET TBLPROPERTIES('xyc')");
+        spark.sql("ALTER TABLE t1 UNSET TBLPROPERTIES('xyc')");
 
-        options = rowsToMap(spark.sql("SELECT * FROM paimon.default.`t1$options`").collectAsList());
+        options = rowsToMap(spark.sql("SELECT * FROM `t1$options`").collectAsList());
         assertThat(options).doesNotContainKey("xyc");
 
-        assertThatThrownBy(
-                        () ->
-                                spark.sql(
-                                        "ALTER TABLE paimon.default.t1 SET TBLPROPERTIES('primary-key' = 'a')"))
+        assertThatThrownBy(() -> spark.sql("ALTER TABLE t1 SET TBLPROPERTIES('primary-key' = 'a')"))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("Alter primary key is not supported");
     }
@@ -68,38 +67,36 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         createTable("testAddColumn");
         writeTable("testAddColumn", "(1, 2L, '1')", "(5, 6L, '3')");
 
-        spark.sql("ALTER TABLE paimon.default.testAddColumn ADD COLUMN d STRING");
+        List<Row> beforeAdd = spark.sql("SHOW CREATE TABLE testAddColumn").collectAsList();
+        assertThat(beforeAdd.toString()).contains(defaultShowCreateString("testAddColumn"));
 
-        Dataset<Row> table = spark.table("paimon.default.testAddColumn");
-        List<Row> results = table.collectAsList();
-        assertThat(results.toString()).isEqualTo("[[1,2,1,null], [5,6,3,null]]");
+        spark.sql("ALTER TABLE testAddColumn ADD COLUMN d STRING");
 
-        results = table.select("a", "c").collectAsList();
-        assertThat(results.toString()).isEqualTo("[[1,1], [5,3]]");
+        List<Row> afterAdd = spark.sql("SHOW CREATE TABLE testAddColumn").collectAsList();
+        assertThat(afterAdd.toString())
+                .contains(
+                        showCreateString(
+                                "testAddColumn",
+                                "a INT NOT NULL",
+                                "b BIGINT",
+                                "c STRING",
+                                "d STRING"));
 
-        results = table.groupBy().sum("b").collectAsList();
-        assertThat(results.toString()).isEqualTo("[[8]]");
+        assertThat(spark.table("testAddColumn").collectAsList().toString())
+                .isEqualTo("[[1,2,1,null], [5,6,3,null]]");
     }
 
     @Test
     public void testAddNotNullColumn() {
         createTable("testAddNotNullColumn");
 
-        List<Row> beforeAdd =
-                spark.sql("SHOW CREATE TABLE paimon.default.testAddNotNullColumn").collectAsList();
-        assertThat(beforeAdd.toString())
-                .isEqualTo(
-                        "[[CREATE TABLE testAddNotNullColumn (\n"
-                                + "  `a` INT NOT NULL,\n"
-                                + "  `b` BIGINT,\n"
-                                + "  `c` STRING)\n"
-                                + buildTableProperties("default.db/testAddNotNullColumn")
-                                + "]]");
+        List<Row> beforeAdd = spark.sql("SHOW CREATE TABLE testAddNotNullColumn").collectAsList();
+        assertThat(beforeAdd.toString()).contains(defaultShowCreateString("testAddNotNullColumn"));
 
         assertThatThrownBy(
                         () ->
                                 spark.sql(
-                                        "ALTER TABLE paimon.default.testAddNotNullColumn ADD COLUMNS (d INT NOT NULL)"))
+                                        "ALTER TABLE testAddNotNullColumn ADD COLUMNS (d INT NOT NULL)"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage(
                         "java.lang.IllegalArgumentException: ADD COLUMN cannot specify NOT NULL.");
@@ -113,22 +110,24 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                 spark.sql("SHOW CREATE TABLE testAddColumnPositionFirst").collectAsList();
         assertThat(result.toString())
                 .contains(
-                        "CREATE TABLE testAddColumnPositionFirst (\n"
-                                + "  `d` INT,\n"
-                                + "  `a` INT NOT NULL,\n"
-                                + "  `b` BIGINT,\n"
-                                + "  `c` STRING)");
+                        showCreateString(
+                                "testAddColumnPositionFirst",
+                                "d INT",
+                                "a INT NOT NULL",
+                                "b BIGINT",
+                                "c STRING"));
 
         createTable("testAddColumnPositionAfter");
         spark.sql("ALTER TABLE testAddColumnPositionAfter ADD COLUMN d INT AFTER b");
         result = spark.sql("SHOW CREATE TABLE testAddColumnPositionAfter").collectAsList();
         assertThat(result.toString())
                 .contains(
-                        "CREATE TABLE testAddColumnPositionAfter (\n"
-                                + "  `a` INT NOT NULL,\n"
-                                + "  `b` BIGINT,\n"
-                                + "  `d` INT,\n"
-                                + "  `c` STRING)");
+                        showCreateString(
+                                "testAddColumnPositionAfter",
+                                "a INT NOT NULL",
+                                "b BIGINT",
+                                "d INT",
+                                "c STRING"));
     }
 
     @Test
@@ -147,15 +146,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         assertThat(tables.stream().map(Row::toString))
                 .containsExactlyInAnyOrder("[default,t2,false]", "[default,t3,false]");
 
-        List<Row> afterRename = spark.sql("SHOW CREATE TABLE paimon.default.t3").collectAsList();
-        assertThat(afterRename.toString())
-                .isEqualTo(
-                        "[[CREATE TABLE t3 (\n"
-                                + "  `a` INT NOT NULL,\n"
-                                + "  `b` BIGINT,\n"
-                                + "  `c` STRING)\n"
-                                + buildTableProperties("default.db/t3")
-                                + "]]");
+        List<Row> afterRename = spark.sql("SHOW CREATE TABLE t3").collectAsList();
+        assertThat(afterRename.toString()).contains(defaultShowCreateString("t3"));
 
         List<Row> data = spark.sql("SELECT * FROM t3").collectAsList();
         assertThat(data.toString()).isEqualTo("[[1,2,1], [5,6,3]]");
@@ -166,78 +158,45 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         createTable("testRenameColumn");
         writeTable("testRenameColumn", "(1, 2L, '1')", "(5, 6L, '3')");
 
-        List<Row> beforeRename =
-                spark.sql("SHOW CREATE TABLE paimon.default.testRenameColumn").collectAsList();
-        assertThat(beforeRename.toString())
-                .isEqualTo(
-                        "[[CREATE TABLE testRenameColumn (\n"
-                                + "  `a` INT NOT NULL,\n"
-                                + "  `b` BIGINT,\n"
-                                + "  `c` STRING)\n"
-                                + buildTableProperties("default.db/testRenameColumn")
-                                + "]]");
-        Dataset<Row> table1 = spark.table("paimon.default.testRenameColumn");
-        List<Row> results = table1.select("a", "c").collectAsList();
+        List<Row> beforeRename = spark.sql("SHOW CREATE TABLE testRenameColumn").collectAsList();
+        assertThat(beforeRename.toString()).contains(defaultShowCreateString("testRenameColumn"));
+        List<Row> results = spark.table("testRenameColumn").select("a", "c").collectAsList();
         assertThat(results.toString()).isEqualTo("[[1,1], [5,3]]");
 
         // Rename "a" to "aa"
-        spark.sql("ALTER TABLE paimon.default.testRenameColumn RENAME COLUMN a to aa");
-        List<Row> afterRename =
-                spark.sql("SHOW CREATE TABLE paimon.default.testRenameColumn").collectAsList();
+        spark.sql("ALTER TABLE testRenameColumn RENAME COLUMN a to aa");
+        List<Row> afterRename = spark.sql("SHOW CREATE TABLE testRenameColumn").collectAsList();
         assertThat(afterRename.toString())
-                .isEqualTo(
-                        "[[CREATE TABLE testRenameColumn (\n"
-                                + "  `aa` INT NOT NULL,\n"
-                                + "  `b` BIGINT,\n"
-                                + "  `c` STRING)\n"
-                                + buildTableProperties("default.db/testRenameColumn")
-                                + "]]");
-        Dataset<Row> table2 = spark.table("paimon.default.testRenameColumn");
-        results = table2.select("aa", "c").collectAsList();
+                .contains(
+                        showCreateString(
+                                "testRenameColumn", "aa INT NOT NULL", "b BIGINT", "c STRING"));
+        Dataset<Row> table = spark.table("testRenameColumn");
+        results = table.select("aa", "c").collectAsList();
         assertThat(results.toString()).isEqualTo("[[1,1], [5,3]]");
-        assertThatThrownBy(() -> table2.select("a", "c").collectAsList())
+        assertThatThrownBy(() -> table.select("a", "c"))
                 .isInstanceOf(AnalysisException.class)
-                .hasMessageContaining("cannot resolve '%s' given input columns", "a");
+                .hasMessageContaining(
+                        "Column 'a' does not exist. Did you mean one of the following? "
+                                + "[paimon.default.testRenameColumn.b, paimon.default.testRenameColumn.c, paimon.default.testRenameColumn.aa]");
     }
 
     @Test
     public void testRenamePartitionKey() {
-        spark.sql("USE paimon");
         spark.sql(
-                "CREATE TABLE default.testRenamePartitionKey (\n"
+                "CREATE TABLE testRenamePartitionKey (\n"
                         + "a BIGINT,\n"
-                        + "b STRING) USING paimon\n"
-                        + "COMMENT 'table comment'\n"
-                        + "PARTITIONED BY (a)\n"
-                        + "TBLPROPERTIES ('foo' = 'bar')");
-
+                        + "b STRING)\n"
+                        + "PARTITIONED BY (a)\n");
         List<Row> beforeRename =
-                spark.sql("SHOW CREATE TABLE paimon.default.testRenamePartitionKey")
-                        .collectAsList();
+                spark.sql("SHOW CREATE TABLE testRenamePartitionKey").collectAsList();
         assertThat(beforeRename.toString())
-                .isEqualTo(
-                        "[[CREATE TABLE testRenamePartitionKey (\n"
-                                + "  `a` BIGINT,\n"
-                                + "  `b` STRING)\n"
-                                + "USING paimon\n"
-                                + "PARTITIONED BY (a)\n"
-                                + "COMMENT 'table comment'\n"
-                                + "TBLPROPERTIES(\n"
-                                + "  'foo' = 'bar',\n"
-                                + String.format(
-                                        "  'path' = '%s/%s')\n",
-                                        warehousePath, "default.db/testRenamePartitionKey")
-                                + "]]");
+                .contains(showCreateString("testRenamePartitionKey", "a BIGINT", "b STRING"));
 
         assertThatThrownBy(
-                        () ->
-                                spark.sql(
-                                        "ALTER TABLE paimon.default.testRenamePartitionKey RENAME COLUMN a to aa"))
+                        () -> spark.sql("ALTER TABLE testRenamePartitionKey RENAME COLUMN a to aa"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage(
-                        String.format(
-                                "java.lang.UnsupportedOperationException: Cannot drop/rename partition key[%s]",
-                                "a"));
+                        "java.lang.UnsupportedOperationException: Cannot drop/rename partition key[a]");
     }
 
     @Test
@@ -245,31 +204,16 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         createTable("testDropSingleColumn");
         writeTable("testDropSingleColumn", "(1, 2L, '1')", "(5, 6L, '3')");
 
-        List<Row> beforeDrop =
-                spark.sql("SHOW CREATE TABLE paimon.default.testDropSingleColumn").collectAsList();
-        assertThat(beforeDrop.toString())
-                .isEqualTo(
-                        "[[CREATE TABLE testDropSingleColumn (\n"
-                                + "  `a` INT NOT NULL,\n"
-                                + "  `b` BIGINT,\n"
-                                + "  `c` STRING)\n"
-                                + buildTableProperties("default.db/testDropSingleColumn")
-                                + "]]");
+        List<Row> beforeDrop = spark.sql("SHOW CREATE TABLE testDropSingleColumn").collectAsList();
+        assertThat(beforeDrop.toString()).contains(defaultShowCreateString("testDropSingleColumn"));
 
-        spark.sql("ALTER TABLE paimon.default.testDropSingleColumn DROP COLUMN a");
+        spark.sql("ALTER TABLE testDropSingleColumn DROP COLUMN a");
 
-        List<Row> afterDrop =
-                spark.sql("SHOW CREATE TABLE paimon.default.testDropSingleColumn").collectAsList();
+        List<Row> afterDrop = spark.sql("SHOW CREATE TABLE testDropSingleColumn").collectAsList();
         assertThat(afterDrop.toString())
-                .isEqualTo(
-                        "[[CREATE TABLE testDropSingleColumn (\n"
-                                + "  `b` BIGINT,\n"
-                                + "  `c` STRING)\n"
-                                + buildTableProperties("default.db/testDropSingleColumn")
-                                + "]]");
+                .contains(showCreateString("testDropSingleColumn", "b BIGINT", "c STRING"));
 
-        Dataset<Row> table = spark.table("paimon.default.testDropSingleColumn");
-        List<Row> results = table.collectAsList();
+        List<Row> results = spark.table("testDropSingleColumn").collectAsList();
         assertThat(results.toString()).isEqualTo("[[2,1], [6,3]]");
     }
 
@@ -277,161 +221,104 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     public void testDropColumns() {
         createTable("testDropColumns");
 
-        List<Row> beforeRename =
-                spark.sql("SHOW CREATE TABLE paimon.default.testDropColumns").collectAsList();
-        assertThat(beforeRename.toString())
-                .isEqualTo(
-                        "[[CREATE TABLE testDropColumns (\n"
-                                + "  `a` INT NOT NULL,\n"
-                                + "  `b` BIGINT,\n"
-                                + "  `c` STRING)\n"
-                                + buildTableProperties("default.db/testDropColumns")
-                                + "]]");
+        List<Row> beforeDrop = spark.sql("SHOW CREATE TABLE testDropColumns").collectAsList();
+        assertThat(beforeDrop.toString()).contains(defaultShowCreateString("testDropColumns"));
 
-        spark.sql("ALTER TABLE paimon.default.testDropColumns DROP COLUMNS a, b");
+        spark.sql("ALTER TABLE testDropColumns DROP COLUMNS a, b");
 
-        List<Row> afterRename =
-                spark.sql("SHOW CREATE TABLE paimon.default.testDropColumns").collectAsList();
-        assertThat(afterRename.toString())
-                .isEqualTo(
-                        "[[CREATE TABLE testDropColumns (\n"
-                                + "  `c` STRING)\n"
-                                + buildTableProperties("default.db/testDropColumns")
-                                + "]]");
+        List<Row> afterDrop = spark.sql("SHOW CREATE TABLE testDropColumns").collectAsList();
+        assertThat(afterDrop.toString()).contains(showCreateString("testDropColumns", "c STRING"));
     }
 
     @Test
     public void testDropPartitionKey() {
-        spark.sql("USE paimon");
         spark.sql(
-                "CREATE TABLE default.testDropPartitionKey (\n"
+                "CREATE TABLE testDropPartitionKey (\n"
                         + "a BIGINT,\n"
-                        + "b STRING) USING paimon\n"
-                        + "COMMENT 'table comment'\n"
-                        + "PARTITIONED BY (a)\n"
-                        + "TBLPROPERTIES ('foo' = 'bar')");
+                        + "b STRING) \n"
+                        + "PARTITIONED BY (a)");
 
-        List<Row> beforeRename =
-                spark.sql("SHOW CREATE TABLE paimon.default.testDropPartitionKey").collectAsList();
-        assertThat(beforeRename.toString())
-                .isEqualTo(
-                        "[[CREATE TABLE testDropPartitionKey (\n"
-                                + "  `a` BIGINT,\n"
-                                + "  `b` STRING)\n"
-                                + "USING paimon\n"
-                                + "PARTITIONED BY (a)\n"
-                                + "COMMENT 'table comment'\n"
-                                + "TBLPROPERTIES(\n"
-                                + "  'foo' = 'bar',\n"
-                                + String.format(
-                                        "  'path' = '%s/%s')\n",
-                                        warehousePath, "default.db/testDropPartitionKey")
-                                + "]]");
+        List<Row> beforeDrop = spark.sql("SHOW CREATE TABLE testDropPartitionKey").collectAsList();
+        assertThat(beforeDrop.toString())
+                .contains(showCreateString("testDropPartitionKey", "a BIGINT", "b STRING"));
 
-        assertThatThrownBy(
-                        () ->
-                                spark.sql(
-                                        "ALTER TABLE paimon.default.testDropPartitionKey DROP COLUMN a"))
+        assertThatThrownBy(() -> spark.sql("ALTER TABLE testDropPartitionKey DROP COLUMN a"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage(
-                        String.format(
-                                "java.lang.UnsupportedOperationException: Cannot drop/rename partition key[%s]",
-                                "a"));
+                        "java.lang.UnsupportedOperationException: Cannot drop/rename partition key[a]");
     }
 
     @Test
     public void testDropPrimaryKey() {
-        spark.sql("USE paimon");
         spark.sql(
-                "CREATE TABLE default.testDropPrimaryKey (\n"
+                "CREATE TABLE testDropPrimaryKey (\n"
                         + "a BIGINT,\n"
-                        + "b STRING) USING paimon\n"
-                        + "COMMENT 'table comment'\n"
+                        + "b STRING)\n"
                         + "PARTITIONED BY (a)\n"
                         + "TBLPROPERTIES ('primary-key' = 'a, b')");
 
-        List<Row> beforeRename =
-                spark.sql("SHOW CREATE TABLE paimon.default.testDropPrimaryKey").collectAsList();
-        assertThat(beforeRename.toString())
-                .isEqualTo(
-                        "[[CREATE TABLE testDropPrimaryKey (\n"
-                                + "  `a` BIGINT NOT NULL,\n"
-                                + "  `b` STRING NOT NULL)\n"
-                                + "USING paimon\n"
-                                + "PARTITIONED BY (a)\n"
-                                + "COMMENT 'table comment'\n"
-                                + "TBLPROPERTIES(\n"
-                                + String.format(
-                                        "  'path' = '%s/%s')\n",
-                                        warehousePath, "default.db/testDropPrimaryKey")
-                                + "]]");
+        List<Row> beforeDrop = spark.sql("SHOW CREATE TABLE testDropPrimaryKey").collectAsList();
+        assertThat(beforeDrop.toString())
+                .contains(
+                        showCreateString(
+                                "testDropPrimaryKey", "a BIGINT NOT NULL", "b STRING NOT NULL"));
 
-        assertThatThrownBy(
-                        () ->
-                                spark.sql(
-                                        "ALTER TABLE paimon.default.testDropPrimaryKey DROP COLUMN b"))
+        assertThatThrownBy(() -> spark.sql("ALTER TABLE testDropPrimaryKey DROP COLUMN b"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage(
-                        String.format(
-                                "java.lang.UnsupportedOperationException: Cannot drop/rename primary key[%s]",
-                                "b"));
+                        "java.lang.UnsupportedOperationException: Cannot drop/rename primary key[b]");
     }
 
     @Test
     public void testUpdateColumnPosition() {
         // move first
-        spark.sql("CREATE TABLE tableFirst (a INT , b BIGINT, c STRING)");
+        createTable("tableFirst");
         spark.sql("ALTER TABLE tableFirst ALTER COLUMN b FIRST");
         List<Row> result = spark.sql("SHOW CREATE TABLE tableFirst").collectAsList();
         assertThat(result.toString())
-                .contains(
-                        "CREATE TABLE tableFirst (\n"
-                                + "  `b` BIGINT,\n"
-                                + "  `a` INT,\n"
-                                + "  `c` STRING)");
+                .contains(showCreateString("tableFirst", "b BIGINT", "a INT NOT NULL", "c STRING"));
 
         // move after
-        spark.sql("CREATE TABLE tableAfter (a INT, b BIGINT, c STRING)");
+        createTable("tableAfter");
         spark.sql("ALTER TABLE tableAfter ALTER COLUMN c AFTER a");
         result = spark.sql("SHOW CREATE TABLE tableAfter").collectAsList();
         assertThat(result.toString())
-                .contains(
-                        "CREATE TABLE tableAfter (\n"
-                                + "  `a` INT,\n"
-                                + "  `c` STRING,\n"
-                                + "  `b` BIGINT)");
+                .contains(showCreateString("tableAfter", "a INT NOT NULL", "c STRING", "b BIGINT"));
 
-        spark.sql("CREATE TABLE tableAfter1 (a INT, b BIGINT, c STRING, d DOUBLE)");
+        spark.sql("CREATE TABLE tableAfter1 (a INT NOT NULL, b BIGINT, c STRING, d DOUBLE)");
         spark.sql("ALTER TABLE tableAfter1 ALTER COLUMN b AFTER c");
         result = spark.sql("SHOW CREATE TABLE tableAfter1").collectAsList();
         assertThat(result.toString())
                 .contains(
-                        "CREATE TABLE tableAfter1 (\n"
-                                + "  `a` INT,\n"
-                                + "  `c` STRING,\n"
-                                + "  `b` BIGINT,\n"
-                                + "  `d` DOUBLE)");
+                        showCreateString(
+                                "tableAfter1",
+                                "a INT NOT NULL",
+                                "c STRING",
+                                "b BIGINT",
+                                "d DOUBLE"));
 
-        //  move self for first test
-        spark.sql("CREATE TABLE tableFirstSelf (a INT , b BIGINT, c STRING)");
+        //  move self to first test
+        createTable("tableFirstSelf");
         assertThatThrownBy(() -> spark.sql("ALTER TABLE tableFirstSelf ALTER COLUMN a FIRST"))
-                .getRootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Cannot move itself for column a");
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Cannot move itself for column a"));
 
-        //  move self for after test
-        spark.sql("CREATE TABLE tableAfterSelf (a INT , b BIGINT, c STRING)");
+        //  move self to after test
+        createTable("tableAfterSelf");
         assertThatThrownBy(() -> spark.sql("ALTER TABLE tableAfterSelf ALTER COLUMN b AFTER b"))
-                .getRootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Cannot move itself for column b");
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Cannot move itself for column b"));
 
         // missing column
-        spark.sql("CREATE TABLE tableMissing (a INT , b BIGINT, c STRING)");
+        createTable("tableMissing");
         assertThatThrownBy(() -> spark.sql("ALTER TABLE tableMissing ALTER COLUMN d FIRST"))
                 .hasMessageContaining("Missing field d in table paimon.default.tableMissing");
 
-        spark.sql("CREATE TABLE tableMissingAfter (a INT , b BIGINT, c STRING)");
+        createTable("tableMissingAfter");
         assertThatThrownBy(() -> spark.sql("ALTER TABLE tableMissingAfter ALTER COLUMN a AFTER d"))
                 .hasMessageContaining("Missing field d in table paimon.default.tableMissingAfter");
     }
@@ -441,19 +328,18 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         createTable("testAlterColumnType");
         writeTable("testAlterColumnType", "(1, 2L, '1')", "(5, 6L, '3')");
 
-        spark.sql("ALTER TABLE paimon.default.testAlterColumnType ALTER COLUMN b TYPE DOUBLE");
-        assertThat(
-                        spark.table("paimon.default.testAlterColumnType").collectAsList().stream()
-                                .map(Row::toString)
-                                .collect(Collectors.toList()))
-                .containsExactlyInAnyOrder("[1,2.0,1]", "[5,6.0,3]");
+        List<Row> beforeAlter = spark.sql("SHOW CREATE TABLE testAlterColumnType").collectAsList();
+        assertThat(beforeAlter.toString()).contains(defaultShowCreateString("testAlterColumnType"));
 
-        spark.sql("ALTER TABLE paimon.default.testAlterColumnType DROP COLUMNS a");
-        assertThat(
-                        spark.table("paimon.default.testAlterColumnType").collectAsList().stream()
-                                .map(Row::toString)
-                                .collect(Collectors.toList()))
-                .containsExactlyInAnyOrder("[2.0,1]", "[6.0,3]");
+        spark.sql("ALTER TABLE testAlterColumnType ALTER COLUMN b TYPE DOUBLE");
+        assertThat(spark.table("testAlterColumnType").collectAsList().toString())
+                .isEqualTo("[[1,2.0,1], [5,6.0,3]]");
+
+        List<Row> afterAlter = spark.sql("SHOW CREATE TABLE testAlterColumnType").collectAsList();
+        assertThat(afterAlter.toString())
+                .contains(
+                        showCreateString(
+                                "testAlterColumnType", "a INT NOT NULL", "b DOUBLE", "c STRING"));
     }
 
     @Test
@@ -469,39 +355,38 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                 .isFalse();
 
         // note: for Spark, it is illegal to change nullable column to non-nullable
-        spark.sql("ALTER TABLE paimon.default.t2 ALTER COLUMN a DROP NOT NULL");
+        spark.sql("ALTER TABLE t2 ALTER COLUMN a DROP NOT NULL");
         assertThat(fieldIsNullable(getField(schema2(), 0))).isTrue();
 
-        spark.sql("ALTER TABLE paimon.default.t2 ALTER COLUMN b DROP NOT NULL");
+        spark.sql("ALTER TABLE t2 ALTER COLUMN b DROP NOT NULL");
         assertThat(fieldIsNullable(getField(schema2(), 1))).isTrue();
 
-        spark.sql("ALTER TABLE paimon.default.t2 ALTER COLUMN c DROP NOT NULL");
+        spark.sql("ALTER TABLE t2 ALTER COLUMN c DROP NOT NULL");
         assertThat(fieldIsNullable(getField(schema2(), 2))).isTrue();
 
-        spark.sql("ALTER TABLE paimon.default.t2 ALTER COLUMN c.c1 DROP NOT NULL");
+        spark.sql("ALTER TABLE t2 ALTER COLUMN c.c1 DROP NOT NULL");
         assertThat(fieldIsNullable(getNestedField(getField(schema2(), 2), 0))).isTrue();
 
-        spark.sql("ALTER TABLE paimon.default.t2 ALTER COLUMN c.c1.c12 DROP NOT NULL");
+        spark.sql("ALTER TABLE t2 ALTER COLUMN c.c1.c12 DROP NOT NULL");
         assertThat(fieldIsNullable(getNestedField(getNestedField(getField(schema2(), 2), 0), 1)))
                 .isTrue();
     }
 
     @Test
     public void testAlterPrimaryKeyNullability() {
-        spark.sql("USE paimon");
         spark.sql(
-                "CREATE TABLE default.testAlterPkNullability (\n"
+                "CREATE TABLE testAlterPkNullability (\n"
                         + "a BIGINT,\n"
-                        + "b STRING) USING paimon\n"
-                        + "COMMENT 'table comment'\n"
+                        + "b STRING)\n"
                         + "TBLPROPERTIES ('primary-key' = 'a')");
         assertThatThrownBy(
                         () ->
                                 spark.sql(
-                                        "ALTER TABLE default.testAlterPkNullability ALTER COLUMN a DROP NOT NULL"))
-                .getRootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Cannot change nullability of primary key");
+                                        "ALTER TABLE testAlterPkNullability ALTER COLUMN a DROP NOT NULL"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Cannot change nullability of primary key"));
     }
 
     @Test
@@ -509,10 +394,10 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         createTable("testAlterTableColumnComment");
         assertThat(getField(schema1(), 0).description()).isNull();
 
-        spark.sql("ALTER TABLE paimon.default.t1 ALTER COLUMN a COMMENT 'a new comment'");
+        spark.sql("ALTER TABLE t1 ALTER COLUMN a COMMENT 'a new comment'");
         assertThat(getField(schema1(), 0).description()).isEqualTo("a new comment");
 
-        spark.sql("ALTER TABLE paimon.default.t1 ALTER COLUMN a COMMENT 'yet another comment'");
+        spark.sql("ALTER TABLE t1 ALTER COLUMN a COMMENT 'yet another comment'");
         assertThat(getField(schema1(), 0).description()).isEqualTo("yet another comment");
 
         assertThat(getField(schema2(), 2).description()).isEqualTo("comment about c");
@@ -524,12 +409,11 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         assertThat(getNestedField(getNestedField(getField(schema2(), 2), 0), 1).description())
                 .isNull();
 
-        spark.sql(
-                "ALTER TABLE paimon.default.t2 ALTER COLUMN c COMMENT 'yet another comment about c'");
-        spark.sql("ALTER TABLE paimon.default.t2 ALTER COLUMN c.c1 COMMENT 'a nested type'");
-        spark.sql("ALTER TABLE paimon.default.t2 ALTER COLUMN c.c2 COMMENT 'a bigint type'");
-        spark.sql("ALTER TABLE paimon.default.t2 ALTER COLUMN c.c1.c11 COMMENT 'a double type'");
-        spark.sql("ALTER TABLE paimon.default.t2 ALTER COLUMN c.c1.c12 COMMENT 'a boolean array'");
+        spark.sql("ALTER TABLE t2 ALTER COLUMN c COMMENT 'yet another comment about c'");
+        spark.sql("ALTER TABLE t2 ALTER COLUMN c.c1 COMMENT 'a nested type'");
+        spark.sql("ALTER TABLE t2 ALTER COLUMN c.c2 COMMENT 'a bigint type'");
+        spark.sql("ALTER TABLE t2 ALTER COLUMN c.c1.c11 COMMENT 'a double type'");
+        spark.sql("ALTER TABLE t2 ALTER COLUMN c.c1.c12 COMMENT 'a boolean array'");
 
         assertThat(getField(schema2(), 2).description()).isEqualTo("yet another comment about c");
         assertThat(getNestedField(getField(schema2(), 2), 0).description())
@@ -563,7 +447,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
     public void testSchemaEvolution() {
         // Create table with fields [a, b, c] and insert 2 records
         spark.sql(
-                "CREATE TABLE paimon.default.testSchemaEvolution(\n"
+                "CREATE TABLE testSchemaEvolution(\n"
                         + "a INT NOT NULL, \n"
                         + "b BIGINT NOT NULL, \n"
                         + "c VARCHAR(10), \n"
@@ -572,20 +456,17 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         + "f INT NOT NULL) \n"
                         + "TBLPROPERTIES ('file.format'='avro')");
         writeTable("testSchemaEvolution", "(1, 2L, '3', 4, 5, 6)", "(7, 8L, '9', 10, 11, 12)");
-        assertThat(
-                        spark.table("paimon.default.testSchemaEvolution").collectAsList().stream()
-                                .map(Row::toString)
-                                .collect(Collectors.toList()))
+
+        Dataset<Row> table = spark.table("testSchemaEvolution");
+        assertThat(table.collectAsList().stream().map(Row::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder("[1,2,3,4,5,6]", "[7,8,9,10,11,12]");
         assertThat(
-                        spark.table("paimon.default.testSchemaEvolution").select("a", "c", "e")
-                                .collectAsList().stream()
+                        table.select("a", "c", "e").collectAsList().stream()
                                 .map(Row::toString)
                                 .collect(Collectors.toList()))
                 .containsExactlyInAnyOrder("[1,3,5]", "[7,9,11]");
         assertThat(
-                        spark.table("paimon.default.testSchemaEvolution").filter("a>1")
-                                .collectAsList().stream()
+                        table.filter("a>1").collectAsList().stream()
                                 .map(Row::toString)
                                 .collect(Collectors.toList()))
                 .containsExactlyInAnyOrder("[7,8,9,10,11,12]");
@@ -593,50 +474,45 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         // Rename (a, int)->(aa, bigint), c->a, b->c, (d, int)->(b, bigint), (f, int)->(ff, float),
         // the fields are [(1, aa, bigint), (2, c, bigint), (3, a, string), (4, b, bigint), (5, e,
         // int), (6, ff, float)] and insert 2 records
-        spark.sql("ALTER TABLE paimon.default.testSchemaEvolution RENAME COLUMN a to aa");
-        spark.sql("ALTER TABLE paimon.default.testSchemaEvolution ALTER COLUMN aa TYPE bigint");
-        spark.sql("ALTER TABLE paimon.default.testSchemaEvolution RENAME COLUMN c to a");
-        spark.sql("ALTER TABLE paimon.default.testSchemaEvolution RENAME COLUMN b to c");
-        spark.sql("ALTER TABLE paimon.default.testSchemaEvolution RENAME COLUMN d to b");
-        spark.sql("ALTER TABLE paimon.default.testSchemaEvolution ALTER COLUMN b TYPE bigint");
-        spark.sql("ALTER TABLE paimon.default.testSchemaEvolution RENAME COLUMN f to ff");
-        spark.sql("ALTER TABLE paimon.default.testSchemaEvolution ALTER COLUMN ff TYPE float");
+        spark.sql("ALTER TABLE testSchemaEvolution RENAME COLUMN a to aa");
+        spark.sql("ALTER TABLE testSchemaEvolution ALTER COLUMN aa TYPE bigint");
+        spark.sql("ALTER TABLE testSchemaEvolution RENAME COLUMN c to a");
+        spark.sql("ALTER TABLE testSchemaEvolution RENAME COLUMN b to c");
+        spark.sql("ALTER TABLE testSchemaEvolution RENAME COLUMN d to b");
+        spark.sql("ALTER TABLE testSchemaEvolution ALTER COLUMN b TYPE bigint");
+        spark.sql("ALTER TABLE testSchemaEvolution RENAME COLUMN f to ff");
+        spark.sql("ALTER TABLE testSchemaEvolution ALTER COLUMN ff TYPE float");
         writeTable(
                 "testSchemaEvolution",
                 "(13L, 14L, '15', 16L, 17, 18.0F)",
                 "(19L, 20L, '21', 22L, 23, 24.0F)");
-        assertThat(
-                        spark.table("paimon.default.testSchemaEvolution").collectAsList().stream()
-                                .map(Row::toString)
-                                .collect(Collectors.toList()))
+
+        table = spark.table("testSchemaEvolution");
+        assertThat(table.collectAsList().stream().map(Row::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
                         "[1,2,3,4,5,6.0]",
                         "[7,8,9,10,11,12.0]",
                         "[13,14,15,16,17,18.0]",
                         "[19,20,21,22,23,24.0]");
         assertThat(
-                        spark.table("paimon.default.testSchemaEvolution").select("aa", "b", "ff")
-                                .collectAsList().stream()
+                        table.select("aa", "b", "ff").collectAsList().stream()
                                 .map(Row::toString)
                                 .collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
                         "[1,4,6.0]", "[7,10,12.0]", "[13,16,18.0]", "[19,22,24.0]");
         assertThat(
-                        spark.table("paimon.default.testSchemaEvolution").select("aa", "a", "ff")
-                                .filter("b>10L").collectAsList().stream()
+                        table.select("aa", "a", "ff").filter("b>10L").collectAsList().stream()
                                 .map(Row::toString)
                                 .collect(Collectors.toList()))
                 .containsExactlyInAnyOrder("[13,15,18.0]", "[19,21,24.0]");
 
         // Drop fields aa, c, e, the fields are [(3, a, string), (4, b, bigint), (6, ff, float)] and
         // insert 2 records
-        spark.sql("ALTER TABLE paimon.default.testSchemaEvolution DROP COLUMNS aa, c, e");
+        spark.sql("ALTER TABLE testSchemaEvolution DROP COLUMNS aa, c, e");
         writeTable("testSchemaEvolution", "('25', 26L, 27.0F)", "('28', 29L, 30.0)");
 
-        assertThat(
-                        spark.table("paimon.default.testSchemaEvolution").collectAsList().stream()
-                                .map(Row::toString)
-                                .collect(Collectors.toList()))
+        table = spark.table("testSchemaEvolution");
+        assertThat(table.collectAsList().stream().map(Row::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
                         "[3,4,6.0]",
                         "[9,10,12.0]",
@@ -645,25 +521,21 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         "[25,26,27.0]",
                         "[28,29,30.0]");
         assertThat(
-                        spark.table("paimon.default.testSchemaEvolution").select("a", "ff")
-                                .filter("b>10L").collectAsList().stream()
+                        table.select("a", "ff").filter("b>10L").collectAsList().stream()
                                 .map(Row::toString)
                                 .collect(Collectors.toList()))
                 .containsExactlyInAnyOrder("[15,18.0]", "[21,24.0]", "[25,27.0]", "[28,30.0]");
 
         // Add new fields d, c, e, the fields are [(3, a, string), (4, b, bigint), (6, ff, float),
         // (7, d, int), (8, c, int), (9, e, int)] insert 2 records
-        spark.sql(
-                "ALTER TABLE paimon.default.testSchemaEvolution ADD COLUMNS (d INT, c INT, e INT)");
+        spark.sql("ALTER TABLE testSchemaEvolution ADD COLUMNS (d INT, c INT, e INT)");
         writeTable(
                 "testSchemaEvolution",
                 "('31', 32L, 33.0F, 34, 35, 36)",
                 "('37', 38L, 39.0F, 40, 41, 42)");
 
-        assertThat(
-                        spark.table("paimon.default.testSchemaEvolution").collectAsList().stream()
-                                .map(Row::toString)
-                                .collect(Collectors.toList()))
+        table = spark.table("testSchemaEvolution");
+        assertThat(table.collectAsList().stream().map(Row::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
                         "[3,4,6.0,null,null,null]",
                         "[9,10,12.0,null,null,null]",
@@ -674,8 +546,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         "[31,32,33.0,34,35,36]",
                         "[37,38,39.0,40,41,42]");
         assertThat(
-                        spark.table("paimon.default.testSchemaEvolution").filter("b>10")
-                                .collectAsList().stream()
+                        table.filter("b>10").collectAsList().stream()
                                 .map(Row::toString)
                                 .collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
@@ -686,8 +557,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         "[31,32,33.0,34,35,36]",
                         "[37,38,39.0,40,41,42]");
         assertThat(
-                        spark.table("paimon.default.testSchemaEvolution")
-                                .select("e", "a", "ff", "d", "b").filter("b>10L").collectAsList()
+                        table.select("e", "a", "ff", "d", "b").filter("b>10L").collectAsList()
                                 .stream()
                                 .map(Row::toString)
                                 .collect(Collectors.toList()))
@@ -699,8 +569,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                         "[36,31,33.0,34,32]",
                         "[42,37,39.0,40,38]");
         assertThat(
-                        spark.table("paimon.default.testSchemaEvolution")
-                                .select("e", "a", "ff", "d", "b").filter("b>10 and e is not null")
+                        table.select("e", "a", "ff", "d", "b").filter("b>10 and e is not null")
                                 .collectAsList().stream()
                                 .map(Row::toString)
                                 .collect(Collectors.toList()))
@@ -714,28 +583,25 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         writeTable("testFilesTable", "(1, 2L, '3')", "(4, 5L, '6')");
         assertThat(
                         getFieldStatsList(
-                                spark.sql("SELECT * FROM paimon.default.`testFilesTable$files`")
-                                        .collectAsList()))
+                                spark.sql("SELECT * FROM `testFilesTable$files`").collectAsList()))
                 .containsExactlyInAnyOrder("{a=0, b=0, c=0},{a=1, b=2, c=3},{a=4, b=5, c=6}");
 
         // Add new fields d, e, f and the fields are [a, b, c, d, e, f], insert 2 records
-        spark.sql("ALTER TABLE paimon.default.testFilesTable ADD COLUMNS (d INT, e INT, f INT)");
+        spark.sql("ALTER TABLE testFilesTable ADD COLUMNS (d INT, e INT, f INT)");
         writeTable("testFilesTable", "(7, 8L, '9', 10, 11, 12)", "(13, 14L, '15', 16, 17, 18)");
         assertThat(
                         getFieldStatsList(
-                                spark.sql("SELECT * FROM paimon.default.`testFilesTable$files`")
-                                        .collectAsList()))
+                                spark.sql("SELECT * FROM `testFilesTable$files`").collectAsList()))
                 .containsExactlyInAnyOrder(
                         "{a=0, b=0, c=0, d=2, e=2, f=2},{a=1, b=2, c=3, d=null, e=null, f=null},{a=4, b=5, c=6, d=null, e=null, f=null}",
                         "{a=0, b=0, c=0, d=0, e=0, f=0},{a=7, b=8, c=15, d=10, e=11, f=12},{a=13, b=14, c=9, d=16, e=17, f=18}");
 
         // Drop fields c, e and the fields are [a, b, d, f], insert 2 records
-        spark.sql("ALTER TABLE paimon.default.testFilesTable DROP COLUMNS c, e");
+        spark.sql("ALTER TABLE testFilesTable DROP COLUMNS c, e");
         writeTable("testFilesTable", "(19, 20L, 21, 22)", "(23, 24L, 25, 26)");
         assertThat(
                         getFieldStatsList(
-                                spark.sql("SELECT * FROM paimon.default.`testFilesTable$files`")
-                                        .collectAsList()))
+                                spark.sql("SELECT * FROM `testFilesTable$files`").collectAsList()))
                 .containsExactlyInAnyOrder(
                         "{a=0, b=0, d=2, f=2},{a=1, b=2, d=null, f=null},{a=4, b=5, d=null, f=null}",
                         "{a=0, b=0, d=0, f=0},{a=7, b=8, d=10, f=12},{a=13, b=14, d=16, f=18}",
@@ -752,11 +618,5 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                                         },
                                         ","))
                 .collect(Collectors.toList());
-    }
-
-    private String buildTableProperties(String tablePath) {
-        return String.format(
-                "TBLPROPERTIES(\n" + "  'file.format' = 'avro',\n" + "  'path' = '%s/%s')\n",
-                warehousePath, tablePath);
     }
 }
