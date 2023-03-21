@@ -40,8 +40,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -185,5 +187,18 @@ public abstract class SparkReadTestBase {
                 String.format(
                         "INSERT INTO paimon.default.%s VALUES %s",
                         tableName, StringUtils.join(values, ",")));
+    }
+
+    // return of 'SHOW CREATE TABLE' excluding TBLPROPERTIES
+    protected String showCreateString(String table, String... fieldSpec) {
+        return String.format(
+                "CREATE TABLE %s (%s)\n",
+                table,
+                Arrays.stream(fieldSpec).map(s -> "\n  " + s).collect(Collectors.joining(",")));
+    }
+
+    // default schema
+    protected String defaultShowCreateString(String table) {
+        return showCreateString(table, "a INT NOT NULL", "b BIGINT", "c STRING");
     }
 }
