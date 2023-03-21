@@ -70,7 +70,7 @@ public class Benchmark {
 
         String queriesValue = line.getOptionValue(QUERIES.getOpt());
         List<Query> queries = Query.load(location);
-        if (!"all".equals(queriesValue.toLowerCase())) {
+        if (!"all".equalsIgnoreCase(queriesValue)) {
             List<String> wantedQueries =
                     Arrays.stream(queriesValue.split(","))
                             .map(String::trim)
@@ -80,7 +80,7 @@ public class Benchmark {
 
         String sinksValue = line.getOptionValue(SINKS.getOpt());
         List<Sink> sinks = Sink.load(location);
-        if (!"all".equals(sinksValue.toLowerCase())) {
+        if (!"all".equalsIgnoreCase(sinksValue)) {
             List<String> wantedSinks =
                     Arrays.stream(sinksValue.split(","))
                             .map(String::trim)

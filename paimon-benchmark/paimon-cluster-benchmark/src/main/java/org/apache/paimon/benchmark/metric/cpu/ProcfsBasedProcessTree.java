@@ -702,9 +702,7 @@ public class ProcfsBasedProcessTree {
                 fReader =
                         new InputStreamReader(
                                 new FileInputStream(
-                                        new File(
-                                                new File(procfsDir, pid.toString()),
-                                                PROCFS_CMDLINE_FILE)),
+                                        new File(new File(procfsDir, pid), PROCFS_CMDLINE_FILE)),
                                 Charset.forName("UTF-8"));
             } catch (FileNotFoundException f) {
                 // The process vanished in the interim!
