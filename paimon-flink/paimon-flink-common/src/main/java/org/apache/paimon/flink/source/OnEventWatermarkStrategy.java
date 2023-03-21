@@ -48,7 +48,10 @@ public class OnEventWatermarkStrategy implements WatermarkStrategy<RowData> {
             }
 
             @Override
-            public void onPeriodicEmit(WatermarkOutput output) {}
+            public void onPeriodicEmit(WatermarkOutput output) {
+                // for idle watermark
+                generator.onPeriodicEmit(output);
+            }
         };
     }
 }
