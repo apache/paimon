@@ -87,7 +87,7 @@ Users can also adjust `changelog-producer` table property to specify the pattern
 
 {{< img src="/img/scan-mode.png">}}
 
-## Streaming Read
+## Streaming Source
 
 Streaming Read is only support in Flink SQL currently.
 
@@ -124,6 +124,12 @@ Watermark related options:
     </thead>
     <tbody>
         <tr>
+            <td><h5>scan.watermark.emit.strategy</h5></td>
+            <td style="word-wrap: break-word;">on-event</td>
+            <td><p>Enum</p></td>
+            <td>Emit strategy for watermark generation.<br /><br />Possible values:<ul><li>"on-periodic": Emit watermark periodically, interval is controlled by Flink 'pipeline.auto-watermark-interval'.</li><li>"on-event": Emit watermark per record.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>scan.watermark.alignment.group</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -134,24 +140,6 @@ Watermark related options:
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>Maximal drift to align watermarks, before we pause consuming from the source/task/partition.</td>
-        </tr>
-        <tr>
-            <td><h5>scan.watermark.alignment.update-interval</h5></td>
-            <td style="word-wrap: break-word;">1 s</td>
-            <td>Duration</td>
-            <td>How often tasks should notify coordinator about the current watermark and how often the coordinator should announce the maximal aligned watermark.</td>
-        </tr>
-        <tr>
-            <td><h5>scan.watermark.emit.strategy</h5></td>
-            <td style="word-wrap: break-word;">on-event</td>
-            <td><p>Enum</p></td>
-            <td>Emit strategy for watermark generation.<br /><br />Possible values:<ul><li>"on-periodic": Emit watermark periodically, interval is controlled by Flink 'pipeline.auto-watermark-interval'.</li><li>"on-event": Emit watermark per record.</li></ul></td>
-        </tr>
-        <tr>
-            <td><h5>scan.watermark.idle-timeout</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Duration</td>
-            <td>If no records flow in a partition of a stream for that amount of time, then that partition is considered "idle" and will not hold back the progress of watermarks in downstream operators.</td>
         </tr>
     </tbody>
 </table>
