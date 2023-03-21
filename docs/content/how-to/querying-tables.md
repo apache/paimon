@@ -109,9 +109,7 @@ SELECT window_start, window_end, SUM(f0) FROM
 ```
 
 You can also enable [Flink Watermark alignment](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/datastream/event-time/generating_watermarks/#watermark-alignment-_beta_),
-which will make sure no sources/splits/shards/partitions increase their watermarks too far ahead of the rest. 
-
-Watermark related options:
+which will make sure no sources/splits/shards/partitions increase their watermarks too far ahead of the rest:
 
 <table class="configuration table table-bordered">
     <thead>
@@ -123,12 +121,6 @@ Watermark related options:
         </tr>
     </thead>
     <tbody>
-        <tr>
-            <td><h5>scan.watermark.emit.strategy</h5></td>
-            <td style="word-wrap: break-word;">on-event</td>
-            <td><p>Enum</p></td>
-            <td>Emit strategy for watermark generation.<br /><br />Possible values:<ul><li>"on-periodic": Emit watermark periodically, interval is controlled by Flink 'pipeline.auto-watermark-interval'.</li><li>"on-event": Emit watermark per record.</li></ul></td>
-        </tr>
         <tr>
             <td><h5>scan.watermark.alignment.group</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
