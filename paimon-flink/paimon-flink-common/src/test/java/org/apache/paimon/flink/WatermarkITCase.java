@@ -44,6 +44,16 @@ public class WatermarkITCase extends CatalogITCaseBase {
     public void testWatermarkAlignment() throws Exception {
         innerTestWatermark(
                 "'scan.watermark.idle-timeout'='1s'",
+                "'scan.watermark.emit.strategy'='on-event'",
+                "'scan.watermark-alignment.group'='group'",
+                "'scan.watermark-alignment.max-drift'='1s',");
+    }
+
+    @Test
+    public void testWatermarkAlignmentPeriod() throws Exception {
+        innerTestWatermark(
+                "'scan.watermark.idle-timeout'='1s'",
+                "'scan.watermark.emit.strategy'='on-periodic'",
                 "'scan.watermark-alignment.group'='group'",
                 "'scan.watermark-alignment.max-drift'='1s',");
     }
