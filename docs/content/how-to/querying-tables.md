@@ -89,7 +89,7 @@ Users can also adjust `changelog-producer` table property to specify the pattern
 
 ## Streaming Source
 
-Streaming Read is only support in Flink SQL currently.
+Streaming source behavior is only supported in Flink engine at present.
 
 ### Watermark Definition
 
