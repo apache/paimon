@@ -85,7 +85,13 @@ public class TypeUtils {
             case BIGINT:
                 return Long.valueOf(s);
             case FLOAT:
-                return Float.valueOf(s);
+                double d = Double.parseDouble(s);
+                if (d == ((float) d)) {
+                    return (float) d;
+                } else {
+                    throw new NumberFormatException(
+                            s + " cannot be cast to float due to precision loss");
+                }
             case DOUBLE:
                 return Double.valueOf(s);
             case DATE:

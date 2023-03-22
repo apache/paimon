@@ -20,6 +20,8 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.streaming.api.functions.ProcessFunction;
@@ -47,18 +49,52 @@ public class SchemaChangeProcessFunction extends ProcessFunction<SchemaChange, V
     public void processElement(
             SchemaChange schemaChange, Context context, Collector<Void> collector)
             throws Exception {
-        Preconditions.checkArgument(
-                schemaChange instanceof SchemaChange.AddColumn,
-                "Currently, only SchemaChange.AddColumn is supported.");
-        try {
-            schemaManager.commitChanges(schemaChange);
-        } catch (Exception e) {
-            // This is normal. For example when a table is split into multiple database tables, all
-            // these tables will be added the same column. However schemaManager can't handle
-            // duplicated column adds, so we just catch the exception and log it.
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Failed to perform schema change {}", schemaChange, e);
+        if (schemaChange instanceof SchemaChange.AddColumn) {
+            try {
+                schemaManager.commitChanges(schemaChange);
+            } catch (Exception e) {
+                // This is normal. For example when a table is split into multiple database tables,
+                // all these tables will be added the same column. However schemaManager can't
+                // handle duplicated column adds, so we just catch the exception and log it.
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Failed to perform SchemaChange.AddColumn {}", schemaChange, e);
+                }
             }
+        } else if (schemaChange instanceof SchemaChange.UpdateColumnType) {
+            SchemaChange.UpdateColumnType updateColumnType =
+                    (SchemaChange.UpdateColumnType) schemaChange;
+            TableSchema schema =
+                    schemaManager
+                            .latest()
+                            .orElseThrow(
+                                    () ->
+                                            new RuntimeException(
+                                                    "Table does not exist. This is unexpected."));
+            int idx = schema.fieldNames().indexOf(updateColumnType.fieldName());
+            Preconditions.checkState(
+                    idx >= 0,
+                    "Field name "
+                            + updateColumnType.fieldName()
+                            + " does not exist in table. This is unexpected.");
+            DataType oldType = schema.fields().get(idx).type();
+            DataType newType = updateColumnType.newDataType();
+            Preconditions.checkArgument(
+                    oldType.getTypeRoot().getFamilies().equals(newType.getTypeRoot().getFamilies()),
+                    String.format(
+                            "Cannot convert field %s from type %s to %s "
+                                    + "because they belong to different type families",
+                            updateColumnType.fieldName(), oldType, newType));
+            schemaManager.commitChanges(schemaChange);
+        } else if (schemaChange instanceof SchemaChange.UpdateColumnComment) {
+            schemaManager.commitChanges(schemaChange);
+        } else if (schemaChange instanceof SchemaChange.UpdateColumnNullability) {
+            schemaManager.commitChanges(schemaChange);
+        } else {
+            throw new UnsupportedOperationException(
+                    "Unsupported schema change class "
+                            + schemaChange.getClass().getName()
+                            + ", content "
+                            + schemaChange);
         }
     }
 }
