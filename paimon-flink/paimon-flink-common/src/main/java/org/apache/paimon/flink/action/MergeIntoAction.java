@@ -454,7 +454,7 @@ public class MergeIntoAction extends ActionBase {
     public void run() throws Exception {
         // handle target alias
         if (targetAlias != null) {
-            tEnv.registerTable(targetAlias, tEnv.from(identifier.getObjectName()));
+            tEnv.createTemporaryView(escapedTargetName(), tEnv.from(identifier.getObjectName()));
         }
 
         // prepare source table

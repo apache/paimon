@@ -417,9 +417,7 @@ row based on merge-condition and optional not-matched-condition (source - target
 3. not-matched-by-source: changed rows are from target table and all row cannot match any source 
 table row based on merge-condition and optional not-matched-by-source-condition (target - source).
 
-Parameters format:\
-All conditions, set changes and values should use Flink SQL syntax. Please quote them
-with \" to escape special characters.
+Parameters format:
 1. matched-upsert-changes:\
 col = \<source-table>.col | expression [, ...] (Means setting \<target-table>.col with given value. Do not 
 add '\<target-table>.' before 'col'.)\
@@ -440,10 +438,20 @@ is equal to source's).
 1. source-alias cannot be duplicated with existed table name. If you use --source-ddl, source-alias 
 must be specified and equal to the table name in "CREATE" statement.
 2. If the source table is not in the same place as target table, the source-table-name or the source-alias 
-should be qualified (database.table or catalog.database.table if in different catalog).
+should be qualified (database.table or catalog.database.table if in different catalog). For examples:\
+\--source-sql "CREATE CATALOG my_cat WITH (...)"\
+\--source-sql "USE CATALOG my_cat"\
+\--source-sql "CREATE DATABASE my_db"\
+\--source-sql "USE my_db"\
+\--source-sql "CREATE TABLE S ..."\
+\--source-as my_cat.my_db.S
 3. At least one merge action must be specified.
 4. If both matched-upsert and matched-delete actions are present, their conditions must both be present too 
 (same to not-matched-by-source-upsert and not-matched-by-source-delete). Otherwise, all conditions are optional.
+5. All conditions, set changes and values should use Flink SQL syntax. To ensure the whole command runs normally
+in Shell, please quote them with \"\" to escape blank spaces and use '\\' to escape special characters in statement. 
+For example:\
+\--source-sql "CREATE TABLE T (k INT) WITH ('special-key' = '123\\!')"
 
 {{< /hint >}}
 
