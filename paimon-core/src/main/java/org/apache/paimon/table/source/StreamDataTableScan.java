@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.DataTable;
+import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.FollowUpScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 
@@ -37,6 +38,8 @@ public interface StreamDataTableScan extends DataTableScan, InnerStreamTableScan
     StreamDataTableScan withStartingScanner(StartingScanner startingScanner);
 
     StreamDataTableScan withFollowUpScanner(FollowUpScanner followUpScanner);
+
+    StreamDataTableScan withBoundedChecker(BoundedChecker boundedChecker);
 
     StreamDataTableScan withSnapshotStarting();
 

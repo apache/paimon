@@ -23,6 +23,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullStartingScanner;
@@ -104,7 +105,8 @@ public class CompactorSourceBuilder {
                                         .withStartingScanner(
                                                 new ContinuousCompactorStartingScanner())
                                         .withFollowUpScanner(
-                                                new ContinuousCompactorFollowUpScanner());
+                                                new ContinuousCompactorFollowUpScanner())
+                                        .withBoundedChecker(BoundedChecker.neverEnd());
                         scan.restore(nextSnapshotId);
                         return scan;
                     });
