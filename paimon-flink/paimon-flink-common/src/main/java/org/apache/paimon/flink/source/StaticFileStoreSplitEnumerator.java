@@ -37,7 +37,7 @@ import java.util.Map;
 public class StaticFileStoreSplitEnumerator
         implements SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> {
 
-    /** Default batch splits size to avoid exceed `akka.framesize` */
+    /** Default batch splits size to avoid exceed `akka.framesize`. */
     private static final int DEFAULT_SPLITS_SIZE = 10;
 
     private final SplitEnumeratorContext<FileStoreSourceSplit> context;
