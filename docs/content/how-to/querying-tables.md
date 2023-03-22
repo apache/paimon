@@ -159,6 +159,44 @@ INSERT INTO paimon_table SELECT * FROM kakfa_table;
 SELECT * FROM paimon_table /*+ OPTIONS('scan.bounded.watermark'='...') */;
 ```
 
+## Time Travel
+
+Currently, Paimon supports time travel for Flink and Spark 3 (requires Spark 3.3+).
+
+{{< tabs "time-travel-example" >}}
+
+{{< tab "Flink" >}}
+****
+you can use [dynamic table options](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql/queries/hints/#dynamic-table-options) to specify scan mode and from where to start:
+
+```sql
+-- travel to snapshot with id 1L
+SELECT * FROM t /*+ OPTIONS('scan.snapshot-id' = '1') */;
+
+-- travel to specified timestamp with a long value in milliseconds
+SELECT * FROM t /*+ OPTIONS('scan.timestamp-millis' = '1678883047356') */;
+```
+{{< /tab >}}
+
+{{< tab "Spark3" >}}
+
+you can use `VERSION AS OF` and `TIMESTAMP AS OF` in query to do time travel:
+
+```sql
+-- travel to snapshot with id 1L (use snapshot id as version)
+SELECT * FROM t VERSION AS OF 1;
+
+-- travel to specified timestamp 
+SELECT * FROM t TIMESTAMP AS OF '2023-06-01 00:00:00.123';
+
+-- you can also use a long value in seconds as timestamp
+SELECT * FROM t TIMESTAMP AS OF 1678883047;
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 ## System Tables
 
 System tables contain metadata and information about each table, such as the snapshots created and the options in use. Users can access system tables with batch queries.
