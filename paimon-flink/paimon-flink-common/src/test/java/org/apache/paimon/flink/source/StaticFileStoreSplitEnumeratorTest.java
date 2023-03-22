@@ -68,6 +68,46 @@ public class StaticFileStoreSplitEnumeratorTest {
     }
 
     @Test
+    public void testSplitBatch() {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingSplitEnumeratorContext<>(2);
+        context.registerReader(0, "test-host");
+        context.registerReader(1, "test-host");
+
+        List<FileStoreSourceSplit> splits = new ArrayList<>();
+        for (int i = 1; i <= 28; i++) {
+            splits.add(createSnapshotSplit(i, 0, Collections.emptyList()));
+        }
+        StaticFileStoreSplitEnumerator enumerator =
+                new StaticFileStoreSplitEnumerator(context, null, splits);
+
+        // test assign
+        enumerator.handleSplitRequest(0, "test-host");
+        enumerator.handleSplitRequest(1, "test-host");
+        Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
+                context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0, 1);
+        assertThat(assignments.get(0).getAssignedSplits()).hasSize(10);
+        assertThat(assignments.get(1).getAssignedSplits()).hasSize(10);
+
+        // test second batch assign
+        enumerator.handleSplitRequest(0, "test-host");
+        enumerator.handleSplitRequest(1, "test-host");
+
+        assertThat(assignments).containsOnlyKeys(0, 1);
+        assertThat(assignments.get(0).getAssignedSplits()).hasSize(14);
+        assertThat(assignments.get(1).getAssignedSplits()).hasSize(14);
+
+        // test third batch assign
+        enumerator.handleSplitRequest(0, "test-host");
+        enumerator.handleSplitRequest(1, "test-host");
+
+        assertThat(assignments).containsOnlyKeys(0, 1);
+        assertThat(assignments.get(0).hasReceivedNoMoreSplitsSignal()).isEqualTo(true);
+        assertThat(assignments.get(1).hasReceivedNoMoreSplitsSignal()).isEqualTo(true);
+    }
+
+    @Test
     public void testSplitAllocationNotEvenly() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 new TestingSplitEnumeratorContext<>(2);
