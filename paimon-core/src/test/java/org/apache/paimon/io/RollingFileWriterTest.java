@@ -68,7 +68,9 @@ public class RollingFileWriterTest {
                                                         new Path(tempDir.toString()),
                                                         "",
                                                         0,
-                                                        CoreOptions.FILE_FORMAT.defaultValue())
+                                                        CoreOptions.FILE_FORMAT
+                                                                .defaultValue()
+                                                                .toString())
                                                 .newPath(),
                                         SCHEMA,
                                         fileFormat.createStatsExtractor(SCHEMA).orElse(null),

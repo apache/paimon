@@ -100,7 +100,7 @@ public class TestChangelogDataReadWrite {
                         tablePath,
                         RowType.of(new IntType()),
                         "default",
-                        CoreOptions.FILE_FORMAT.defaultValue());
+                        CoreOptions.FILE_FORMAT.defaultValue().toString());
         this.snapshotManager = new SnapshotManager(LocalFileIO.create(), new Path(root));
         this.commitUser = UUID.randomUUID().toString();
     }
