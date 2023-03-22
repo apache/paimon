@@ -105,7 +105,10 @@ public class FileStoreSourceSplitReaderTest {
 
     private FileStoreSourceSplitReader<RecordAndPosition<RowData>> createReader(
             TableRead tableRead, @Nullable Long limit) {
-        return new FileStoreSourceSplitReader<>(RecordsFunction.forIterate(), tableRead, limit);
+        return new FileStoreSourceSplitReader<>(
+                RecordsFunction.forIterate(),
+                tableRead,
+                limit == null ? null : new RecordLimiter(limit));
     }
 
     private void innerTestOnce(boolean valueCountMode, int skip) throws Exception {
