@@ -38,17 +38,17 @@ Paimon supports Spark 2.4+. It is highly recommended to use Spark 2.4+ version w
 
 Download [paimon-spark-2-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-spark-2-{{< version >}}.jar).
 
-You can also manually build bundled jar from the source code.
-
 {{< /stable >}}
 
 {{< unstable >}}
 
-You are using an unreleased version of Paimon so you need to manually build bundled jar from the source code.
+Download [paimon-spark-2-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-2/{{< version >}}/).
 
 {{< /unstable >}}
 
-To build from source code, either [download the source of a release](https://flink.apache.org/downloads.html) or [clone the git repository]({{< github_repo >}}).
+You can also manually build bundled jar from the source code.
+
+To build from source code, [clone the git repository]({{< github_repo >}}).
 
 Build bundled jar with the following command.
 

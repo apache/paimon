@@ -32,9 +32,9 @@ This documentation is a guide for using Paimon in Spark3.
 
 Paimon currently supports Spark 3.3, 3.2 and 3.1. We recommend the latest Spark version for a better experience.
 
-{{< stable >}}
-
 Download the jar file with corresponding version.
+
+{{< stable >}}
 
 | Version   | Jar                                                                                                                                                                              |
 |-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -42,17 +42,21 @@ Download the jar file with corresponding version.
 | Spark 3.2 | [paimon-spark-3.2-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-spark-3.2-{{< version >}}.jar) |
 | Spark 3.1 | [paimon-spark-3.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-spark-3.1-{{< version >}}.jar) |
 
-You can also manually build bundled jar from the source code.
-
 {{< /stable >}}
 
 {{< unstable >}}
 
-You are using an unreleased version of Paimon so you need to manually build bundled jar from the source code.
+| Version   | Jar                                                                                                                                                                              |
+|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Spark 3.3 | [paimon-spark-3.3-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.3/{{< version >}}/) |
+| Spark 3.2 | [paimon-spark-3.2-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.2/{{< version >}}/) |
+| Spark 3.1 | [paimon-spark-3.1-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.1/{{< version >}}/) |
 
 {{< /unstable >}}
 
-To build from source code, either [download the source of a release](https://flink.apache.org/downloads.html) or [clone the git repository]({{< github_repo >}}).
+You can also manually build bundled jar from the source code.
+
+To build from source code, [clone the git repository]({{< github_repo >}}).
 
 Build bundled jar with the following command.
 

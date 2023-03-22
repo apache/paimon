@@ -78,25 +78,27 @@ By using Paimon Hive catalog, changes to the catalog will directly affect the co
 
 ### Preparing Paimon Hive Catalog Jar File
 
-{{< stable >}}
-
 Download the jar file with corresponding version.
+
+{{< stable >}}
 
 | Version    | Jar                                                                                                                                                                                    |
 |------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Hive 2 & 3 | [paimon-hive-catalog-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-hive-catalog-{{< version >}}.jar) |
 
-You can also manually build bundled jar from the source code.
-
 {{< /stable >}}
 
 {{< unstable >}}
 
-You are using an unreleased version of Paimon so you need to manually build bundled jar from the source code.
+| Version    | Jar                                                                                                                                                                                    |
+|------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Hive 2 & 3 | [paimon-hive-catalog-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-catalog/{{< version >}}/) |
 
 {{< /unstable >}}
 
-To build from source code, either [download the source of a release](https://flink.apache.org/downloads.html) or [clone the git repository]({{< github_repo >}}).
+You can also manually build bundled jar from the source code.
+
+To build from source code, [clone the git repository]({{< github_repo >}}).
 
 Build bundled jar with the following command.
 `mvn clean install -Dmaven.test.skip=true`
