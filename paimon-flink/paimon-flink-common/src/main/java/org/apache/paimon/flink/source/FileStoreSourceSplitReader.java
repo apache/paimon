@@ -48,7 +48,7 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
 
     private final TableRead tableRead;
 
-    @Nullable private final Long limit;
+    @Nullable private final RecordLimiter limiter;
 
     private final Queue<FileStoreSourceSplit> splits;
 
@@ -56,15 +56,16 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
 
     @Nullable private LazyRecordReader currentReader;
     @Nullable private String currentSplitId;
-    private long totalNumRead;
     private long currentNumRead;
     private RecordIterator<InternalRow> currentFirstBatch;
 
     public FileStoreSourceSplitReader(
-            RecordsFunction<T> recordsFunction, TableRead tableRead, @Nullable Long limit) {
+            RecordsFunction<T> recordsFunction,
+            TableRead tableRead,
+            @Nullable RecordLimiter limiter) {
         this.recordsFunction = recordsFunction;
         this.tableRead = tableRead;
-        this.limit = limit;
+        this.limiter = limiter;
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
         this.pool.add(new FileStoreRecordIterator());
@@ -93,7 +94,7 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
     }
 
     private boolean reachLimit() {
-        return limit != null && totalNumRead >= limit;
+        return limiter != null && limiter.reachLimit();
     }
 
     private FileStoreRecordIterator pool() throws IOException {
@@ -142,7 +143,9 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
         currentSplitId = nextSplit.splitId();
         currentReader = new LazyRecordReader(nextSplit.split());
         currentNumRead = nextSplit.recordsToSkip();
-        totalNumRead += currentNumRead;
+        if (limiter != null) {
+            limiter.add(currentNumRead);
+        }
         if (currentNumRead > 0) {
             seek(currentNumRead);
         }
@@ -212,7 +215,9 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
 
             recordAndPosition.setNext(new FlinkRowData(row));
             currentNumRead++;
-            totalNumRead++;
+            if (limiter != null) {
+                limiter.increment();
+            }
             return recordAndPosition;
         }
 
