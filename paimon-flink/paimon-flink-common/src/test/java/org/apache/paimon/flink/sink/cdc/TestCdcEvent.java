@@ -16,48 +16,42 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.cdc;
+package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.types.RowKind;
+import org.apache.paimon.cdc.CdcRecord;
+import org.apache.paimon.schema.SchemaChange;
 
 import java.io.Serializable;
-import java.util.Map;
-import java.util.Objects;
+import java.util.List;
 
-/** A data change message from the CDC source. */
-public class CdcRecord implements Serializable {
+/** Testing CDC change event. */
+public class TestCdcEvent implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private final RowKind kind;
-    private final Map<String, String> fields;
+    private final SchemaChange schemaChange;
+    private final List<CdcRecord> records;
 
-    public CdcRecord(RowKind kind, Map<String, String> fields) {
-        this.kind = kind;
-        this.fields = fields;
+    public TestCdcEvent(SchemaChange schemaChange) {
+        this.schemaChange = schemaChange;
+        this.records = null;
     }
 
-    public RowKind kind() {
-        return kind;
+    public TestCdcEvent(List<CdcRecord> records) {
+        this.schemaChange = null;
+        this.records = records;
     }
 
-    /** Map key is the field's name, and map value is the field's value. */
-    public Map<String, String> fields() {
-        return fields;
+    public SchemaChange schemaChange() {
+        return schemaChange;
     }
 
-    @Override
-    public boolean equals(Object o) {
-        if (!(o instanceof CdcRecord)) {
-            return false;
-        }
-
-        CdcRecord that = (CdcRecord) o;
-        return Objects.equals(kind, that.kind) && Objects.equals(fields, that.fields);
+    public List<CdcRecord> records() {
+        return records;
     }
 
     @Override
     public String toString() {
-        return kind.shortString() + " " + fields;
+        return String.format("{schemChange = %s, records = %s}", schemaChange, records);
     }
 }

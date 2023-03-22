@@ -26,7 +26,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.util.function.SerializableFunction;
 
 /** {@link FlinkSink} for dedicated compact jobs. */
-public class CompactorSink extends FlinkSink {
+public class CompactorSink extends FlinkSink<RowData> {
 
     private static final long serialVersionUID = 1L;
 
