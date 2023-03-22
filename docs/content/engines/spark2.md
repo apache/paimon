@@ -48,7 +48,7 @@ Download [paimon-spark-2-{{< version >}}.jar](https://repository.apache.org/snap
 
 You can also manually build bundled jar from the source code.
 
-To build from source code, either [download the source of a release](https://flink.apache.org/downloads.html) or [clone the git repository]({{< github_repo >}}).
+To build from source code, [clone the git repository]({{< github_repo >}}).
 
 Build bundled jar with the following command.
 
