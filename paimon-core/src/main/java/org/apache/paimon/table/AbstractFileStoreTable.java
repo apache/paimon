@@ -55,7 +55,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     protected final FileIO fileIO;
     protected final Path path;
-    protected TableSchema tableSchema;
+    protected final TableSchema tableSchema;
 
     public AbstractFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
         this.fileIO = fileIO;
