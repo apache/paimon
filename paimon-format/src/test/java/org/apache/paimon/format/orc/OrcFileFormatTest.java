@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format.orc;
 
-import org.apache.paimon.format.FileFormatFactory;
+import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
@@ -33,9 +33,7 @@ public class OrcFileFormatTest {
     public void testAbsent() {
         Options options = new Options();
         options.setString("haha", "1");
-        OrcFileFormat orc =
-                new OrcFileFormatFactory()
-                        .create(new FileFormatFactory.FormatContext(options, 1024));
+        OrcFileFormat orc = new OrcFileFormatFactory().create(new FormatContext(options, 1024));
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", "")).isEqualTo("lz4");
     }
@@ -45,9 +43,7 @@ public class OrcFileFormatTest {
         Options options = new Options();
         options.setString("haha", "1");
         options.setString("compress", "zlib");
-        OrcFileFormat orc =
-                new OrcFileFormatFactory()
-                        .create(new FileFormatFactory.FormatContext(options, 1024));
+        OrcFileFormat orc = new OrcFileFormatFactory().create(new FormatContext(options, 1024));
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", "")).isEqualTo("zlib");
     }

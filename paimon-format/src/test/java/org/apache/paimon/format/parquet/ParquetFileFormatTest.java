@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format.parquet;
 
-import org.apache.paimon.format.FileFormatFactory;
+import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
@@ -40,8 +40,7 @@ public class ParquetFileFormatTest {
     public void testAbsent() {
         Options options = new Options();
         ParquetFileFormat parquet =
-                new ParquetFileFormatFactory()
-                        .create(new FileFormatFactory.FormatContext(options, 1024));
+                new ParquetFileFormatFactory().create(new FormatContext(options, 1024));
         assertThat(parquet.formatOptions().getString(KEY1)).isEqualTo("absent");
     }
 
@@ -50,8 +49,7 @@ public class ParquetFileFormatTest {
         Options options = new Options();
         options.setString(KEY1.key(), "v1");
         ParquetFileFormat parquet =
-                new ParquetFileFormatFactory()
-                        .create(new FileFormatFactory.FormatContext(options, 1024));
+                new ParquetFileFormatFactory().create(new FormatContext(options, 1024));
         assertThat(parquet.formatOptions().getString(KEY1)).isEqualTo("v1");
     }
 
@@ -72,8 +70,7 @@ public class ParquetFileFormatTest {
     private String getCompressionCodec(Options conf) {
         Options formatOptions = conf.removePrefix(IDENTIFIER + ".");
         ParquetFileFormat parquet =
-                new ParquetFileFormatFactory()
-                        .create(new FileFormatFactory.FormatContext(formatOptions, 1024));
+                new ParquetFileFormatFactory().create(new FormatContext(formatOptions, 1024));
         return getParquetConfiguration(parquet.formatOptions())
                 .getString(ParquetOutputFormat.COMPRESSION, null);
     }
