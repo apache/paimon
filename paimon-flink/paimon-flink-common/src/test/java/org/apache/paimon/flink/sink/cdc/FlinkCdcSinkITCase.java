@@ -89,20 +89,37 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
 
         Map<Integer, Map<String, String>> expected = new HashMap<>();
         List<String> fieldNames = new ArrayList<>();
+        List<Boolean> isBigInt = new ArrayList<>();
         fieldNames.add("v0");
+        isBigInt.add(false);
         int suffixId = 0;
         for (int i = 0; i < numEvents; i++) {
             if (schemaChangePositions.contains(i)) {
-                suffixId++;
-                String newName = "v" + suffixId;
-                fieldNames.add(newName);
-                events[i] = new TestCdcEvent(SchemaChange.addColumn(newName, DataTypes.INT()));
+                if (random.nextBoolean()) {
+                    int idx = random.nextInt(fieldNames.size());
+                    isBigInt.set(idx, true);
+                    events[i] =
+                            new TestCdcEvent(
+                                    SchemaChange.updateColumnType(
+                                            fieldNames.get(idx), DataTypes.BIGINT()));
+                } else {
+                    suffixId++;
+                    String newName = "v" + suffixId;
+                    fieldNames.add(newName);
+                    isBigInt.add(false);
+                    events[i] = new TestCdcEvent(SchemaChange.addColumn(newName, DataTypes.INT()));
+                }
             } else {
                 Map<String, String> fields = new HashMap<>();
                 int key = random.nextInt(numKeys);
                 fields.put("k", String.valueOf(key));
-                for (String fieldName : fieldNames) {
-                    fields.put(fieldName, String.valueOf(random.nextInt()));
+                for (int j = 0; j < fieldNames.size(); j++) {
+                    String fieldName = fieldNames.get(j);
+                    if (isBigInt.get(j)) {
+                        fields.put(fieldName, String.valueOf(random.nextLong()));
+                    } else {
+                        fields.put(fieldName, String.valueOf(random.nextInt()));
+                    }
                 }
 
                 List<CdcRecord> records = new ArrayList<>();
@@ -174,7 +191,12 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
                 Map<String, String> fields = new HashMap<>();
                 for (int i = 0; i < schema.fieldNames().size(); i++) {
                     if (!row.isNullAt(i)) {
-                        fields.put(schema.fieldNames().get(i), String.valueOf(row.getInt(i)));
+                        fields.put(
+                                schema.fieldNames().get(i),
+                                String.valueOf(
+                                        schema.fields().get(i).type().equals(DataTypes.BIGINT())
+                                                ? row.getLong(i)
+                                                : row.getInt(i)));
                     }
                 }
                 actual.put(Integer.valueOf(fields.get("k")), fields);
