@@ -52,12 +52,16 @@ public class SchemaChangeProcessFunction extends ProcessFunction<SchemaChange, V
         if (schemaChange instanceof SchemaChange.AddColumn) {
             try {
                 schemaManager.commitChanges(schemaChange);
-            } catch (Exception e) {
+            } catch (IllegalArgumentException e) {
                 // This is normal. For example when a table is split into multiple database tables,
                 // all these tables will be added the same column. However schemaManager can't
                 // handle duplicated column adds, so we just catch the exception and log it.
                 if (LOG.isDebugEnabled()) {
-                    LOG.debug("Failed to perform SchemaChange.AddColumn {}", schemaChange, e);
+                    LOG.debug(
+                            "Failed to perform SchemaChange.AddColumn {}, "
+                                    + "possibly due to duplicated column name",
+                            schemaChange,
+                            e);
                 }
             }
         } else if (schemaChange instanceof SchemaChange.UpdateColumnType) {
