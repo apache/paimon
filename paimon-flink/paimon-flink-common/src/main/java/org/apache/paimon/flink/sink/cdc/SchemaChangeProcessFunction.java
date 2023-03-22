@@ -22,12 +22,16 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * A {@link ProcessFunction} to handle {@link SchemaChange}.
@@ -82,13 +86,14 @@ public class SchemaChangeProcessFunction extends ProcessFunction<SchemaChange, V
                             + " does not exist in table. This is unexpected.");
             DataType oldType = schema.fields().get(idx).type();
             DataType newType = updateColumnType.newDataType();
-            Preconditions.checkArgument(
-                    oldType.getTypeRoot().getFamilies().equals(newType.getTypeRoot().getFamilies()),
-                    String.format(
-                            "Cannot convert field %s from type %s to %s "
-                                    + "because they belong to different type families",
-                            updateColumnType.fieldName(), oldType, newType));
-            schemaManager.commitChanges(schemaChange);
+            if (checkTypeConversion(oldType, newType)) {
+                schemaManager.commitChanges(schemaChange);
+            } else {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Cannot convert field %s from type %s to %s",
+                                updateColumnType.fieldName(), oldType, newType));
+            }
         } else if (schemaChange instanceof SchemaChange.UpdateColumnComment) {
             schemaManager.commitChanges(schemaChange);
         } else if (schemaChange instanceof SchemaChange.UpdateColumnNullability) {
@@ -100,5 +105,38 @@ public class SchemaChangeProcessFunction extends ProcessFunction<SchemaChange, V
                             + ", content "
                             + schemaChange);
         }
+    }
+
+    private static final List<DataTypeRoot> STRING_TYPES =
+            Arrays.asList(DataTypeRoot.CHAR, DataTypeRoot.VARCHAR);
+    private static final List<DataTypeRoot> INTEGER_TYPES =
+            Arrays.asList(
+                    DataTypeRoot.TINYINT,
+                    DataTypeRoot.SMALLINT,
+                    DataTypeRoot.INTEGER,
+                    DataTypeRoot.BIGINT);
+    private static final List<DataTypeRoot> FLOATING_POINT_TYPES =
+            Arrays.asList(DataTypeRoot.FLOAT, DataTypeRoot.DOUBLE);
+
+    private boolean checkTypeConversion(DataType oldType, DataType newType) {
+        int oldIdx = STRING_TYPES.indexOf(oldType.getTypeRoot());
+        int newIdx = STRING_TYPES.indexOf(newType.getTypeRoot());
+        if (oldIdx >= 0 && newIdx >= 0) {
+            return true;
+        }
+
+        oldIdx = INTEGER_TYPES.indexOf(oldType.getTypeRoot());
+        newIdx = INTEGER_TYPES.indexOf(newType.getTypeRoot());
+        if (oldIdx >= 0 && newIdx >= 0) {
+            return oldIdx <= newIdx;
+        }
+
+        oldIdx = FLOATING_POINT_TYPES.indexOf(oldType.getTypeRoot());
+        newIdx = FLOATING_POINT_TYPES.indexOf(newType.getTypeRoot());
+        if (oldIdx >= 0 && newIdx >= 0) {
+            return oldIdx <= newIdx;
+        }
+
+        return false;
     }
 }
