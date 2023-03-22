@@ -37,6 +37,9 @@ import java.util.Map;
 public class StaticFileStoreSplitEnumerator
         implements SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> {
 
+    /** Default batch splits size to avoid exceed `akka.framesize` */
+    private static final int DEFAULT_SPLITS_SIZE = 10;
+
     private final SplitEnumeratorContext<FileStoreSourceSplit> context;
 
     @Nullable private final Snapshot snapshot;
@@ -79,10 +82,15 @@ public class StaticFileStoreSplitEnumerator
         // The following batch assignment operation is for two purposes:
         // To distribute splits evenly when batch reading to prevent a few tasks from reading all
         // the data (for example, the current resource can only schedule part of the tasks).
-        // TODO: assignment is already created in constructor, here can just assign per batch
-        List<FileStoreSourceSplit> splits = pendingSplitAssignment.remove(subtask);
-        if (splits != null && splits.size() > 0) {
-            context.assignSplits(new SplitsAssignment<>(Collections.singletonMap(subtask, splits)));
+        List<FileStoreSourceSplit> allSubTaskSplits = pendingSplitAssignment.get(subtask);
+        List<FileStoreSourceSplit> batchAssignment =
+                allSubTaskSplits != null && allSubTaskSplits.size() > DEFAULT_SPLITS_SIZE
+                        ? allSubTaskSplits.subList(0, DEFAULT_SPLITS_SIZE)
+                        : allSubTaskSplits;
+        if (batchAssignment != null && batchAssignment.size() > 0) {
+            context.assignSplits(
+                    new SplitsAssignment<>(Collections.singletonMap(subtask, batchAssignment)));
+            allSubTaskSplits.subList(0, batchAssignment.size()).clear();
         } else {
             context.signalNoMoreSplits(subtask);
         }
