@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -37,6 +38,7 @@ import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.StreamDataTableScanImpl;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
+import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.Map;
@@ -119,11 +121,14 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         // set dynamic options with default values
         CoreOptions.setDefaultValues(newOptions);
 
-        // copy a new paimon to contain dynamic options
+        // copy a new table schema to contain dynamic options
         TableSchema newTableSchema = tableSchema.copy(newOptions.toMap());
 
-        // validate schema wit new options
+        // validate schema with new options
         SchemaValidation.validateTableSchema(newTableSchema);
+
+        // see if merged options contain time travel option
+        newTableSchema = tryTimeTravel(newOptions).orElse(newTableSchema);
 
         return copy(newTableSchema);
     }
@@ -178,5 +183,31 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 store().newCommit(commitUser),
                 options().writeOnly() ? null : store().newExpire(),
                 options().writeOnly() ? null : store().newPartitionExpire(commitUser));
+    }
+
+    private Optional<TableSchema> tryTimeTravel(Options options) {
+        CoreOptions coreOptions = new CoreOptions(options);
+        Long snapshotId;
+
+        switch (coreOptions.startupMode()) {
+            case FROM_SNAPSHOT:
+                snapshotId = coreOptions.scanSnapshotId();
+                if (snapshotManager().snapshotExists(snapshotId)) {
+                    long schemaId = snapshotManager().snapshot(snapshotId).schemaId();
+                    return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
+                }
+                return Optional.empty();
+            case FROM_TIMESTAMP:
+                Snapshot snapshot =
+                        StaticFromTimestampStartingScanner.getSnapshot(
+                                snapshotManager(), coreOptions.scanTimestampMills());
+                if (snapshot != null) {
+                    long schemaId = snapshot.schemaId();
+                    return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
+                }
+                return Optional.empty();
+            default:
+                return Optional.empty();
+        }
     }
 }
