@@ -35,7 +35,6 @@ import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.util.function.SerializableFunction;
 
 import java.io.Serializable;
@@ -45,7 +44,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_F
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_LOOKUP_WAIT;
 
 /** Abstract sink of paimon. */
-public abstract class FlinkSink implements Serializable {
+public abstract class FlinkSink<T> implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -91,7 +90,7 @@ public abstract class FlinkSink implements Serializable {
                 new StoreSinkWriteImpl(table, context, initialCommitUser, ioManager, isOverwrite);
     }
 
-    public DataStreamSink<?> sinkFrom(DataStream<RowData> input) {
+    public DataStreamSink<?> sinkFrom(DataStream<T> input) {
         // This commitUser is valid only for new jobs.
         // After the job starts, this commitUser will be recorded into the states of write and
         // commit operators.
@@ -102,7 +101,7 @@ public abstract class FlinkSink implements Serializable {
     }
 
     public DataStreamSink<?> sinkFrom(
-            DataStream<RowData> input, String commitUser, StoreSinkWrite.Provider sinkProvider) {
+            DataStream<T> input, String commitUser, StoreSinkWrite.Provider sinkProvider) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
@@ -150,7 +149,7 @@ public abstract class FlinkSink implements Serializable {
                         + " to exactly-once");
     }
 
-    protected abstract OneInputStreamOperator<RowData, Committable> createWriteOperator(
+    protected abstract OneInputStreamOperator<T, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, boolean isStreaming);
 
     protected abstract SerializableFunction<String, Committer> createCommitterFactory(
