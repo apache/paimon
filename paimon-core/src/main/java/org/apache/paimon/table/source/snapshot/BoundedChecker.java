@@ -19,19 +19,20 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.table.source.DataTableScan;
-import org.apache.paimon.table.source.StreamDataTableScan;
 
-/** Helper class for the follow-up planning of {@link StreamDataTableScan}. */
-public interface FollowUpScanner {
+/** Checker to check whether the bounded stream is end. */
+public interface BoundedChecker {
 
-    boolean shouldScanSnapshot(Snapshot snapshot);
+    boolean shouldEndInput(Snapshot snapshot);
 
-    DataTableScan.DataFilePlan getPlan(long snapshotId, SnapshotSplitReader snapshotSplitReader);
+    static BoundedChecker neverEnd() {
+        return snapshot -> false;
+    }
 
-    default DataTableScan.DataFilePlan getOverwriteChangesPlan(
-            long snapshotId, SnapshotSplitReader snapshotSplitReader) {
-        return new DataTableScan.DataFilePlan(
-                snapshotId, snapshotSplitReader.withSnapshot(snapshotId).overwriteSplits());
+    static BoundedChecker watermark(long boundedWatermark) {
+        return snapshot -> {
+            Long watermark = snapshot.watermark();
+            return watermark != null && watermark > boundedWatermark;
+        };
     }
 }

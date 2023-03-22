@@ -27,28 +27,25 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link BoundedWatermarkFollowUpScanner}. */
-public class BoundedWatermarkFollowUpScannerTest extends ScannerTestBase {
+/** Test for {@link BoundedChecker}. */
+public class BoundedWatermarkCheckerTest extends ScannerTestBase {
 
     @Test
     public void testBounded() {
         SnapshotManager snapshotManager = table.snapshotManager();
         TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
-        FollowUpScanner scanner =
-                new BoundedWatermarkFollowUpScanner(new DeltaFollowUpScanner(), 2000L);
+        BoundedChecker checker = BoundedChecker.watermark(2000L);
 
         commit.commit(new ManifestCommittable(0, 1024L));
         Snapshot snapshot = snapshotManager.latestSnapshot();
-        assertThat(scanner.shouldEndInput(snapshot)).isFalse();
-        assertThat(scanner.getPlan(snapshot.id(), snapshotSplitReader).splits()).isEmpty();
+        assertThat(checker.shouldEndInput(snapshot)).isFalse();
 
         commit.commit(new ManifestCommittable(0, 2000L));
         snapshot = snapshotManager.latestSnapshot();
-        assertThat(scanner.shouldEndInput(snapshot)).isFalse();
-        assertThat(scanner.getPlan(snapshot.id(), snapshotSplitReader).splits()).isEmpty();
+        assertThat(checker.shouldEndInput(snapshot)).isFalse();
 
         commit.commit(new ManifestCommittable(0, 2001L));
         snapshot = snapshotManager.latestSnapshot();
-        assertThat(scanner.shouldEndInput(snapshot)).isTrue();
+        assertThat(checker.shouldEndInput(snapshot)).isTrue();
     }
 }

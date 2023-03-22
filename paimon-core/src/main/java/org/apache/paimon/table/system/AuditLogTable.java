@@ -39,6 +39,7 @@ import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.FollowUpScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
@@ -298,6 +299,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public StreamDataTableScan withFollowUpScanner(FollowUpScanner followUpScanner) {
             return streamScan.withFollowUpScanner(followUpScanner);
+        }
+
+        @Override
+        public StreamDataTableScan withBoundedChecker(BoundedChecker boundedChecker) {
+            return streamScan.withBoundedChecker(boundedChecker);
         }
 
         @Override
