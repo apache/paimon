@@ -73,6 +73,7 @@ public class DataTableSource extends FlinkTableSource
     private final ObjectIdentifier tableIdentifier;
     private final FileStoreTable table;
     private final boolean streaming;
+    private final int splitsSize;
     private final DynamicTableFactory.Context context;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
@@ -82,12 +83,14 @@ public class DataTableSource extends FlinkTableSource
             ObjectIdentifier tableIdentifier,
             FileStoreTable table,
             boolean streaming,
+            int splitsSize,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
         this(
                 tableIdentifier,
                 table,
                 streaming,
+                splitsSize,
                 context,
                 logStoreTableFactory,
                 null,
@@ -100,6 +103,7 @@ public class DataTableSource extends FlinkTableSource
             ObjectIdentifier tableIdentifier,
             FileStoreTable table,
             boolean streaming,
+            int splitsSize,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory,
             @Nullable Predicate predicate,
@@ -110,6 +114,7 @@ public class DataTableSource extends FlinkTableSource
         this.tableIdentifier = tableIdentifier;
         this.table = table;
         this.streaming = streaming;
+        this.splitsSize = splitsSize;
         this.context = context;
         this.logStoreTableFactory = logStoreTableFactory;
         this.predicate = predicate;
@@ -198,6 +203,7 @@ public class DataTableSource extends FlinkTableSource
                         .withProjection(projectFields)
                         .withPredicate(predicate)
                         .withLimit(limit)
+                        .withSplitsSize(splitsSize)
                         .withParallelism(
                                 Options.fromMap(table.schema().options())
                                         .get(FlinkConnectorOptions.SCAN_PARALLELISM))
@@ -213,6 +219,7 @@ public class DataTableSource extends FlinkTableSource
                 tableIdentifier,
                 table,
                 streaming,
+                splitsSize,
                 context,
                 logStoreTableFactory,
                 predicate,

@@ -42,13 +42,15 @@ public class StaticFileStoreSource extends FlinkSource {
     private final DataTable table;
     private final BatchDataTableScan.Factory scanFactory;
     private final Predicate predicate;
+    private final int splitsSize;
 
     public StaticFileStoreSource(
             DataTable table,
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
-            @Nullable Long limit) {
-        this(table, projectedFields, predicate, limit, DataTable::newScan);
+            @Nullable Long limit,
+            int splitsSize) {
+        this(table, projectedFields, predicate, limit, splitsSize, DataTable::newScan);
     }
 
     public StaticFileStoreSource(
@@ -56,11 +58,13 @@ public class StaticFileStoreSource extends FlinkSource {
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit,
+            int splitsSize,
             BatchDataTableScan.Factory scanFactory) {
         super(table.newReadBuilder().withFilter(predicate).withProjection(projectedFields), limit);
         this.table = table;
         this.scanFactory = scanFactory;
         this.predicate = predicate;
+        this.splitsSize = splitsSize;
     }
 
     @Override
@@ -94,6 +98,6 @@ public class StaticFileStoreSource extends FlinkSource {
         }
 
         Snapshot snapshot = snapshotId == null ? null : snapshotManager.snapshot(snapshotId);
-        return new StaticFileStoreSplitEnumerator(context, snapshot, splits);
+        return new StaticFileStoreSplitEnumerator(context, snapshot, splits, splitsSize);
     }
 }

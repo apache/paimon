@@ -35,11 +35,13 @@ public class SystemTableSource extends FlinkTableSource {
 
     private final Table table;
     private final boolean isStreamingMode;
+    private final int splitsSize;
 
-    public SystemTableSource(Table table, boolean isStreamingMode) {
+    public SystemTableSource(Table table, boolean isStreamingMode, int splitsSize) {
         super(table);
         this.table = table;
         this.isStreamingMode = isStreamingMode;
+        this.splitsSize = splitsSize;
     }
 
     public SystemTableSource(
@@ -47,10 +49,12 @@ public class SystemTableSource extends FlinkTableSource {
             boolean isStreamingMode,
             @Nullable Predicate predicate,
             @Nullable int[][] projectFields,
-            @Nullable Long limit) {
+            @Nullable Long limit,
+            @Nullable int splitsSize) {
         super(table, predicate, projectFields, limit);
         this.table = table;
         this.isStreamingMode = isStreamingMode;
+        this.splitsSize = splitsSize;
     }
 
     @Override
@@ -67,21 +71,24 @@ public class SystemTableSource extends FlinkTableSource {
                     isStreamingMode
                             ? new ContinuousFileStoreSource(
                                     dataTable, projectFields, predicate, limit)
-                            : new StaticFileStoreSource(dataTable, projectFields, predicate, limit);
+                            : new StaticFileStoreSource(
+                                    dataTable, projectFields, predicate, limit, splitsSize);
         } else {
             source =
                     new SimpleSystemSource(
                             table.newReadBuilder()
                                     .withFilter(predicate)
                                     .withProjection(projectFields),
-                            limit);
+                            limit,
+                            splitsSize);
         }
         return SourceProvider.of(source);
     }
 
     @Override
     public DynamicTableSource copy() {
-        return new SystemTableSource(table, isStreamingMode, predicate, projectFields, limit);
+        return new SystemTableSource(
+                table, isStreamingMode, predicate, projectFields, limit, splitsSize);
     }
 
     @Override

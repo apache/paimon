@@ -161,6 +161,14 @@ public class FlinkConnectorOptions {
                             "How often tasks should notify coordinator about the current watermark "
                                     + "and how often the coordinator should announce the maximal aligned watermark.");
 
+    public static final ConfigOption<Integer> SCAN_BOUNDED_SPLITS_SIZE =
+            key("scan.bounded.splits.size")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription(
+                            "How many splits should assign to subtask per batch in StaticFileStoreSplitEnumerator "
+                                    + "to avoid exceed `akka.framesize` limit.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);

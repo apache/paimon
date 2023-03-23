@@ -69,13 +69,18 @@ public abstract class AbstractFlinkTableFactory
         boolean isStreamingMode =
                 context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING;
+        int splitsSize =
+                Options.fromMap(origin.getOptions())
+                        .get(FlinkConnectorOptions.SCAN_BOUNDED_SPLITS_SIZE);
         if (origin instanceof SystemCatalogTable) {
-            return new SystemTableSource(((SystemCatalogTable) origin).table(), isStreamingMode);
+            return new SystemTableSource(
+                    ((SystemCatalogTable) origin).table(), isStreamingMode, splitsSize);
         } else {
             return new DataTableSource(
                     context.getObjectIdentifier(),
                     buildFileStoreTable(context),
                     isStreamingMode,
+                    splitsSize,
                     context,
                     createOptionalLogStoreFactory(context).orElse(null));
         }

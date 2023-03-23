@@ -45,7 +45,7 @@ public class StaticFileStoreSplitEnumeratorTest {
             splits.add(createSnapshotSplit(i, 0, Collections.emptyList()));
         }
         StaticFileStoreSplitEnumerator enumerator =
-                new StaticFileStoreSplitEnumerator(context, null, splits);
+                new StaticFileStoreSplitEnumerator(context, null, splits, 10);
 
         // test assign
         enumerator.handleSplitRequest(0, "test-host");
@@ -79,7 +79,7 @@ public class StaticFileStoreSplitEnumeratorTest {
             splits.add(createSnapshotSplit(i, 0, Collections.emptyList()));
         }
         StaticFileStoreSplitEnumerator enumerator =
-                new StaticFileStoreSplitEnumerator(context, null, splits);
+                new StaticFileStoreSplitEnumerator(context, null, splits, 10);
 
         // test assign
         enumerator.handleSplitRequest(0, "test-host");
@@ -119,7 +119,7 @@ public class StaticFileStoreSplitEnumeratorTest {
             splits.add(createSnapshotSplit(i, 0, Collections.emptyList()));
         }
         StaticFileStoreSplitEnumerator enumerator =
-                new StaticFileStoreSplitEnumerator(context, null, splits);
+                new StaticFileStoreSplitEnumerator(context, null, splits, 10);
 
         // test assign
         enumerator.handleSplitRequest(0, "test-host");
@@ -145,7 +145,7 @@ public class StaticFileStoreSplitEnumeratorTest {
             splits.add(createSnapshotSplit(i, 0, Collections.emptyList()));
         }
         StaticFileStoreSplitEnumerator enumerator =
-                new StaticFileStoreSplitEnumerator(context, null, splits);
+                new StaticFileStoreSplitEnumerator(context, null, splits, 1);
 
         // test assign
         enumerator.handleSplitRequest(0, "test-host");
