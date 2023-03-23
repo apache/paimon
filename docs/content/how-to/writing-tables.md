@@ -446,7 +446,7 @@ When sqls changed current catalog and database, it's OK to not qualify the sourc
 \--source-sql "CREATE DATABASE my_db"\
 \--source-sql "USE my_db"\
 \--source-sql "CREATE TABLE S ..."\
-\--source-table my_cat.my_db.S\
+\--source-table S\
 but you must qualify it in the following case:\
 \--source-sql "CREATE CATALOG my_cat WITH (...)"\
 \--source-sql "CREATE TABLE my_cat.\`default`.S ..."\
