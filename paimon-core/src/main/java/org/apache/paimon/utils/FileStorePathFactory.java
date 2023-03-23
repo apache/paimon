@@ -58,7 +58,7 @@ public class FileStorePathFactory {
                 root,
                 RowType.builder().build(),
                 PARTITION_DEFAULT_NAME.defaultValue(),
-                CoreOptions.FILE_FORMAT.defaultValue());
+                CoreOptions.FILE_FORMAT.defaultValue().toString());
     }
 
     // for tables without partition, partitionType should be a row type with 0 columns (not null)

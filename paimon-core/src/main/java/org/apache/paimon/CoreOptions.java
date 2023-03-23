@@ -20,6 +20,7 @@ package org.apache.paimon;
 
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.fs.Path;
@@ -29,11 +30,13 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
+import org.apache.paimon.utils.StringUtils;
 
 import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -79,11 +82,12 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The file path of this table in the filesystem.");
 
-    public static final ConfigOption<String> FILE_FORMAT =
+    public static final ConfigOption<FileFormatType> FILE_FORMAT =
             key("file.format")
-                    .stringType()
-                    .defaultValue("orc")
-                    .withDescription("Specify the message format of data files.");
+                    .enumType(FileFormatType.class)
+                    .defaultValue(FileFormatType.ORC)
+                    .withDescription(
+                            "Specify the message format of data files, currently orc, parquet and avro are supported.");
 
     public static final ConfigOption<String> ORC_BLOOM_FILTER_COLUMNS =
             key("orc.bloom.filter.columns")
@@ -109,10 +113,10 @@ public class CoreOptions implements Serializable {
                                     + "could be NONE, ZLIB, SNAPPY, LZO, LZ4, for parquet file format, the compression value could be "
                                     + "UNCOMPRESSED, SNAPPY, GZIP, LZO, BROTLI, LZ4, ZSTD.");
 
-    public static final ConfigOption<String> MANIFEST_FORMAT =
+    public static final ConfigOption<FileFormatType> MANIFEST_FORMAT =
             key("manifest.format")
-                    .stringType()
-                    .defaultValue("avro")
+                    .enumType(FileFormatType.class)
+                    .defaultValue(FileFormatType.AVRO)
                     .withDescription("Specify the message format of manifest files.");
 
     public static final ConfigOption<MemorySize> MANIFEST_TARGET_FILE_SIZE =
@@ -564,6 +568,10 @@ public class CoreOptions implements Serializable {
         return new Path(options.get(PATH));
     }
 
+    public FileFormatType formatType() {
+        return options.get(FILE_FORMAT);
+    }
+
     public FileFormat fileFormat() {
         return createFileFormat(options, FILE_FORMAT);
     }
@@ -580,11 +588,12 @@ public class CoreOptions implements Serializable {
         return options.get(PARTITION_DEFAULT_NAME);
     }
 
-    public static FileFormat createFileFormat(Options options, ConfigOption<String> formatOption) {
-        String formatIdentifier = options.get(formatOption);
+    public static FileFormat createFileFormat(
+            Options options, ConfigOption<FileFormatType> formatOption) {
+        FileFormatType formatIdentifier = options.get(formatOption);
         int readBatchSize = options.get(READ_BATCH_SIZE);
         return FileFormat.fromIdentifier(
-                formatIdentifier,
+                formatIdentifier.toString(),
                 new FormatContext(options.removePrefix(formatIdentifier + "."), readBatchSize));
     }
 
@@ -953,6 +962,46 @@ public class CoreOptions implements Serializable {
         @Override
         public InlineElement getDescription() {
             return text(description);
+        }
+    }
+
+    /** Specifies the file format type for store. */
+    public enum FileFormatType implements DescribedEnum {
+        ORC("orc", "ORC file format."),
+        PARQUET("parquet", "Parquet file format."),
+        AVRO("avro", "Avro file format.");
+
+        private final String value;
+        private final String description;
+
+        FileFormatType(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+
+        @VisibleForTesting
+        public static FileFormatType fromValue(String value) {
+            for (FileFormatType formatType : FileFormatType.values()) {
+                if (formatType.value.equals(value)) {
+                    return formatType;
+                }
+            }
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid format type %s, only support [%s]",
+                            value,
+                            StringUtils.join(
+                                    Arrays.stream(FileFormatType.values()).iterator(), ",")));
         }
     }
 

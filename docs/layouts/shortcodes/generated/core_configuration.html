@@ -82,9 +82,9 @@
         </tr>
         <tr>
             <td><h5>file.format</h5></td>
-            <td style="word-wrap: break-word;">"orc"</td>
-            <td>String</td>
-            <td>Specify the message format of data files.</td>
+            <td style="word-wrap: break-word;">orc</td>
+            <td><p>Enum</p></td>
+            <td>Specify the message format of data files, currently orc, parquet and avro are supported.<br /><br />Possible values:<ul><li>"orc": ORC file format.</li><li>"parquet": Parquet file format.</li><li>"avro": Avro file format.</li></ul></td>
         </tr>
         <tr>
             <td><h5>local-sort.max-num-file-handles</h5></td>
@@ -148,9 +148,9 @@
         </tr>
         <tr>
             <td><h5>manifest.format</h5></td>
-            <td style="word-wrap: break-word;">"avro"</td>
-            <td>String</td>
-            <td>Specify the message format of manifest files.</td>
+            <td style="word-wrap: break-word;">avro</td>
+            <td><p>Enum</p></td>
+            <td>Specify the message format of manifest files.<br /><br />Possible values:<ul><li>"orc": ORC file format.</li><li>"parquet": Parquet file format.</li><li>"avro": Avro file format.</li></ul></td>
         </tr>
         <tr>
             <td><h5>manifest.merge-min-count</h5></td>
@@ -361,12 +361,6 @@
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
-        </tr>
-        <tr>
-            <td><h5>read.batch-size</h5></td>
-            <td style="word-wrap: break-word;">1024</td>
-            <td>Integer</td>
-            <td>Read batch size for orc and parquet.</td>
         </tr>
     </tbody>
 </table>

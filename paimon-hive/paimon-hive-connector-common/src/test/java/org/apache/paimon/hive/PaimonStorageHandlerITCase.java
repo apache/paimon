@@ -600,7 +600,7 @@ public class PaimonStorageHandlerITCase {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, path);
         conf.set(CoreOptions.BUCKET, 2);
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(conf, rowType, partitionKeys, primaryKeys);
 
@@ -613,7 +613,7 @@ public class PaimonStorageHandlerITCase {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, path);
         conf.set(CoreOptions.BUCKET, 2);
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
         conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
@@ -653,7 +653,7 @@ public class PaimonStorageHandlerITCase {
         String root = folder.newFolder().toString();
         Options conf = new Options();
         conf.set(CoreOptions.PATH, root);
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -769,7 +769,7 @@ public class PaimonStorageHandlerITCase {
         String path = folder.newFolder().toURI().toString();
         Options conf = new Options();
         conf.set(CoreOptions.PATH, path);
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -858,7 +858,7 @@ public class PaimonStorageHandlerITCase {
         String path = folder.newFolder().toURI().toString();
         Options conf = new Options();
         conf.set(CoreOptions.PATH, path);
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
