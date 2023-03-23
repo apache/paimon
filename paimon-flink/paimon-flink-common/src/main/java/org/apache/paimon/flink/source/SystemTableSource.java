@@ -50,7 +50,7 @@ public class SystemTableSource extends FlinkTableSource {
             @Nullable Predicate predicate,
             @Nullable int[][] projectFields,
             @Nullable Long limit,
-            @Nullable int splitBatchSize) {
+            int splitBatchSize) {
         super(table, predicate, projectFields, limit);
         this.table = table;
         this.isStreamingMode = isStreamingMode;
