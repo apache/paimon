@@ -50,6 +50,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
@@ -199,6 +200,12 @@ public class SnapshotsTable implements ReadonlyTable {
                         Iterators.transform(
                                 rows, row -> ProjectedRow.from(projection).replaceRow(row));
             }
+
+            rows =
+                    Arrays.stream(Iterators.toArray(rows, InternalRow.class))
+                            .sorted(Comparator.comparingLong(row -> row.getLong(0)))
+                            .iterator();
+
             return new IteratorRecordReader<>(rows);
         }
 
