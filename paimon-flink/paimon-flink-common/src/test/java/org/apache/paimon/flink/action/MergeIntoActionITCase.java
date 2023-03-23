@@ -28,9 +28,7 @@ import org.apache.flink.types.Row;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.aggregator.ArgumentsAccessor;
 import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -101,7 +99,8 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
         //   SET v = v || '_nmu', last_action = 'not_matched_upsert'
         // WHEN NOT MATCHED BY SOURCE AND (dt >= '02-28') THEN DELETE
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSourceTable(null, "S")
+        // here test if it works when table S is in default and qualified both
+        action.withSourceName("default.S")
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withMatchedUpsert(
                         "T.v <> S.v AND S.v IS NOT NULL", "v = S.v, last_action = 'matched_upsert'")
@@ -143,7 +142,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
         }
 
         action.withTargetAlias("TT")
-                .withSourceTable(null, "S")
+                .withSourceName("S")
                 .withMergeCondition("TT.k = S.k AND TT.dt = S.dt")
                 .withMatchedDelete("S.v IS NULL");
 
@@ -163,12 +162,9 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 10, "v_10", "creation", "02-28")));
     }
 
-    @ParameterizedTest(name = "in-default = {0}, with-alias = {1}")
-    @CsvSource({"true, true", "true, false", "false, true", "false, false"})
-    public void testSourceTable(ArgumentsAccessor argumentsAccessor) throws Exception {
-        boolean inDefault = argumentsAccessor.getBoolean(0);
-        boolean withAlias = argumentsAccessor.getBoolean(1);
-
+    @ParameterizedTest(name = "in-default = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testSourceName(boolean inDefault) throws Exception {
         MergeIntoAction action = new MergeIntoAction(warehouse, "default", "T");
         String sourceTableName = "S";
 
@@ -182,15 +178,9 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
             sourceTableName = "test_db.S";
         }
 
-        if (withAlias) {
-            action.withSourceTable("SS", sourceTableName)
-                    .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
-                    .withMatchedDelete("SS.v IS NULL");
-        } else {
-            action.withSourceTable(null, sourceTableName)
-                    .withMergeCondition("T.k = S.k AND T.dt = S.dt")
-                    .withMatchedDelete("S.v IS NULL");
-        }
+        action.withSourceName(sourceTableName)
+                .withMergeCondition("T.k = S.k AND T.dt = S.dt")
+                .withMatchedDelete("S.v IS NULL");
 
         if (!inDefault) {
             sEnv.executeSql("USE `default`");
@@ -215,7 +205,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest(name = "useCatalog = {0}")
     @ValueSource(booleans = {true, false})
-    public void testUsingSqlSource(boolean useCatalog) throws Exception {
+    public void testSqls(boolean useCatalog) throws Exception {
         // drop table S
         sEnv.executeSql("DROP TABLE S");
 
@@ -238,10 +228,12 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
 
         if (useCatalog) {
+            action.withSqls(catalog, "USE CATALOG test_cat", ddl);
             // test current catalog and current database
-            action.withSourceSqls("S", catalog, "USE CATALOG test_cat", ddl);
+            action.withSourceName("S");
         } else {
-            action.withSourceSqls("test_cat.default.S", catalog, ddl);
+            action.withSqls(catalog, ddl);
+            action.withSourceName("test_cat.default.S");
         }
 
         action.withMergeCondition("T.k = S.k AND T.dt = S.dt").withMatchedDelete("S.v IS NULL");
@@ -262,11 +254,13 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 10, "v_10", "creation", "02-28")));
     }
 
-    @Test
-    public void testMatchedUpsertSetAll() throws Exception {
+    @ParameterizedTest(name = "source-qualified = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testMatchedUpsertSetAll(boolean qualified) throws Exception {
         // build MergeIntoAction
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSourceSqls("SS", "CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
+        action.withSqls("CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
+                .withSourceName(qualified ? "default.SS" : "SS")
                 .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
                 .withMatchedUpsert(null, "*");
 
@@ -294,11 +288,13 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 10, "v_10", "creation", "02-28")));
     }
 
-    @Test
-    public void testNotMatchedInsertAll() throws Exception {
+    @ParameterizedTest(name = "source-qualified = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testNotMatchedInsertAll(boolean qualified) throws Exception {
         // build MergeIntoAction
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSourceSqls("SS", "CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
+        action.withSqls("CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
+                .withSourceName(qualified ? "default.SS" : "SS")
                 .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
                 .withNotMatchedInsert("SS.k < 12", "*");
 
@@ -344,7 +340,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     public void testIncompatibleSchema() {
         // build MergeIntoAction
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSourceTable(null, "S")
+        action.withSourceName("S")
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withNotMatchedInsert(null, "S.k, S.v, 0, S.dt");
 
@@ -357,7 +353,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testIllegalSourceTableName() throws Exception {
+    public void testIllegalSourceName() throws Exception {
         // create source table in a new database
         sEnv.executeSql("DROP TABLE S");
         sEnv.executeSql("CREATE DATABASE test_db");
@@ -365,8 +361,8 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
         prepareSourceTable();
 
         MergeIntoAction action = new MergeIntoAction(warehouse, "default", "T");
-        // the qualified path of source table name is absent
-        action.withSourceTable(null, "S")
+        // the qualified path of source table is absent
+        action.withSourceName("S")
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withMatchedDelete("S.v IS NULL");
 
@@ -377,22 +373,16 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testIllegalSourceAlias() {
+    public void testIllegalSourceNameSqlCase() {
         // drop table S
         sEnv.executeSql("DROP TABLE S");
 
-        String catalog =
-                String.format(
-                        "CREATE CATALOG test_cat WITH ('type' = 'paimon', 'warehouse' = '%s')",
-                        getTempDirPath());
-
-        String ddl =
-                "CREATE TEMPORARY TABLE test_cat.`default`.S (k INT, v STRING, dt STRING)\n"
-                        + "WITH ('connector' = 'values', 'bounded' = 'true');";
-
-        MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        // the qualified path of source alias is absent
-        action.withSourceSqls("S", catalog, ddl)
+        MergeIntoAction action = new MergeIntoAction(warehouse, "default", "T");
+        action.withSqls(
+                        "CREATE DATABASE test_db",
+                        "CREATE TEMPORARY TABLE test_db.S (k INT, v STRING, dt STRING) WITH ('connector' = 'values', 'bounded' = 'true')")
+                // the qualified path of source table  is absent
+                .withSourceName("S")
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withMatchedDelete("S.v IS NULL");
 
