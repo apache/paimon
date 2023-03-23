@@ -43,6 +43,8 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
+
 /** {@link DataTableScan} for streaming planning. */
 public class StreamDataTableScanImpl extends AbstractDataTableScan implements StreamDataTableScan {
 
@@ -166,7 +168,7 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
                 LOG.debug(
                         "Next snapshot id {} does not exist, wait for the snapshot generation.",
                         nextSnapshotId);
-                return null;
+                return new DataFilePlan(Collections.emptyList());
             }
 
             Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);

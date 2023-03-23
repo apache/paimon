@@ -48,8 +48,8 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         StreamTableCommit commit = table.newCommit(commitUser);
         StreamDataTableScan scan = table.newStreamScan();
 
-        // first call without any snapshot, should return null
-        assertThat(scan.plan()).isNull();
+        // first call without any snapshot, should return empty plan
+        assertThat(scan.plan().splits()).isEmpty();
 
         // write base data
         write.write(rowData(1, 10, 100L));
@@ -110,8 +110,8 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         StreamTableCommit commit = table.newCommit(commitUser);
         StreamDataTableScan scan = table.newStreamScan();
 
-        // first call without any snapshot, should return null
-        assertThat(scan.plan()).isNull();
+        // first call without any snapshot, should return empty plan
+        assertThat(scan.plan().splits()).isEmpty();
 
         // write base data
         write.write(rowData(1, 10, 100L));
