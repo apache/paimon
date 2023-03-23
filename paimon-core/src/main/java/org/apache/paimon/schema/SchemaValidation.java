@@ -44,7 +44,6 @@ import static org.apache.paimon.WriteMode.APPEND_ONLY;
 import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 import static org.apache.paimon.schema.SystemColumns.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Validation utils for {@link TableSchema}. */
@@ -101,8 +100,10 @@ public class SchemaValidation {
             }
         }
 
-        // Valid the format type
-        checkNotNull(options.formatType());
+        // Get the format type here which will try to convert string value to {@Code
+        // FileFormatType}. If the string value is illegal, an exception will be thrown.
+        // TODO Check fields type according to the format type
+        options.formatType();
 
         // Check column names in schema
         schema.fieldNames()

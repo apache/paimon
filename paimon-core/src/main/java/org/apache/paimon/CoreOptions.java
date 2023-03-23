@@ -964,9 +964,9 @@ public class CoreOptions implements Serializable {
 
     /** Specifies the file format type for store. */
     public enum FileFormatType implements DescribedEnum {
-        ORC("orc", "ORC format for file store."),
-        PARQUET("parquet", "Parquet format for file store."),
-        AVRO("avro", "Avro format for file store.");
+        ORC("orc", "ORC file format."),
+        PARQUET("parquet", "Parquet file format."),
+        AVRO("avro", "Avro file format.");
 
         private final String value;
         private final String description;
