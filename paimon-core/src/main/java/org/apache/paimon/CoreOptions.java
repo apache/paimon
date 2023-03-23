@@ -20,6 +20,7 @@ package org.apache.paimon;
 
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.fs.Path;
@@ -29,11 +30,13 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
+import org.apache.paimon.utils.StringUtils;
 
 import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -984,6 +987,21 @@ public class CoreOptions implements Serializable {
         @Override
         public InlineElement getDescription() {
             return text(description);
+        }
+
+        @VisibleForTesting
+        public static FileFormatType fromValue(String value) {
+            for (FileFormatType formatType : FileFormatType.values()) {
+                if (formatType.value.equals(value)) {
+                    return formatType;
+                }
+            }
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid format type %s, only support [%s]",
+                            value,
+                            StringUtils.join(
+                                    Arrays.stream(FileFormatType.values()).iterator(), ",")));
         }
     }
 
