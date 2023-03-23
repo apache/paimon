@@ -27,13 +27,23 @@ under the License.
 # Paimon Filesystems Download page
 
 This documentation is a guide for using Table Store in Flink.
-{{< not_stable >}}
-# Filesystems snapshots jar
+{{< unstable >}}
+# Filesystems Snapshots Jar
 -------------------
 **The snapshot version is not recommended for production use**
 download link [paimon snapshots jar](https://repository.apache.org/content/repositories/snapshots/org/apache/paimon/)
-{{< /not_stable >}}
-# connectors jar
--------------------
-{{< sql_optional_filesystems >}}
+| Version | Jar                                                                                                                                                                                |
+|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| paimon-oss | [paimon-oss-{{< version >}}.jar](https://repository.apache.org/content/groups/snapshots/org/apache/paimon/paimon-oss/{{< version >}}/) |
+| paimon-s3 | [paimon-s3-{{< version >}}.jar](https://repository.apache.org/content/groups/snapshots/org/apache/paimon/paimon-s3/{{< version >}}/) |
+{{< /unstable >}}
 
+{{< stable >}}
+# Filesystems Version Jar
+-------------------
+| Version | Jar                                                                                                                                                                                |
+|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| paimon-oss | [paimon-oss-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-oss/{{< version >}}/paimon-oss-{{< version >}}.jar) |
+| paimon-s3 | [paimon-s3-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-s3/{{< version >}}/paimon-s3-{{< version >}}.jar) |
+
+{{< /stable >}}
