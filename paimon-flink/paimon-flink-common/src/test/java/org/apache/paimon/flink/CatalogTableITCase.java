@@ -53,8 +53,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO T VALUES (3, 4)");
 
         List<Row> result = sql("SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots");
-        assertThat(result)
-                .containsExactlyInAnyOrder(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
+
+        // check correctness and sequence snapshots.
+        assertThat(result).containsExactly(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
     }
 
     @Test
