@@ -44,7 +44,7 @@ public class StaticFileStoreSplitEnumerator
     @Nullable private final Snapshot snapshot;
 
     /** Default batch splits size to avoid exceed `akka.framesize`. */
-    private final int splitsSize;
+    private final int splitBatchSize;
 
     private final Map<Integer, Queue<FileStoreSourceSplit>> pendingSplitAssignment;
 
@@ -52,11 +52,11 @@ public class StaticFileStoreSplitEnumerator
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             @Nullable Snapshot snapshot,
             Collection<FileStoreSourceSplit> splits,
-            int splitsSize) {
+            int splitBatchSize) {
         this.context = context;
         this.snapshot = snapshot;
         this.pendingSplitAssignment = createSplitAssignment(splits, context.currentParallelism());
-        this.splitsSize = splitsSize;
+        this.splitBatchSize = splitBatchSize;
     }
 
     private static Map<Integer, Queue<FileStoreSourceSplit>> createSplitAssignment(
@@ -88,7 +88,7 @@ public class StaticFileStoreSplitEnumerator
         // the data (for example, the current resource can only schedule part of the tasks).
         Queue<FileStoreSourceSplit> taskSplits = pendingSplitAssignment.get(subtask);
         List<FileStoreSourceSplit> assignment = new ArrayList<>();
-        while (taskSplits != null && !taskSplits.isEmpty() && assignment.size() < splitsSize) {
+        while (taskSplits != null && !taskSplits.isEmpty() && assignment.size() < splitBatchSize) {
             assignment.add(taskSplits.poll());
         }
         if (assignment != null && assignment.size() > 0) {
