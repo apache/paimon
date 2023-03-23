@@ -435,16 +435,25 @@ is equal to source's).
 5. not-matched-by-source-condition cannot use source table's columns to construct condition expression.
 
 {{< hint warning >}}
-1. source-alias cannot be duplicated with existed table name. If you use --source-ddl, source-alias 
-must be specified and equal to the table name in "CREATE" statement.
-2. If the source table is not in the same place as target table, the source-table-name or the source-alias 
-should be qualified (database.table or catalog.database.table if in different catalog). For examples:\
+1. Table aliases cannot be duplicated with existed table name. 
+2. If the source table is not in the default catalog and default database, the source-table-name and 
+the source-alias should be qualified (database.table or catalog.database.table if created a new catalog). 
+For examples:\
+(1) If source table 'my_source' is in 'my_db', qualify it:\
+\--source-table "my_db.my_source"\
+\--source-as "S"\
+(2)Example for source sqls:\
 \--source-sql "CREATE CATALOG my_cat WITH (...)"\
 \--source-sql "USE CATALOG my_cat"\
 \--source-sql "CREATE DATABASE my_db"\
 \--source-sql "USE my_db"\
 \--source-sql "CREATE TABLE S ..."\
-\--source-as my_cat.my_db.S
+\--source-as my_cat.my_db.S\
+another scenario:\
+\--source-sql "CREATE CATALOG my_cat WITH (...)"\
+\--source-sql "CREATE TABLE my_cat.\`default`.S ..."\
+\--source-as my_cat.default.S\
+You can just use 'S' as source table name in following arguments.
 3. At least one merge action must be specified.
 4. If both matched-upsert and matched-delete actions are present, their conditions must both be present too 
 (same to not-matched-by-source-upsert and not-matched-by-source-delete). Otherwise, all conditions are optional.

@@ -28,7 +28,9 @@ import org.apache.flink.types.Row;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.aggregator.ArgumentsAccessor;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -39,7 +41,7 @@ import java.util.List;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
-import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.assertNoMoreRecords;
+import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildDdl;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildSimpleQuery;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.createTable;
@@ -49,7 +51,6 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.sEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testStreamingRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.validateStreamingReadResult;
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 
@@ -123,9 +124,24 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 12, "v_12", "insert", "02-29")));
     }
 
-    @Test
-    public void testTargetAlias() throws Exception {
-        MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
+    @ParameterizedTest(name = "in-default = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testTargetAlias(boolean inDefault) throws Exception {
+        MergeIntoAction action;
+
+        if (!inDefault) {
+            // create target table in a new database
+            sEnv.executeSql("DROP TABLE T");
+            sEnv.executeSql("CREATE DATABASE test_db");
+            sEnv.executeSql("USE test_db");
+            bEnv.executeSql("USE test_db");
+            prepareTargetTable(CoreOptions.ChangelogProducer.NONE);
+
+            action = new MergeIntoAction(warehouse, "test_db", "T");
+        } else {
+            action = new MergeIntoAction(warehouse, database, "T");
+        }
+
         action.withTargetAlias("TT")
                 .withSourceTable(null, "S")
                 .withMergeCondition("TT.k = S.k AND TT.dt = S.dt")
@@ -147,48 +163,54 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 10, "v_10", "creation", "02-28")));
     }
 
-    @Test
-    public void testTargetNotInDefaultWithAlias() throws Exception {
-        // create a new database and prepare tables
-        sEnv.executeSql("CREATE DATABASE test_db");
-        sEnv.executeSql("USE test_db");
-        prepareTargetTable(CoreOptions.ChangelogProducer.NONE);
-        prepareSourceTable();
+    @ParameterizedTest(name = "in-default = {0}, with-alias = {1}")
+    @CsvSource({"true, true", "true, false", "false, true", "false, false"})
+    public void testSourceTable(ArgumentsAccessor argumentsAccessor) throws Exception {
+        boolean inDefault = argumentsAccessor.getBoolean(0);
+        boolean withAlias = argumentsAccessor.getBoolean(1);
 
-        MergeIntoAction action = new MergeIntoAction(warehouse, "test_db", "T");
-        action.withTargetAlias("TT")
-                .withSourceTable(null, "S")
-                .withMergeCondition("TT.k = S.k AND TT.dt = S.dt")
-                .withMatchedDelete("S.v IS NULL");
+        MergeIntoAction action = new MergeIntoAction(warehouse, "default", "T");
+        String sourceTableName = "S";
 
-        BlockingIterator<Row, Row> iterator =
-                testStreamingRead(buildSimpleQuery("T"), initialRecords);
+        if (!inDefault) {
+            // create source table in a new database
+            sEnv.executeSql("DROP TABLE S");
+            sEnv.executeSql("CREATE DATABASE test_db");
+            sEnv.executeSql("USE test_db");
+            bEnv.executeSql("USE test_db");
+            prepareSourceTable();
+            sourceTableName = "test_db.S";
+        }
 
-        action.run();
+        if (withAlias) {
+            action.withSourceTable("SS", sourceTableName)
+                    .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
+                    .withMatchedDelete("SS.v IS NULL");
+        } else {
+            action.withSourceTable(null, sourceTableName)
+                    .withMergeCondition("T.k = S.k AND T.dt = S.dt")
+                    .withMatchedDelete("S.v IS NULL");
+        }
 
-        // test changelog
-        validateStreamingReadResult(
-                iterator,
+        if (!inDefault) {
+            sEnv.executeSql("USE `default`");
+            bEnv.executeSql("USE `default`");
+        }
+
+        validateActionRunResult(
+                action,
                 Arrays.asList(
                         changelogRow("-D", 4, "v_4", "creation", "02-27"),
-                        changelogRow("-D", 8, "v_8", "creation", "02-28")));
-        iterator.close();
-
-        // test read full result
-        iterator = BlockingIterator.of(sEnv.executeSql("SELECT * FROM T").collect());
-        assertThat(iterator.collect(8))
-                .containsExactlyInAnyOrderElementsOf(
-                        Arrays.asList(
-                                changelogRow("+I", 1, "v_1", "creation", "02-27"),
-                                changelogRow("+I", 2, "v_2", "creation", "02-27"),
-                                changelogRow("+I", 3, "v_3", "creation", "02-27"),
-                                changelogRow("+I", 5, "v_5", "creation", "02-28"),
-                                changelogRow("+I", 6, "v_6", "creation", "02-28"),
-                                changelogRow("+I", 7, "v_7", "creation", "02-28"),
-                                changelogRow("+I", 9, "v_9", "creation", "02-28"),
-                                changelogRow("+I", 10, "v_10", "creation", "02-28")));
-        assertNoMoreRecords(iterator);
-        iterator.close();
+                        changelogRow("-D", 8, "v_8", "creation", "02-28")),
+                Arrays.asList(
+                        changelogRow("+I", 1, "v_1", "creation", "02-27"),
+                        changelogRow("+I", 2, "v_2", "creation", "02-27"),
+                        changelogRow("+I", 3, "v_3", "creation", "02-27"),
+                        changelogRow("+I", 5, "v_5", "creation", "02-28"),
+                        changelogRow("+I", 6, "v_6", "creation", "02-28"),
+                        changelogRow("+I", 7, "v_7", "creation", "02-28"),
+                        changelogRow("+I", 9, "v_9", "creation", "02-28"),
+                        changelogRow("+I", 10, "v_10", "creation", "02-28")));
     }
 
     @ParameterizedTest(name = "useCatalog = {0}")
@@ -305,7 +327,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
-    public void testInsertChangesActionWithNonPkTable() {
+    public void testNonPkTable() {
         String nonPkTable =
                 createTable(
                         Collections.singletonList("k int"),
@@ -335,6 +357,26 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testIllegalSourceTableName() throws Exception {
+        // create source table in a new database
+        sEnv.executeSql("DROP TABLE S");
+        sEnv.executeSql("CREATE DATABASE test_db");
+        sEnv.executeSql("USE test_db");
+        prepareSourceTable();
+
+        MergeIntoAction action = new MergeIntoAction(warehouse, "default", "T");
+        // the qualified path of source table name is absent
+        action.withSourceTable(null, "S")
+                .withMergeCondition("T.k = S.k AND T.dt = S.dt")
+                .withMatchedDelete("S.v IS NULL");
+
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                ValidationException.class, "Object 'S' not found"));
+    }
+
+    @Test
     public void testIllegalSourceAlias() {
         // drop table S
         sEnv.executeSql("DROP TABLE S");
@@ -349,7 +391,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         + "WITH ('connector' = 'values', 'bounded' = 'true');";
 
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        // the qualified path is absent
+        // the qualified path of source alias is absent
         action.withSourceSqls("S", catalog, ddl)
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withMatchedDelete("S.v IS NULL");

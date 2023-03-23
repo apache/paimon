@@ -452,25 +452,9 @@ public class MergeIntoAction extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        // handle target alias
-        if (targetAlias != null) {
-            tEnv.createTemporaryView(escapedTargetName(), tEnv.from(identifier.getObjectName()));
-        }
-
-        // prepare source table
-        if (sourceTable != null) {
-            sourceAlias = sourceTable;
-        } else {
-            // NOTE: sql may change current catalog and database
-            try {
-                for (String sql : sourceSqls) {
-                    tEnv.executeSql(sql).await();
-                }
-            } catch (Throwable t) {
-                LOG.error("Error occurs when executing sql in --source-sql.", t);
-                throw new RuntimeException("Error occurs when executing sql in --source-sql.", t);
-            }
-        }
+        // handle aliases
+        handleTargetAlias();
+        handleSourceAlias();
 
         List<DataStream<RowData>> dataStreams =
                 Stream.of(
@@ -485,6 +469,36 @@ public class MergeIntoAction extends ActionBase {
 
         DataStream<RowData> firstDs = dataStreams.get(0);
         batchSink(firstDs.union(dataStreams.stream().skip(1).toArray(DataStream[]::new)));
+    }
+
+    private void handleTargetAlias() {
+        if (targetAlias != null) {
+            // create a view 'targetAlias' in the path of target table, then we can find it with the
+            // qualified name
+            tEnv.createTemporaryView(escapedTargetName(), tEnv.from(identifier.getFullName()));
+        }
+    }
+
+    private void handleSourceAlias() {
+        if (sourceTable != null) {
+            if (sourceAlias == null) {
+                sourceAlias = sourceTable;
+            } else {
+                // similar to #handleTargetAlias
+                tEnv.createTemporaryView(escapedSourceName(), tEnv.from(sourceTable));
+            }
+        } else {
+            // NOTE: sql may change current catalog and database
+            for (String sql : sourceSqls) {
+                try {
+                    tEnv.executeSql(sql).await();
+                } catch (Throwable t) {
+                    String errMsg = "Error occurs when executing sql in --source-sql. Sql:\n%s";
+                    LOG.error(String.format(errMsg, sql), t);
+                    throw new RuntimeException(String.format(errMsg, sql), t);
+                }
+            }
+        }
     }
 
     private Optional<DataStream<RowData>> getMatchedUpsertDataStream() {
