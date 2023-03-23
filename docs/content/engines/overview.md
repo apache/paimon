@@ -40,4 +40,4 @@ Apache Spark and Apache Hive.
 | Spark     | 2.4 | batch read | Projection, Filter |
 | Trino     | 388/358 | batch read | Projection, Filter |
 
-[download link]({{< ref "engines/download#changelog-producers" >}})
+[download link]({{< ref "project/download#changelog-producers" >}})
