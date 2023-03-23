@@ -19,13 +19,12 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
+import javax.annotation.Nullable;
 
 /** {@link StartingScanner} used internally for stand-alone streaming compact job sources. */
 public class ContinuousCompactorStartingScanner implements StartingScanner {
@@ -34,8 +33,8 @@ public class ContinuousCompactorStartingScanner implements StartingScanner {
             LoggerFactory.getLogger(ContinuousCompactorStartingScanner.class);
 
     @Override
-    public DataTableScan.DataFilePlan getPlan(
-            SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
+    @Nullable
+    public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
         if (latestSnapshotId == null || earliestSnapshotId == null) {
@@ -47,13 +46,13 @@ public class ContinuousCompactorStartingScanner implements StartingScanner {
             Snapshot snapshot = snapshotManager.snapshot(id);
             if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
                 LOG.debug("Found latest compact snapshot {}, reading from the next snapshot.", id);
-                return new DataTableScan.DataFilePlan(id, Collections.emptyList());
+                return new Result(id);
             }
         }
 
         LOG.debug(
                 "No compact snapshot found, reading from the earliest snapshot {}.",
                 earliestSnapshotId);
-        return new DataTableScan.DataFilePlan(earliestSnapshotId - 1, Collections.emptyList());
+        return new Result(earliestSnapshotId - 1);
     }
 }

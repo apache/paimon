@@ -45,10 +45,9 @@ public class InputChangelogFollowUpScanner implements FollowUpScanner {
     }
 
     @Override
-    public DataTableScan.DataFilePlan getPlan(
+    public DataTableScan.DataFilePlan scan(
             long snapshotId, SnapshotSplitReader snapshotSplitReader) {
         return new DataTableScan.DataFilePlan(
-                snapshotId,
                 snapshotSplitReader.withKind(ScanKind.CHANGELOG).withSnapshot(snapshotId).splits());
     }
 }

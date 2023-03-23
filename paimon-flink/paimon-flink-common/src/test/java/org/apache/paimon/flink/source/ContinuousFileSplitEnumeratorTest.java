@@ -19,9 +19,16 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan.DataFilePlan;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.source.snapshot.BoundedChecker;
+import org.apache.paimon.table.source.snapshot.FollowUpScanner;
+import org.apache.paimon.table.source.snapshot.StartingScanner;
+import org.apache.paimon.utils.Filter;
 
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
@@ -34,7 +41,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.UUID;
-import java.util.concurrent.Callable;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.stream.Collectors;
 
@@ -149,21 +155,13 @@ public class ContinuousFileSplitEnumeratorTest {
         context.registerReader(1, "test-host");
 
         Queue<DataFilePlan> results = new LinkedBlockingQueue<>();
-        Callable<DataFilePlan> callable =
-                () -> {
-                    DataFilePlan plan = results.poll();
-                    if (plan == null) {
-                        throw new EndOfScanException();
-                    }
-                    return plan;
-                };
-
+        StreamDataTableScan scan = new MockScan(results);
         ContinuousFileSplitEnumerator enumerator =
                 new Builder()
                         .setSplitEnumeratorContext(context)
                         .setInitialSplits(Collections.emptyList())
                         .setDiscoveryInterval(1)
-                        .setCallable(callable)
+                        .setScan(scan)
                         .build();
         enumerator.start();
 
@@ -172,7 +170,7 @@ public class ContinuousFileSplitEnumeratorTest {
         for (int i = 0; i < 4; i++) {
             splits.add(createDataSplit(snapshot, i, Collections.emptyList()));
         }
-        results.add(new DataFilePlan(snapshot, splits));
+        results.add(new DataFilePlan(splits));
         context.triggerAllActions();
 
         // assign to task 0
@@ -228,9 +226,8 @@ public class ContinuousFileSplitEnumeratorTest {
     private static class Builder {
         private SplitEnumeratorContext<FileStoreSourceSplit> context;
         private Collection<FileStoreSourceSplit> initialSplits = Collections.emptyList();
-        private Long nextSnapshotId;
         private long discoveryInterval = Long.MAX_VALUE;
-        private Callable<DataFilePlan> callable;
+        private StreamDataTableScan scan;
 
         public Builder setSplitEnumeratorContext(
                 SplitEnumeratorContext<FileStoreSourceSplit> context) {
@@ -243,24 +240,89 @@ public class ContinuousFileSplitEnumeratorTest {
             return this;
         }
 
-        public Builder setNextSnapshotId(Long nextSnapshotId) {
-            this.nextSnapshotId = nextSnapshotId;
-            return this;
-        }
-
         public Builder setDiscoveryInterval(long discoveryInterval) {
             this.discoveryInterval = discoveryInterval;
             return this;
         }
 
-        public Builder setCallable(Callable<DataFilePlan> callable) {
-            this.callable = callable;
+        public Builder setScan(StreamDataTableScan scan) {
+            this.scan = scan;
             return this;
         }
 
         public ContinuousFileSplitEnumerator build() {
             return new ContinuousFileSplitEnumerator(
-                    context, initialSplits, nextSnapshotId, discoveryInterval, callable);
+                    context, initialSplits, null, discoveryInterval, scan);
         }
+    }
+
+    private static class MockScan implements StreamDataTableScan {
+        private final Queue<DataFilePlan> results;
+
+        public MockScan(Queue<DataFilePlan> results) {
+            this.results = results;
+        }
+
+        @Override
+        public StreamDataTableScan withKind(ScanKind kind) {
+            return null;
+        }
+
+        @Override
+        public StreamDataTableScan withSnapshot(long snapshotId) {
+            return null;
+        }
+
+        @Override
+        public StreamDataTableScan withLevelFilter(Filter<Integer> levelFilter) {
+            return null;
+        }
+
+        @Override
+        public StreamDataTableScan withFilter(Predicate predicate) {
+            return null;
+        }
+
+        @Override
+        public DataFilePlan plan() {
+            DataFilePlan plan = results.poll();
+            if (plan == null) {
+                throw new EndOfScanException();
+            }
+            return plan;
+        }
+
+        @Override
+        public boolean supportStreamingReadOverwrite() {
+            return false;
+        }
+
+        @Override
+        public StreamDataTableScan withStartingScanner(StartingScanner startingScanner) {
+            return null;
+        }
+
+        @Override
+        public StreamDataTableScan withFollowUpScanner(FollowUpScanner followUpScanner) {
+            return null;
+        }
+
+        @Override
+        public StreamDataTableScan withBoundedChecker(BoundedChecker boundedChecker) {
+            return null;
+        }
+
+        @Override
+        public StreamDataTableScan withSnapshotStarting() {
+            return null;
+        }
+
+        @Override
+        public Long checkpoint() {
+            return null;
+        }
+
+        @Override
+        public void restore(Long state) {}
     }
 }

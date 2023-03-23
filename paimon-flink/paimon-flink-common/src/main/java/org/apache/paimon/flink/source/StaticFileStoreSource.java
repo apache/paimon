@@ -24,6 +24,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.source.BatchDataTableScan;
 import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.snapshot.StaticStartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.api.connector.source.Boundedness;
@@ -32,7 +33,6 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Collection;
 
 /** Bounded {@link FlinkSource} for reading records. It does not monitor new snapshots. */
@@ -75,19 +75,15 @@ public class StaticFileStoreSource extends FlinkSource {
             PendingSplitsCheckpoint checkpoint) {
         SnapshotManager snapshotManager = table.snapshotManager();
 
-        Long snapshotId = null;
+        Long snapshotId;
         Collection<FileStoreSourceSplit> splits;
         if (checkpoint == null) {
-            splits = new ArrayList<>();
             FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
-
             // read all splits from scan
             DataTableScan.DataFilePlan plan =
                     scanFactory.create(table).withFilter(predicate).plan();
-            if (plan != null) {
-                snapshotId = plan.snapshotId;
-                splits.addAll(splitGenerator.createSplits(plan));
-            }
+            splits = splitGenerator.createSplits(plan);
+            snapshotId = StaticStartingScanner.scanStartSnapshot(table.options(), snapshotManager);
         } else {
             // restore from checkpoint
             snapshotId = checkpoint.currentSnapshotId();

@@ -54,7 +54,6 @@ public class BatchDataTableScanTest extends ScannerTestBase {
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(2);
 
         DataTableScan.DataFilePlan plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(table.newRead(), plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
 

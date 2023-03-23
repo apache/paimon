@@ -85,7 +85,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 splits,
                 nextSnapshotId,
                 table.coreOptions().continuousDiscoveryInterval().toMillis(),
-                scanFactory.create(table, nextSnapshotId).withFilter(predicate)::plan);
+                scanFactory.create(table, nextSnapshotId).withFilter(predicate));
     }
 
     @Override

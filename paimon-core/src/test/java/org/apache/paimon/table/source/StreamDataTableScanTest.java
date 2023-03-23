@@ -64,7 +64,6 @@ public class StreamDataTableScanTest extends ScannerTestBase {
 
         // first call with snapshot, should return complete records from 2nd commit
         DataTableScan.DataFilePlan plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
 
@@ -85,13 +84,11 @@ public class StreamDataTableScanTest extends ScannerTestBase {
 
         // first incremental call, should return incremental records from 3rd commit
         plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(3);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|102", "+I 1|20|201", "+I 1|40|400"));
 
         // second incremental call, should return incremental records from 4th commit
         plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(4);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|103", "-D 1|40|400", "+I 1|50|500"));
 
@@ -137,7 +134,6 @@ public class StreamDataTableScanTest extends ScannerTestBase {
 
         // first call with snapshot, should return full compacted records from 3rd commit
         DataTableScan.DataFilePlan plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(4);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
 
@@ -158,7 +154,6 @@ public class StreamDataTableScanTest extends ScannerTestBase {
 
         // full compaction done, read new changelog
         plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(6);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(
                         Arrays.asList(
@@ -191,7 +186,6 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         commit.commit(committable);
 
         DataTableScan.DataFilePlan plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(1);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Collections.singletonList("+I 1|10|100"));
 
@@ -217,7 +211,6 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         commit.commit(committable);
 
         DataTableScan.DataFilePlan plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(1);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Collections.singletonList("+I 1|10|100"));
         assertThat(scan.plan()).isNull();
@@ -228,7 +221,6 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         commit.commit(committable);
 
         plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Collections.singletonList("+I 2|20|200"));
         assertThat(scan.plan()).isNull();

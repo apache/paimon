@@ -20,15 +20,22 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
+import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotStartingScanner;
+import org.apache.paimon.table.source.snapshot.ContinuousFromTimestampStartingScanner;
+import org.apache.paimon.table.source.snapshot.ContinuousLatestStartingScanner;
 import org.apache.paimon.table.source.snapshot.DeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.FollowUpScanner;
 import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.InputChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
+import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -63,6 +70,30 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
     }
 
     @Override
+    public StreamDataTableScanImpl withSnapshot(long snapshotId) {
+        snapshotSplitReader.withSnapshot(snapshotId);
+        return this;
+    }
+
+    @Override
+    public StreamDataTableScanImpl withFilter(Predicate predicate) {
+        snapshotSplitReader.withFilter(predicate);
+        return this;
+    }
+
+    @Override
+    public StreamDataTableScanImpl withKind(ScanKind scanKind) {
+        snapshotSplitReader.withKind(scanKind);
+        return this;
+    }
+
+    @Override
+    public StreamDataTableScanImpl withLevelFilter(Filter<Integer> levelFilter) {
+        snapshotSplitReader.withLevelFilter(levelFilter);
+        return this;
+    }
+
+    @Override
     public boolean supportStreamingReadOverwrite() {
         return supportStreamingReadOverwrite;
     }
@@ -94,11 +125,10 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
         return this;
     }
 
-    @Nullable
     @Override
     public DataFilePlan plan() {
         if (startingScanner == null) {
-            startingScanner = createStartingScanner(true);
+            startingScanner = createStartingScanner();
         }
         if (followUpScanner == null) {
             followUpScanner = createFollowUpScanner();
@@ -115,16 +145,15 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
     }
 
     private DataFilePlan tryFirstPlan() {
-        DataTableScan.DataFilePlan plan =
-                startingScanner.getPlan(snapshotManager, snapshotSplitReader);
-        if (plan != null) {
-            long snapshot = plan.snapshotId;
-            nextSnapshotId = snapshot + 1;
-            if (boundedChecker.shouldEndInput(snapshotManager.snapshot(snapshot))) {
+        StartingScanner.Result result = startingScanner.scan(snapshotManager, snapshotSplitReader);
+        if (result != null) {
+            long snapshotId = result.snapshotId();
+            nextSnapshotId = snapshotId + 1;
+            if (boundedChecker.shouldEndInput(snapshotManager.snapshot(snapshotId))) {
                 isEnd = true;
             }
         }
-        return plan;
+        return DataFilePlan.fromResult(result);
     }
 
     private DataFilePlan nextPlan() {
@@ -158,12 +187,47 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
             } else if (followUpScanner.shouldScanSnapshot(snapshot)) {
                 LOG.debug("Find snapshot id {}.", nextSnapshotId);
                 DataTableScan.DataFilePlan plan =
-                        followUpScanner.getPlan(nextSnapshotId, snapshotSplitReader);
+                        followUpScanner.scan(nextSnapshotId, snapshotSplitReader);
                 nextSnapshotId++;
                 return plan;
             } else {
                 nextSnapshotId++;
             }
+        }
+    }
+
+    private StartingScanner createStartingScanner() {
+        CoreOptions.StartupMode startupMode = options.startupMode();
+        switch (startupMode) {
+            case LATEST_FULL:
+                return new FullStartingScanner();
+            case LATEST:
+                return new ContinuousLatestStartingScanner();
+            case COMPACTED_FULL:
+                return new CompactedStartingScanner();
+            case FROM_TIMESTAMP:
+                Long startupMillis = options.scanTimestampMills();
+                Preconditions.checkNotNull(
+                        startupMillis,
+                        String.format(
+                                "%s can not be null when you use %s for %s",
+                                CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
+                                CoreOptions.StartupMode.FROM_TIMESTAMP,
+                                CoreOptions.SCAN_MODE.key()));
+                return new ContinuousFromTimestampStartingScanner(startupMillis);
+            case FROM_SNAPSHOT:
+                Long snapshotId = options.scanSnapshotId();
+                Preconditions.checkNotNull(
+                        snapshotId,
+                        String.format(
+                                "%s can not be null when you use %s for %s",
+                                CoreOptions.SCAN_SNAPSHOT_ID.key(),
+                                CoreOptions.StartupMode.FROM_SNAPSHOT,
+                                CoreOptions.SCAN_MODE.key()));
+                return new ContinuousFromSnapshotStartingScanner(snapshotId);
+            default:
+                throw new UnsupportedOperationException(
+                        "Unknown startup mode " + startupMode.name());
         }
     }
 

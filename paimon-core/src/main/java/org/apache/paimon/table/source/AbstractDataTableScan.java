@@ -21,19 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.operation.FileStoreScan;
-import org.apache.paimon.operation.ScanKind;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
-import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotStartingScanner;
-import org.apache.paimon.table.source.snapshot.ContinuousFromTimestampStartingScanner;
-import org.apache.paimon.table.source.snapshot.ContinuousLatestStartingScanner;
-import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
-import org.apache.paimon.table.source.snapshot.StartingScanner;
-import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
-import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
-import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.Preconditions;
 
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
 public abstract class AbstractDataTableScan implements DataTableScan {
@@ -46,30 +34,6 @@ public abstract class AbstractDataTableScan implements DataTableScan {
         this.snapshotSplitReader = snapshotSplitReader;
     }
 
-    @Override
-    public AbstractDataTableScan withSnapshot(long snapshotId) {
-        snapshotSplitReader.withSnapshot(snapshotId);
-        return this;
-    }
-
-    @Override
-    public AbstractDataTableScan withFilter(Predicate predicate) {
-        snapshotSplitReader.withFilter(predicate);
-        return this;
-    }
-
-    @Override
-    public AbstractDataTableScan withKind(ScanKind scanKind) {
-        snapshotSplitReader.withKind(scanKind);
-        return this;
-    }
-
-    @Override
-    public AbstractDataTableScan withLevelFilter(Filter<Integer> levelFilter) {
-        snapshotSplitReader.withLevelFilter(levelFilter);
-        return this;
-    }
-
     @VisibleForTesting
     public AbstractDataTableScan withBucket(int bucket) {
         snapshotSplitReader.withBucket(bucket);
@@ -78,46 +42,5 @@ public abstract class AbstractDataTableScan implements DataTableScan {
 
     public CoreOptions options() {
         return options;
-    }
-
-    protected StartingScanner createStartingScanner(boolean isStreaming) {
-        CoreOptions.StartupMode startupMode = options.startupMode();
-        switch (startupMode) {
-            case LATEST_FULL:
-                return new FullStartingScanner();
-            case LATEST:
-                return isStreaming
-                        ? new ContinuousLatestStartingScanner()
-                        : new FullStartingScanner();
-            case COMPACTED_FULL:
-                return new CompactedStartingScanner();
-            case FROM_TIMESTAMP:
-                Long startupMillis = options.scanTimestampMills();
-                Preconditions.checkNotNull(
-                        startupMillis,
-                        String.format(
-                                "%s can not be null when you use %s for %s",
-                                CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
-                                CoreOptions.StartupMode.FROM_TIMESTAMP,
-                                CoreOptions.SCAN_MODE.key()));
-                return isStreaming
-                        ? new ContinuousFromTimestampStartingScanner(startupMillis)
-                        : new StaticFromTimestampStartingScanner(startupMillis);
-            case FROM_SNAPSHOT:
-                Long snapshotId = options.scanSnapshotId();
-                Preconditions.checkNotNull(
-                        snapshotId,
-                        String.format(
-                                "%s can not be null when you use %s for %s",
-                                CoreOptions.SCAN_SNAPSHOT_ID.key(),
-                                CoreOptions.StartupMode.FROM_SNAPSHOT,
-                                CoreOptions.SCAN_MODE.key()));
-                return isStreaming
-                        ? new ContinuousFromSnapshotStartingScanner(snapshotId)
-                        : new StaticFromSnapshotStartingScanner(snapshotId);
-            default:
-                throw new UnsupportedOperationException(
-                        "Unknown startup mode " + startupMode.name());
-        }
     }
 }

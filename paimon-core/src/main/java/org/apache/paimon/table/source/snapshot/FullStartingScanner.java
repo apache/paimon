@@ -19,31 +19,15 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.operation.ScanKind;
-import org.apache.paimon.table.source.DataTableScan;
-import org.apache.paimon.utils.SnapshotManager;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.paimon.options.Options;
 
 /** {@link StartingScanner} for the {@link CoreOptions.StartupMode#LATEST_FULL} startup mode. */
-public class FullStartingScanner implements StartingScanner {
+public class FullStartingScanner extends StaticStartingScanner {
 
-    private static final Logger LOG = LoggerFactory.getLogger(FullStartingScanner.class);
-
-    @Override
-    public DataTableScan.DataFilePlan getPlan(
-            SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
-        Long startingSnapshotId = snapshotManager.latestSnapshotId();
-        if (startingSnapshotId == null) {
-            LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");
-            return null;
-        }
-        return new DataTableScan.DataFilePlan(
-                startingSnapshotId,
-                snapshotSplitReader
-                        .withKind(ScanKind.ALL)
-                        .withSnapshot(startingSnapshotId)
-                        .splits());
+    public FullStartingScanner() {
+        super(
+                new CoreOptions(
+                        new Options()
+                                .set(CoreOptions.SCAN_MODE, CoreOptions.StartupMode.LATEST_FULL)));
     }
 }
