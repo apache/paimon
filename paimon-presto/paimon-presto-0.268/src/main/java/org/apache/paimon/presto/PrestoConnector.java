@@ -18,75 +18,29 @@
 
 package org.apache.paimon.presto;
 
-import com.facebook.presto.spi.classloader.ThreadContextClassLoader;
 import com.facebook.presto.spi.connector.Connector;
-import com.facebook.presto.spi.connector.ConnectorMetadata;
-import com.facebook.presto.spi.connector.ConnectorPageSourceProvider;
-import com.facebook.presto.spi.connector.ConnectorSplitManager;
 import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
-import com.facebook.presto.spi.connector.classloader.ClassLoaderSafeConnectorMetadata;
-import com.facebook.presto.spi.transaction.IsolationLevel;
-
-import static com.facebook.presto.spi.transaction.IsolationLevel.READ_COMMITTED;
-import static com.facebook.presto.spi.transaction.IsolationLevel.checkConnectorSupports;
-import static java.util.Objects.requireNonNull;
 
 /** Presto {@link Connector}. */
-public class PrestoConnector implements Connector {
+public class PrestoConnector extends PrestoConnectorBase {
 
     private final PrestoTransactionManager transactionManager;
-    private final PrestoSplitManager prestoSplitManager;
-    private final PrestoPageSourceProvider prestoPageSourceProvider;
-    private final PrestoMetadataFactory prestoMetadataFactory;
 
     public PrestoConnector(
             PrestoTransactionManager transactionManager,
             PrestoSplitManager prestoSplitManager,
             PrestoPageSourceProvider prestoPageSourceProvider,
             PrestoMetadataFactory prestoMetadataFactory) {
-        this.transactionManager = requireNonNull(transactionManager, "transactionManager is null");
-        this.prestoSplitManager = requireNonNull(prestoSplitManager, "prestoSplitManager is null");
-        this.prestoPageSourceProvider =
-                requireNonNull(prestoPageSourceProvider, "prestoPageSourceProvider is null");
-        this.prestoMetadataFactory =
-                requireNonNull(prestoMetadataFactory, "prestoMetadataFactory is null");
-    }
-
-    @Override
-    public ConnectorTransactionHandle beginTransaction(
-            IsolationLevel isolationLevel, boolean readOnly) {
-        checkConnectorSupports(READ_COMMITTED, isolationLevel);
-        ConnectorTransactionHandle transaction = new PrestoTransactionHandle();
-        try (ThreadContextClassLoader ignored =
-                new ThreadContextClassLoader(getClass().getClassLoader())) {
-            transactionManager.put(transaction, prestoMetadataFactory.create());
-        }
-        return transaction;
-    }
-
-    @Override
-    public ConnectorMetadata getMetadata(ConnectorTransactionHandle transactionHandle) {
-        ConnectorMetadata metadata = transactionManager.get(transactionHandle);
-        return new ClassLoaderSafeConnectorMetadata(metadata, getClass().getClassLoader());
-    }
-
-    @Override
-    public ConnectorSplitManager getSplitManager() {
-        return prestoSplitManager;
-    }
-
-    @Override
-    public ConnectorPageSourceProvider getPageSourceProvider() {
-        return prestoPageSourceProvider;
+        super(
+                transactionManager,
+                prestoSplitManager,
+                prestoPageSourceProvider,
+                prestoMetadataFactory);
+        this.transactionManager = transactionManager;
     }
 
     @Override
     public void commit(ConnectorTransactionHandle transaction) {
-        transactionManager.remove(transaction);
-    }
-
-    @Override
-    public void rollback(ConnectorTransactionHandle transaction) {
         transactionManager.remove(transaction);
     }
 }

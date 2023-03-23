@@ -24,6 +24,7 @@ import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -31,7 +32,6 @@ import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
-import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
@@ -105,8 +105,6 @@ public class PrestoTypeUtils {
             DataType elementType = ((ArrayType) paimonType).getElementType();
             return new com.facebook.presto.common.type.ArrayType(
                     Objects.requireNonNull(toPrestoType(elementType, typeManager)));
-        } else if (paimonType instanceof MultisetType) {
-            return null;
         } else if (paimonType instanceof MapType) {
             MapType paimonMapType = (MapType) paimonType;
             TypeSignature keyType =
@@ -123,6 +121,49 @@ public class PrestoTypeUtils {
         } else {
             throw new UnsupportedOperationException(
                     format("Cannot convert from Paimon type '%s' to Presto type", paimonType));
+        }
+    }
+
+    public static DataType toPaimonType(Type prestoType) {
+        if (prestoType instanceof com.facebook.presto.common.type.CharType) {
+            return DataTypes.CHAR(
+                    ((com.facebook.presto.common.type.CharType) prestoType).getLength());
+        } else if (prestoType instanceof VarcharType) {
+            return DataTypes.VARCHAR(
+                    Math.min(Integer.MAX_VALUE, ((VarcharType) prestoType).getLength()));
+        } else if (prestoType instanceof com.facebook.presto.common.type.BooleanType) {
+            return DataTypes.BOOLEAN();
+        } else if (prestoType instanceof com.facebook.presto.common.type.DecimalType) {
+            return DataTypes.DECIMAL(
+                    ((com.facebook.presto.common.type.DecimalType) prestoType).getPrecision(),
+                    ((com.facebook.presto.common.type.DecimalType) prestoType).getScale());
+        } else if (prestoType instanceof TinyintType) {
+            return DataTypes.TINYINT();
+        } else if (prestoType instanceof SmallintType) {
+            return DataTypes.SMALLINT();
+        } else if (prestoType instanceof IntegerType) {
+            return DataTypes.INT();
+        } else if (prestoType instanceof BigintType) {
+            return DataTypes.BIGINT();
+        } else if (prestoType instanceof RealType) {
+            return DataTypes.FLOAT();
+        } else if (prestoType instanceof com.facebook.presto.common.type.DoubleType) {
+            return DataTypes.DOUBLE();
+        } else if (prestoType instanceof com.facebook.presto.common.type.DateType) {
+            return DataTypes.DATE();
+        } else if (prestoType instanceof com.facebook.presto.common.type.TimeType) {
+            return new TimeType();
+        } else if (prestoType instanceof com.facebook.presto.common.type.TimestampType) {
+            return DataTypes.TIMESTAMP();
+        } else if (prestoType instanceof TimestampWithTimeZoneType) {
+            return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE();
+        } else if (prestoType instanceof com.facebook.presto.common.type.ArrayType) {
+            return DataTypes.ARRAY(toPaimonType(prestoType));
+        } else if (prestoType instanceof com.facebook.presto.common.type.MapType) {
+            return DataTypes.MAP(toPaimonType(prestoType), toPaimonType(prestoType));
+        } else {
+            throw new UnsupportedOperationException(
+                    format("Cannot convert from Presto type '%s' to Paimon type", prestoType));
         }
     }
 }

@@ -30,7 +30,7 @@ This documentation is a guide for using Paimon in Presto.
 
 Paimon currently supports Presto 0.236 and above.
 
-## Deploy Table Store Presto Connector
+## Deploy Paimon Presto Connector
 
 Build bundled jar with the following command.
 
@@ -40,12 +40,10 @@ Build bundled jar with the following command.
 | [0.268,0.273)    | mvn clean install -Dmaven.test.skip=true -Ppresto-0.268                 |
 | [0.273,0.279]    | mvn clean install -Dmaven.test.skip=true -Ppresto-0.273                 |
 
-You can find Hive connector jar in `./paimon-presto/paimon-presto-<presto-version>/target/paimon-presto-*.jar`.
+You can find Presto connector jar in `./paimon-presto/paimon-presto-<presto-version>/target/paimon-presto-*.jar`.
 
 Then, copy `paimon-presto-*.jar and flink-shaded-hadoop-*-uber-*.jar` to plugin/paimon.
 
-:::tip
-if
 ## Configure Paimon Catalog
 
 Catalogs are registered by creating a catalog properties file in the etc/catalog directory. For example, create etc/catalog/paimon.properties with the following contents to mount the paimon connector as the paimon catalog:

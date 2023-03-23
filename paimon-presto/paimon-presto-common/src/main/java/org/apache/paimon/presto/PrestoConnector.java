@@ -19,7 +19,9 @@
 package org.apache.paimon.presto;
 
 import com.facebook.presto.spi.connector.Connector;
+import com.facebook.presto.spi.connector.ConnectorCommitHandle;
 import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
+import com.facebook.presto.spi.connector.EmptyConnectorCommitHandle;
 
 /** Presto {@link Connector}. */
 public class PrestoConnector extends PrestoConnectorBase {
@@ -40,7 +42,8 @@ public class PrestoConnector extends PrestoConnectorBase {
     }
 
     @Override
-    public void commit(ConnectorTransactionHandle transaction) {
+    public ConnectorCommitHandle commit(ConnectorTransactionHandle transaction) {
         transactionManager.remove(transaction);
+        return EmptyConnectorCommitHandle.INSTANCE;
     }
 }

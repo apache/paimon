@@ -18,15 +18,18 @@
 
 package org.apache.paimon.presto;
 
-import com.facebook.presto.spi.Plugin;
-import com.facebook.presto.spi.connector.ConnectorFactory;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.reader.RecordReader;
 
-import java.util.Collections;
+import com.facebook.presto.spi.ColumnHandle;
+import com.facebook.presto.spi.ConnectorPageSource;
 
-/** Presto {@link Plugin}. */
-public class PrestoPlugin implements Plugin {
-    @Override
-    public Iterable<ConnectorFactory> getConnectorFactories() {
-        return Collections.singletonList(new PrestoConnectorFactory());
+import java.util.List;
+
+/** Presto {@link ConnectorPageSource}. */
+public class PrestoPageSource extends PrestoPageSourceBase {
+
+    public PrestoPageSource(RecordReader<InternalRow> reader, List<ColumnHandle> projectedColumns) {
+        super(reader, projectedColumns);
     }
 }

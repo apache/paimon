@@ -65,6 +65,7 @@ public class PrestoColumnHandle implements ColumnHandle {
         return typeString;
     }
 
+    @JsonProperty
     public DataType logicalType() {
         return JsonSerdeUtil.fromJson(typeString, DataType.class);
     }

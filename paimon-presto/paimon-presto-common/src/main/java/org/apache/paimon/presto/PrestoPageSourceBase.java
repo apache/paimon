@@ -67,7 +67,7 @@ import static io.airlift.slice.Slices.wrappedBuffer;
 import static java.lang.String.format;
 
 /** Presto {@link ConnectorPageSource}. */
-public class PrestoPageSource implements ConnectorPageSource {
+public abstract class PrestoPageSourceBase implements ConnectorPageSource {
 
     private final RecordReader<InternalRow> reader;
     private final PageBuilder pageBuilder;
@@ -76,7 +76,8 @@ public class PrestoPageSource implements ConnectorPageSource {
 
     private boolean isFinished = false;
 
-    public PrestoPageSource(RecordReader<InternalRow> reader, List<ColumnHandle> projectedColumns) {
+    public PrestoPageSourceBase(
+            RecordReader<InternalRow> reader, List<ColumnHandle> projectedColumns) {
         this.reader = reader;
         this.columnTypes = new ArrayList<>();
         this.logicalTypes = new ArrayList<>();

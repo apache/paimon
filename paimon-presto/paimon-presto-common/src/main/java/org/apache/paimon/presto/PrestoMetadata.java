@@ -18,17 +18,21 @@
 
 package org.apache.paimon.presto;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.StringUtils;
 
 import com.facebook.presto.common.type.TypeManager;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ColumnMetadata;
+import com.facebook.presto.spi.ConnectorNewTableLayout;
+import com.facebook.presto.spi.ConnectorOutputTableHandle;
 import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.ConnectorTableHandle;
 import com.facebook.presto.spi.ConnectorTableLayout;
@@ -39,11 +43,15 @@ import com.facebook.presto.spi.Constraint;
 import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.SchemaTablePrefix;
 import com.facebook.presto.spi.connector.ConnectorMetadata;
+import com.facebook.presto.spi.connector.ConnectorOutputMetadata;
+import com.facebook.presto.spi.statistics.ComputedStatistics;
+import io.airlift.slice.Slice;
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -52,6 +60,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 
+import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toMap;
@@ -189,6 +198,70 @@ public class PrestoMetadata implements ConnectorMetadata {
         } catch (Catalog.DatabaseNotExistException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    // TODO: Need to insert method,the pr of presto writer will do this
+    @Override
+    public ConnectorOutputTableHandle beginCreateTable(
+            ConnectorSession session,
+            ConnectorTableMetadata tableMetadata,
+            Optional<ConnectorNewTableLayout> layout) {
+        return null;
+    }
+
+    @Override
+    public void createTable(
+            ConnectorSession session,
+            ConnectorTableMetadata tableMetadata,
+            boolean ignoreExisting) {
+        SchemaTableName table = tableMetadata.getTable();
+        Identifier identifier = Identifier.create(table.getSchemaName(), table.getTableName());
+
+        try {
+            catalog.createTable(identifier, prepareSchema(tableMetadata), true);
+        } catch (Catalog.TableAlreadyExistException e) {
+            throw new RuntimeException(format("table already existed: '%s'", table.getTableName()));
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new RuntimeException(format("database not exists: '%s'", table.getSchemaName()));
+        }
+    }
+
+    // TODO
+    @Override
+    public Optional<ConnectorOutputMetadata> finishCreateTable(
+            ConnectorSession session,
+            ConnectorOutputTableHandle tableHandle,
+            Collection<Slice> fragments,
+            Collection<ComputedStatistics> computedStatistics) {
+        return Optional.empty();
+    }
+
+    // TODO: options is not set
+    private Schema prepareSchema(ConnectorTableMetadata tableMetadata) {
+        Schema.Builder builder =
+                Schema.newBuilder()
+                        .primaryKey(getPrimaryKeys(tableMetadata.getProperties()))
+                        .partitionKeys(getPartitionedKeys(tableMetadata.getProperties()));
+
+        for (ColumnMetadata column : tableMetadata.getColumns()) {
+            builder.column(
+                    column.getName(),
+                    PrestoTypeUtils.toPaimonType(column.getType()),
+                    column.getComment());
+        }
+        return builder.build();
+    }
+
+    private List<String> getPartitionedKeys(Map<String, Object> tableProperties) {
+        List<String> partitionedKeys =
+                (List<String>) tableProperties.get(CoreOptions.PARTITION.key());
+        return partitionedKeys == null ? ImmutableList.of() : ImmutableList.copyOf(partitionedKeys);
+    }
+
+    private List<String> getPrimaryKeys(Map<String, Object> tableProperties) {
+        List<String> primaryKeys =
+                (List<String>) tableProperties.get(CoreOptions.PRIMARY_KEY.key());
+        return primaryKeys == null ? ImmutableList.of() : ImmutableList.copyOf(primaryKeys);
     }
 
     @Override

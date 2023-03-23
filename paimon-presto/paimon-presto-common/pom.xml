@@ -35,6 +35,7 @@ under the License.
 
     <properties>
         <presto.version>0.273</presto.version>
+        <hadoop.apache2.version>2.7.4-9</hadoop.apache2.version>
         <slf4j.version>1.7.25</slf4j.version>
     </properties>
 
@@ -71,6 +72,13 @@ under the License.
             <artifactId>presto-client</artifactId>
             <version>${presto.version}</version>
             <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.facebook.presto.hadoop</groupId>
+            <artifactId>hadoop-apache2</artifactId>
+            <version>${hadoop.apache2.version}</version>
+            <scope>provided</scope>
         </dependency>
 
         <dependency>

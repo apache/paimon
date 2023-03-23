@@ -20,12 +20,10 @@ package org.apache.paimon.presto;
 
 import com.facebook.presto.spi.classloader.ThreadContextClassLoader;
 import com.facebook.presto.spi.connector.Connector;
-import com.facebook.presto.spi.connector.ConnectorCommitHandle;
 import com.facebook.presto.spi.connector.ConnectorMetadata;
 import com.facebook.presto.spi.connector.ConnectorPageSourceProvider;
 import com.facebook.presto.spi.connector.ConnectorSplitManager;
 import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
-import com.facebook.presto.spi.connector.EmptyConnectorCommitHandle;
 import com.facebook.presto.spi.connector.classloader.ClassLoaderSafeConnectorMetadata;
 import com.facebook.presto.spi.transaction.IsolationLevel;
 
@@ -34,14 +32,14 @@ import static com.facebook.presto.spi.transaction.IsolationLevel.checkConnectorS
 import static java.util.Objects.requireNonNull;
 
 /** Presto {@link Connector}. */
-public class PrestoConnector implements Connector {
+public abstract class PrestoConnectorBase implements Connector {
 
     private final PrestoTransactionManager transactionManager;
     private final PrestoSplitManager prestoSplitManager;
     private final PrestoPageSourceProvider prestoPageSourceProvider;
     private final PrestoMetadataFactory prestoMetadataFactory;
 
-    public PrestoConnector(
+    public PrestoConnectorBase(
             PrestoTransactionManager transactionManager,
             PrestoSplitManager prestoSplitManager,
             PrestoPageSourceProvider prestoPageSourceProvider,
@@ -80,12 +78,6 @@ public class PrestoConnector implements Connector {
     @Override
     public ConnectorPageSourceProvider getPageSourceProvider() {
         return prestoPageSourceProvider;
-    }
-
-    @Override
-    public ConnectorCommitHandle commit(ConnectorTransactionHandle transaction) {
-        transactionManager.remove(transaction);
-        return EmptyConnectorCommitHandle.INSTANCE;
     }
 
     @Override

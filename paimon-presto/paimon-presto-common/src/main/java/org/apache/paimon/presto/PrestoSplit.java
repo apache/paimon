@@ -23,51 +23,26 @@ import org.apache.paimon.table.source.Split;
 import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.HostAddress;
 import com.facebook.presto.spi.NodeProvider;
-import com.facebook.presto.spi.schedule.NodeSelectionStrategy;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 
-import java.util.Collections;
 import java.util.List;
 
-import static com.facebook.presto.spi.schedule.NodeSelectionStrategy.NO_PREFERENCE;
-
 /** Trino {@link ConnectorSplit}. */
-public class PrestoSplit implements ConnectorSplit {
-
-    private final String splitSerialized;
+public class PrestoSplit extends PrestoSplitBase {
 
     @JsonCreator
     public PrestoSplit(@JsonProperty("splitSerialized") String splitSerialized) {
-        this.splitSerialized = splitSerialized;
+        super(splitSerialized);
     }
 
     public static PrestoSplit fromSplit(Split split) {
         return new PrestoSplit(EncodingUtils.encodeObjectToString(split));
     }
 
-    public Split decodeSplit() {
-        return EncodingUtils.decodeStringToObject(splitSerialized);
-    }
-
-    @JsonProperty
-    public String getSplitSerialized() {
-        return splitSerialized;
-    }
-
-    @Override
-    public NodeSelectionStrategy getNodeSelectionStrategy() {
-        return NO_PREFERENCE;
-    }
-
     @Override
     public List<HostAddress> getPreferredNodes(NodeProvider nodeProvider) {
         return ImmutableList.of();
-    }
-
-    @Override
-    public Object getInfo() {
-        return Collections.emptyMap();
     }
 }

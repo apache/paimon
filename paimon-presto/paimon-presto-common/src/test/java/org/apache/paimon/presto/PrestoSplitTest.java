@@ -18,15 +18,24 @@
 
 package org.apache.paimon.presto;
 
-import com.facebook.presto.spi.Plugin;
-import com.facebook.presto.spi.connector.ConnectorFactory;
+import com.facebook.airlift.json.JsonCodec;
+import org.testng.annotations.Test;
 
-import java.util.Collections;
+import java.util.Arrays;
 
-/** Presto {@link Plugin}. */
-public class PrestoPlugin implements Plugin {
-    @Override
-    public Iterable<ConnectorFactory> getConnectorFactories() {
-        return Collections.singletonList(new PrestoConnectorFactory());
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** Test for {@link PrestoSplit}. */
+public class PrestoSplitTest {
+
+    private final JsonCodec<PrestoSplit> codec = JsonCodec.jsonCodec(PrestoSplit.class);
+
+    @Test
+    public void testJsonRoundTrip() throws Exception {
+        byte[] serializedTable = TestPrestoUtils.getSerializedTable();
+        PrestoSplit expected = new PrestoSplit(Arrays.toString(serializedTable));
+        String json = codec.toJson(expected);
+        PrestoSplit actual = codec.fromJson(json);
+        assertThat(actual.getSplitSerialized()).isEqualTo(expected.getSplitSerialized());
     }
 }
