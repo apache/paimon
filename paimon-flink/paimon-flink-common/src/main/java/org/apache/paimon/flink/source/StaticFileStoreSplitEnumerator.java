@@ -39,11 +39,11 @@ import java.util.Queue;
 public class StaticFileStoreSplitEnumerator
         implements SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> {
 
-    /** Default batch splits size to avoid exceed `akka.framesize`. */
     private final SplitEnumeratorContext<FileStoreSourceSplit> context;
 
     @Nullable private final Snapshot snapshot;
 
+    /** Default batch splits size to avoid exceed `akka.framesize`. */
     private final int splitsSize;
 
     private final Map<Integer, Queue<FileStoreSourceSplit>> pendingSplitAssignment;
