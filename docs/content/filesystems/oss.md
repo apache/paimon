@@ -39,7 +39,7 @@ flink paimon shaded jar.
 
 ## Build
 
-To build from source code, either [download the source of a release](https://flink.apache.org/downloads.html) or [clone the git repository]({{< github_repo >}}).
+To build from source code, [clone the git repository]({{< github_repo >}}).
 
 Build shaded jar with the following command.
 

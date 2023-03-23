@@ -69,7 +69,7 @@ public abstract class SparkCatalogBase implements TableCatalog, SupportsNamespac
     private static final String PRIMARY_KEY_IDENTIFIER = "primary-key";
 
     private String name = null;
-    private Catalog catalog = null;
+    protected Catalog catalog = null;
 
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
@@ -205,7 +205,7 @@ public abstract class SparkCatalogBase implements TableCatalog, SupportsNamespac
     public SparkTable loadTable(Identifier ident) throws NoSuchTableException {
         try {
             return new SparkTable(
-                    catalog.getTable(toIdentifier(ident)),
+                    load(ident),
                     Lock.factory(catalog.lockFactory().orElse(null), toIdentifier(ident)));
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
@@ -360,22 +360,6 @@ public abstract class SparkCatalogBase implements TableCatalog, SupportsNamespac
         return namespace.length == 1;
     }
 
-    private org.apache.paimon.catalog.Identifier toIdentifier(Identifier ident)
-            throws NoSuchTableException {
-        if (!isValidateNamespace(ident.namespace())) {
-            throw new NoSuchTableException(ident);
-        }
-
-        return new org.apache.paimon.catalog.Identifier(ident.namespace()[0], ident.name());
-    }
-
-    // --------------------- unsupported methods ----------------------------
-
-    @Override
-    public void alterNamespace(String[] namespace, NamespaceChange... changes) {
-        throw new UnsupportedOperationException("Alter namespace in Spark is not supported yet.");
-    }
-
     @Override
     public void renameTable(Identifier oldIdent, Identifier newIdent)
             throws NoSuchTableException, TableAlreadyExistsException {
@@ -386,5 +370,29 @@ public abstract class SparkCatalogBase implements TableCatalog, SupportsNamespac
         } catch (Catalog.TableAlreadyExistException e) {
             throw new TableAlreadyExistsException(newIdent);
         }
+    }
+
+    // --------------------- tools ------------------------------------------
+
+    protected org.apache.paimon.catalog.Identifier toIdentifier(Identifier ident)
+            throws NoSuchTableException {
+        if (!isValidateNamespace(ident.namespace())) {
+            throw new NoSuchTableException(ident);
+        }
+
+        return new org.apache.paimon.catalog.Identifier(ident.namespace()[0], ident.name());
+    }
+
+    /** Load a Table Store table. */
+    protected org.apache.paimon.table.Table load(Identifier ident)
+            throws Catalog.TableNotExistException, NoSuchTableException {
+        return catalog.getTable(toIdentifier(ident));
+    }
+
+    // --------------------- unsupported methods ----------------------------
+
+    @Override
+    public void alterNamespace(String[] namespace, NamespaceChange... changes) {
+        throw new UnsupportedOperationException("Alter namespace in Spark is not supported yet.");
     }
 }

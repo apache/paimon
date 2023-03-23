@@ -52,6 +52,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
@@ -64,11 +65,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link SchemaAwareStoreWriteOperator}. */
 public class SchemaAwareStoreWriteOperatorTest {
-
-    private static final RowType ROW_TYPE =
-            RowType.of(
-                    new DataType[] {DataTypes.INT(), DataTypes.BIGINT(), DataTypes.STRING()},
-                    new String[] {"pt", "k", "v"});
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -91,35 +87,21 @@ public class SchemaAwareStoreWriteOperatorTest {
 
     @Test
     @Timeout(30)
-    public void testProcessRecord() throws Exception {
-        FileStoreTable table = createFileStoreTable();
+    public void testAddColumn() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"pt", "k", "v"});
+
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType, Collections.singletonList("pt"), Arrays.asList("pt", "k"));
         OneInputStreamOperatorTestHarness<CdcRecord, Committable> harness =
                 createTestHarness(table);
         harness.open();
 
-        BlockingQueue<CdcRecord> toProcess = new LinkedBlockingQueue<>();
-        BlockingQueue<CdcRecord> processed = new LinkedBlockingQueue<>();
-        AtomicBoolean running = new AtomicBoolean(true);
-        Runnable r =
-                () -> {
-                    long timestamp = 0;
-                    try {
-                        while (running.get()) {
-                            if (toProcess.isEmpty()) {
-                                Thread.sleep(10);
-                                continue;
-                            }
-
-                            CdcRecord record = toProcess.poll();
-                            harness.processElement(record, ++timestamp);
-                            processed.offer(record);
-                        }
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                };
-
-        Thread t = new Thread(r);
+        Runner runner = new Runner(harness);
+        Thread t = new Thread(runner);
         t.start();
 
         // check that records with compatible schema can be processed immediately
@@ -129,16 +111,16 @@ public class SchemaAwareStoreWriteOperatorTest {
         fields.put("k", "1");
         fields.put("v", "10");
         CdcRecord expected = new CdcRecord(RowKind.INSERT, fields);
-        toProcess.offer(expected);
-        CdcRecord actual = processed.take();
+        runner.offer(expected);
+        CdcRecord actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
         fields = new HashMap<>();
         fields.put("pt", "0");
         fields.put("k", "2");
         expected = new CdcRecord(RowKind.INSERT, fields);
-        toProcess.offer(expected);
-        actual = processed.take();
+        runner.offer(expected);
+        actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
         // check that records with new fields should be processed after schema is updated
@@ -149,16 +131,80 @@ public class SchemaAwareStoreWriteOperatorTest {
         fields.put("v", "30");
         fields.put("v2", "300");
         expected = new CdcRecord(RowKind.INSERT, fields);
-        toProcess.offer(expected);
-        actual = processed.poll(1, TimeUnit.SECONDS);
+        runner.offer(expected);
+        actual = runner.poll(1);
         assertThat(actual).isNull();
 
         SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.INT()));
-        actual = processed.take();
+        actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
-        running.set(false);
+        runner.stop();
+        t.join();
+        harness.close();
+    }
+
+    @Test
+    @Timeout(30)
+    public void testUpdateColumnType() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.FLOAT()},
+                        new String[] {"k", "v1", "v2"});
+
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType, Collections.emptyList(), Collections.singletonList("k"));
+        OneInputStreamOperatorTestHarness<CdcRecord, Committable> harness =
+                createTestHarness(table);
+        harness.open();
+
+        Runner runner = new Runner(harness);
+        Thread t = new Thread(runner);
+        t.start();
+
+        // check that records with compatible schema can be processed immediately
+
+        Map<String, String> fields = new HashMap<>();
+        fields.put("k", "1");
+        fields.put("v1", "10");
+        fields.put("v2", "0.625");
+        CdcRecord expected = new CdcRecord(RowKind.INSERT, fields);
+        runner.offer(expected);
+        CdcRecord actual = runner.take();
+        assertThat(actual).isEqualTo(expected);
+
+        // check that records with new fields should be processed after schema is updated
+
+        fields = new HashMap<>();
+        fields.put("k", "2");
+        fields.put("v1", "12345678987654321");
+        fields.put("v2", "0.25");
+        expected = new CdcRecord(RowKind.INSERT, fields);
+        runner.offer(expected);
+        actual = runner.poll(1);
+        assertThat(actual).isNull();
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        schemaManager.commitChanges(SchemaChange.updateColumnType("v1", DataTypes.BIGINT()));
+        actual = runner.take();
+        assertThat(actual).isEqualTo(expected);
+
+        fields = new HashMap<>();
+        fields.put("k", "3");
+        fields.put("v1", "100");
+        fields.put("v2", "1.0000000000009095");
+        expected = new CdcRecord(RowKind.INSERT, fields);
+        runner.offer(expected);
+        actual = runner.poll(1);
+        assertThat(actual).isNull();
+
+        schemaManager.commitChanges(SchemaChange.updateColumnType("v2", DataTypes.DOUBLE()));
+        actual = runner.take();
+        assertThat(actual).isEqualTo(expected);
+
+        runner.stop();
         t.join();
         harness.close();
     }
@@ -180,19 +226,62 @@ public class SchemaAwareStoreWriteOperatorTest {
         return harness;
     }
 
-    private FileStoreTable createFileStoreTable() throws Exception {
+    private FileStoreTable createFileStoreTable(
+            RowType rowType, List<String> partitions, List<String> primaryKeys) throws Exception {
         Options conf = new Options();
         conf.set(SchemaAwareStoreWriteOperator.RETRY_SLEEP_TIME, Duration.ofMillis(10));
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
-                        new Schema(
-                                ROW_TYPE.getFields(),
-                                Collections.singletonList("pt"),
-                                Arrays.asList("pt", "k"),
-                                conf.toMap(),
-                                ""));
+                        new Schema(rowType.getFields(), partitions, primaryKeys, conf.toMap(), ""));
         return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+    }
+
+    private static class Runner implements Runnable {
+
+        private final OneInputStreamOperatorTestHarness<CdcRecord, Committable> harness;
+        private final BlockingQueue<CdcRecord> toProcess = new LinkedBlockingQueue<>();
+        private final BlockingQueue<CdcRecord> processed = new LinkedBlockingQueue<>();
+        private final AtomicBoolean running = new AtomicBoolean(true);
+
+        private Runner(OneInputStreamOperatorTestHarness<CdcRecord, Committable> harness) {
+            this.harness = harness;
+        }
+
+        private void offer(CdcRecord record) {
+            toProcess.offer(record);
+        }
+
+        private CdcRecord take() throws Exception {
+            return processed.take();
+        }
+
+        private CdcRecord poll(long seconds) throws Exception {
+            return processed.poll(seconds, TimeUnit.SECONDS);
+        }
+
+        private void stop() {
+            running.set(false);
+        }
+
+        @Override
+        public void run() {
+            long timestamp = 0;
+            try {
+                while (running.get()) {
+                    if (toProcess.isEmpty()) {
+                        Thread.sleep(10);
+                        continue;
+                    }
+
+                    CdcRecord record = toProcess.poll();
+                    harness.processElement(record, ++timestamp);
+                    processed.offer(record);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 }
