@@ -320,8 +320,8 @@ Run the following command to submit a 'merge-into' job for the table.
     --database <database-name> \
     --table <target-table> \
     [--target-as <target-table-alias>] \
-    --source-name <source-table-name> \
-    [--sql <sql> ...]\
+    --source-table <source-table-name> \
+    [--source-sql <sql> ...]\
     --on <merge-condition> \
     --merge-actions <matched-upsert,matched-delete,not-matched-insert,not-matched-by-source-upsert,not-matched-by-source-delete> \
     --matched-upsert-condition <matched-condition> \
@@ -333,7 +333,7 @@ Run the following command to submit a 'merge-into' job for the table.
     --not-matched-by-source-upsert-set <not-matched-upsert-changes> \
     --not-matched-by-source-delete-condition <not-matched-by-source-condition>
     
-You can pass sqls by '--sql <sql> [, ---sql <sql> ...]' to config environment and tables at runtime.
+You can pass sqls by '--source-sql <sql> [, --source-sql <sql> ...]' to config environment and create source table at runtime.
     
 -- Examples:
 -- Find all orders mentioned in the source table, then mark as important if the price is above 100 
@@ -346,7 +346,7 @@ You can pass sqls by '--sql <sql> [, ---sql <sql> ...]' to config environment an
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table T \
-    --source-name S \
+    --source-table S \
     --on "T.id = S.order_id" \
     --merge-actions \
     matched-upsert,matched-delete \
@@ -364,7 +364,7 @@ You can pass sqls by '--sql <sql> [, ---sql <sql> ...]' to config environment an
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table T \
-    --source-name S \
+    --source-table S \
     --on "T.id = S.order_id" \
     --merge-actions \
     matched-upsert,not-matched-insert \
@@ -381,7 +381,7 @@ You can pass sqls by '--sql <sql> [, ---sql <sql> ...]' to config environment an
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table T \
-    --source-name S \
+    --source-table S \
     --on "T.id = S.order_id" \
     --merge-actions \
     not-matched-by-source-upsert,not-matched-by-source-delete \
@@ -389,7 +389,7 @@ You can pass sqls by '--sql <sql> [, ---sql <sql> ...]' to config environment an
     --not-matched-by-source-upsert-set "price = T.price - 20" \
     --not-matched-by-source-delete-condition "T.mark = 'trivial'"
     
--- A --sql example: 
+-- A --source-sql example: 
 -- Create a temporary view S in new catalog and use it as source table
 ./flink run \
     -c org.apache.paimon.flink.action.FlinkActions \
@@ -399,9 +399,9 @@ You can pass sqls by '--sql <sql> [, ---sql <sql> ...]' to config environment an
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table T \
-    --sql "CREATE CATALOG test_cat WITH (...)" \
-    --sql "CREATE TEMPORARY VIEW test_cat.`default`.S AS SELECT order_id, price, 'important' FROM important_order" \
-    --source-name test_cat.default.S \
+    --source-sql "CREATE CATALOG test_cat WITH (...)" \
+    --source-sql "CREATE TEMPORARY VIEW test_cat.`default`.S AS SELECT order_id, price, 'important' FROM important_order" \
+    --source-table test_cat.default.S \
     --on "T.id = S.order_id" \
     --merge-actions not-matched-insert\
     --not-matched-insert-values *
@@ -438,19 +438,19 @@ is equal to source's).
 qualified (database.table or catalog.database.table if created a new catalog). 
 For examples:\
 (1) If source table 'my_source' is in 'my_db', qualify it:\
-\--source-name "my_db.my_source"\
+\--source-table "my_db.my_source"\
 (2) Example for sqls:\
-if sqls changed current catalog and database, it's OK to not qualify the source table name:\
-\--sql "CREATE CATALOG my_cat WITH (...)"\
-\--sql "USE CATALOG my_cat"\
-\--sql "CREATE DATABASE my_db"\
-\--sql "USE my_db"\
-\--sql "CREATE TABLE S ..."\
-\--source-name my_cat.my_db.S\
+When sqls changed current catalog and database, it's OK to not qualify the source table name:\
+\--source-sql "CREATE CATALOG my_cat WITH (...)"\
+\--source-sql "USE CATALOG my_cat"\
+\--source-sql "CREATE DATABASE my_db"\
+\--source-sql "USE my_db"\
+\--source-sql "CREATE TABLE S ..."\
+\--source-table my_cat.my_db.S\
 but you must qualify it in the following case:\
-\--sql "CREATE CATALOG my_cat WITH (...)"\
-\--sql "CREATE TABLE my_cat.\`default`.S ..."\
-\--source-name my_cat.default.S\
+\--source-sql "CREATE CATALOG my_cat WITH (...)"\
+\--source-sql "CREATE TABLE my_cat.\`default`.S ..."\
+\--source-table my_cat.default.S\
 You can use just 'S' as source table name in following arguments.
 3. At least one merge action must be specified.
 4. If both matched-upsert and matched-delete actions are present, their conditions must both be present too 
@@ -458,7 +458,7 @@ You can use just 'S' as source table name in following arguments.
 5. All conditions, set changes and values should use Flink SQL syntax. To ensure the whole command runs normally
 in Shell, please quote them with \"\" to escape blank spaces and use '\\' to escape special characters in statement. 
 For example:\
-\--sql "CREATE TABLE T (k INT) WITH ('special-key' = '123\\!')"
+\--source-sql "CREATE TABLE T (k INT) WITH ('special-key' = '123\\!')"
 
 {{< /hint >}}
 
