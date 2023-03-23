@@ -120,7 +120,7 @@ public class CompactAction extends ActionBase {
         System.out.println("Syntax:");
         System.out.println(
                 "  compact --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> [--partition <partition-name>] ");
+                        + "--table <table-name> [--partition <partition-name>]");
         System.out.println("  compact --path <table-path> [--partition <partition-name>]");
         System.out.println();
 

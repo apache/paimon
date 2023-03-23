@@ -39,6 +39,7 @@ import java.util.Collection;
 public class StaticFileStoreSource extends FlinkSource {
 
     private static final long serialVersionUID = 3L;
+
     private final DataTable table;
     private final BatchDataTableScan.Factory scanFactory;
     private final Predicate predicate;
