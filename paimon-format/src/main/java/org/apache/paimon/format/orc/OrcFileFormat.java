@@ -80,6 +80,11 @@ public class OrcFileFormat extends FileFormat {
         return orcProperties;
     }
 
+    @VisibleForTesting
+    public FormatContext formatContext() {
+        return formatContext;
+    }
+
     @Override
     public Optional<FileStatsExtractor> createStatsExtractor(RowType type) {
         return Optional.of(new OrcFileStatsExtractor(type));

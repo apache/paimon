@@ -28,6 +28,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 
@@ -42,6 +43,8 @@ import org.apache.hadoop.mapred.Reporter;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -55,7 +58,11 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
         FileStoreTable table = createFileStoreTable(jobConf);
         DataTableScan scan = table.newScan();
         createPredicate(table.schema(), jobConf).ifPresent(scan::withFilter);
-        return scan.plan().splits.stream()
+
+        // TODO: Roll back modification after refactoring scan interface
+        DataTableScan.DataFilePlan plan = scan.plan();
+        List<DataSplit> splits = plan == null ? Collections.emptyList() : plan.splits;
+        return splits.stream()
                 .map(split -> new PaimonInputSplit(table.location().toString(), split))
                 .toArray(PaimonInputSplit[]::new);
     }

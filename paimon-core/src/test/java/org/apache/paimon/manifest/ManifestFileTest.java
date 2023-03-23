@@ -95,7 +95,10 @@ public class ManifestFileTest {
         Path path = new Path(pathStr);
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
-                        path, DEFAULT_PART_TYPE, "default", CoreOptions.FILE_FORMAT.defaultValue());
+                        path,
+                        DEFAULT_PART_TYPE,
+                        "default",
+                        CoreOptions.FILE_FORMAT.defaultValue().toString());
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         FileIO fileIO = FileIOFinder.find(path);
         return new ManifestFile.Factory(

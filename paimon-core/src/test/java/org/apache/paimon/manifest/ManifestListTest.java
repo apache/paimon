@@ -94,7 +94,7 @@ public class ManifestListTest {
                         path,
                         TestKeyValueGenerator.DEFAULT_PART_TYPE,
                         "default",
-                        CoreOptions.FILE_FORMAT.defaultValue());
+                        CoreOptions.FILE_FORMAT.defaultValue().toString());
         return new ManifestList.Factory(
                         FileIOFinder.find(path),
                         TestKeyValueGenerator.DEFAULT_PART_TYPE,

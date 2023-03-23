@@ -16,22 +16,30 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source.snapshot;
+package org.apache.paimon.flink.source;
 
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.table.source.DataTableScan;
-import org.apache.paimon.table.source.StreamDataTableScan;
+import java.util.concurrent.atomic.AtomicLong;
 
-/** Helper class for the follow-up planning of {@link StreamDataTableScan}. */
-public interface FollowUpScanner {
+/** A limiter to limit record reading. */
+public class RecordLimiter {
 
-    boolean shouldScanSnapshot(Snapshot snapshot);
+    private final long limit;
+    private final AtomicLong counter;
 
-    DataTableScan.DataFilePlan getPlan(long snapshotId, SnapshotSplitReader snapshotSplitReader);
+    public RecordLimiter(long limit) {
+        this.limit = limit;
+        this.counter = new AtomicLong(0);
+    }
 
-    default DataTableScan.DataFilePlan getOverwriteChangesPlan(
-            long snapshotId, SnapshotSplitReader snapshotSplitReader) {
-        return new DataTableScan.DataFilePlan(
-                snapshotId, snapshotSplitReader.withSnapshot(snapshotId).overwriteSplits());
+    public boolean reachLimit() {
+        return counter.get() >= limit;
+    }
+
+    public void increment() {
+        counter.incrementAndGet();
+    }
+
+    public void add(long delta) {
+        counter.addAndGet(delta);
     }
 }

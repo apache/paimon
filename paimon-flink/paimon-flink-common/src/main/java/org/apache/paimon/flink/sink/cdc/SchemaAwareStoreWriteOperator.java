@@ -35,6 +35,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -62,12 +63,12 @@ public class SchemaAwareStoreWriteOperator extends AbstractStoreWriteOperator<Cd
 
     @Override
     protected SinkRecord processRecord(CdcRecord record) throws Exception {
-        Map<String, String> fields = record.fields();
-
-        if (!schemaMatched(fields)) {
+        Map<String, Object> convertedFields = tryConvert(record.fields());
+        if (convertedFields == null) {
             while (true) {
                 table = table.copyWithLatestSchema();
-                if (schemaMatched(fields)) {
+                convertedFields = tryConvert(record.fields());
+                if (convertedFields != null) {
                     break;
                 }
                 Thread.sleep(retrySleepMillis);
@@ -78,14 +79,11 @@ public class SchemaAwareStoreWriteOperator extends AbstractStoreWriteOperator<Cd
         TableSchema schema = table.schema();
         GenericRow row = new GenericRow(schema.fields().size());
         row.setRowKind(record.kind());
-        for (Map.Entry<String, String> field : fields.entrySet()) {
-            String key = field.getKey();
-            String value = field.getValue();
+        for (Map.Entry<String, Object> convertedField : convertedFields.entrySet()) {
+            String key = convertedField.getKey();
+            Object value = convertedField.getValue();
             int idx = schema.fieldNames().indexOf(key);
-            DataType type = schema.fields().get(idx).type();
-            // TODO TypeUtils.castFromString cannot deal with complex types like arrays and maps.
-            //  Change type of CdcRecord#field if needed.
-            row.setField(idx, TypeUtils.castFromString(value, type));
+            row.setField(idx, value);
         }
 
         try {
@@ -95,8 +93,26 @@ public class SchemaAwareStoreWriteOperator extends AbstractStoreWriteOperator<Cd
         }
     }
 
-    private boolean schemaMatched(Map<String, String> fields) {
-        TableSchema currentSchema = table.schema();
-        return currentSchema.fieldNames().containsAll(fields.keySet());
+    private Map<String, Object> tryConvert(Map<String, String> fields) {
+        Map<String, Object> converted = new HashMap<>();
+        TableSchema schema = table.schema();
+        for (Map.Entry<String, String> field : fields.entrySet()) {
+            String key = field.getKey();
+            String value = field.getValue();
+            int idx = schema.fieldNames().indexOf(key);
+            if (idx < 0) {
+                return null;
+            }
+            DataType type = schema.fields().get(idx).type();
+            // TODO TypeUtils.castFromString cannot deal with complex types like arrays and maps.
+            //  Change type of CdcRecord#field if needed.
+            try {
+                converted.put(key, TypeUtils.castFromString(value, type));
+            } catch (Exception e) {
+                LOG.debug("Failed to convert value " + value + " to type " + type, e);
+                return null;
+            }
+        }
+        return converted;
     }
 }

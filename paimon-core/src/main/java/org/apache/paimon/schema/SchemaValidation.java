@@ -100,6 +100,11 @@ public class SchemaValidation {
             }
         }
 
+        // Get the format type here which will try to convert string value to {@Code
+        // FileFormatType}. If the string value is illegal, an exception will be thrown.
+        // TODO Check fields type according to the format type
+        options.formatType();
+
         // Check column names in schema
         schema.fieldNames()
                 .forEach(

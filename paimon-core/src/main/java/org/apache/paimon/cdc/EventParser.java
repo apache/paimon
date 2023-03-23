@@ -16,22 +16,31 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source.snapshot;
+package org.apache.paimon.cdc;
 
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.table.source.DataTableScan;
-import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.schema.SchemaChange;
 
-/** Helper class for the follow-up planning of {@link StreamDataTableScan}. */
-public interface FollowUpScanner {
+import java.io.Serializable;
+import java.util.List;
 
-    boolean shouldScanSnapshot(Snapshot snapshot);
+/**
+ * Parse a CDC change event to a list of {@link SchemaChange} or {@link CdcRecord}.
+ *
+ * @param <T> CDC change event type
+ */
+public interface EventParser<T> {
 
-    DataTableScan.DataFilePlan getPlan(long snapshotId, SnapshotSplitReader snapshotSplitReader);
+    void setRawEvent(T rawEvent);
 
-    default DataTableScan.DataFilePlan getOverwriteChangesPlan(
-            long snapshotId, SnapshotSplitReader snapshotSplitReader) {
-        return new DataTableScan.DataFilePlan(
-                snapshotId, snapshotSplitReader.withSnapshot(snapshotId).overwriteSplits());
+    boolean isSchemaChange();
+
+    List<SchemaChange> getSchemaChanges();
+
+    List<CdcRecord> getRecords();
+
+    /** Factory to create an {@link EventParser}. */
+    interface Factory<T> extends Serializable {
+
+        EventParser<T> create();
     }
 }

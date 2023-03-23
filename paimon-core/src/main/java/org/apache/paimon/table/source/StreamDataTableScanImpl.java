@@ -20,7 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.table.source.snapshot.BoundedWatermarkFollowUpScanner;
+import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.DeltaFollowUpScanner;
@@ -47,6 +47,8 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
 
     private StartingScanner startingScanner;
     private FollowUpScanner followUpScanner;
+    private BoundedChecker boundedChecker;
+    private boolean isEnd = false;
     @Nullable private Long nextSnapshotId;
 
     public StreamDataTableScanImpl(
@@ -65,13 +67,21 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
         return supportStreamingReadOverwrite;
     }
 
+    @Override
     public StreamDataTableScan withStartingScanner(StartingScanner startingScanner) {
         this.startingScanner = startingScanner;
         return this;
     }
 
+    @Override
     public StreamDataTableScan withFollowUpScanner(FollowUpScanner followUpScanner) {
         this.followUpScanner = followUpScanner;
+        return this;
+    }
+
+    @Override
+    public StreamDataTableScan withBoundedChecker(BoundedChecker boundedChecker) {
+        this.boundedChecker = boundedChecker;
         return this;
     }
 
@@ -93,6 +103,9 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
         if (followUpScanner == null) {
             followUpScanner = createFollowUpScanner();
         }
+        if (boundedChecker == null) {
+            boundedChecker = createBoundedChecker();
+        }
 
         if (nextSnapshotId == null) {
             return tryFirstPlan();
@@ -105,13 +118,21 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
         DataTableScan.DataFilePlan plan =
                 startingScanner.getPlan(snapshotManager, snapshotSplitReader);
         if (plan != null) {
-            nextSnapshotId = plan.snapshotId + 1;
+            long snapshot = plan.snapshotId;
+            nextSnapshotId = snapshot + 1;
+            if (boundedChecker.shouldEndInput(snapshotManager.snapshot(snapshot))) {
+                isEnd = true;
+            }
         }
         return plan;
     }
 
     private DataFilePlan nextPlan() {
         while (true) {
+            if (isEnd) {
+                throw new EndOfScanException();
+            }
+
             if (!snapshotManager.snapshotExists(nextSnapshotId)) {
                 LOG.debug(
                         "Next snapshot id {} does not exist, wait for the snapshot generation.",
@@ -121,7 +142,7 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
 
             Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);
 
-            if (followUpScanner.shouldEndInput(snapshot)) {
+            if (boundedChecker.shouldEndInput(snapshot)) {
                 throw new EndOfScanException();
             }
 
@@ -170,13 +191,14 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
                 throw new UnsupportedOperationException(
                         "Unknown changelog producer " + changelogProducer.name());
         }
-
-        Long boundedWatermark = options.scanBoundedWatermark();
-        if (boundedWatermark != null) {
-            followUpScanner =
-                    new BoundedWatermarkFollowUpScanner(followUpScanner, boundedWatermark);
-        }
         return followUpScanner;
+    }
+
+    private BoundedChecker createBoundedChecker() {
+        Long boundedWatermark = options.scanBoundedWatermark();
+        return boundedWatermark != null
+                ? BoundedChecker.watermark(boundedWatermark)
+                : BoundedChecker.neverEnd();
     }
 
     @Nullable

@@ -16,22 +16,37 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source.snapshot;
+package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.table.source.DataTableScan;
-import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.cdc.CdcRecord;
+import org.apache.paimon.cdc.EventParser;
+import org.apache.paimon.schema.SchemaChange;
 
-/** Helper class for the follow-up planning of {@link StreamDataTableScan}. */
-public interface FollowUpScanner {
+import java.util.Collections;
+import java.util.List;
 
-    boolean shouldScanSnapshot(Snapshot snapshot);
+/** Testing {@link EventParser} for {@link TestCdcEvent}. */
+public class TestCdcEventParser implements EventParser<TestCdcEvent> {
 
-    DataTableScan.DataFilePlan getPlan(long snapshotId, SnapshotSplitReader snapshotSplitReader);
+    private TestCdcEvent raw;
 
-    default DataTableScan.DataFilePlan getOverwriteChangesPlan(
-            long snapshotId, SnapshotSplitReader snapshotSplitReader) {
-        return new DataTableScan.DataFilePlan(
-                snapshotId, snapshotSplitReader.withSnapshot(snapshotId).overwriteSplits());
+    @Override
+    public void setRawEvent(TestCdcEvent raw) {
+        this.raw = raw;
+    }
+
+    @Override
+    public boolean isSchemaChange() {
+        return raw.schemaChange() != null;
+    }
+
+    @Override
+    public List<SchemaChange> getSchemaChanges() {
+        return Collections.singletonList(raw.schemaChange());
+    }
+
+    @Override
+    public List<CdcRecord> getRecords() {
+        return raw.records();
     }
 }

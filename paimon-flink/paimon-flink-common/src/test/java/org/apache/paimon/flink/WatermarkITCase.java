@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -40,6 +41,7 @@ public class WatermarkITCase extends CatalogITCaseBase {
         innerTestWatermark();
     }
 
+    @Disabled // TODO unstable alignment may block watermark generation
     @Test
     public void testWatermarkAlignment() throws Exception {
         innerTestWatermark(

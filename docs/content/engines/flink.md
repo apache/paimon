@@ -32,9 +32,9 @@ This documentation is a guide for using Paimon in Flink.
 
 Paimon currently supports Flink 1.16, 1.15 and 1.14. We recommend the latest Flink version for a better experience.
 
-{{< stable >}}
-
 Download the jar file with corresponding version.
+
+{{< stable >}}
 
 | Version | Jar                                                                                                                                                                                |
 |---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -42,17 +42,21 @@ Download the jar file with corresponding version.
 | Flink 1.15 | [paimon-flink-1.15-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.15-{{< version >}}.jar) |
 | Flink 1.14 | [paimon-flink-1.14-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.14-{{< version >}}.jar) |
 
-You can also manually build bundled jar from the source code.
-
 {{< /stable >}}
 
 {{< unstable >}}
 
-You are using an unreleased version of Paimon so you need to manually build bundled jar from the source code.
+| Version | Jar                                                                                                                                                                                |
+|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 1.16 | [paimon-flink-1.16-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.16/{{< version >}}/) |
+| Flink 1.15 | [paimon-flink-1.15-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.15/{{< version >}}/) |
+| Flink 1.14 | [paimon-flink-1.14-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.14/{{< version >}}/) |
 
 {{< /unstable >}}
 
-To build from source code, either [download the source of a release](https://flink.apache.org/downloads.html) or [clone the git repository]({{< github_repo >}}).
+You can also manually build bundled jar from the source code.
+
+To build from source code, [clone the git repository]({{< github_repo >}}).
 
 Build bundled jar with the following command.
 - `mvn clean install -DskipTests`

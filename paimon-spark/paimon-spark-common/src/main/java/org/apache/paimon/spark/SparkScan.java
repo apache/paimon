@@ -20,6 +20,7 @@ package org.apache.paimon.spark;
 
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableScan;
 
 import org.apache.spark.sql.connector.read.Batch;
 import org.apache.spark.sql.connector.read.InputPartition;
@@ -29,6 +30,7 @@ import org.apache.spark.sql.connector.read.Statistics;
 import org.apache.spark.sql.connector.read.SupportsReportStatistics;
 import org.apache.spark.sql.types.StructType;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.OptionalLong;
 
@@ -77,7 +79,9 @@ public class SparkScan implements Scan, SupportsReportStatistics {
 
     protected List<Split> splits() {
         if (splits == null) {
-            this.splits = readBuilder.newScan().plan().splits();
+            // TODO: Roll back modification after refactoring scan interface
+            TableScan.Plan plan = readBuilder.newScan().plan();
+            splits = plan == null ? Collections.emptyList() : plan.splits();
         }
         return splits;
     }

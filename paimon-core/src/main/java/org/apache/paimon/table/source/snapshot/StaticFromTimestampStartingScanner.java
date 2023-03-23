@@ -19,12 +19,15 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 /**
  * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_TIMESTAMP} startup mode of a
@@ -44,18 +47,23 @@ public class StaticFromTimestampStartingScanner implements StartingScanner {
     @Override
     public DataTableScan.DataFilePlan getPlan(
             SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
-        Long startingSnapshotId = snapshotManager.earlierOrEqualTimeMills(startupMillis);
-        if (startingSnapshotId == null) {
+        Snapshot startingSnapshot = getSnapshot(snapshotManager, startupMillis);
+        if (startingSnapshot == null) {
             LOG.debug(
                     "There is currently no snapshot earlier than or equal to timestamp[{}]",
                     startupMillis);
             return null;
         }
         return new DataTableScan.DataFilePlan(
-                startingSnapshotId,
+                startingSnapshot.id(),
                 snapshotSplitReader
                         .withKind(ScanKind.ALL)
-                        .withSnapshot(startingSnapshotId)
+                        .withSnapshot(startingSnapshot.id())
                         .splits());
+    }
+
+    @Nullable
+    public static Snapshot getSnapshot(SnapshotManager snapshotManager, long timestamp) {
+        return snapshotManager.earlierOrEqualTimeMills(timestamp);
     }
 }

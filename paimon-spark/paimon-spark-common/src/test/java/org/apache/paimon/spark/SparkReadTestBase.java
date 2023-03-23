@@ -168,7 +168,7 @@ public abstract class SparkReadTestBase {
                         tableName));
     }
 
-    private static void writeTable(String tableName, GenericRow... rows) throws Exception {
+    protected static void writeTable(String tableName, GenericRow... rows) throws Exception {
         FileStoreTable fileStoreTable =
                 FileStoreTableFactory.create(
                         LocalFileIO.create(),

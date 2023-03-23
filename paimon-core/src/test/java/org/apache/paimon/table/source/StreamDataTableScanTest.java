@@ -19,17 +19,24 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.snapshot.ScannerTestBase;
 import org.apache.paimon.types.RowKind;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link StreamDataTableScan}. */
 public class StreamDataTableScanTest extends ScannerTestBase {
@@ -163,6 +170,75 @@ public class StreamDataTableScanTest extends ScannerTestBase {
 
         // no more new snapshots, should return null
         assertThat(scan.plan()).isNull();
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testBoundedInFull() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "4");
+        FileStoreTable table = this.table.copy(options);
+        TableRead read = table.newRead();
+        StreamTableWrite write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        StreamDataTableScan scan = table.newStreamScan();
+
+        write.write(rowData(1, 10, 100L));
+        ManifestCommittable committable = new ManifestCommittable(0, 5L);
+        write.prepareCommit(true, 0).forEach(committable::addFileCommittable);
+        commit.commit(committable);
+
+        DataTableScan.DataFilePlan plan = scan.plan();
+        assertThat(plan.snapshotId).isEqualTo(1);
+        assertThat(getResult(read, plan.splits()))
+                .hasSameElementsAs(Collections.singletonList("+I 1|10|100"));
+
+        assertThatThrownBy(scan::plan).isInstanceOf(EndOfScanException.class);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testBounded() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "8");
+        FileStoreTable table = this.table.copy(options);
+        TableRead read = table.newRead();
+        StreamTableWrite write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        StreamDataTableScan scan = table.newStreamScan();
+
+        write.write(rowData(1, 10, 100L));
+        ManifestCommittable committable = new ManifestCommittable(0, 5L);
+        write.prepareCommit(true, 0).forEach(committable::addFileCommittable);
+        commit.commit(committable);
+
+        DataTableScan.DataFilePlan plan = scan.plan();
+        assertThat(plan.snapshotId).isEqualTo(1);
+        assertThat(getResult(read, plan.splits()))
+                .hasSameElementsAs(Collections.singletonList("+I 1|10|100"));
+        assertThat(scan.plan()).isNull();
+
+        write.write(rowData(2, 20, 200L));
+        committable = new ManifestCommittable(0, 7L);
+        write.prepareCommit(true, 0).forEach(committable::addFileCommittable);
+        commit.commit(committable);
+
+        plan = scan.plan();
+        assertThat(plan.snapshotId).isEqualTo(2);
+        assertThat(getResult(read, plan.splits()))
+                .hasSameElementsAs(Collections.singletonList("+I 2|20|200"));
+        assertThat(scan.plan()).isNull();
+
+        write.write(rowData(3, 30, 300L));
+        committable = new ManifestCommittable(0, 9L);
+        write.prepareCommit(true, 0).forEach(committable::addFileCommittable);
+        commit.commit(committable);
+
+        assertThatThrownBy(scan::plan).isInstanceOf(EndOfScanException.class);
 
         write.close();
         commit.close();

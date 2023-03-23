@@ -38,7 +38,7 @@ public class DataFilePathFactoryTest {
                         new Path(tempDir.toString()),
                         "",
                         123,
-                        CoreOptions.FILE_FORMAT.defaultValue());
+                        CoreOptions.FILE_FORMAT.defaultValue().toString());
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {
@@ -64,7 +64,7 @@ public class DataFilePathFactoryTest {
                         new Path(tempDir.toString()),
                         "dt=20211224",
                         123,
-                        CoreOptions.FILE_FORMAT.defaultValue());
+                        CoreOptions.FILE_FORMAT.defaultValue().toString());
         String uuid = pathFactory.uuid();
 
         for (int i = 0; i < 20; i++) {

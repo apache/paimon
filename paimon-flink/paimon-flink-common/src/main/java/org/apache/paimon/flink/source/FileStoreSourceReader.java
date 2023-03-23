@@ -39,8 +39,21 @@ public final class FileStoreSourceReader<T>
             SourceReaderContext readerContext,
             TableRead tableRead,
             @Nullable Long limit) {
+        this(
+                recordsFunction,
+                readerContext,
+                tableRead,
+                limit == null ? null : new RecordLimiter(limit));
+    }
+
+    private FileStoreSourceReader(
+            RecordsFunction<T> recordsFunction,
+            SourceReaderContext readerContext,
+            TableRead tableRead,
+            @Nullable RecordLimiter limiter) {
+        // limiter is created in SourceReader, it can be shared in all split readers
         super(
-                () -> new FileStoreSourceSplitReader<>(recordsFunction, tableRead, limit),
+                () -> new FileStoreSourceSplitReader<>(recordsFunction, tableRead, limiter),
                 recordsFunction,
                 readerContext.getConfiguration(),
                 readerContext);

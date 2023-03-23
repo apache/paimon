@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
@@ -148,7 +149,8 @@ public abstract class FileStoreTableTestBase {
 
     @Test
     public void testChangeFormat() throws Exception {
-        FileStoreTable table = createFileStoreTable(conf -> conf.set(FILE_FORMAT, "orc"));
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.set(FILE_FORMAT, CoreOptions.FileFormatType.ORC));
 
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -167,7 +169,9 @@ public abstract class FileStoreTableTestBase {
                         "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
 
-        table = createFileStoreTable(conf -> conf.set(FILE_FORMAT, "avro"));
+        table =
+                createFileStoreTable(
+                        conf -> conf.set(FILE_FORMAT, CoreOptions.FileFormatType.AVRO));
         write = table.newWrite(commitUser);
         commit = table.newCommit(commitUser);
         write.write(rowData(1, 11, 111L));
