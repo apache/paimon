@@ -68,11 +68,6 @@ public class CompactAction extends ActionBase {
         return this;
     }
 
-    public CompactAction withSplitsSize(int splitsSize) {
-        sourceBuilder.withSplitsSize(splitsSize);
-        return this;
-    }
-
     public void build(StreamExecutionEnvironment env) {
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         boolean isStreaming =
@@ -114,13 +109,6 @@ public class CompactAction extends ActionBase {
             action.withPartitions(partitions);
         }
 
-        if (params.has("splitsSize")) {
-            int splitsSize = params.getInt("splitsSize");
-            if (splitsSize > 0) {
-                action.withSplitsSize(splitsSize);
-            }
-        }
-
         return Optional.of(action);
     }
 
@@ -132,8 +120,7 @@ public class CompactAction extends ActionBase {
         System.out.println("Syntax:");
         System.out.println(
                 "  compact --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> [--partition <partition-name>] "
-                        + "--splitssize <splits-size>");
+                        + "--table <table-name> [--partition <partition-name>] ");
         System.out.println("  compact --path <table-path> [--partition <partition-name>]");
         System.out.println();
 

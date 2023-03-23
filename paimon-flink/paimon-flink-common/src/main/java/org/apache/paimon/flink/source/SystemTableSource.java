@@ -71,8 +71,7 @@ public class SystemTableSource extends FlinkTableSource {
                     isStreamingMode
                             ? new ContinuousFileStoreSource(
                                     dataTable, projectFields, predicate, limit)
-                            : new StaticFileStoreSource(
-                                    dataTable, projectFields, predicate, limit, splitsSize);
+                            : new StaticFileStoreSource(dataTable, projectFields, predicate, limit);
         } else {
             source =
                     new SimpleSystemSource(

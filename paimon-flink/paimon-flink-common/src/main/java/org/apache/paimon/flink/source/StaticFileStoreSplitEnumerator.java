@@ -86,16 +86,14 @@ public class StaticFileStoreSplitEnumerator
         // The following batch assignment operation is for two purposes:
         // To distribute splits evenly when batch reading to prevent a few tasks from reading all
         // the data (for example, the current resource can only schedule part of the tasks).
-        Queue<FileStoreSourceSplit> allSubTaskSplits = pendingSplitAssignment.get(subtask);
-        List<FileStoreSourceSplit> batchAssignment = new ArrayList<>();
-        while (allSubTaskSplits != null
-                && !allSubTaskSplits.isEmpty()
-                && batchAssignment.size() < splitsSize) {
-            batchAssignment.add(allSubTaskSplits.poll());
+        Queue<FileStoreSourceSplit> taskSplits = pendingSplitAssignment.get(subtask);
+        List<FileStoreSourceSplit> assignment = new ArrayList<>();
+        while (taskSplits != null && !taskSplits.isEmpty() && assignment.size() < splitsSize) {
+            assignment.add(taskSplits.poll());
         }
-        if (batchAssignment != null && batchAssignment.size() > 0) {
+        if (assignment != null && assignment.size() > 0) {
             context.assignSplits(
-                    new SplitsAssignment<>(Collections.singletonMap(subtask, batchAssignment)));
+                    new SplitsAssignment<>(Collections.singletonMap(subtask, assignment)));
         } else {
             context.signalNoMoreSplits(subtask);
         }

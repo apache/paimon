@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.source.BatchDataTableScan;
@@ -38,19 +39,16 @@ import java.util.Collection;
 public class StaticFileStoreSource extends FlinkSource {
 
     private static final long serialVersionUID = 3L;
-
     private final DataTable table;
     private final BatchDataTableScan.Factory scanFactory;
     private final Predicate predicate;
-    private final int splitsSize;
 
     public StaticFileStoreSource(
             DataTable table,
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
-            @Nullable Long limit,
-            int splitsSize) {
-        this(table, projectedFields, predicate, limit, splitsSize, DataTable::newScan);
+            @Nullable Long limit) {
+        this(table, projectedFields, predicate, limit, DataTable::newScan);
     }
 
     public StaticFileStoreSource(
@@ -58,13 +56,11 @@ public class StaticFileStoreSource extends FlinkSource {
             @Nullable int[][] projectedFields,
             @Nullable Predicate predicate,
             @Nullable Long limit,
-            int splitsSize,
             BatchDataTableScan.Factory scanFactory) {
         super(table.newReadBuilder().withFilter(predicate).withProjection(projectedFields), limit);
         this.table = table;
         this.scanFactory = scanFactory;
         this.predicate = predicate;
-        this.splitsSize = splitsSize;
     }
 
     @Override
@@ -98,6 +94,12 @@ public class StaticFileStoreSource extends FlinkSource {
         }
 
         Snapshot snapshot = snapshotId == null ? null : snapshotManager.snapshot(snapshotId);
-        return new StaticFileStoreSplitEnumerator(context, snapshot, splits, splitsSize);
+        return new StaticFileStoreSplitEnumerator(
+                context,
+                snapshot,
+                splits,
+                table.options()
+                        .toConfiguration()
+                        .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE));
     }
 }

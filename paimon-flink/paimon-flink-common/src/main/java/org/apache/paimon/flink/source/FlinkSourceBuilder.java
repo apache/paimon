@@ -63,7 +63,6 @@ public class FlinkSourceBuilder {
     @Nullable private Integer parallelism;
     @Nullable private Long limit;
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
-    private int splitsSize;
 
     public FlinkSourceBuilder(ObjectIdentifier tableIdentifier, FileStoreTable table) {
         this.tableIdentifier = tableIdentifier;
@@ -78,11 +77,6 @@ public class FlinkSourceBuilder {
 
     public FlinkSourceBuilder withEnv(StreamExecutionEnvironment env) {
         this.env = env;
-        return this;
-    }
-
-    public FlinkSourceBuilder withSplitsSize(Integer splitsSize) {
-        this.splitsSize = splitsSize;
         return this;
     }
 
@@ -118,7 +112,7 @@ public class FlinkSourceBuilder {
     }
 
     private StaticFileStoreSource buildStaticFileSource() {
-        return new StaticFileStoreSource(table, projectedFields, predicate, limit, splitsSize);
+        return new StaticFileStoreSource(table, projectedFields, predicate, limit);
     }
 
     private ContinuousFileStoreSource buildContinuousFileSource() {

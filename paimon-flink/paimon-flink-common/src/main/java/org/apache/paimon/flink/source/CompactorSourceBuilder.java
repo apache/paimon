@@ -55,7 +55,6 @@ public class CompactorSourceBuilder {
     private boolean isContinuous = false;
     private StreamExecutionEnvironment env;
     @Nullable private List<Map<String, String>> specifiedPartitions = null;
-    private int splitsSize = 10;
 
     public CompactorSourceBuilder(String tableIdentifier, FileStoreTable table) {
         this.tableIdentifier = tableIdentifier;
@@ -78,11 +77,6 @@ public class CompactorSourceBuilder {
 
     public CompactorSourceBuilder withPartitions(List<Map<String, String>> partitions) {
         this.specifiedPartitions = partitions;
-        return this;
-    }
-
-    public CompactorSourceBuilder withSplitsSize(int splitsSize) {
-        this.splitsSize = splitsSize;
         return this;
     }
 
@@ -122,7 +116,6 @@ public class CompactorSourceBuilder {
                     null,
                     partitionPredicate,
                     null,
-                    splitsSize,
                     table -> table.newScan().withStartingScanner(new FullStartingScanner()));
         }
     }

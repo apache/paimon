@@ -161,8 +161,8 @@ public class FlinkConnectorOptions {
                             "How often tasks should notify coordinator about the current watermark "
                                     + "and how often the coordinator should announce the maximal aligned watermark.");
 
-    public static final ConfigOption<Integer> SCAN_BOUNDED_SPLITS_SIZE =
-            key("scan.bounded.splits.size")
+    public static final ConfigOption<Integer> SCAN_SPLIT_ENUMERATOR_BATCH_SIZE =
+            key("scan.split-enumerator.batch-size")
                     .intType()
                     .defaultValue(10)
                     .withDescription(
