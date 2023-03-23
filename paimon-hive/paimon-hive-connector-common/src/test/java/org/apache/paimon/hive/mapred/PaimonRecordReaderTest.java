@@ -65,7 +65,7 @@ public class PaimonRecordReaderTest {
     public void testPk() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tempDir.toString());
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -103,7 +103,7 @@ public class PaimonRecordReaderTest {
     public void testValueCount() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tempDir.toString());
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -142,7 +142,7 @@ public class PaimonRecordReaderTest {
     public void testProjectionPushdown() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tempDir.toString());
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
         FileStoreTable table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,

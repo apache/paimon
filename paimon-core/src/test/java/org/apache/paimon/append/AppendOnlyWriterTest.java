@@ -295,7 +295,7 @@ public class AppendOnlyWriterTest {
                 new Path(tempDir.toString()),
                 "dt=" + PART,
                 0,
-                CoreOptions.FILE_FORMAT.defaultValue());
+                CoreOptions.FILE_FORMAT.defaultValue().toString());
     }
 
     private AppendOnlyWriter createEmptyWriter(long targetFileSize) {
