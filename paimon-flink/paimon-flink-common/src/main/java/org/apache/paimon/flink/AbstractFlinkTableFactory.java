@@ -70,7 +70,11 @@ public abstract class AbstractFlinkTableFactory
                 context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING;
         if (origin instanceof SystemCatalogTable) {
-            return new SystemTableSource(((SystemCatalogTable) origin).table(), isStreamingMode);
+            int splitBatchSize =
+                    Options.fromMap(origin.getOptions())
+                            .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE);
+            return new SystemTableSource(
+                    ((SystemCatalogTable) origin).table(), isStreamingMode, splitBatchSize);
         } else {
             return new DataTableSource(
                     context.getObjectIdentifier(),
