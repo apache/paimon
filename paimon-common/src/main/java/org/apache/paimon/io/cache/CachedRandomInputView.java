@@ -73,9 +73,12 @@ public class CachedRandomInputView extends AbstractPagedInputView
     }
 
     private MemorySegment getCurrentPage() {
-        return segments.computeIfAbsent(
-                currentSegmentIndex,
-                key -> cacheManager.getPage(file, currentSegmentIndex, this::invalidPage));
+        MemorySegment segment = segments.get(currentSegmentIndex);
+        if (segment == null) {
+            segment = cacheManager.getPage(file, currentSegmentIndex, this::invalidPage);
+            segments.put(currentSegmentIndex, segment);
+        }
+        return segment;
     }
 
     @Override
