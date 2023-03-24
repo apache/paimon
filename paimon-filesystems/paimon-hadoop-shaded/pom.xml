@@ -214,7 +214,7 @@
                 <artifactId>maven-shade-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>shade-flink</id>
+                        <id>shade-paimon</id>
                         <phase>package</phase>
                         <goals>
                             <goal>shade</goal>

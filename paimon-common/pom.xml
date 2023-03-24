@@ -233,7 +233,7 @@ under the License.
                 <artifactId>maven-shade-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>shade-flink</id>
+                        <id>shade-paimon</id>
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
