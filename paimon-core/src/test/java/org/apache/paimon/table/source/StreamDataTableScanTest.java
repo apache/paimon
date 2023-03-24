@@ -43,7 +43,7 @@ public class StreamDataTableScanTest extends ScannerTestBase {
 
     @Test
     public void testPlan() throws Exception {
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
         StreamDataTableScan scan = (StreamDataTableScan) table.newReadBuilder().newStreamScan();
@@ -108,7 +108,7 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         conf.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.FULL_COMPACTION);
 
         table = table.copy(conf.toMap());
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
         StreamDataTableScan scan = (StreamDataTableScan) table.newReadBuilder().newStreamScan();
@@ -180,7 +180,7 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "4");
         FileStoreTable table = this.table.copy(options);
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         TableCommitImpl commit = table.newCommit(commitUser);
         StreamDataTableScan scan = (StreamDataTableScan) table.newReadBuilder().newStreamScan();
@@ -206,7 +206,7 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "8");
         FileStoreTable table = this.table.copy(options);
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         TableCommitImpl commit = table.newCommit(commitUser);
         StreamDataTableScan scan = (StreamDataTableScan) table.newReadBuilder().newStreamScan();

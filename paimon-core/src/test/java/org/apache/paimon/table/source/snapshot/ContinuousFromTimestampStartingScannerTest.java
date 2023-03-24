@@ -62,7 +62,7 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
                 new ContinuousFromTimestampStartingScanner(timestamp);
         DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, snapshotSplitReader);
         assertThat(plan.snapshotId).isEqualTo(2);
-        assertThat(getResult(table.newRead(), plan.splits())).isEmpty();
+        assertThat(getResult(table.newReadBuilder().newRead(), plan.splits())).isEmpty();
 
         write.close();
         commit.close();
@@ -95,7 +95,7 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
                 new ContinuousFromTimestampStartingScanner(timestamp);
         DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, snapshotSplitReader);
         assertThat(plan.snapshotId).isEqualTo(0);
-        assertThat(getResult(table.newRead(), plan.splits())).isEmpty();
+        assertThat(getResult(table.newReadBuilder().newRead(), plan.splits())).isEmpty();
 
         write.close();
         commit.close();

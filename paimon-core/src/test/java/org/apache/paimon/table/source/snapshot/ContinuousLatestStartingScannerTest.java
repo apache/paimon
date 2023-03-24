@@ -52,7 +52,7 @@ public class ContinuousLatestStartingScannerTest extends ScannerTestBase {
         ContinuousLatestStartingScanner scanner = new ContinuousLatestStartingScanner();
         DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, snapshotSplitReader);
         assertThat(plan.snapshotId).isEqualTo(2);
-        assertThat(getResult(table.newRead(), plan.splits())).isEmpty();
+        assertThat(getResult(table.newReadBuilder().newRead(), plan.splits())).isEmpty();
 
         write.close();
         commit.close();

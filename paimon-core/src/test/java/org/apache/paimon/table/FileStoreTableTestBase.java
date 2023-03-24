@@ -163,7 +163,7 @@ public abstract class FileStoreTableTestBase {
 
         assertThat(
                         getResult(
-                                table.newRead(),
+                                table.newReadBuilder().newRead(),
                                 toSplits(table.newSnapshotSplitReader().splits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
@@ -183,7 +183,7 @@ public abstract class FileStoreTableTestBase {
 
         assertThat(
                         getResult(
-                                table.newRead(),
+                                table.newReadBuilder().newRead(),
                                 toSplits(table.newSnapshotSplitReader().splits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
@@ -213,7 +213,7 @@ public abstract class FileStoreTableTestBase {
         write.close();
 
         List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
                         Collections.singletonList(
@@ -278,7 +278,7 @@ public abstract class FileStoreTableTestBase {
 
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
         List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
-        TableRead read = table.newRead().withFilter(builder.equal(2, 300L));
+        TableRead read = table.newReadBuilder().withFilter(builder.equal(2, 300L)).newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
                         Arrays.asList(

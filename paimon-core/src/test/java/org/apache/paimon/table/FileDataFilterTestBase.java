@@ -157,7 +157,8 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
                     // filter with "b" = 15 in schema0
-                    TableRead read = table.newRead().withFilter(builder.equal(2, 15));
+                    TableRead read =
+                            table.newReadBuilder().withFilter(builder.equal(2, 15)).newRead();
 
                     assertThat(getResult(read, splits, SCHEMA_0_ROW_TO_STRING))
                             .hasSameElementsAs(
@@ -171,14 +172,16 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
 
                     // filter with "d" = 15 in schema1 which should be mapped to "b" = 15 in schema0
-                    TableRead read1 = table.newRead().withFilter(builder.equal(1, 15));
+                    TableRead read1 =
+                            table.newReadBuilder().withFilter(builder.equal(1, 15)).newRead();
                     assertThat(getResult(read1, splits, SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(
                                             "2|15|115|null|null|null", "2|16|116|null|null|null"));
 
                     // filter with "d" = 21 in schema1
-                    TableRead read2 = table.newRead().withFilter(builder.equal(1, 21));
+                    TableRead read2 =
+                            table.newReadBuilder().withFilter(builder.equal(1, 21)).newRead();
                     assertThat(getResult(read2, splits, SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(
@@ -199,7 +202,8 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
 
                     // filter with "a" = 1122 in schema1 which is not exist in schema0
-                    TableRead read1 = table.newRead().withFilter(builder.equal(3, 1122));
+                    TableRead read1 =
+                            table.newReadBuilder().withFilter(builder.equal(3, 1122)).newRead();
                     assertThat(getResult(read1, splits, SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(
@@ -218,7 +222,8 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                                     table.newSnapshotSplitReader()
                                             .withFilter(builder.equal(3, 1122))
                                             .splits());
-                    TableRead read2 = table.newRead().withFilter(builder.equal(3, 1122));
+                    TableRead read2 =
+                            table.newReadBuilder().withFilter(builder.equal(3, 1122)).newRead();
                     assertThat(getResult(read2, splits, SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(
@@ -254,7 +259,9 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     // filter with "d" = 21 or "f" is null in schema1 that "f" is not exist in
                     // schema0, read all data
                     TableRead read1 =
-                            table.newRead().withFilter(PredicateBuilder.or(predicateList));
+                            table.newReadBuilder()
+                                    .withFilter(PredicateBuilder.or(predicateList))
+                                    .newRead();
                     assertThat(getResult(read1, splits, SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(
@@ -274,7 +281,9 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     splits = toSplits(table.newSnapshotSplitReader().splits());
                     // filter with "d" = 21 or "f" is null, read snapshot which contains "d" = 21
                     TableRead read2 =
-                            table.newRead().withFilter(PredicateBuilder.and(predicateList));
+                            table.newReadBuilder()
+                                    .withFilter(PredicateBuilder.and(predicateList))
+                                    .newRead();
                     assertThat(getResult(read2, splits, SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(
@@ -292,7 +301,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
                     // project "c", "b", "pt" in schema0
-                    TableRead read = table.newRead().withProjection(PROJECTION);
+                    TableRead read = table.newReadBuilder().withProjection(PROJECTION).newRead();
 
                     assertThat(getResult(read, splits, SCHEMA_0_PROJECT_ROW_TO_STRING))
                             .hasSameElementsAs(
@@ -310,7 +319,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
 
                     // project "a", "kt", "d" in schema1
-                    TableRead read = table.newRead().withProjection(PROJECTION);
+                    TableRead read = table.newReadBuilder().withProjection(PROJECTION).newRead();
                     assertThat(getResult(read, splits, SCHEMA_1_PROJECT_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(
@@ -342,7 +351,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                                     table.newSnapshotSplitReader()
                                             .withKind(ScanKind.DELTA)
                                             .splits());
-                    TableRead read = table.newRead();
+                    TableRead read = table.newReadBuilder().newRead();
 
                     assertThat(getResult(read, splits, STREAMING_SCHEMA_0_ROW_TO_STRING))
                             .hasSameElementsAs(
@@ -360,7 +369,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                                             .withKind(ScanKind.DELTA)
                                             .splits());
 
-                    TableRead read = table.newRead();
+                    TableRead read = table.newReadBuilder().newRead();
                     assertThat(getResult(read, splits, STREAMING_SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(
@@ -384,7 +393,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                                             .withKind(ScanKind.DELTA)
                                             .splits());
                     // project "c", "b", "pt" in schema0
-                    TableRead read = table.newRead().withProjection(PROJECTION);
+                    TableRead read = table.newReadBuilder().withProjection(PROJECTION).newRead();
 
                     assertThat(getResult(read, splits, STREAMING_SCHEMA_0_PROJECT_ROW_TO_STRING))
                             .hasSameElementsAs(
@@ -400,7 +409,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                                             .splits());
 
                     // project "a", "kt", "d" in schema1
-                    TableRead read = table.newRead().withProjection(PROJECTION);
+                    TableRead read = table.newReadBuilder().withProjection(PROJECTION).newRead();
                     assertThat(getResult(read, splits, STREAMING_SCHEMA_1_PROJECT_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList("+1120|120|20", "+1121|121|21", "+1122|122|22"));
@@ -422,7 +431,8 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                                             .withKind(ScanKind.DELTA)
                                             .splits());
                     // filter with "b" = 15 in schema0
-                    TableRead read = table.newRead().withFilter(builder.equal(2, 15));
+                    TableRead read =
+                            table.newReadBuilder().withFilter(builder.equal(2, 15)).newRead();
 
                     assertThat(getResult(read, splits, STREAMING_SCHEMA_0_ROW_TO_STRING))
                             .hasSameElementsAs(
@@ -440,12 +450,14 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                                             .splits());
 
                     // filter with "d" = 15 in schema1 which should be mapped to "b" = 15 in schema0
-                    TableRead read1 = table.newRead().withFilter(builder.equal(1, 15));
+                    TableRead read1 =
+                            table.newReadBuilder().withFilter(builder.equal(1, 15)).newRead();
                     assertThat(getResult(read1, splits, STREAMING_SCHEMA_1_ROW_TO_STRING))
                             .isEmpty();
 
                     // filter with "d" = 21 in schema1
-                    TableRead read2 = table.newRead().withFilter(builder.equal(1, 21));
+                    TableRead read2 =
+                            table.newReadBuilder().withFilter(builder.equal(1, 21)).newRead();
                     assertThat(getResult(read2, splits, STREAMING_SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(

@@ -58,7 +58,7 @@ public class InputChangelogFollowUpScannerTest extends ScannerTestBase {
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(3);
 
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         InputChangelogFollowUpScanner scanner = new InputChangelogFollowUpScanner();
 
         Snapshot snapshot = snapshotManager.snapshot(1);
