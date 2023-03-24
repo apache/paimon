@@ -18,7 +18,7 @@
 
 package org.apache.paimon.memory;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 import java.nio.ByteBuffer;
 
@@ -27,7 +27,7 @@ import java.nio.ByteBuffer;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class Buffer {
 
     private final MemorySegment segment;

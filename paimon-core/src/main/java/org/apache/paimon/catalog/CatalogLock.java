@@ -18,7 +18,7 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 import java.io.Closeable;
 import java.io.Serializable;
@@ -29,7 +29,7 @@ import java.util.concurrent.Callable;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface CatalogLock extends Closeable {
 
     /** Run with catalog lock. The caller should tell catalog the database and table name. */

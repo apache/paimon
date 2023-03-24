@@ -117,6 +117,11 @@ public class FilesTable implements ReadonlyTable {
     }
 
     @Override
+    public List<String> primaryKeys() {
+        return Collections.singletonList("file_path");
+    }
+
+    @Override
     public InnerTableScan newScan() {
         return new FilesScan(storeTable);
     }

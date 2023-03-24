@@ -18,7 +18,7 @@
 
 package org.apache.paimon.data;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 
@@ -39,7 +39,7 @@ import static org.apache.paimon.types.DataTypeChecks.getScale;
  * @see GenericArray
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface InternalArray extends DataGetters {
 
     /** Returns the number of elements in this array. */

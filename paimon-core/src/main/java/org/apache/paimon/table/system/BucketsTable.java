@@ -105,6 +105,16 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public Map<String, String> options() {
+        return wrapped.options();
+    }
+
+    @Override
+    public List<String> primaryKeys() {
+        return Collections.emptyList();
+    }
+
+    @Override
     public SnapshotSplitReader newSnapshotSplitReader() {
         return wrapped.newSnapshotSplitReader();
     }
@@ -120,8 +130,8 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public CoreOptions options() {
-        return wrapped.options();
+    public CoreOptions coreOptions() {
+        return wrapped.coreOptions();
     }
 
     @Override

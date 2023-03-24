@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.operation.FileStoreRead;
@@ -33,7 +33,7 @@ import java.util.List;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface TableRead {
 
     RecordReader<InternalRow> createReader(Split split) throws IOException;

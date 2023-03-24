@@ -18,14 +18,14 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 /**
  * Data type of a 2-byte signed integer with values from -32,768 to 32,767.
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public final class SmallIntType extends DataType {
 
     private static final long serialVersionUID = 1L;

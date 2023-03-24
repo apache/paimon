@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,22 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.memory;
+package org.apache.paimon.annotation;
 
-import org.apache.paimon.annotation.Public;
+import java.lang.annotation.Documented;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Target;
 
 /**
- * Interface describing entities that can provide memory segments.
+ * Annotation for marking classes as public, stable interfaces.
  *
- * @since 0.4.0
+ * <p>API classes or methods need to be marked with modified versions.
  */
+@Documented
+@Target(ElementType.TYPE)
 @Public
-public interface MemorySegmentSource {
-
-    /**
-     * Gets the next memory segment. If no more segments are available, it returns null.
-     *
-     * @return The next memory segment, or null, if none is available.
-     */
-    MemorySegment nextSegment();
-}
+public @interface Public {}

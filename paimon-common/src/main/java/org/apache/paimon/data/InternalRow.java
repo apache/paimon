@@ -18,7 +18,7 @@
 
 package org.apache.paimon.data;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.RowKind;
@@ -83,7 +83,7 @@ import static org.apache.paimon.types.DataTypeChecks.getScale;
  * @see JoinedRow
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface InternalRow extends DataGetters {
 
     /**

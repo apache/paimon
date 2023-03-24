@@ -18,7 +18,7 @@
 
 package org.apache.paimon.options;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -41,7 +41,7 @@ import static org.apache.paimon.options.OptionsUtils.removePrefixMap;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 @ThreadSafe
 public class Options implements Serializable {
 

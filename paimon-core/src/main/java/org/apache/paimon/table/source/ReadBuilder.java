@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -67,7 +67,7 @@ import java.util.List;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface ReadBuilder extends Serializable {
 
     /** A name to identify the table. */

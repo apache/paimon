@@ -84,19 +84,19 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 context,
                 splits,
                 nextSnapshotId,
-                table.options().continuousDiscoveryInterval().toMillis(),
+                table.coreOptions().continuousDiscoveryInterval().toMillis(),
                 scanFactory.create(table, nextSnapshotId).withFilter(predicate)::plan);
     }
 
     @Override
     public FileStoreSourceReader<?> createSourceReader(
             SourceReaderContext context, TableRead read, @Nullable Long limit) {
-        return table.options().toConfiguration().get(STREAMING_READ_ATOMIC)
+        return table.coreOptions().toConfiguration().get(STREAMING_READ_ATOMIC)
                 ? new FileStoreSourceReader<>(RecordsFunction.forSingle(), context, read, limit)
                 : new FileStoreSourceReader<>(RecordsFunction.forIterate(), context, read, limit);
     }
 
     private boolean isBounded() {
-        return table.options().scanBoundedWatermark() != null;
+        return table.coreOptions().scanBoundedWatermark() != null;
     }
 }

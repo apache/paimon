@@ -504,7 +504,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testReadFilter() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        if (table.options().fileFormat().getFormatIdentifier().equals("parquet")) {
+        if (table.coreOptions().fileFormat().getFormatIdentifier().equals("parquet")) {
             // TODO support parquet reader filter push down
             return;
         }

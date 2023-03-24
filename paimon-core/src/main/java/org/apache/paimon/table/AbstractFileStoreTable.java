@@ -41,6 +41,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -71,7 +72,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         return new SnapshotSplitReaderImpl(
                 store().newScan(),
                 tableSchema,
-                options(),
+                coreOptions(),
                 snapshotManager(),
                 splitGenerator(),
                 nonPartitionFilterConsumer());
@@ -79,13 +80,14 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public BatchDataTableScan newScan() {
-        return new BatchDataTableScanImpl(options(), newSnapshotSplitReader(), snapshotManager());
+        return new BatchDataTableScanImpl(
+                coreOptions(), newSnapshotSplitReader(), snapshotManager());
     }
 
     @Override
     public StreamDataTableScan newStreamScan() {
         return new StreamDataTableScanImpl(
-                options(),
+                coreOptions(),
                 newSnapshotSplitReader(),
                 snapshotManager(),
                 supportStreamingReadOverwrite());
@@ -153,7 +155,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public CoreOptions options() {
+    public CoreOptions coreOptions() {
         return store().options();
     }
 
@@ -173,6 +175,26 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public List<String> partitionKeys() {
+        return tableSchema.partitionKeys();
+    }
+
+    @Override
+    public List<String> primaryKeys() {
+        return tableSchema.primaryKeys();
+    }
+
+    @Override
+    public Map<String, String> options() {
+        return tableSchema.options();
+    }
+
+    @Override
+    public Optional<String> comment() {
+        return Optional.ofNullable(tableSchema.comment());
+    }
+
+    @Override
     public SnapshotManager snapshotManager() {
         return store().snapshotManager();
     }
@@ -181,8 +203,8 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     public TableCommitImpl newCommit(String commitUser) {
         return new TableCommitImpl(
                 store().newCommit(commitUser),
-                options().writeOnly() ? null : store().newExpire(),
-                options().writeOnly() ? null : store().newPartitionExpire(commitUser));
+                coreOptions().writeOnly() ? null : store().newExpire(),
+                coreOptions().writeOnly() ? null : store().newPartitionExpire(commitUser));
     }
 
     private Optional<TableSchema> tryTimeTravel(Options options) {

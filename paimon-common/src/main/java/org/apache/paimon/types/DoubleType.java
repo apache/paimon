@@ -18,14 +18,14 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 /**
  * Data type of an 8-byte double precision floating point number.
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class DoubleType extends DataType {
 
     private static final long serialVersionUID = 1L;

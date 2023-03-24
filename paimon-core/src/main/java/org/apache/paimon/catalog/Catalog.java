@@ -18,7 +18,7 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
@@ -33,7 +33,7 @@ import java.util.Optional;
  * @see CatalogFactory
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface Catalog extends AutoCloseable {
 
     String DEFAULT_DATABASE = "default";

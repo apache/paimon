@@ -82,7 +82,7 @@ public class FileStoreShuffleBucketTest extends CatalogITCaseBase {
     public void testShuffleByBucketPartition() throws Exception {
         FileStoreTable originalTable =
                 FileStoreTableFactory.create(LocalFileIO.create(), getTableDirectory("T"));
-        Map<String, String> dynamicOptions = originalTable.options().toMap();
+        Map<String, String> dynamicOptions = originalTable.coreOptions().toMap();
         dynamicOptions.put(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION.key(), "true");
         FileStoreTable table = originalTable.copy(dynamicOptions);
 

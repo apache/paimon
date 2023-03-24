@@ -18,7 +18,7 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 import java.util.Objects;
 
@@ -34,7 +34,7 @@ import java.util.Objects;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public final class TimeType extends DataType {
 
     private static final long serialVersionUID = 1L;

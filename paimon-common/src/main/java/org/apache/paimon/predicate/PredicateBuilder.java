@@ -18,7 +18,7 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
@@ -53,7 +53,7 @@ import static java.util.Collections.singletonList;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class PredicateBuilder {
 
     private final RowType rowType;

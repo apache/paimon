@@ -18,7 +18,7 @@
 
 package org.apache.paimon.schema;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class Schema {
 
     private final List<DataField> fields;

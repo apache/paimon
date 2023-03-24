@@ -18,7 +18,7 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
@@ -38,7 +38,7 @@ import java.util.Set;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class MultisetType extends DataType {
 
     private static final long serialVersionUID = 1L;

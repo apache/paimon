@@ -18,14 +18,14 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 /**
  * Lists all kinds of changes that a row can describe in a changelog.
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public enum RowKind {
 
     // Note: Enums have no stable hash code across different JVMs, use toByteValue() for

@@ -253,7 +253,7 @@ public abstract class FileStoreTableTestBase {
     @Test
     public void testReadFilter() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        if (table.options().fileFormat().getFormatIdentifier().equals("parquet")) {
+        if (table.coreOptions().fileFormat().getFormatIdentifier().equals("parquet")) {
             // TODO support parquet reader filter push down
             return;
         }
@@ -387,7 +387,7 @@ public abstract class FileStoreTableTestBase {
         SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("added", DataTypes.INT()));
         table = table.copyWithLatestSchema();
-        assertThat(table.options().snapshotNumRetainMax()).isEqualTo(100);
+        assertThat(table.coreOptions().snapshotNumRetainMax()).isEqualTo(100);
         write = table.newWrite(commitUser);
 
         write.write(new JoinedRow(rowData(1, 30, 300L), GenericRow.of(3000)));
