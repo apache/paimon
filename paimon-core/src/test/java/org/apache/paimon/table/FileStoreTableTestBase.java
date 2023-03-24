@@ -396,6 +396,7 @@ public abstract class FileStoreTableTestBase {
         schemaManager.commitChanges(SchemaChange.addColumn("added", DataTypes.INT()));
         table = table.copyWithLatestSchema();
         assertThat(table.coreOptions().snapshotNumRetainMax()).isEqualTo(100);
+        streamWriteBuilder = table.newStreamWriteBuilder();
         write = streamWriteBuilder.newWrite();
 
         write.write(new JoinedRow(rowData(1, 30, 300L), GenericRow.of(3000)));

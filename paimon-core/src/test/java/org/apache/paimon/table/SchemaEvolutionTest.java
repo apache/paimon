@@ -95,7 +95,7 @@ public class SchemaEvolutionTest {
         schemaManager.commitChanges(
                 Collections.singletonList(SchemaChange.addColumn("f3", new BigIntType())));
         table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
-
+        streamWriteBuilder = table.newStreamWriteBuilder();
         write = streamWriteBuilder.newWrite();
         write.write(GenericRow.of(3, 3L, 3L));
         write.write(GenericRow.of(4, 4L, 4L));

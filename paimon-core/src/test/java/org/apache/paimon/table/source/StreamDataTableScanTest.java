@@ -26,6 +26,7 @@ import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.snapshot.ScannerTestBase;
 import org.apache.paimon.types.RowKind;
 
@@ -110,11 +111,12 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         conf.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.FULL_COMPACTION);
 
         table = table.copy(conf.toMap());
-        TableRead read = table.newReadBuilder().newRead();
+        ReadBuilder readBuilder = table.newReadBuilder();
         StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        TableRead read = readBuilder.newRead();
         StreamTableWrite write = streamWriteBuilder.newWrite();
         StreamTableCommit commit = streamWriteBuilder.newCommit();
-        StreamDataTableScan scan = (StreamDataTableScan) table.newReadBuilder().newStreamScan();
+        StreamDataTableScan scan = (StreamDataTableScan) readBuilder.newStreamScan();
 
         // first call without any snapshot, should return null
         assertThat(scan.plan()).isNull();
@@ -161,7 +163,8 @@ public class StreamDataTableScanTest extends ScannerTestBase {
 
         // full compaction done, read new changelog
         plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(6);
+        // because StreamWriteBuilder#newCommit will not ignore the empty snapshot, so snapshot id will equal 7
+        assertThat(plan.snapshotId).isEqualTo(7);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(
                         Arrays.asList(

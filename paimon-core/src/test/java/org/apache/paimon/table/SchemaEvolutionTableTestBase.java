@@ -208,6 +208,7 @@ public abstract class SchemaEvolutionTableTestBase {
                         tableConfig.toMap(),
                         ""));
         table = createFileStoreTable.apply(tableSchemas);
+        streamWriteBuilder = table.newStreamWriteBuilder();
         write = streamWriteBuilder.newWrite();
         commit = streamWriteBuilder.newCommit();
 
@@ -343,6 +344,7 @@ public abstract class SchemaEvolutionTableTestBase {
                         tableConfig.toMap(),
                         ""));
         table = createFileStoreTable.apply(tableSchemas);
+        streamWriteBuilder = table.newStreamWriteBuilder();
         write = streamWriteBuilder.newWrite();
         commit = streamWriteBuilder.newCommit();
 
