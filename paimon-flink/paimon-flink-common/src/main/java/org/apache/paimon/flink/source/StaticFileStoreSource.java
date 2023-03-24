@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.source.BatchDataTableScan;
@@ -94,6 +95,12 @@ public class StaticFileStoreSource extends FlinkSource {
         }
 
         Snapshot snapshot = snapshotId == null ? null : snapshotManager.snapshot(snapshotId);
-        return new StaticFileStoreSplitEnumerator(context, snapshot, splits);
+        return new StaticFileStoreSplitEnumerator(
+                context,
+                snapshot,
+                splits,
+                table.options()
+                        .toConfiguration()
+                        .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE));
     }
 }

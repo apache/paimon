@@ -30,8 +30,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 
 /** A {@link SplitEnumerator} implementation for {@link StaticFileStoreSource} input. */
 public class StaticFileStoreSplitEnumerator
@@ -41,24 +43,29 @@ public class StaticFileStoreSplitEnumerator
 
     @Nullable private final Snapshot snapshot;
 
-    private final Map<Integer, List<FileStoreSourceSplit>> pendingSplitAssignment;
+    /** Default batch splits size to avoid exceed `akka.framesize`. */
+    private final int splitBatchSize;
+
+    private final Map<Integer, Queue<FileStoreSourceSplit>> pendingSplitAssignment;
 
     public StaticFileStoreSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             @Nullable Snapshot snapshot,
-            Collection<FileStoreSourceSplit> splits) {
+            Collection<FileStoreSourceSplit> splits,
+            int splitBatchSize) {
         this.context = context;
         this.snapshot = snapshot;
         this.pendingSplitAssignment = createSplitAssignment(splits, context.currentParallelism());
+        this.splitBatchSize = splitBatchSize;
     }
 
-    private static Map<Integer, List<FileStoreSourceSplit>> createSplitAssignment(
+    private static Map<Integer, Queue<FileStoreSourceSplit>> createSplitAssignment(
             Collection<FileStoreSourceSplit> splits, int numReaders) {
-        Map<Integer, List<FileStoreSourceSplit>> assignment = new HashMap<>();
+        Map<Integer, Queue<FileStoreSourceSplit>> assignment = new HashMap<>();
         int i = 0;
         for (FileStoreSourceSplit split : splits) {
             int task = i % numReaders;
-            assignment.computeIfAbsent(task, k -> new ArrayList<>()).add(split);
+            assignment.computeIfAbsent(task, k -> new LinkedList<>()).add(split);
             i++;
         }
         return assignment;
@@ -79,10 +86,14 @@ public class StaticFileStoreSplitEnumerator
         // The following batch assignment operation is for two purposes:
         // To distribute splits evenly when batch reading to prevent a few tasks from reading all
         // the data (for example, the current resource can only schedule part of the tasks).
-        // TODO: assignment is already created in constructor, here can just assign per batch
-        List<FileStoreSourceSplit> splits = pendingSplitAssignment.remove(subtask);
-        if (splits != null && splits.size() > 0) {
-            context.assignSplits(new SplitsAssignment<>(Collections.singletonMap(subtask, splits)));
+        Queue<FileStoreSourceSplit> taskSplits = pendingSplitAssignment.get(subtask);
+        List<FileStoreSourceSplit> assignment = new ArrayList<>();
+        while (taskSplits != null && !taskSplits.isEmpty() && assignment.size() < splitBatchSize) {
+            assignment.add(taskSplits.poll());
+        }
+        if (assignment != null && assignment.size() > 0) {
+            context.assignSplits(
+                    new SplitsAssignment<>(Collections.singletonMap(subtask, assignment)));
         } else {
             context.signalNoMoreSplits(subtask);
         }
@@ -91,7 +102,7 @@ public class StaticFileStoreSplitEnumerator
     @Override
     public void addSplitsBack(List<FileStoreSourceSplit> backSplits, int subtaskId) {
         pendingSplitAssignment
-                .computeIfAbsent(subtaskId, k -> new ArrayList<>())
+                .computeIfAbsent(subtaskId, k -> new LinkedList<>())
                 .addAll(backSplits);
     }
 
