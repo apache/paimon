@@ -18,7 +18,7 @@
 
 package org.apache.paimon.options;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
@@ -47,7 +47,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class MemorySize implements java.io.Serializable, Comparable<MemorySize> {
 
     private static final long serialVersionUID = 1L;

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.data;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.DataType;
@@ -35,7 +35,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public final class BinaryMap extends BinarySection implements InternalMap {
 
     private static final long serialVersionUID = 1L;

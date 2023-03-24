@@ -164,7 +164,7 @@ public class DataTableSource extends FlinkTableSource
         }
 
         WatermarkStrategy<RowData> watermarkStrategy = this.watermarkStrategy;
-        Options options = table.options().toConfiguration();
+        Options options = table.coreOptions().toConfiguration();
         if (watermarkStrategy != null) {
             WatermarkEmitStrategy emitStrategy = options.get(SCAN_WATERMARK_EMIT_STRATEGY);
             if (emitStrategy == WatermarkEmitStrategy.ON_EVENT) {

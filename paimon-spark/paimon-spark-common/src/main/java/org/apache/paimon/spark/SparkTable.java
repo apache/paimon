@@ -21,7 +21,6 @@ package org.apache.paimon.spark;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
-import org.apache.paimon.table.SupportsPartition;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableUtils;
 
@@ -87,14 +86,10 @@ public class SparkTable
 
     @Override
     public Transform[] partitioning() {
-        if (table instanceof SupportsPartition) {
-            return ((SupportsPartition) table)
-                    .partitionKeys().stream()
-                            .map(FieldReference::apply)
-                            .map(IdentityTransform::apply)
-                            .toArray(Transform[]::new);
-        }
-        return new Transform[0];
+        return table.partitionKeys().stream()
+                .map(FieldReference::apply)
+                .map(IdentityTransform::apply)
+                .toArray(Transform[]::new);
     }
 
     @Override
@@ -120,7 +115,7 @@ public class SparkTable
     @Override
     public Map<String, String> properties() {
         if (table instanceof DataTable) {
-            return ((DataTable) table).options().toMap();
+            return ((DataTable) table).coreOptions().toMap();
         } else {
             return Collections.emptyMap();
         }

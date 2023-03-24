@@ -58,7 +58,7 @@ public class SchemaAwareStoreWriteOperator extends AbstractStoreWriteOperator<Cd
             @Nullable LogSinkFunction logSinkFunction,
             StoreSinkWrite.Provider storeSinkWriteProvider) {
         super(table, logSinkFunction, storeSinkWriteProvider);
-        retrySleepMillis = table.options().toConfiguration().get(RETRY_SLEEP_TIME).toMillis();
+        retrySleepMillis = table.coreOptions().toConfiguration().get(RETRY_SLEEP_TIME).toMillis();
     }
 
     @Override

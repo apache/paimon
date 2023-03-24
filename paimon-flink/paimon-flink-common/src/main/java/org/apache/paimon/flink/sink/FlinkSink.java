@@ -60,9 +60,9 @@ public abstract class FlinkSink<T> implements Serializable {
     }
 
     protected StoreSinkWrite.Provider createWriteProvider(String initialCommitUser) {
-        if (!table.options().writeOnly()) {
-            Options options = table.options().toConfiguration();
-            switch (table.options().changelogProducer()) {
+        if (!table.coreOptions().writeOnly()) {
+            Options options = table.coreOptions().toConfiguration();
+            switch (table.coreOptions().changelogProducer()) {
                 case FULL_COMPACTION:
                     long fullCompactionThresholdMs =
                             options.get(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL)

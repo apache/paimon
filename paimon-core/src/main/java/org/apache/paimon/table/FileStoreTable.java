@@ -29,12 +29,13 @@ import org.apache.paimon.types.RowType;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * An abstraction layer above {@link FileStore} to provide reading and writing of {@link
  * InternalRow}.
  */
-public interface FileStoreTable extends DataTable, SupportsPartition {
+public interface FileStoreTable extends DataTable {
 
     @Override
     default String name() {
@@ -49,6 +50,21 @@ public interface FileStoreTable extends DataTable, SupportsPartition {
     @Override
     default List<String> partitionKeys() {
         return schema().partitionKeys();
+    }
+
+    @Override
+    default List<String> primaryKeys() {
+        return schema().primaryKeys();
+    }
+
+    @Override
+    default Map<String, String> options() {
+        return schema().options();
+    }
+
+    @Override
+    default Optional<String> comment() {
+        return Optional.ofNullable(schema().comment());
     }
 
     TableSchema schema();

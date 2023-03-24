@@ -18,7 +18,7 @@
 
 package org.apache.paimon.memory;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.options.MemorySize;
 
 import java.util.List;
@@ -28,7 +28,7 @@ import java.util.List;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface MemorySegmentPool extends MemorySegmentSource {
 
     int DEFAULT_PAGE_SIZE = 32 * 1024;

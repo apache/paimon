@@ -18,7 +18,7 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 /**
  * Implementation of {@link DataTypeVisitor} that redirects all calls to {@link
@@ -26,7 +26,7 @@ import org.apache.paimon.annotation.Experimental;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public abstract class DataTypeDefaultVisitor<R> implements DataTypeVisitor<R> {
 
     @Override

@@ -71,7 +71,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         return new SnapshotSplitReaderImpl(
                 store().newScan(),
                 tableSchema,
-                options(),
+                coreOptions(),
                 snapshotManager(),
                 splitGenerator(),
                 nonPartitionFilterConsumer());
@@ -79,13 +79,14 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public BatchDataTableScan newScan() {
-        return new BatchDataTableScanImpl(options(), newSnapshotSplitReader(), snapshotManager());
+        return new BatchDataTableScanImpl(
+                coreOptions(), newSnapshotSplitReader(), snapshotManager());
     }
 
     @Override
     public StreamDataTableScan newStreamScan() {
         return new StreamDataTableScanImpl(
-                options(),
+                coreOptions(),
                 newSnapshotSplitReader(),
                 snapshotManager(),
                 supportStreamingReadOverwrite());
@@ -153,7 +154,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public CoreOptions options() {
+    public CoreOptions coreOptions() {
         return store().options();
     }
 
@@ -181,8 +182,8 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     public TableCommitImpl newCommit(String commitUser) {
         return new TableCommitImpl(
                 store().newCommit(commitUser),
-                options().writeOnly() ? null : store().newExpire(),
-                options().writeOnly() ? null : store().newPartitionExpire(commitUser));
+                coreOptions().writeOnly() ? null : store().newExpire(),
+                coreOptions().writeOnly() ? null : store().newPartitionExpire(commitUser));
     }
 
     private Optional<TableSchema> tryTimeTravel(Options options) {

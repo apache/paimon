@@ -18,7 +18,7 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.Preconditions;
@@ -39,7 +39,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface CatalogFactory {
 
     String identifier();

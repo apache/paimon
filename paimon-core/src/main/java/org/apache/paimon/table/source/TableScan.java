@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.table.Table;
 
 import java.util.List;
@@ -28,7 +28,7 @@ import java.util.List;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface TableScan {
 
     /** Plan splits, throws {@link EndOfScanException} if the scan is ended. */
@@ -39,7 +39,7 @@ public interface TableScan {
      *
      * @since 0.4.0
      */
-    @Experimental
+    @Public
     interface Plan {
         List<Split> splits();
     }

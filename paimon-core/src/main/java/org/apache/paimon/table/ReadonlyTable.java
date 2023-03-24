@@ -24,8 +24,28 @@ import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
 /** Readonly table which only provide implementation for scan and read. */
 public interface ReadonlyTable extends InnerTable {
+
+    @Override
+    default List<String> partitionKeys() {
+        return Collections.emptyList();
+    }
+
+    @Override
+    default Map<String, String> options() {
+        return Collections.emptyMap();
+    }
+
+    @Override
+    default Optional<String> comment() {
+        return Optional.empty();
+    }
 
     @Override
     default BatchWriteBuilder newBatchWriteBuilder() {

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.utils.Restorable;
 
 /**
@@ -26,5 +26,5 @@ import org.apache.paimon.utils.Restorable;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface StreamTableScan extends TableScan, Restorable<Long> {}
