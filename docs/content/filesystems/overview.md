@@ -41,3 +41,5 @@ FileSystem pluggable jars for user to query tables from Spark/Hive side.
 | HDFS              | hdfs://          | N         | Built-in Support, ensure that the cluster is in the hadoop environment |
 | Aliyun OSS        | oss://           | Y         |  |
 | S3                | s3://            | Y         |  |
+
+[Download Link]({{< ref "project/download#changelog-producers" >}})
