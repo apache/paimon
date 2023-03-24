@@ -34,7 +34,7 @@ import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
-import org.apache.paimon.utils.RowDataUtils;
+import org.apache.paimon.utils.InternalRowUtils;
 
 /** Generate sequence number. */
 public class SequenceGenerator {
@@ -80,7 +80,7 @@ public class SequenceGenerator {
         @Override
         public Generator visit(DecimalType decimalType) {
             return (row, i) ->
-                    RowDataUtils.castToIntegral(
+                    InternalRowUtils.castToIntegral(
                             row.getDecimal(i, decimalType.getPrecision(), decimalType.getScale()));
         }
 

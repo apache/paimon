@@ -20,7 +20,7 @@ package org.apache.paimon.mergetree.compact.aggregate;
 
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
-import org.apache.paimon.utils.RowDataUtils;
+import org.apache.paimon.utils.InternalRowUtils;
 
 /** max aggregate a field of a row. */
 public class FieldMaxAgg extends FieldAggregator {
@@ -44,7 +44,7 @@ public class FieldMaxAgg extends FieldAggregator {
             max = (accumulator == null ? inputField : accumulator);
         } else {
             DataTypeRoot type = fieldType.getTypeRoot();
-            if (RowDataUtils.compare(accumulator, inputField, type) < 0) {
+            if (InternalRowUtils.compare(accumulator, inputField, type) < 0) {
                 max = inputField;
             } else {
                 max = accumulator;

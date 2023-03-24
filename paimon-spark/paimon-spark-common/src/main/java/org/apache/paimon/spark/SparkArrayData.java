@@ -23,7 +23,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.RowDataUtils;
+import org.apache.paimon.utils.InternalRowUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.expressions.SpecializedGettersReader;
@@ -34,7 +34,7 @@ import org.apache.spark.unsafe.types.CalendarInterval;
 import org.apache.spark.unsafe.types.UTF8String;
 
 import static org.apache.paimon.spark.SparkInternalRow.fromPaimon;
-import static org.apache.paimon.utils.RowDataUtils.copyArray;
+import static org.apache.paimon.utils.InternalRowUtils.copyArray;
 import static org.apache.paimon.utils.TypeUtils.timestampPrecision;
 
 /** Spark {@link ArrayData} to wrap Paimon {@link InternalArray}. */
@@ -67,7 +67,7 @@ public class SparkArrayData extends ArrayData {
     public Object[] array() {
         Object[] objects = new Object[numElements()];
         for (int i = 0; i < objects.length; i++) {
-            objects[i] = fromPaimon(RowDataUtils.get(array, i, elementType), elementType);
+            objects[i] = fromPaimon(InternalRowUtils.get(array, i, elementType), elementType);
         }
         return objects;
     }
