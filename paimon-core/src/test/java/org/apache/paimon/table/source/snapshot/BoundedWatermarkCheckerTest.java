@@ -20,6 +20,7 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -33,7 +34,9 @@ public class BoundedWatermarkCheckerTest extends ScannerTestBase {
     @Test
     public void testBounded() {
         SnapshotManager snapshotManager = table.snapshotManager();
-        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        TableCommitImpl streamTableCommit = (TableCommitImpl) streamWriteBuilder.newCommit();
+        TableCommitImpl commit = streamTableCommit.ignoreEmptyCommit(false);
         BoundedChecker checker = BoundedChecker.watermark(2000L);
 
         commit.commit(new ManifestCommittable(0, 1024L));

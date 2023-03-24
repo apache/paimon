@@ -34,6 +34,7 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
@@ -117,9 +118,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testSplitOrder() throws Exception {
         FileStoreTable table = createFileStoreTable();
-
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
 
         write.write(rowData(1, 10, 100L));
         commit.commit(0, write.prepareCommit(true, 0));
@@ -146,8 +147,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                 createFileStoreTable(
                         options -> options.set(CoreOptions.SCAN_PLAN_SORT_PARTITION, true));
 
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
 
         write.write(rowData(3, 33, 303L));
         commit.commit(0, write.prepareCommit(true, 0));
@@ -213,9 +215,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable(numOfBucket);
         InternalRowSerializer serializer =
                 new InternalRowSerializer(table.schema().logicalRowType());
-        StreamTableWrite write = table.newWrite(commitUser);
-
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
         List<Map<Integer, List<InternalRow>>> dataset = new ArrayList<>();
         Map<Integer, List<InternalRow>> dataPerBucket = new HashMap<>(numOfBucket);
         int numOfPartition = Math.max(random.nextInt(10), 1);
@@ -265,8 +267,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
 
     private void writeData() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));

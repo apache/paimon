@@ -41,8 +41,10 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
+import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -153,8 +155,9 @@ public abstract class FileStoreTableTestBase {
         FileStoreTable table =
                 createFileStoreTable(conf -> conf.set(FILE_FORMAT, CoreOptions.FileFormatType.ORC));
 
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
         commit.commit(0, write.prepareCommit(true, 0));
@@ -173,8 +176,8 @@ public abstract class FileStoreTableTestBase {
         table =
                 createFileStoreTable(
                         conf -> conf.set(FILE_FORMAT, CoreOptions.FileFormatType.AVRO));
-        write = table.newWrite(commitUser);
-        commit = table.newCommit(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
         write.write(rowData(1, 11, 111L));
         write.write(rowData(2, 22, 222L));
         commit.commit(1, write.prepareCommit(true, 1));
@@ -197,15 +200,16 @@ public abstract class FileStoreTableTestBase {
     public void testOverwrite() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
-        StreamTableWrite write = table.newWrite(commitUser);
-        InnerTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        InnerTableCommit commit = (InnerTableCommit) streamWriteBuilder.newCommit();
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
 
-        write = table.newWrite(commitUser).withOverwrite(true);
-        commit = table.newCommit(commitUser);
+        write = ((InnerTableWrite) streamWriteBuilder.newWrite()).withOverwrite(true);
+        commit = (InnerTableCommit) streamWriteBuilder.newCommit();
         write.write(rowData(2, 21, 201L));
         Map<String, String> overwritePartition = new HashMap<>();
         overwritePartition.put("pt", "2");
@@ -232,14 +236,14 @@ public abstract class FileStoreTableTestBase {
                             conf.set(BUCKET, 5);
                             conf.set(BUCKET_KEY, "a");
                         });
-
-        StreamTableWrite write = table.newWrite(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
         write.write(rowData(1, 1, 2L));
         write.write(rowData(1, 3, 4L));
         write.write(rowData(1, 5, 6L));
         write.write(rowData(1, 7, 8L));
         write.write(rowData(1, 9, 10L));
-        table.newCommit(commitUser).commit(0, write.prepareCommit(true, 0));
+        streamWriteBuilder.newCommit().commit(0, write.prepareCommit(true, 0));
         write.close();
 
         List<Split> splits =
@@ -258,9 +262,9 @@ public abstract class FileStoreTableTestBase {
             // TODO support parquet reader filter push down
             return;
         }
-
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
@@ -289,8 +293,9 @@ public abstract class FileStoreTableTestBase {
     @Test
     public void testPartitionEmptyWriter() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
 
         for (int i = 0; i < 4; i++) {
             // write lots of records, let compaction be slower
@@ -348,8 +353,9 @@ public abstract class FileStoreTableTestBase {
                             conf.set(SNAPSHOT_NUM_RETAINED_MAX, 3);
                         });
 
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
         for (int i = 0; i < 10; i++) {
             write.write(rowData(1, 1, 100L));
             commit.commit(i, write.prepareCommit(true, i));
@@ -378,8 +384,9 @@ public abstract class FileStoreTableTestBase {
     public void testCopyWithLatestSchema() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(conf -> conf.set(SNAPSHOT_NUM_RETAINED_MAX, 100));
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
@@ -389,7 +396,7 @@ public abstract class FileStoreTableTestBase {
         schemaManager.commitChanges(SchemaChange.addColumn("added", DataTypes.INT()));
         table = table.copyWithLatestSchema();
         assertThat(table.coreOptions().snapshotNumRetainMax()).isEqualTo(100);
-        write = table.newWrite(commitUser);
+        write = streamWriteBuilder.newWrite();
 
         write.write(new JoinedRow(rowData(1, 30, 300L), GenericRow.of(3000)));
         write.write(new JoinedRow(rowData(1, 40, 400L), GenericRow.of(4000)));
