@@ -64,7 +64,7 @@ public abstract class ScannerTestBase {
                     new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
                     new String[] {"pt", "a", "b"});
 
-    @TempDir java.nio.file.Path tempDir;
+    protected @TempDir java.nio.file.Path tempDir;
 
     protected Path tablePath;
     protected FileIO fileIO;
