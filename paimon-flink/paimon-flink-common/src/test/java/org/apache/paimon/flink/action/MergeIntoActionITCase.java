@@ -19,8 +19,10 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.utils.BlockingIterator;
 
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -36,6 +39,7 @@ import java.util.List;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildDdl;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildSimpleQuery;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.createTable;
@@ -68,32 +72,20 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     public void setUp() throws Exception {
         init(warehouse);
 
-        // prepare table S
-        sEnv.executeSql(
-                buildDdl(
-                        "S",
-                        Arrays.asList("k INT", "v STRING", "dt STRING"),
-                        Arrays.asList("k", "dt"),
-                        Collections.singletonList("dt"),
-                        new HashMap<>()));
+        // prepare target table T
+        prepareTargetTable(CoreOptions.ChangelogProducer.NONE);
 
-        insertInto(
-                "S",
-                "(1, 'v_1', '02-27')",
-                "(4, CAST (NULL AS STRING), '02-27')",
-                "(7, 'Seven', '02-28')",
-                "(8, CAST (NULL AS STRING), '02-28')",
-                "(8, 'v_8', '02-29')",
-                "(11, 'v_11', '02-29')",
-                "(12, 'v_12', '02-29')");
+        // prepare source table S
+        prepareSourceTable();
     }
 
     @ParameterizedTest(name = "changelog-producer = {0}")
     @MethodSource("producerTestData")
     public void testVariousChangelogProducer(
             CoreOptions.ChangelogProducer producer, List<Row> expected) throws Exception {
-        // prepare table T
-        prepareTable(producer);
+        // re-create target table with given producer
+        sEnv.executeSql("DROP TABLE T");
+        prepareTargetTable(producer);
 
         // similar to:
         // MERGE INTO T
@@ -107,7 +99,8 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
         //   SET v = v || '_nmu', last_action = 'not_matched_upsert'
         // WHEN NOT MATCHED BY SOURCE AND (dt >= '02-28') THEN DELETE
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSourceTable(null, "S")
+        // here test if it works when table S is in default and qualified both
+        action.withSourceTable("default.S")
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withMatchedUpsert(
                         "T.v <> S.v AND S.v IS NOT NULL", "v = S.v, last_action = 'matched_upsert'")
@@ -130,14 +123,26 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 12, "v_12", "insert", "02-29")));
     }
 
-    @Test
-    public void testTargetAlias() throws Exception {
-        // prepare table T
-        prepareTable(CoreOptions.ChangelogProducer.NONE);
+    @ParameterizedTest(name = "in-default = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testTargetAlias(boolean inDefault) throws Exception {
+        MergeIntoAction action;
 
-        MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
+        if (!inDefault) {
+            // create target table in a new database
+            sEnv.executeSql("DROP TABLE T");
+            sEnv.executeSql("CREATE DATABASE test_db");
+            sEnv.executeSql("USE test_db");
+            bEnv.executeSql("USE test_db");
+            prepareTargetTable(CoreOptions.ChangelogProducer.NONE);
+
+            action = new MergeIntoAction(warehouse, "test_db", "T");
+        } else {
+            action = new MergeIntoAction(warehouse, database, "T");
+        }
+
         action.withTargetAlias("TT")
-                .withSourceTable(null, "S")
+                .withSourceTable("S")
                 .withMergeCondition("TT.k = S.k AND TT.dt = S.dt")
                 .withMatchedDelete("S.v IS NULL");
 
@@ -157,39 +162,31 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 10, "v_10", "creation", "02-28")));
     }
 
-    @Test
-    public void testUsingDdlSource() throws Exception {
-        // prepare table T
-        prepareTable(CoreOptions.ChangelogProducer.NONE);
+    @ParameterizedTest(name = "in-default = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testSourceName(boolean inDefault) throws Exception {
+        MergeIntoAction action = new MergeIntoAction(warehouse, "default", "T");
+        String sourceTableName = "S";
 
-        TestValuesTableFactory.registerData(
-                Arrays.asList(
-                        changelogRow("+I", 1, "v_1", "02-27"),
-                        changelogRow("+I", 4, null, "02-27"),
-                        changelogRow("+I", 8, null, "02-28")));
+        if (!inDefault) {
+            // create source table in a new database
+            sEnv.executeSql("DROP TABLE S");
+            sEnv.executeSql("CREATE DATABASE test_db");
+            sEnv.executeSql("USE test_db");
+            bEnv.executeSql("USE test_db");
+            prepareSourceTable();
+            sourceTableName = "test_db.S";
+        }
 
-        String catalog =
-                String.format(
-                        "CREATE CATALOG test_cat WITH ('type' = 'paimon', 'warehouse' = '%s')",
-                        getTempDirPath());
-        String useCatalog = "USE CATALOG test_cat";
-        String id =
-                TestValuesTableFactory.registerData(
-                        Arrays.asList(
-                                changelogRow("+I", 1, "v_1", "02-27"),
-                                changelogRow("+I", 4, null, "02-27"),
-                                changelogRow("+I", 8, null, "02-28")));
-        String ddl =
-                String.format(
-                        "CREATE TEMPORARY TABLE S (k INT, v STRING, dt STRING)\n"
-                                + "WITH ('connector' = 'values', 'bounded' = 'true', 'data-id' = '%s');",
-                        id);
-
-        MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        // test current catalog and current database
-        action.withSourceSqls("S", catalog, useCatalog, ddl)
+        action.withSourceTable(sourceTableName)
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withMatchedDelete("S.v IS NULL");
+
+        if (!inDefault) {
+            sEnv.executeSql("USE `default`");
+            bEnv.executeSql("USE `default`");
+        }
+
         validateActionRunResult(
                 action,
                 Arrays.asList(
@@ -206,14 +203,64 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 10, "v_10", "creation", "02-28")));
     }
 
-    @Test
-    public void testMatchedUpsertSetAll() throws Exception {
-        // prepare table T
-        prepareTable(CoreOptions.ChangelogProducer.NONE);
+    @ParameterizedTest(name = "useCatalog = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testSqls(boolean useCatalog) throws Exception {
+        // drop table S
+        sEnv.executeSql("DROP TABLE S");
 
+        String catalog =
+                String.format(
+                        "CREATE CATALOG test_cat WITH ('type' = 'paimon', 'warehouse' = '%s')",
+                        getTempDirPath());
+        String id =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                changelogRow("+I", 1, "v_1", "02-27"),
+                                changelogRow("+I", 4, null, "02-27"),
+                                changelogRow("+I", 8, null, "02-28")));
+        String ddl =
+                String.format(
+                        "CREATE TEMPORARY TABLE %s (k INT, v STRING, dt STRING)\n"
+                                + "WITH ('connector' = 'values', 'bounded' = 'true', 'data-id' = '%s');",
+                        useCatalog ? "S" : "test_cat.`default`.S", id);
+
+        MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
+
+        if (useCatalog) {
+            action.withSourceSqls(catalog, "USE CATALOG test_cat", ddl);
+            // test current catalog and current database
+            action.withSourceTable("S");
+        } else {
+            action.withSourceSqls(catalog, ddl);
+            action.withSourceTable("test_cat.default.S");
+        }
+
+        action.withMergeCondition("T.k = S.k AND T.dt = S.dt").withMatchedDelete("S.v IS NULL");
+
+        validateActionRunResult(
+                action,
+                Arrays.asList(
+                        changelogRow("-D", 4, "v_4", "creation", "02-27"),
+                        changelogRow("-D", 8, "v_8", "creation", "02-28")),
+                Arrays.asList(
+                        changelogRow("+I", 1, "v_1", "creation", "02-27"),
+                        changelogRow("+I", 2, "v_2", "creation", "02-27"),
+                        changelogRow("+I", 3, "v_3", "creation", "02-27"),
+                        changelogRow("+I", 5, "v_5", "creation", "02-28"),
+                        changelogRow("+I", 6, "v_6", "creation", "02-28"),
+                        changelogRow("+I", 7, "v_7", "creation", "02-28"),
+                        changelogRow("+I", 9, "v_9", "creation", "02-28"),
+                        changelogRow("+I", 10, "v_10", "creation", "02-28")));
+    }
+
+    @ParameterizedTest(name = "source-qualified = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testMatchedUpsertSetAll(boolean qualified) throws Exception {
         // build MergeIntoAction
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSourceSqls("SS", "CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
+        action.withSourceSqls("CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
+                .withSourceTable(qualified ? "default.SS" : "SS")
                 .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
                 .withMatchedUpsert(null, "*");
 
@@ -241,14 +288,13 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 10, "v_10", "creation", "02-28")));
     }
 
-    @Test
-    public void testNotMatchedInsertAll() throws Exception {
-        // prepare table T
-        prepareTable(CoreOptions.ChangelogProducer.NONE);
-
+    @ParameterizedTest(name = "source-qualified = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testNotMatchedInsertAll(boolean qualified) throws Exception {
         // build MergeIntoAction
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSourceSqls("SS", "CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
+        action.withSourceSqls("CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
+                .withSourceTable(qualified ? "default.SS" : "SS")
                 .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
                 .withNotMatchedInsert("SS.k < 12", "*");
 
@@ -277,7 +323,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
-    public void testInsertChangesActionWithNonPkTable() {
+    public void testNonPkTable() {
         String nonPkTable =
                 createTable(
                         Collections.singletonList("k int"),
@@ -291,13 +337,10 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testIncompatibleSchema() throws Exception {
-        // prepare table T
-        prepareTable(CoreOptions.ChangelogProducer.NONE);
-
+    public void testIncompatibleSchema() {
         // build MergeIntoAction
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
-        action.withSourceTable(null, "S")
+        action.withSourceTable("S")
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withNotMatchedInsert(null, "S.k, S.v, 0, S.dt");
 
@@ -307,6 +350,46 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         "The schema of result in action 'not-matched-insert' is invalid.\n"
                                 + "Result schema:   [INT NOT NULL, STRING, INT NOT NULL, STRING NOT NULL]\n"
                                 + "Expected schema: [INT NOT NULL, STRING, STRING, STRING NOT NULL]");
+    }
+
+    @Test
+    public void testIllegalSourceName() throws Exception {
+        // create source table in a new database
+        sEnv.executeSql("DROP TABLE S");
+        sEnv.executeSql("CREATE DATABASE test_db");
+        sEnv.executeSql("USE test_db");
+        prepareSourceTable();
+
+        MergeIntoAction action = new MergeIntoAction(warehouse, "default", "T");
+        // the qualified path of source table is absent
+        action.withSourceTable("S")
+                .withMergeCondition("T.k = S.k AND T.dt = S.dt")
+                .withMatchedDelete("S.v IS NULL");
+
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                ValidationException.class, "Object 'S' not found"));
+    }
+
+    @Test
+    public void testIllegalSourceNameSqlCase() {
+        // drop table S
+        sEnv.executeSql("DROP TABLE S");
+
+        MergeIntoAction action = new MergeIntoAction(warehouse, "default", "T");
+        action.withSourceSqls(
+                        "CREATE DATABASE test_db",
+                        "CREATE TEMPORARY TABLE test_db.S (k INT, v STRING, dt STRING) WITH ('connector' = 'values', 'bounded' = 'true')")
+                // the qualified path of source table  is absent
+                .withSourceTable("S")
+                .withMergeCondition("T.k = S.k AND T.dt = S.dt")
+                .withMatchedDelete("S.v IS NULL");
+
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                ValidationException.class, "Object 'S' not found"));
     }
 
     private void validateActionRunResult(
@@ -322,7 +405,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
         testBatchRead(buildSimpleQuery("T"), batchExpected);
     }
 
-    private void prepareTable(CoreOptions.ChangelogProducer producer) throws Exception {
+    private void prepareTargetTable(CoreOptions.ChangelogProducer producer) throws Exception {
         sEnv.executeSql(
                 buildDdl(
                         "T",
@@ -347,6 +430,26 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 "(8, 'v_8', 'creation', '02-28')",
                 "(9, 'v_9', 'creation', '02-28')",
                 "(10, 'v_10', 'creation', '02-28')");
+    }
+
+    private void prepareSourceTable() throws Exception {
+        sEnv.executeSql(
+                buildDdl(
+                        "S",
+                        Arrays.asList("k INT", "v STRING", "dt STRING"),
+                        Arrays.asList("k", "dt"),
+                        Collections.singletonList("dt"),
+                        new HashMap<>()));
+
+        insertInto(
+                "S",
+                "(1, 'v_1', '02-27')",
+                "(4, CAST (NULL AS STRING), '02-27')",
+                "(7, 'Seven', '02-28')",
+                "(8, CAST (NULL AS STRING), '02-28')",
+                "(8, 'v_8', '02-29')",
+                "(11, 'v_11', '02-29')",
+                "(12, 'v_12', '02-29')");
     }
 
     private static List<Arguments> producerTestData() {
