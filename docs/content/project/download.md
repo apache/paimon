@@ -24,12 +24,11 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Paimon Engines Download page
+# Download
+This documentation is a guide for downloading Paimon Jars.
 
-This documentation is a guide for using Paimon in Flink.
+##  Engine Jars
 {{< unstable >}}
-# Engines Snapshots Jar
--------------------
 **The snapshot version is not recommended for production use**
 download link [paimon snapshots jar](https://repository.apache.org/content/repositories/snapshots/org/apache/paimon/)
 | Version | Jar                                                                                                                                                                                |
@@ -47,18 +46,9 @@ download link [paimon snapshots jar](https://repository.apache.org/content/repos
 | Hive 2.1 | [paimon-hive-connector-2.1-{{< version >}}.jar](https://repository.apache.org/content/groups/snapshots/org/apache/paimon/paimon-hive-connector-2.1/{{< version >}}/) |
 | Hive 2.1-cdh-6.3 | [paimon-hive-connector-2.1-cdh-6.3-{{< version >}}.jar](https://repository.apache.org/content/groups/snapshots/org/apache/paimon/paimon-hive-connector-2.1-cdh-6.3/{{< version >}}/) |
 | Hive Catalog | [paimon-hive-catalog-{{< version >}}.jar](https://repository.apache.org/content/groups/snapshots/org/apache/paimon/paimon-hive-catalog/{{< version >}}/) |
-
-# Filesystems Snapshots Jar
-| Version | Jar                                                                                                                                                                                |
-|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| paimon-oss | [paimon-oss-{{< version >}}.jar](https://repository.apache.org/content/groups/snapshots/org/apache/paimon/paimon-oss/{{< version >}}/) |
-| paimon-s3 | [paimon-s3-{{< version >}}.jar](https://repository.apache.org/content/groups/snapshots/org/apache/paimon/paimon-s3/{{< version >}}/) |
-
 {{< /unstable >}}
 
 {{< stable >}}
-# Engine Version Jar
--------------------
 | Version | Jar                                                                                                                                                                                |
 |---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Flink 1.16 | [paimon-flink-1.16-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.16/{{< version >}}/paimon-flink-1.16-{{< version >}}.jar) |
@@ -74,13 +64,21 @@ download link [paimon snapshots jar](https://repository.apache.org/content/repos
 | Hive 2.1 | [paimon-hive-connector-2.1-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.1/{{< version >}}/paimon-hive-connector-2.1-{{< version >}}.jar) |
 | Hive 2.1-cdh-6.3 | [paimon-hive-connector-2.1-cdh-6.3-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.1-cdh-6.3/{{< version >}}/paimon-hive-connector-2.1-cdh-6.3-{{< version >}}.jar) |
 | Hive Catalog | [paimon-hive-catalog-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-catalog/{{< version >}}/paimon-hive-catalog-{{< version >}}.jar) |
+{{< /stable >}}
 
-# Filesystems Version Jar
+## Filesystem Jars
+{{< unstable >}}
+| Version | Jar                                                                                                                                                                                |
+|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| paimon-oss | [paimon-oss-{{< version >}}.jar](https://repository.apache.org/content/groups/snapshots/org/apache/paimon/paimon-oss/{{< version >}}/) |
+| paimon-s3 | [paimon-s3-{{< version >}}.jar](https://repository.apache.org/content/groups/snapshots/org/apache/paimon/paimon-s3/{{< version >}}/) |
+{{< /unstable >}}
+
+{{< stable >}}
 | Version | Jar                                                                                                                                                                                |
 |---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | paimon-oss | [paimon-oss-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-oss/{{< version >}}/paimon-oss-{{< version >}}.jar) |
 | paimon-s3 | [paimon-s3-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-s3/{{< version >}}/paimon-s3-{{< version >}}.jar) |
-
 {{< /stable >}}
 
 
