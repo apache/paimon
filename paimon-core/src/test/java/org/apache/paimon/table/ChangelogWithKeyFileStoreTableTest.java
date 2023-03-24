@@ -457,7 +457,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         }
 
         // no more changelog
-        assertThat(scan.plan()).isNull();
+        assertThat(scan.plan().splits()).isEmpty();
 
         // write another commit
         StreamTableWrite write = table.newWrite(commitUser);
@@ -472,7 +472,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertNextSnapshot.apply(2);
 
         // no more changelog
-        assertThat(scan.plan()).isNull();
+        assertThat(scan.plan().splits()).isEmpty();
     }
 
     private void writeData() throws Exception {
