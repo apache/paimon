@@ -51,6 +51,7 @@ import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -95,6 +96,11 @@ public class SnapshotsTable implements ReadonlyTable {
     @Override
     public RowType rowType() {
         return TABLE_TYPE;
+    }
+
+    @Override
+    public List<String> primaryKeys() {
+        return Collections.singletonList("snapshot_id");
     }
 
     @Override

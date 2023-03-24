@@ -18,7 +18,7 @@
 
 package org.apache.paimon.disk;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.memory.Buffer;
 
 import java.io.IOException;
@@ -28,7 +28,7 @@ import java.io.IOException;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface BufferFileReader extends FileIOChannel {
 
     void readInto(Buffer buffer) throws IOException;

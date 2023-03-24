@@ -58,6 +58,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -106,6 +107,21 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public List<String> partitionKeys() {
+        return dataTable.partitionKeys();
+    }
+
+    @Override
+    public Map<String, String> options() {
+        return dataTable.options();
+    }
+
+    @Override
+    public List<String> primaryKeys() {
+        return Collections.emptyList();
+    }
+
+    @Override
     public SnapshotSplitReader newSnapshotSplitReader() {
         return new AuditLogDataSplitReader(dataTable.newSnapshotSplitReader());
     }
@@ -121,8 +137,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public CoreOptions options() {
-        return dataTable.options();
+    public CoreOptions coreOptions() {
+        return dataTable.coreOptions();
     }
 
     @Override

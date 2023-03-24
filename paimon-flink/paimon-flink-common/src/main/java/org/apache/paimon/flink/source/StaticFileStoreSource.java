@@ -99,7 +99,7 @@ public class StaticFileStoreSource extends FlinkSource {
                 context,
                 snapshot,
                 splits,
-                table.options()
+                table.coreOptions()
                         .toConfiguration()
                         .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE));
     }

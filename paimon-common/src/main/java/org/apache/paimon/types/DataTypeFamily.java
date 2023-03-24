@@ -18,7 +18,7 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 /**
  * An enumeration of Data type families for clustering {@link DataTypeRoot}s into categories.
@@ -29,7 +29,7 @@ import org.apache.paimon.annotation.Experimental;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public enum DataTypeFamily {
     PREDEFINED,
 

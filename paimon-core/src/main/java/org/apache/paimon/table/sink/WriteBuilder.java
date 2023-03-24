@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowType;
 
@@ -29,7 +29,7 @@ import java.io.Serializable;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface WriteBuilder extends Serializable {
 
     /** A name to identify this table. */

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.reader;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.utils.CloseableIterator;
 
 import javax.annotation.Nullable;
@@ -34,7 +34,7 @@ import java.util.function.Function;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface RecordReader<T> extends Closeable {
 
     /**

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.schema;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.types.DataType;
 
 import javax.annotation.Nullable;
@@ -32,7 +32,7 @@ import java.util.Objects;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface SchemaChange extends Serializable {
 
     static SchemaChange setOption(String key, String value) {

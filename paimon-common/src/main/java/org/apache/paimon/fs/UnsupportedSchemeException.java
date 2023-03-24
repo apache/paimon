@@ -18,7 +18,7 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 import java.io.IOException;
 
@@ -27,7 +27,7 @@ import java.io.IOException;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class UnsupportedSchemeException extends IOException {
 
     private static final long serialVersionUID = 1L;

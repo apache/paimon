@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 
 /**
@@ -39,7 +39,7 @@ import org.apache.paimon.data.InternalRow;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface StreamWriteBuilder extends WriteBuilder {
 
     /** Get commit user, set by {@link #withCommitUser}. */

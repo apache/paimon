@@ -18,7 +18,7 @@
 
 package org.apache.paimon.data;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.Preconditions;
@@ -39,7 +39,7 @@ import java.time.LocalTime;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public final class Timestamp implements Comparable<Timestamp>, Serializable {
 
     private static final long serialVersionUID = 1L;

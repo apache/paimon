@@ -18,14 +18,14 @@
 
 package org.apache.paimon.data;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 /**
  * Getters to get data.
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface DataGetters {
 
     /** Returns true if the element is null at the given position. */

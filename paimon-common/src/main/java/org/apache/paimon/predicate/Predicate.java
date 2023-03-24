@@ -18,7 +18,7 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.format.FieldStats;
 
 import java.io.Serializable;
@@ -30,7 +30,7 @@ import java.util.Optional;
  * @see PredicateBuilder
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface Predicate extends Serializable {
 
     /**

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.data;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.DataType;
@@ -41,7 +41,7 @@ import static org.apache.paimon.memory.MemorySegment.UNSAFE;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public final class BinaryArray extends BinarySection implements InternalArray, DataSetters {
 
     private static final long serialVersionUID = 1L;

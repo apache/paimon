@@ -100,7 +100,7 @@ public class FlinkCdcSinkBuilder<T> {
         CdcBucketStreamPartitioner partitioner =
                 new CdcBucketStreamPartitioner(
                         table.schema(),
-                        table.options()
+                        table.coreOptions()
                                 .toConfiguration()
                                 .get(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION));
         PartitionTransformation<CdcRecord> partitioned =

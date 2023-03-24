@@ -18,14 +18,14 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 /**
  * Signals that an end of scanning has been reached unexpectedly during input.
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class EndOfScanException extends RuntimeException {
 
     private static final long serialVersionUID = 1L;

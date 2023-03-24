@@ -18,7 +18,7 @@
 
 package org.apache.paimon.disk;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.memory.Buffer;
 import org.apache.paimon.memory.MemorySegment;
 
@@ -29,7 +29,7 @@ import java.io.IOException;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface BufferFileWriter extends FileIOChannel {
 
     /**
