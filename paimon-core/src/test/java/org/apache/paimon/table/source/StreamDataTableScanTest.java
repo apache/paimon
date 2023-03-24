@@ -26,7 +26,6 @@ import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.sink.TableCommitImpl;
-import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.snapshot.ScannerTestBase;
 import org.apache.paimon.types.RowKind;
 
@@ -163,7 +162,8 @@ public class StreamDataTableScanTest extends ScannerTestBase {
 
         // full compaction done, read new changelog
         plan = scan.plan();
-        // because StreamWriteBuilder#newCommit will not ignore the empty snapshot, so snapshot id will equal 7
+        // because StreamWriteBuilder#newCommit will not ignore the empty snapshot, so snapshot id
+        // will equal 7
         assertThat(plan.snapshotId).isEqualTo(7);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(
