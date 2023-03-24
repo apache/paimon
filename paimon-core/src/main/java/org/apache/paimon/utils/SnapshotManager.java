@@ -26,6 +26,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
@@ -163,6 +164,7 @@ public class SnapshotManager implements Serializable {
     public Iterator<Snapshot> snapshots() throws IOException {
         return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
                 .map(this::snapshot)
+                .sorted(Comparator.comparingLong(Snapshot::id))
                 .iterator();
     }
 
