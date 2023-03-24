@@ -29,6 +29,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
@@ -84,21 +85,21 @@ public class SchemaEvolutionTest {
         schemaManager.createTable(schema);
 
         FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
-
-        StreamTableWrite write = table.newWrite(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
         write.write(GenericRow.of(1, 1L));
         write.write(GenericRow.of(2, 2L));
-        table.newCommit(commitUser).commit(0, write.prepareCommit(true, 0));
+        streamWriteBuilder.newCommit().commit(0, write.prepareCommit(true, 0));
         write.close();
 
         schemaManager.commitChanges(
                 Collections.singletonList(SchemaChange.addColumn("f3", new BigIntType())));
         table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
 
-        write = table.newWrite(commitUser);
+        write = streamWriteBuilder.newWrite();
         write.write(GenericRow.of(3, 3L, 3L));
         write.write(GenericRow.of(4, 4L, 4L));
-        table.newCommit(commitUser).commit(1, write.prepareCommit(true, 1));
+        streamWriteBuilder.newCommit().commit(1, write.prepareCommit(true, 1));
         write.close();
 
         // read all

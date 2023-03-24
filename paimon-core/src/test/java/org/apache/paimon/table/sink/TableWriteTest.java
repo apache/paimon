@@ -107,8 +107,9 @@ public class TableWriteTest {
         }
 
         FileStoreTable table = createFileStoreTable();
-        TableWriteImpl<?> write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        TableWriteImpl<?> write = (TableWriteImpl<?>) streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
 
         Map<String, Long> expected = new HashMap<>();
         List<List<CommitMessage>> commitList = new ArrayList<>();
@@ -130,7 +131,7 @@ public class TableWriteTest {
                         case EXTRACT_STATE:
                             List<AbstractFileStoreWrite.State> state = write.checkpoint();
                             write.close();
-                            write = table.newWrite(commitUser);
+                            write = (TableWriteImpl<?>) streamWriteBuilder.newWrite();
                             write.restore(state);
                             break;
                     }

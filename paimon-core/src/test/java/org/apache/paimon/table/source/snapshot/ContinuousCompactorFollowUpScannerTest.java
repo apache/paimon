@@ -21,8 +21,11 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.system.BucketsTable;
@@ -48,8 +51,9 @@ public class ContinuousCompactorFollowUpScannerTest extends ScannerTestBase {
     @Test
     public void testGetPlan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
@@ -66,8 +70,10 @@ public class ContinuousCompactorFollowUpScannerTest extends ScannerTestBase {
 
         Map<String, String> overwritePartition = new HashMap<>();
         overwritePartition.put("pt", "1");
-        write = table.newWrite(commitUser).withOverwrite(true);
-        commit = table.newCommit(commitUser).withOverwrite(overwritePartition);
+        write = ((TableWriteImpl<?>) streamWriteBuilder.newWrite()).withOverwrite(true);
+        commit =
+                ((InnerTableCommit) streamWriteBuilder.newCommit())
+                        .withOverwrite(overwritePartition);
         write.write(rowData(1, 10, 101L));
         write.write(rowData(1, 20, 201L));
         commit.commit(2, write.prepareCommit(true, 2));
