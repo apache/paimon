@@ -32,9 +32,11 @@ import java.util.Collection;
 public class SimpleSystemSource extends FlinkSource {
 
     private static final long serialVersionUID = 2L;
+    private final int splitBatchSize;
 
-    public SimpleSystemSource(ReadBuilder readBuilder, @Nullable Long limit) {
+    public SimpleSystemSource(ReadBuilder readBuilder, @Nullable Long limit, int splitBatchSize) {
         super(readBuilder, limit);
+        this.splitBatchSize = splitBatchSize;
     }
 
     @Override
@@ -52,6 +54,6 @@ public class SimpleSystemSource extends FlinkSource {
                                 .createSplits(readBuilder.newScan().plan())
                         : checkpoint.splits();
 
-        return new StaticFileStoreSplitEnumerator(context, null, splits);
+        return new StaticFileStoreSplitEnumerator(context, null, splits, splitBatchSize);
     }
 }
