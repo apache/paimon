@@ -44,6 +44,7 @@ import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataType;
@@ -394,8 +395,9 @@ public abstract class FileStoreTableTestBase {
         write.write(new JoinedRow(rowData(1, 40, 400L), GenericRow.of(4000)));
         commit.commit(1, write.prepareCommit(true, 1));
 
-        List<Split> splits = table.newScan().plan().splits();
-        TableRead read = table.newRead();
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
         Function<InternalRow, String> toString =
                 rowData ->
                         BATCH_ROW_TO_STRING.apply(rowData)

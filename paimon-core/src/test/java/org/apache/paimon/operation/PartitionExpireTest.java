@@ -29,6 +29,7 @@ import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
@@ -120,8 +121,10 @@ public class PartitionExpireTest {
 
     private List<String> read() throws IOException {
         List<String> ret = new ArrayList<>();
-        table.newRead()
-                .createReader(table.newScan().plan().splits())
+        ReadBuilder readBuilder = table.newReadBuilder();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan().splits())
                 .forEachRemaining(row -> ret.add(row.getString(0) + ":" + row.getString(1)));
         return ret;
     }
