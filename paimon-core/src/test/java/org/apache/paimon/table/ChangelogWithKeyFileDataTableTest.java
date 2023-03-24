@@ -58,7 +58,8 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                     List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
 
                     // filter with "a" = 1122 in schema1 which is not exist in schema0
-                    TableRead read1 = table.newRead().withFilter(builder.equal(3, 1122));
+                    TableRead read1 =
+                            table.newReadBuilder().withFilter(builder.equal(3, 1122)).newRead();
                     assertThat(getResult(read1, splits, SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(
@@ -78,7 +79,8 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                                     table.newSnapshotSplitReader()
                                             .withFilter(builder.equal(3, 1122))
                                             .splits());
-                    TableRead read2 = table.newRead().withFilter(builder.equal(3, 1122));
+                    TableRead read2 =
+                            table.newReadBuilder().withFilter(builder.equal(3, 1122)).newRead();
                     assertThat(getResult(read2, splits, SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(
@@ -108,7 +110,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                                     table.newSnapshotSplitReader()
                                             .withFilter(builder.equal(4, 114L))
                                             .splits());
-                    TableRead read = table.newRead();
+                    TableRead read = table.newReadBuilder().newRead();
                     assertThat(getResult(read, splits, SCHEMA_0_ROW_TO_STRING))
                             .hasSameElementsAs(Collections.singletonList("S004|1|14|S14|114|S114"));
                     return null;
@@ -123,14 +125,15 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                                     table.newSnapshotSplitReader()
                                             .withFilter(builder.equal(2, 114L))
                                             .splits());
-                    TableRead read1 = table.newRead();
+                    TableRead read1 = table.newReadBuilder().newRead();
                     assertThat(getResult(read1, splits, SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Collections.singletonList("1|14|114|null|null|null"));
 
                     // read filter with "kt" = 114 in schema1
                     splits = toSplits(table.newSnapshotSplitReader().splits());
-                    TableRead read2 = table.newRead().withFilter(builder.equal(2, 114L));
+                    TableRead read2 =
+                            table.newReadBuilder().withFilter(builder.equal(2, 114L)).newRead();
                     assertThat(getResult(read2, splits, SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Collections.singletonList("1|14|114|null|null|null"));
@@ -153,7 +156,8 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                                             .withKind(ScanKind.DELTA)
                                             .splits());
                     // filter with "b" = 15 in schema0
-                    TableRead read = table.newRead().withFilter(builder.equal(2, 15));
+                    TableRead read =
+                            table.newReadBuilder().withFilter(builder.equal(2, 15)).newRead();
 
                     /// TODO: changelog with key only supports to filter key
                     assertThat(getResult(read, splits, STREAMING_SCHEMA_0_ROW_TO_STRING))
@@ -175,7 +179,8 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
 
                     // filter with "d" = 15 in schema1 which should be mapped to "b" = 15 in schema0
                     /// TODO: changelog with key only supports to filter on key
-                    TableRead read1 = table.newRead().withFilter(builder.equal(1, 15));
+                    TableRead read1 =
+                            table.newReadBuilder().withFilter(builder.equal(1, 15)).newRead();
                     assertThat(getResult(read1, splits, STREAMING_SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(
@@ -185,7 +190,8 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
 
                     // filter with "d" = 21 in schema1
                     /// TODO: changelog with key only supports to filter on key
-                    TableRead read2 = table.newRead().withFilter(builder.equal(1, 21));
+                    TableRead read2 =
+                            table.newReadBuilder().withFilter(builder.equal(1, 21)).newRead();
                     assertThat(getResult(read2, splits, STREAMING_SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(
@@ -210,7 +216,8 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                                             .withKind(ScanKind.DELTA)
                                             .splits());
                     // filter with "kt" = 116 in schema0
-                    TableRead read = table.newRead().withFilter(builder.equal(4, 116));
+                    TableRead read =
+                            table.newReadBuilder().withFilter(builder.equal(4, 116)).newRead();
 
                     assertThat(getResult(read, splits, STREAMING_SCHEMA_0_ROW_TO_STRING))
                             .hasSameElementsAs(
@@ -228,7 +235,8 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                                             .splits());
 
                     // filter with "kt" = 120 in schema1
-                    TableRead read = table.newRead().withFilter(builder.equal(1, 120));
+                    TableRead read =
+                            table.newReadBuilder().withFilter(builder.equal(1, 120)).newRead();
                     assertThat(getResult(read, splits, STREAMING_SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(

@@ -356,7 +356,7 @@ public class SchemaEvolutionTest {
             snapshotSplitReader.withFilter(filter);
         }
         for (Split split : snapshotSplitReader.splits()) {
-            InnerTableRead read = table.newRead();
+            InnerTableRead read = (InnerTableRead) table.newReadBuilder().newRead();
             if (filter != null) {
                 read.withFilter(filter);
             }

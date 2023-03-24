@@ -33,6 +33,8 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowKind;
@@ -55,7 +57,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .isEqualTo(
                         Arrays.asList(
@@ -76,7 +78,9 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
-        TableRead read = table.newRead().withProjection(PROJECTION);
+        ReadBuilder readBuilder = table.newReadBuilder();
+        InnerTableRead tableRead = (InnerTableRead) readBuilder.newRead();
+        TableRead read = tableRead.withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("101|11", "101|11", "102|12"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_PROJECTED_ROW_TO_STRING))
@@ -92,7 +96,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         Predicate predicate = builder.equal(2, 201L);
         List<Split> splits =
                 toSplits(table.newSnapshotSplitReader().withFilter(predicate).splits());
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
                 .isEqualTo(
@@ -109,7 +113,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
 
         List<Split> splits =
                 toSplits(table.newSnapshotSplitReader().withKind(ScanKind.DELTA).splits());
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
                         Arrays.asList(
@@ -130,7 +134,9 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
 
         List<Split> splits =
                 toSplits(table.newSnapshotSplitReader().withKind(ScanKind.DELTA).splits());
-        TableRead read = table.newRead().withProjection(PROJECTION);
+        ReadBuilder readBuilder = table.newReadBuilder();
+        InnerTableRead tableRead = (InnerTableRead) readBuilder.newRead();
+        TableRead read = tableRead.withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("-100|10", "+101|11"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_PROJECTED_ROW_TO_STRING))
@@ -150,7 +156,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
                                 .withKind(ScanKind.DELTA)
                                 .withFilter(predicate)
                                 .splits());
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(

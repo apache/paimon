@@ -55,7 +55,7 @@ public class DeltaFollowUpScannerTest extends ScannerTestBase {
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(3);
 
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         DeltaFollowUpScanner scanner = new DeltaFollowUpScanner();
 
         Snapshot snapshot = snapshotManager.snapshot(1);

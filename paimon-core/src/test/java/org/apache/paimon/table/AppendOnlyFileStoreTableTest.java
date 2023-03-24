@@ -63,7 +63,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
                         Arrays.asList(
@@ -87,7 +87,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
-        TableRead read = table.newRead().withProjection(PROJECTION);
+        TableRead read = table.newReadBuilder().withProjection(PROJECTION).newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_PROJECTED_ROW_TO_STRING))
                 .hasSameElementsAs(Arrays.asList("100|10", "101|11", "102|12", "101|11", "102|12"));
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_PROJECTED_ROW_TO_STRING))
@@ -103,7 +103,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         Predicate predicate = builder.equal(2, 201L);
         List<Split> splits =
                 toSplits(table.newSnapshotSplitReader().withFilter(predicate).splits());
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
@@ -176,7 +176,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
 
         List<Split> splits =
                 toSplits(table.newSnapshotSplitReader().withKind(ScanKind.DELTA).splits());
-        TableRead read = table.newRead().withProjection(PROJECTION);
+        TableRead read = table.newReadBuilder().withProjection(PROJECTION).newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("+101|11", "+102|12"));
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_PROJECTED_ROW_TO_STRING))
@@ -196,7 +196,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 .withKind(ScanKind.DELTA)
                                 .withFilter(predicate)
                                 .splits());
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
                         Arrays.asList(
@@ -254,7 +254,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 .withFilter(partitionFilter)
                                 .withBucket(bucket)
                                 .splits());
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
 
         assertThat(getResult(read, splits, binaryRow(partition), bucket, STREAMING_ROW_TO_STRING))
                 .containsExactlyElementsOf(

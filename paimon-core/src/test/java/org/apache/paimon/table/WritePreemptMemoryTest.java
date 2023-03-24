@@ -78,7 +78,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
 
         // read
         List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         List<String> results = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
             results.addAll(getResult(read, splits, binaryRow(i), 0, BATCH_ROW_TO_STRING));
