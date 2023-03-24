@@ -20,7 +20,6 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.snapshot.ScannerTestBase;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.SnapshotManager;
@@ -39,9 +38,8 @@ public class BatchDataTableScanTest extends ScannerTestBase {
     public void testPlan() throws Exception {
         ReadBuilder readBuilder = table.newReadBuilder();
         SnapshotManager snapshotManager = table.snapshotManager();
-        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
-        StreamTableWrite write = streamWriteBuilder.newWrite();
-        StreamTableCommit commit = streamWriteBuilder.newCommit();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         BatchDataTableScan scan = (BatchDataTableScan) readBuilder.newScan();
 
         write.write(rowData(1, 10, 100L));

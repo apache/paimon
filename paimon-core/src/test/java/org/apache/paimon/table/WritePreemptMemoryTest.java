@@ -30,7 +30,6 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 
@@ -65,9 +64,8 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
     private void testWritePreemptMemory(boolean singlePartition) throws Exception {
         // write
         FileStoreTable table = createFileStoreTable();
-        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
-        StreamTableWrite write = streamWriteBuilder.newWrite();
-        StreamTableCommit commit = streamWriteBuilder.newCommit();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         Random random = new Random();
         List<String> expected = new ArrayList<>();
         for (int i = 0; i < 10_000; i++) {

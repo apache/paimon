@@ -135,11 +135,9 @@ public class PartitionExpireTest {
 
     private void write(String f0, String f1) throws Exception {
         StreamTableWrite write =
-                table.copy(Collections.singletonMap(WRITE_ONLY.key(), "true"))
-                        .newStreamWriteBuilder()
-                        .newWrite();
+                table.copy(Collections.singletonMap(WRITE_ONLY.key(), "true")).newWrite("");
         write.write(GenericRow.of(BinaryString.fromString(f0), BinaryString.fromString(f1)));
-        table.newStreamWriteBuilder().newCommit().commit(0, write.prepareCommit(true, 0));
+        table.newCommit("").commit(0, write.prepareCommit(true, 0));
         write.close();
     }
 

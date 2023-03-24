@@ -20,7 +20,6 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.SnapshotManager;
@@ -37,9 +36,8 @@ public class CompactedStartingScannerTest extends ScannerTestBase {
     @Test
     public void testGetPlan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
-        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
-        StreamTableWrite write = streamWriteBuilder.newWrite();
-        StreamTableCommit commit = streamWriteBuilder.newCommit();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
@@ -78,9 +76,8 @@ public class CompactedStartingScannerTest extends ScannerTestBase {
     @Test
     public void testNoCompactSnapshot() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
-        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
-        StreamTableWrite write = streamWriteBuilder.newWrite();
-        StreamTableCommit commit = streamWriteBuilder.newCommit();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));

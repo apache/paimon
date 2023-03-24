@@ -24,7 +24,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.snapshot.ScannerTestBase;
 import org.apache.paimon.types.RowKind;
@@ -45,9 +44,8 @@ public class StreamDataTableScanTest extends ScannerTestBase {
     @Test
     public void testPlan() throws Exception {
         TableRead read = table.newReadBuilder().newRead();
-        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
-        StreamTableWrite write = streamWriteBuilder.newWrite();
-        StreamTableCommit commit = streamWriteBuilder.newCommit();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         StreamDataTableScan scan = (StreamDataTableScan) table.newReadBuilder().newStreamScan();
 
         // first call without any snapshot, should return null
@@ -111,9 +109,8 @@ public class StreamDataTableScanTest extends ScannerTestBase {
 
         table = table.copy(conf.toMap());
         TableRead read = table.newReadBuilder().newRead();
-        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
-        StreamTableWrite write = streamWriteBuilder.newWrite();
-        StreamTableCommit commit = streamWriteBuilder.newCommit();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
         StreamDataTableScan scan = (StreamDataTableScan) table.newReadBuilder().newStreamScan();
 
         // first call without any snapshot, should return null
@@ -184,9 +181,8 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         options.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "4");
         FileStoreTable table = this.table.copy(options);
         TableRead read = table.newReadBuilder().newRead();
-        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
-        StreamTableWrite write = streamWriteBuilder.newWrite();
-        TableCommitImpl commit = (TableCommitImpl) streamWriteBuilder.newCommit();
+        StreamTableWrite write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
         StreamDataTableScan scan = (StreamDataTableScan) table.newReadBuilder().newStreamScan();
 
         write.write(rowData(1, 10, 100L));
@@ -211,9 +207,8 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         options.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "8");
         FileStoreTable table = this.table.copy(options);
         TableRead read = table.newReadBuilder().newRead();
-        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
-        StreamTableWrite write = streamWriteBuilder.newWrite();
-        TableCommitImpl commit = (TableCommitImpl) streamWriteBuilder.newCommit();
+        StreamTableWrite write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
         StreamDataTableScan scan = (StreamDataTableScan) table.newReadBuilder().newStreamScan();
 
         write.write(rowData(1, 10, 100L));

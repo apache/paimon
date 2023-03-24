@@ -38,7 +38,6 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
@@ -169,9 +168,8 @@ public abstract class SchemaEvolutionTableTestBase {
                         tableConfig.toMap(),
                         ""));
         FileStoreTable table = createFileStoreTable.apply(tableSchemas);
-        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
-        StreamTableWrite write = streamWriteBuilder.newWrite();
-        StreamTableCommit commit = streamWriteBuilder.newCommit();
+        StreamTableWrite write = table.newWrite("user");
+        StreamTableCommit commit = table.newCommit("user");
 
         write.write(rowData("S001", 1, 11, "S11", 111L, "S111"));
         write.write(rowData("S002", 2, 12, "S12", 112L, "S112"));
@@ -208,8 +206,8 @@ public abstract class SchemaEvolutionTableTestBase {
                         tableConfig.toMap(),
                         ""));
         table = createFileStoreTable.apply(tableSchemas);
-        write = streamWriteBuilder.newWrite();
-        commit = streamWriteBuilder.newCommit();
+        write = table.newWrite("user");
+        commit = table.newCommit("user");
 
         write.write(rowData(1, 17, 117L, 1117, "S007", "S17"));
         write.write(rowData(2, 18, 118L, 1118, "S008", "S18"));
@@ -245,9 +243,8 @@ public abstract class SchemaEvolutionTableTestBase {
                         tableConfig.toMap(),
                         ""));
         FileStoreTable table = createFileStoreTable.apply(tableSchemas);
-        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
-        StreamTableWrite write = streamWriteBuilder.newWrite();
-        StreamTableCommit commit = streamWriteBuilder.newCommit();
+        StreamTableWrite write = table.newWrite("user");
+        StreamTableCommit commit = table.newCommit("user");
 
         /**
          * Generate two files:
@@ -343,8 +340,8 @@ public abstract class SchemaEvolutionTableTestBase {
                         tableConfig.toMap(),
                         ""));
         table = createFileStoreTable.apply(tableSchemas);
-        write = streamWriteBuilder.newWrite();
-        commit = streamWriteBuilder.newCommit();
+        write = table.newWrite("user");
+        commit = table.newCommit("user");
 
         /**
          * Generate another two files:
