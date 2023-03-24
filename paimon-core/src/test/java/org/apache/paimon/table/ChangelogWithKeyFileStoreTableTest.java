@@ -420,9 +420,10 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                         "+I 1|20|201|binary|varbinary"),
                                 // partition 2
                                 Collections.singletonList("-D 2|10|301|binary|varbinary")));
-
+        StreamDataTableScan streamTableScan =
+                (StreamDataTableScan) table.newReadBuilder().newStreamScan();
         StreamDataTableScan scan =
-                table.newStreamScan()
+                streamTableScan
                         .withStartingScanner(new FullStartingScanner())
                         .withFollowUpScanner(new InputChangelogFollowUpScanner());
         scan.restore(1L);

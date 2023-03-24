@@ -46,7 +46,7 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
-        StreamDataTableScan scan = table.newStreamScan();
+        StreamDataTableScan scan = (StreamDataTableScan) table.newReadBuilder().newStreamScan();
 
         // first call without any snapshot, should return null
         assertThat(scan.plan()).isNull();
@@ -111,7 +111,7 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
-        StreamDataTableScan scan = table.newStreamScan();
+        StreamDataTableScan scan = (StreamDataTableScan) table.newReadBuilder().newStreamScan();
 
         // first call without any snapshot, should return null
         assertThat(scan.plan()).isNull();
@@ -183,7 +183,7 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         TableCommitImpl commit = table.newCommit(commitUser);
-        StreamDataTableScan scan = table.newStreamScan();
+        StreamDataTableScan scan = (StreamDataTableScan) table.newReadBuilder().newStreamScan();
 
         write.write(rowData(1, 10, 100L));
         ManifestCommittable committable = new ManifestCommittable(0, 5L);
@@ -209,7 +209,7 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         TableCommitImpl commit = table.newCommit(commitUser);
-        StreamDataTableScan scan = table.newStreamScan();
+        StreamDataTableScan scan = (StreamDataTableScan) table.newReadBuilder().newStreamScan();
 
         write.write(rowData(1, 10, 100L));
         ManifestCommittable committable = new ManifestCommittable(0, 5L);

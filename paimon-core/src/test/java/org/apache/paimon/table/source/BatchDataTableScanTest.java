@@ -36,10 +36,11 @@ public class BatchDataTableScanTest extends ScannerTestBase {
 
     @Test
     public void testPlan() throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder();
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
-        BatchDataTableScan scan = table.newScan();
+        BatchDataTableScan scan = (BatchDataTableScan) readBuilder.newScan();
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
