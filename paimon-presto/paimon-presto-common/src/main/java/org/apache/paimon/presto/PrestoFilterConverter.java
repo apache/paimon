@@ -88,7 +88,7 @@ public class PrestoFilterConverter {
         if (conjuncts.isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(builder.and());
+        return Optional.of(PredicateBuilder.and(conjuncts));
     }
 
     private Predicate toPredicate(int columnIndex, Type type, Domain domain) {
