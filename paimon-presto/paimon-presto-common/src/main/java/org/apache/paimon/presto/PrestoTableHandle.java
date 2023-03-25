@@ -115,8 +115,7 @@ public class PrestoTableHandle implements ConnectorTableHandle {
         return lazyTable;
     }
 
-    public ConnectorTableMetadata tableMetadata(
-            TypeManager typeManager) {
+    public ConnectorTableMetadata tableMetadata(TypeManager typeManager) {
         return new ConnectorTableMetadata(
                 new SchemaTableName(schemaName, tableName), columnMetadatas(typeManager));
     }

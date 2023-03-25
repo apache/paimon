@@ -171,7 +171,8 @@ public abstract class PrestoPageSourceBase implements ConnectorPageSource {
                 Verify.verify(isShortDecimal(prestoType), "The type should be short decimal");
                 DecimalType decimalType = (DecimalType) prestoType;
                 BigDecimal decimal = ((Decimal) value).toBigDecimal();
-                prestoType.writeLong(output, encodeShortScaledValue(decimal, decimalType.getScale()));
+                prestoType.writeLong(
+                        output, encodeShortScaledValue(decimal, decimalType.getScale()));
             } else if (prestoType.equals(DATE)) {
                 prestoType.writeLong(output, (int) value);
             } else if (prestoType.equals(TIMESTAMP)) {
@@ -222,7 +223,8 @@ public abstract class PrestoPageSourceBase implements ConnectorPageSource {
         }
     }
 
-    private void writeBlock(BlockBuilder output, Type prestoType, DataType paimonType, Object value) {
+    private void writeBlock(
+            BlockBuilder output, Type prestoType, DataType paimonType, Object value) {
         if (prestoType instanceof ArrayType) {
             BlockBuilder builder = output.beginBlockEntry();
 
@@ -230,7 +232,7 @@ public abstract class PrestoPageSourceBase implements ConnectorPageSource {
             DataType elementType = DataTypeChecks.getNestedTypes(paimonType).get(0);
             for (int i = 0; i < arrayData.size(); i++) {
                 appendTo(
-                    prestoType.getTypeParameters().get(0),
+                        prestoType.getTypeParameters().get(0),
                         elementType,
                         RowDataUtils.get(arrayData, i, elementType),
                         builder);
@@ -264,12 +266,12 @@ public abstract class PrestoPageSourceBase implements ConnectorPageSource {
             BlockBuilder builder = output.beginBlockEntry();
             for (int i = 0; i < keyArray.size(); i++) {
                 appendTo(
-                    prestoType.getTypeParameters().get(0),
+                        prestoType.getTypeParameters().get(0),
                         keyType,
                         RowDataUtils.get(keyArray, i, keyType),
                         builder);
                 appendTo(
-                    prestoType.getTypeParameters().get(1),
+                        prestoType.getTypeParameters().get(1),
                         valueType,
                         RowDataUtils.get(valueArray, i, valueType),
                         builder);
@@ -278,6 +280,7 @@ public abstract class PrestoPageSourceBase implements ConnectorPageSource {
             return;
         }
         throw new PrestoException(
-                GENERIC_INTERNAL_ERROR, "Unhandled type for Block: " + prestoType.getTypeSignature());
+                GENERIC_INTERNAL_ERROR,
+                "Unhandled type for Block: " + prestoType.getTypeSignature());
     }
 }
