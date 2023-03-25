@@ -158,9 +158,16 @@ public class PrestoTypeUtils {
         } else if (prestoType instanceof TimestampWithTimeZoneType) {
             return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE();
         } else if (prestoType instanceof com.facebook.presto.common.type.ArrayType) {
-            return DataTypes.ARRAY(toPaimonType(prestoType));
+            return DataTypes.ARRAY(
+                    toPaimonType(
+                            ((com.facebook.presto.common.type.ArrayType) prestoType)
+                                    .getElementType()));
         } else if (prestoType instanceof com.facebook.presto.common.type.MapType) {
-            return DataTypes.MAP(toPaimonType(prestoType), toPaimonType(prestoType));
+            return DataTypes.MAP(
+                    toPaimonType(
+                            ((com.facebook.presto.common.type.MapType) prestoType).getKeyType()),
+                    toPaimonType(
+                            ((com.facebook.presto.common.type.MapType) prestoType).getValueType()));
         } else {
             throw new UnsupportedOperationException(
                     format("Cannot convert from Presto type '%s' to Paimon type", prestoType));
