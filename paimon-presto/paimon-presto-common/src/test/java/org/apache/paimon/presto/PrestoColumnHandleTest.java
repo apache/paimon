@@ -60,7 +60,7 @@ public class PrestoColumnHandleTest {
         PrestoColumnHandle actual = codec.fromJson(json);
         assertThat(actual).isEqualTo(expected);
         assertThat(actual.getColumnName()).isEqualTo(expected.getColumnName());
-        assertThat(actual.logicalType()).isEqualTo(expected.logicalType());
+        assertThat(actual.paimonType()).isEqualTo(expected.paimonType());
         assertThat(actual.getPrestoType()).isEqualTo(expected.getPrestoType());
         assertThat(actual.getTypeString()).isEqualTo(expected.getTypeString());
     }

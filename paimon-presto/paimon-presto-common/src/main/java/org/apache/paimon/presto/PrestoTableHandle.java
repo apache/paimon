@@ -33,7 +33,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -116,11 +115,10 @@ public class PrestoTableHandle implements ConnectorTableHandle {
         return lazyTable;
     }
 
-    public ConnectorTableMetadata tableMetadata(TypeManager typeManager) {
+    public ConnectorTableMetadata tableMetadata(
+            TypeManager typeManager) {
         return new ConnectorTableMetadata(
-                new SchemaTableName(schemaName, tableName),
-                columnMetadatas(typeManager),
-                Collections.emptyMap());
+                new SchemaTableName(schemaName, tableName), columnMetadatas(typeManager));
     }
 
     public List<ColumnMetadata> columnMetadatas(TypeManager typeManager) {

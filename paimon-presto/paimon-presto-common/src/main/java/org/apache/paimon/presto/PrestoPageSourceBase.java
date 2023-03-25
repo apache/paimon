@@ -71,23 +71,23 @@ public abstract class PrestoPageSourceBase implements ConnectorPageSource {
 
     private final RecordReader<InternalRow> reader;
     private final PageBuilder pageBuilder;
-    private final List<Type> columnTypes;
-    private final List<DataType> logicalTypes;
+    private final List<Type> prestoColumnTypes;
+    private final List<DataType> paimonColumnTypes;
 
     private boolean isFinished = false;
 
     public PrestoPageSourceBase(
             RecordReader<InternalRow> reader, List<ColumnHandle> projectedColumns) {
         this.reader = reader;
-        this.columnTypes = new ArrayList<>();
-        this.logicalTypes = new ArrayList<>();
+        this.prestoColumnTypes = new ArrayList<>();
+        this.paimonColumnTypes = new ArrayList<>();
         for (ColumnHandle handle : projectedColumns) {
             PrestoColumnHandle prestoColumnHandle = (PrestoColumnHandle) handle;
-            columnTypes.add(prestoColumnHandle.getPrestoType());
-            logicalTypes.add(prestoColumnHandle.logicalType());
+            prestoColumnTypes.add(prestoColumnHandle.getPrestoType());
+            paimonColumnTypes.add(prestoColumnHandle.paimonType());
         }
 
-        this.pageBuilder = new PageBuilder(columnTypes);
+        this.pageBuilder = new PageBuilder(prestoColumnTypes);
     }
 
     @Override
@@ -133,12 +133,12 @@ public abstract class PrestoPageSourceBase implements ConnectorPageSource {
         InternalRow row;
         while ((row = batch.next()) != null) {
             pageBuilder.declarePosition();
-            for (int i = 0; i < columnTypes.size(); i++) {
+            for (int i = 0; i < prestoColumnTypes.size(); i++) {
                 BlockBuilder output = pageBuilder.getBlockBuilder(i);
                 appendTo(
-                        columnTypes.get(i),
-                        logicalTypes.get(i),
-                        RowDataUtils.get(row, i, logicalTypes.get(i)),
+                        prestoColumnTypes.get(i),
+                        paimonColumnTypes.get(i),
+                        RowDataUtils.get(row, i, paimonColumnTypes.get(i)),
                         output);
             }
         }
@@ -153,48 +153,48 @@ public abstract class PrestoPageSourceBase implements ConnectorPageSource {
         this.reader.close();
     }
 
-    private void appendTo(Type type, DataType logicalType, Object value, BlockBuilder output) {
+    private void appendTo(Type prestoType, DataType paimonType, Object value, BlockBuilder output) {
         if (value == null) {
             output.appendNull();
             return;
         }
 
-        Class<?> javaType = type.getJavaType();
+        Class<?> javaType = prestoType.getJavaType();
         if (javaType == boolean.class) {
-            type.writeBoolean(output, (Boolean) value);
+            prestoType.writeBoolean(output, (Boolean) value);
         } else if (javaType == long.class) {
-            if (type.equals(BIGINT)) {
-                type.writeLong(output, ((Number) value).longValue());
-            } else if (type.equals(INTEGER)) {
-                type.writeLong(output, ((Number) value).intValue());
-            } else if (type instanceof DecimalType) {
-                Verify.verify(isShortDecimal(type), "The type should be short decimal");
-                DecimalType decimalType = (DecimalType) type;
+            if (prestoType.equals(BIGINT)) {
+                prestoType.writeLong(output, ((Number) value).longValue());
+            } else if (prestoType.equals(INTEGER)) {
+                prestoType.writeLong(output, ((Number) value).intValue());
+            } else if (prestoType instanceof DecimalType) {
+                Verify.verify(isShortDecimal(prestoType), "The type should be short decimal");
+                DecimalType decimalType = (DecimalType) prestoType;
                 BigDecimal decimal = ((Decimal) value).toBigDecimal();
-                type.writeLong(output, encodeShortScaledValue(decimal, decimalType.getScale()));
-            } else if (type.equals(DATE)) {
-                type.writeLong(output, (int) value);
-            } else if (type.equals(TIMESTAMP)) {
-                type.writeLong(output, ((Timestamp) value).getMillisecond() * 1_000);
-            } else if (type.equals(TIME)) {
-                type.writeLong(output, (int) value * 1_000);
+                prestoType.writeLong(output, encodeShortScaledValue(decimal, decimalType.getScale()));
+            } else if (prestoType.equals(DATE)) {
+                prestoType.writeLong(output, (int) value);
+            } else if (prestoType.equals(TIMESTAMP)) {
+                prestoType.writeLong(output, ((Timestamp) value).getMillisecond() * 1_000);
+            } else if (prestoType.equals(TIME)) {
+                prestoType.writeLong(output, (int) value * 1_000);
             } else {
                 throw new PrestoException(
                         GENERIC_INTERNAL_ERROR,
-                        format("Unhandled type for %s: %s", javaType.getSimpleName(), type));
+                        format("Unhandled type for %s: %s", javaType.getSimpleName(), prestoType));
             }
         } else if (javaType == double.class) {
-            type.writeDouble(output, ((Number) value).doubleValue());
-        } else if (type instanceof DecimalType) {
-            writeObject(output, type, value);
+            prestoType.writeDouble(output, ((Number) value).doubleValue());
+        } else if (prestoType instanceof DecimalType) {
+            writeObject(output, prestoType, value);
         } else if (javaType == Slice.class) {
-            writeSlice(output, type, value);
+            writeSlice(output, prestoType, value);
         } else if (javaType == Block.class) {
-            writeBlock(output, type, logicalType, value);
+            writeBlock(output, prestoType, paimonType, value);
         } else {
             throw new PrestoException(
                     GENERIC_INTERNAL_ERROR,
-                    format("Unhandled type for %s: %s", javaType.getSimpleName(), type));
+                    format("Unhandled type for %s: %s", javaType.getSimpleName(), prestoType));
         }
     }
 
@@ -222,15 +222,15 @@ public abstract class PrestoPageSourceBase implements ConnectorPageSource {
         }
     }
 
-    private void writeBlock(BlockBuilder output, Type type, DataType logicalType, Object value) {
-        if (type instanceof ArrayType) {
+    private void writeBlock(BlockBuilder output, Type prestoType, DataType paimonType, Object value) {
+        if (prestoType instanceof ArrayType) {
             BlockBuilder builder = output.beginBlockEntry();
 
             InternalArray arrayData = (InternalArray) value;
-            DataType elementType = DataTypeChecks.getNestedTypes(logicalType).get(0);
+            DataType elementType = DataTypeChecks.getNestedTypes(paimonType).get(0);
             for (int i = 0; i < arrayData.size(); i++) {
                 appendTo(
-                        type.getTypeParameters().get(0),
+                    prestoType.getTypeParameters().get(0),
                         elementType,
                         RowDataUtils.get(arrayData, i, elementType),
                         builder);
@@ -239,13 +239,13 @@ public abstract class PrestoPageSourceBase implements ConnectorPageSource {
             output.closeEntry();
             return;
         }
-        if (type instanceof RowType) {
+        if (prestoType instanceof RowType) {
             InternalRow rowData = (InternalRow) value;
             BlockBuilder builder = output.beginBlockEntry();
-            for (int index = 0; index < type.getTypeParameters().size(); index++) {
-                Type fieldType = type.getTypeParameters().get(index);
+            for (int index = 0; index < prestoType.getTypeParameters().size(); index++) {
+                Type fieldType = prestoType.getTypeParameters().get(index);
                 DataType fieldLogicalType =
-                        ((org.apache.paimon.types.RowType) logicalType).getTypeAt(index);
+                        ((org.apache.paimon.types.RowType) paimonType).getTypeAt(index);
                 appendTo(
                         fieldType,
                         fieldLogicalType,
@@ -255,21 +255,21 @@ public abstract class PrestoPageSourceBase implements ConnectorPageSource {
             output.closeEntry();
             return;
         }
-        if (type instanceof MapType) {
+        if (prestoType instanceof MapType) {
             InternalMap mapData = (InternalMap) value;
             InternalArray keyArray = mapData.keyArray();
             InternalArray valueArray = mapData.valueArray();
-            DataType keyType = ((org.apache.paimon.types.MapType) logicalType).getKeyType();
-            DataType valueType = ((org.apache.paimon.types.MapType) logicalType).getValueType();
+            DataType keyType = ((org.apache.paimon.types.MapType) paimonType).getKeyType();
+            DataType valueType = ((org.apache.paimon.types.MapType) paimonType).getValueType();
             BlockBuilder builder = output.beginBlockEntry();
             for (int i = 0; i < keyArray.size(); i++) {
                 appendTo(
-                        type.getTypeParameters().get(0),
+                    prestoType.getTypeParameters().get(0),
                         keyType,
                         RowDataUtils.get(keyArray, i, keyType),
                         builder);
                 appendTo(
-                        type.getTypeParameters().get(1),
+                    prestoType.getTypeParameters().get(1),
                         valueType,
                         RowDataUtils.get(valueArray, i, valueType),
                         builder);
@@ -278,6 +278,6 @@ public abstract class PrestoPageSourceBase implements ConnectorPageSource {
             return;
         }
         throw new PrestoException(
-                GENERIC_INTERNAL_ERROR, "Unhandled type for Block: " + type.getTypeSignature());
+                GENERIC_INTERNAL_ERROR, "Unhandled type for Block: " + prestoType.getTypeSignature());
     }
 }
