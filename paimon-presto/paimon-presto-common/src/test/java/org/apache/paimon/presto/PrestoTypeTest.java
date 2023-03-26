@@ -18,9 +18,12 @@
 
 package org.apache.paimon.presto;
 
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.TimeType;
+import org.apache.paimon.types.VarCharType;
 
 import com.facebook.presto.common.type.ArrayType;
 import com.facebook.presto.common.type.BigintType;
@@ -31,6 +34,7 @@ import com.facebook.presto.common.type.DecimalType;
 import com.facebook.presto.common.type.DoubleType;
 import com.facebook.presto.common.type.IntegerType;
 import com.facebook.presto.common.type.RealType;
+import com.facebook.presto.common.type.RowType;
 import com.facebook.presto.common.type.SmallintType;
 import com.facebook.presto.common.type.StandardTypes;
 import com.facebook.presto.common.type.TimestampType;
@@ -43,6 +47,8 @@ import com.facebook.presto.metadata.FunctionAndTypeManager;
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 import static com.facebook.presto.metadata.FunctionAndTypeManager.createTestFunctionAndTypeManager;
@@ -140,6 +146,15 @@ public class PrestoTypeTest {
                         createTestFunctionAndTypeManager());
         assertThat(Objects.requireNonNull(mapType).getDisplayName())
                 .isEqualTo("map(bigint, varchar)");
+
+        Type row =
+                PrestoTypeUtils.toPrestoType(
+                        DataTypes.ROW(
+                                new DataField(0, "id", new IntType()),
+                                new DataField(1, "name", new VarCharType(Integer.MAX_VALUE))),
+                        createTestFunctionAndTypeManager());
+        assertThat(Objects.requireNonNull(row).getDisplayName())
+                .isEqualTo("row(\"id\" integer, \"name\" varchar)");
     }
 
     @Test
@@ -204,5 +219,14 @@ public class PrestoTypeTest {
                                                 .getTypeSignature())));
         DataType mapType = PrestoTypeUtils.toPaimonType(parameterizedType);
         assertThat(mapType.asSQLString()).isEqualTo("MAP<BIGINT, STRING>");
+
+        List<RowType.Field> fields = new ArrayList<>();
+        fields.add(new RowType.Field(java.util.Optional.of("id"), IntegerType.INTEGER));
+        fields.add(
+                new RowType.Field(
+                        java.util.Optional.of("name"), VarcharType.createUnboundedVarcharType()));
+        Type type = RowType.from(fields);
+        DataType rowType = PrestoTypeUtils.toPaimonType(type);
+        assertThat(rowType.asSQLString()).isEqualTo("ROW<`id` INT, `name` STRING>");
     }
 }

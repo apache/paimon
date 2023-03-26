@@ -23,6 +23,7 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
@@ -32,6 +33,7 @@ import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
@@ -54,7 +56,10 @@ import com.facebook.presto.common.type.VarbinaryType;
 import com.facebook.presto.common.type.VarcharType;
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 
+import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static java.lang.String.format;
 
@@ -118,6 +123,17 @@ public class PrestoTypeUtils {
                     ImmutableList.of(
                             TypeSignatureParameter.of(keyType),
                             TypeSignatureParameter.of(valueType)));
+        } else if (paimonType instanceof RowType) {
+            RowType rowType = (RowType) paimonType;
+            List<com.facebook.presto.common.type.RowType.Field> fields =
+                    rowType.getFields().stream()
+                            .map(
+                                    field ->
+                                            com.facebook.presto.common.type.RowType.field(
+                                                    field.name(),
+                                                    toPrestoType(field.type(), typeManager)))
+                            .collect(Collectors.toList());
+            return com.facebook.presto.common.type.RowType.from(fields);
         } else {
             throw new UnsupportedOperationException(
                     format("Cannot convert from Paimon type '%s' to Presto type", paimonType));
@@ -168,6 +184,20 @@ public class PrestoTypeUtils {
                             ((com.facebook.presto.common.type.MapType) prestoType).getKeyType()),
                     toPaimonType(
                             ((com.facebook.presto.common.type.MapType) prestoType).getValueType()));
+        } else if (prestoType instanceof com.facebook.presto.common.type.RowType) {
+            com.facebook.presto.common.type.RowType rowType =
+                    (com.facebook.presto.common.type.RowType) prestoType;
+            AtomicInteger id = new AtomicInteger(0);
+            List<DataField> dataFields =
+                    rowType.getFields().stream()
+                            .map(
+                                    field ->
+                                            new DataField(
+                                                    id.getAndIncrement(),
+                                                    field.getName().get(),
+                                                    toPaimonType(field.getType())))
+                            .collect(Collectors.toList());
+            return new RowType(true, dataFields);
         } else {
             throw new UnsupportedOperationException(
                     format("Cannot convert from Presto type '%s' to Paimon type", prestoType));
