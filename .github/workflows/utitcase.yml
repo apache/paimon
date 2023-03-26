@@ -39,6 +39,7 @@ jobs:
       - name: Build
         run: ./mvnw clean install -DskipTests
       - name: Test
+        timeout-minutes: 60
         run: |
           # run tests with random timezone to find out timezone related bugs
           . .github/workflows/utils.sh
