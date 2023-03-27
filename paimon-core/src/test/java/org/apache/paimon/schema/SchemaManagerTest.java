@@ -261,7 +261,7 @@ public class SchemaManagerTest {
                         "");
         assertThatThrownBy(() -> manager.createTable(schemaWithoutPrimaryKeys))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Changelog table with full compaction must have primary keys");
+                .hasMessage("Changelog table with full-compaction must have primary keys");
 
         final Schema schemaWithPrimaryKeys =
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
