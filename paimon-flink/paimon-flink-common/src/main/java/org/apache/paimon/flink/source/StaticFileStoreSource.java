@@ -82,7 +82,8 @@ public class StaticFileStoreSource extends FlinkSource {
             // read all splits from scan
             DataTableScan.DataFilePlan plan =
                     scanFactory.create(table).withFilter(predicate).plan();
-            snapshotId = StaticStartingScanner.scanStartSnapshot(table.options(), snapshotManager);
+            snapshotId =
+                    StaticStartingScanner.scanStartSnapshot(table.coreOptions(), snapshotManager);
             splits = splitGenerator.createSplits(plan);
         } else {
             // restore from checkpoint
