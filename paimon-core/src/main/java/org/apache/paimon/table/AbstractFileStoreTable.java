@@ -38,7 +38,7 @@ import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.StreamDataTableScanImpl;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
-import org.apache.paimon.table.source.snapshot.StaticStartingScanner;
+import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.Map;
@@ -200,7 +200,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 return Optional.empty();
             case FROM_TIMESTAMP:
                 Snapshot snapshot =
-                        StaticStartingScanner.timeTravelToTimestamp(
+                        StaticFromTimestampStartingScanner.timeTravelToTimestamp(
                                 snapshotManager(), coreOptions.scanTimestampMills());
                 if (snapshot != null) {
                     long schemaId = snapshot.schemaId();
