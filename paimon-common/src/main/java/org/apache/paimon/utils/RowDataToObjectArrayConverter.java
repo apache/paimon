@@ -35,7 +35,7 @@ public class RowDataToObjectArrayConverter {
                 IntStream.range(0, rowType.getFieldCount())
                         .mapToObj(
                                 i ->
-                                        RowDataUtils.createNullCheckingFieldGetter(
+                                        InternalRowUtils.createNullCheckingFieldGetter(
                                                 rowType.getTypeAt(i), i))
                         .toArray(InternalRow.FieldGetter[]::new);
     }

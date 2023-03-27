@@ -26,7 +26,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
-import org.apache.paimon.utils.RowDataUtils;
+import org.apache.paimon.utils.InternalRowUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -215,7 +215,7 @@ public class KeyValue {
                 .mapToObj(
                         i ->
                                 String.valueOf(
-                                        RowDataUtils.createNullCheckingFieldGetter(
+                                        InternalRowUtils.createNullCheckingFieldGetter(
                                                         type.getTypeAt(i), i)
                                                 .getFieldOrNull(row)))
                 .collect(Collectors.joining(", "));

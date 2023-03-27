@@ -21,7 +21,7 @@ package org.apache.paimon.hive.objectinspector;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.hive.HiveTypeUtils;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.RowDataUtils;
+import org.apache.paimon.utils.InternalRowUtils;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
@@ -34,13 +34,13 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /** {@link StructObjectInspector} for {@link InternalRow}. */
-public class PaimonRowDataObjectInspector extends StructObjectInspector {
+public class PaimonInternalRowObjectInspector extends StructObjectInspector {
 
     private final List<PaimonStructField> structFields;
     private final Map<String, PaimonStructField> structFieldMap;
     private final String typeName;
 
-    public PaimonRowDataObjectInspector(
+    public PaimonInternalRowObjectInspector(
             List<String> fieldNames, List<DataType> fieldTypes, List<String> fieldComments) {
         this.structFields = new ArrayList<>();
         this.structFieldMap = new HashMap<>();
@@ -54,7 +54,7 @@ public class PaimonRowDataObjectInspector extends StructObjectInspector {
                             name,
                             PaimonObjectInspectorFactory.create(logicalType),
                             i,
-                            RowDataUtils.createNullCheckingFieldGetter(logicalType, i),
+                            InternalRowUtils.createNullCheckingFieldGetter(logicalType, i),
                             fieldComments.get(i));
             structFields.add(structField);
             structFieldMap.put(name, structField);
@@ -84,15 +84,15 @@ public class PaimonRowDataObjectInspector extends StructObjectInspector {
 
     @Override
     public Object getStructFieldData(Object o, StructField structField) {
-        InternalRow rowData = (InternalRow) o;
-        return ((PaimonStructField) structField).fieldGetter.getFieldOrNull(rowData);
+        InternalRow internalRow = (InternalRow) o;
+        return ((PaimonStructField) structField).fieldGetter.getFieldOrNull(internalRow);
     }
 
     @Override
     public List<Object> getStructFieldsDataAsList(Object o) {
-        InternalRow rowData = (InternalRow) o;
+        InternalRow internalRow = (InternalRow) o;
         return structFields.stream()
-                .map(f -> f.fieldGetter.getFieldOrNull(rowData))
+                .map(f -> f.fieldGetter.getFieldOrNull(internalRow))
                 .collect(Collectors.toList());
     }
 

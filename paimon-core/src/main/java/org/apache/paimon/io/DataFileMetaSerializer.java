@@ -24,8 +24,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.utils.ObjectSerializer;
 
-import static org.apache.paimon.utils.RowDataUtils.fromStringArrayData;
-import static org.apache.paimon.utils.RowDataUtils.toStringArrayData;
+import static org.apache.paimon.utils.InternalRowUtils.fromStringArrayData;
+import static org.apache.paimon.utils.InternalRowUtils.toStringArrayData;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 

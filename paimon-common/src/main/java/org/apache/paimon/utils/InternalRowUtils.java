@@ -50,9 +50,9 @@ import java.util.List;
 import java.util.Map;
 
 /** Utils for {@link InternalRow} structures. */
-public class RowDataUtils {
+public class InternalRowUtils {
 
-    public static InternalRow copyRowData(InternalRow row, RowType rowType) {
+    public static InternalRow copyInternalRow(InternalRow row, RowType rowType) {
         if (row instanceof BinaryRow) {
             return ((BinaryRow) row).copy();
         } else if (row instanceof NestedRow) {
@@ -125,12 +125,11 @@ public class RowDataUtils {
         return new GenericMap(javaMap);
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
     public static Object copy(Object o, DataType type) {
         if (o instanceof BinaryString) {
             return ((BinaryString) o).copy();
         } else if (o instanceof InternalRow) {
-            return copyRowData((InternalRow) o, (RowType) type);
+            return copyInternalRow((InternalRow) o, (RowType) type);
         } else if (o instanceof InternalArray) {
             return copyArray((InternalArray) o, ((ArrayType) type).getElementType());
         } else if (o instanceof InternalMap) {

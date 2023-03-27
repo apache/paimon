@@ -24,7 +24,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.utils.RowDataUtils;
+import org.apache.paimon.utils.InternalRowUtils;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,7 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTestBase {
     protected static List<InternalRow.FieldGetter> getFieldGetterList(FileStoreTable table) {
         return Arrays.asList(
-                RowDataUtils.createFieldGetters(
+                InternalRowUtils.createFieldGetters(
                         table.schema().fields().stream()
                                 .map(DataField::type)
                                 .collect(Collectors.toList())));
