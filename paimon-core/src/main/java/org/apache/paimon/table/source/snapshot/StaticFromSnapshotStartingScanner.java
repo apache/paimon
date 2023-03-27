@@ -22,29 +22,28 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import javax.annotation.Nullable;
 
-/** {@link StartingScanner} for the {@link CoreOptions.StartupMode#COMPACTED_FULL} startup mode. */
-public class CompactedStartingScanner implements StartingScanner {
+/**
+ * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_SNAPSHOT} startup mode of a
+ * batch read.
+ */
+public class StaticFromSnapshotStartingScanner implements StartingScanner {
+    private final long snapshotId;
 
-    private static final Logger LOG = LoggerFactory.getLogger(CompactedStartingScanner.class);
+    public StaticFromSnapshotStartingScanner(long snapshotId) {
+        this.snapshotId = snapshotId;
+    }
 
     @Override
     @Nullable
     public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
-        Long startingSnapshotId = snapshotManager.latestCompactedSnapshotId();
-        if (startingSnapshotId == null) {
-            LOG.debug("There is currently no compact snapshot. Waiting for snapshot generation.");
+        if (snapshotManager.earliestSnapshotId() == null
+                || snapshotId < snapshotManager.earliestSnapshotId()) {
             return null;
         }
         return new Result(
-                startingSnapshotId,
-                snapshotSplitReader
-                        .withKind(ScanKind.ALL)
-                        .withSnapshot(startingSnapshotId)
-                        .splits());
+                snapshotId,
+                snapshotSplitReader.withKind(ScanKind.ALL).withSnapshot(snapshotId).splits());
     }
 }

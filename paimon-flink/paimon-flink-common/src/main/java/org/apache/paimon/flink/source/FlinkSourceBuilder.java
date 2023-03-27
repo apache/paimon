@@ -132,7 +132,8 @@ public class FlinkSourceBuilder {
                     return logSourceProvider.createSource(null);
                 }
                 return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
-                                buildStaticFileSource())
+                                LogHybridSourceFactory.buildHybridFirstSource(
+                                        table, projectedFields, predicate))
                         .addSource(
                                 new LogHybridSourceFactory(logSourceProvider),
                                 Boundedness.CONTINUOUS_UNBOUNDED)

@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -27,24 +28,41 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-/** {@link StartingScanner} for the {@link CoreOptions.StartupMode#COMPACTED_FULL} startup mode. */
-public class CompactedStartingScanner implements StartingScanner {
+/**
+ * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_TIMESTAMP} startup mode of a
+ * batch read.
+ */
+public class StaticFromTimestampStartingScanner implements StartingScanner {
 
-    private static final Logger LOG = LoggerFactory.getLogger(CompactedStartingScanner.class);
+    private static final Logger LOG =
+            LoggerFactory.getLogger(StaticFromTimestampStartingScanner.class);
+
+    private final long startupMillis;
+
+    public StaticFromTimestampStartingScanner(long startupMillis) {
+        this.startupMillis = startupMillis;
+    }
 
     @Override
     @Nullable
     public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
-        Long startingSnapshotId = snapshotManager.latestCompactedSnapshotId();
-        if (startingSnapshotId == null) {
-            LOG.debug("There is currently no compact snapshot. Waiting for snapshot generation.");
+        Snapshot startingSnapshot = getSnapshot(snapshotManager, startupMillis);
+        if (startingSnapshot == null) {
+            LOG.debug(
+                    "There is currently no snapshot earlier than or equal to timestamp[{}]",
+                    startupMillis);
             return null;
         }
         return new Result(
-                startingSnapshotId,
+                startingSnapshot.id(),
                 snapshotSplitReader
                         .withKind(ScanKind.ALL)
-                        .withSnapshot(startingSnapshotId)
+                        .withSnapshot(startingSnapshot.id())
                         .splits());
+    }
+
+    @Nullable
+    public static Snapshot getSnapshot(SnapshotManager snapshotManager, long timestamp) {
+        return snapshotManager.earlierOrEqualTimeMills(timestamp);
     }
 }

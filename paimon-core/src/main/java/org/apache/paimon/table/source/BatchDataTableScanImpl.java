@@ -23,7 +23,6 @@ import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
-import org.apache.paimon.table.source.snapshot.StaticStartingScanner;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -78,7 +77,7 @@ public class BatchDataTableScanImpl extends AbstractDataTableScan implements Bat
     @Override
     public DataFilePlan plan() {
         if (startingScanner == null) {
-            startingScanner = new StaticStartingScanner(options());
+            startingScanner = createStartingScanner(false);
         }
 
         if (hasNext) {

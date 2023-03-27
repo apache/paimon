@@ -18,14 +18,11 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.source.BatchDataTableScan;
 import org.apache.paimon.table.source.DataTableScan;
-import org.apache.paimon.table.source.snapshot.StaticStartingScanner;
-import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.SplitEnumerator;
@@ -73,28 +70,21 @@ public class StaticFileStoreSource extends FlinkSource {
     public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> restoreEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
-        SnapshotManager snapshotManager = table.snapshotManager();
-
-        Long snapshotId;
         Collection<FileStoreSourceSplit> splits;
         if (checkpoint == null) {
             FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
             // read all splits from scan
             DataTableScan.DataFilePlan plan =
                     scanFactory.create(table).withFilter(predicate).plan();
-            snapshotId =
-                    StaticStartingScanner.scanStartSnapshot(table.coreOptions(), snapshotManager);
             splits = splitGenerator.createSplits(plan);
         } else {
             // restore from checkpoint
-            snapshotId = checkpoint.currentSnapshotId();
             splits = checkpoint.splits();
         }
 
-        Snapshot snapshot = snapshotId == null ? null : snapshotManager.snapshot(snapshotId);
         return new StaticFileStoreSplitEnumerator(
                 context,
-                snapshot,
+                null,
                 splits,
                 table.coreOptions()
                         .toConfiguration()
