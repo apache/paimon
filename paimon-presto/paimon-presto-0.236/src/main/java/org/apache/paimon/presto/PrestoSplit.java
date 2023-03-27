@@ -28,7 +28,7 @@ import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 
 import java.util.List;
 
-/** Trino {@link ConnectorSplit}. */
+/** Presto {@link ConnectorSplit}. */
 public class PrestoSplit extends PrestoSplitBase {
 
     @JsonCreator

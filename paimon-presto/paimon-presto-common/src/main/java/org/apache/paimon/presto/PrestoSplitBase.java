@@ -29,7 +29,7 @@ import java.util.Collections;
 
 import static com.facebook.presto.spi.schedule.NodeSelectionStrategy.NO_PREFERENCE;
 
-/** Trino {@link ConnectorSplit}. */
+/** Presto {@link ConnectorSplit}. */
 public abstract class PrestoSplitBase implements ConnectorSplit {
 
     private final String splitSerialized;

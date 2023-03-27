@@ -149,6 +149,10 @@ public class PrestoTypeUtils {
                     Math.min(Integer.MAX_VALUE, ((VarcharType) prestoType).getLength()));
         } else if (prestoType instanceof com.facebook.presto.common.type.BooleanType) {
             return DataTypes.BOOLEAN();
+        } else if (prestoType instanceof VarbinaryType) {
+            // The varbinary in Presto currently does not accept the maximum length parameter, it is
+            // unbounded
+            return DataTypes.VARBINARY(Integer.MAX_VALUE);
         } else if (prestoType instanceof com.facebook.presto.common.type.DecimalType) {
             return DataTypes.DECIMAL(
                     ((com.facebook.presto.common.type.DecimalType) prestoType).getPrecision(),

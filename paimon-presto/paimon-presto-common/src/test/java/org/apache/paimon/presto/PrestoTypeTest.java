@@ -42,6 +42,7 @@ import com.facebook.presto.common.type.TimestampWithTimeZoneType;
 import com.facebook.presto.common.type.TinyintType;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.common.type.TypeSignatureParameter;
+import com.facebook.presto.common.type.VarbinaryType;
 import com.facebook.presto.common.type.VarcharType;
 import com.facebook.presto.metadata.FunctionAndTypeManager;
 import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
@@ -168,6 +169,9 @@ public class PrestoTypeTest {
 
         DataType booleanType = PrestoTypeUtils.toPaimonType(BooleanType.BOOLEAN);
         assertThat(booleanType.asSQLString()).isEqualTo("BOOLEAN");
+
+        DataType varbinaryType = PrestoTypeUtils.toPaimonType(VarbinaryType.VARBINARY);
+        assertThat(varbinaryType.asSQLString()).isEqualTo("BYTES");
 
         DataType decimalType = PrestoTypeUtils.toPaimonType(DecimalType.createDecimalType());
         assertThat(decimalType.asSQLString()).isEqualTo("DECIMAL(38, 0)");
