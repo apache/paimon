@@ -107,17 +107,17 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
         writeAndCheckFileResultForColumnType(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    /**
-                     * Filter field "g" in [200, 500] in SCHEMA_FIELDS which is bigint and will get
-                     * one file with two data as followed:
-                     *
-                     * <ul>
-                     *   <li>2,"200","201",toDecimal(202),(short)203,204,205L,206F,207D,208,toTimestamp(209
-                     *       * millsPerDay),toBytes("210")
-                     *   <li>2,"300","301",toDecimal(302),(short)303,304,305L,306F,307D,308,toTimestamp(309
-                     *       * millsPerDay),toBytes("310")
-                     * </ul>
-                     */
+                    /*
+                     Filter field "g" in [200, 500] in SCHEMA_FIELDS which is bigint and will get
+                     one file with two data as followed:
+
+                     <ul>
+                       <li>2,"200","201",toDecimal(202),(short)203,204,205L,206F,207D,208,toTimestamp(209
+                           * millsPerDay),toBytes("210")
+                       <li>2,"300","301",toDecimal(302),(short)303,304,305L,306F,307D,308,toTimestamp(309
+                           * millsPerDay),toBytes("310")
+                     </ul>
+                    */
                     Predicate predicate =
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(6, 200L, 500L);
@@ -131,16 +131,16 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
 
-                    /**
-                     * Filter field "g" in [200, 500] in SCHEMA_FIELDS which is updated from bigint
-                     * to float and will get another file with one data as followed:
-                     *
-                     * <ul>
-                     *   <li>2,"400","401",402D,403,toDecimal(404),405F,406D,toDecimal(407),408,409,toBytes("410")
-                     * </ul>
-                     *
-                     * <p>Then we can check the results of the two result files.
-                     */
+                    /*
+                     Filter field "g" in [200, 500] in SCHEMA_FIELDS which is updated from bigint
+                     to float and will get another file with one data as followed:
+
+                     <ul>
+                       <li>2,"400","401",402D,403,toDecimal(404),405F,406D,toDecimal(407),408,409,toBytes("410")
+                     </ul>
+
+                     <p>Then we can check the results of the two result files.
+                    */
                     List<DataSplit> splits =
                             table.newSnapshotSplitReader()
                                     .withFilter(
