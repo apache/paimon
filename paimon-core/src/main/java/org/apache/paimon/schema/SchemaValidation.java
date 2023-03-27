@@ -93,7 +93,9 @@ public class SchemaValidation {
                 case LOOKUP:
                     if (schema.primaryKeys().isEmpty()) {
                         throw new UnsupportedOperationException(
-                                "Changelog table with full compaction must have primary keys");
+                                "Changelog table with "
+                                        + options.changelogProducer()
+                                        + " must have primary keys");
                     }
                     break;
                 default:
@@ -112,7 +114,7 @@ public class SchemaValidation {
                             checkState(
                                     !SYSTEM_FIELD_NAMES.contains(f),
                                     String.format(
-                                            "Field name[%s] in schema cannot be exist in [%s]",
+                                            "Field name[%s] in schema cannot be exist in %s",
                                             f, SYSTEM_FIELD_NAMES));
                             checkState(
                                     !f.startsWith(KEY_FIELD_PREFIX),
