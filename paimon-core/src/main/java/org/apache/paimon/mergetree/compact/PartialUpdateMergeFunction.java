@@ -29,7 +29,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 
-import static org.apache.paimon.utils.RowDataUtils.createFieldGetters;
+import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record, update

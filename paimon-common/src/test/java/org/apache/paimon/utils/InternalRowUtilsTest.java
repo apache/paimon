@@ -39,8 +39,8 @@ import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link RowDataUtils}. */
-public class RowDataUtilsTest {
+/** Test for {@link InternalRowUtils}. */
+public class InternalRowUtilsTest {
 
     public static final RowType ROW_TYPE =
             RowType.builder()
@@ -88,15 +88,15 @@ public class RowDataUtilsTest {
     public void testCopy() {
         for (int i = 0; i < 10; i++) {
             InternalRow row = rowDataGenerator.next();
-            InternalRow copied = RowDataUtils.copyRowData(row, ROW_TYPE);
+            InternalRow copied = InternalRowUtils.copyInternalRow(row, ROW_TYPE);
             assertThat(toBinary(copied)).isEqualTo(toBinary(row));
             InternalRow copied2 = serializer.copy(row);
 
             // check copied
             for (int j = 0; j < copied.getFieldCount(); j++) {
-                Object origin = RowDataUtils.get(row, j, ROW_TYPE.getTypeAt(j));
-                Object field1 = RowDataUtils.get(copied, j, ROW_TYPE.getTypeAt(j));
-                Object field2 = RowDataUtils.get(copied2, j, ROW_TYPE.getTypeAt(j));
+                Object origin = InternalRowUtils.get(row, j, ROW_TYPE.getTypeAt(j));
+                Object field1 = InternalRowUtils.get(copied, j, ROW_TYPE.getTypeAt(j));
+                Object field2 = InternalRowUtils.get(copied2, j, ROW_TYPE.getTypeAt(j));
 
                 if (field2 != origin) {
                     assertThat(field1).isNotSameAs(origin);
@@ -114,19 +114,20 @@ public class RowDataUtilsTest {
         // test DECIMAL data type
         Decimal xDecimalData = Decimal.fromBigDecimal(new BigDecimal("12.34"), 4, 2);
         Decimal yDecimalData = Decimal.fromBigDecimal(new BigDecimal("13.14"), 4, 2);
-        assertThat(RowDataUtils.compare(xDecimalData, yDecimalData, DataTypeRoot.DECIMAL))
+        assertThat(InternalRowUtils.compare(xDecimalData, yDecimalData, DataTypeRoot.DECIMAL))
                 .isLessThan(0);
 
         // test DOUBLE data type
         double xDouble = 13.14;
         double yDouble = 12.13;
-        assertThat(RowDataUtils.compare(xDouble, yDouble, DataTypeRoot.DOUBLE)).isGreaterThan(0);
+        assertThat(InternalRowUtils.compare(xDouble, yDouble, DataTypeRoot.DOUBLE))
+                .isGreaterThan(0);
 
         // test TIMESTAMP_WITHOUT_TIME_ZONE data type
         Timestamp xTimestamp = Timestamp.fromLocalDateTime(LocalDateTime.now());
         Timestamp yTimestamp = Timestamp.fromSQLTimestamp(xTimestamp.toSQLTimestamp());
         assertThat(
-                        RowDataUtils.compare(
+                        InternalRowUtils.compare(
                                 xTimestamp, yTimestamp, DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE))
                 .isEqualTo(0);
     }

@@ -34,13 +34,13 @@ import static org.apache.paimon.hive.RandomGenericRowDataGenerator.TYPE_NAMES;
 import static org.apache.paimon.hive.RandomGenericRowDataGenerator.generate;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link PaimonRowDataObjectInspector}. */
-public class PaimonRowDataObjectInspectorTest {
+/** Tests for {@link PaimonInternalRowObjectInspector}. */
+public class PaimonInternalRowObjectInspectorTest {
 
     @Test
     public void testGetStructFieldRef() {
-        PaimonRowDataObjectInspector oi =
-                new PaimonRowDataObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
+        PaimonInternalRowObjectInspector oi =
+                new PaimonInternalRowObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
         List<? extends StructField> structFields = oi.getAllStructFieldRefs();
         List<ObjectInspector.Category> expectedOiCategories =
                 Arrays.asList(
@@ -76,8 +76,8 @@ public class PaimonRowDataObjectInspectorTest {
 
     @Test
     public void testGetTypeName() {
-        PaimonRowDataObjectInspector oi =
-                new PaimonRowDataObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
+        PaimonInternalRowObjectInspector oi =
+                new PaimonInternalRowObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
         String expected =
                 "struct<"
                         + String.join(
@@ -106,8 +106,8 @@ public class PaimonRowDataObjectInspectorTest {
 
     @Test
     public void testGetStructFieldData() {
-        PaimonRowDataObjectInspector oi =
-                new PaimonRowDataObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
+        PaimonInternalRowObjectInspector oi =
+                new PaimonInternalRowObjectInspector(FIELD_NAMES, LOGICAL_TYPES, FIELD_COMMENTS);
         GenericRow rowData = generate();
         List<Object> structFieldsData = oi.getStructFieldsDataAsList(rowData);
         for (int i = 0; i < structFieldsData.size(); i++) {

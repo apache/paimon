@@ -42,7 +42,7 @@ public class RowDataPartitionComputer {
                         .mapToInt(columnList::indexOf)
                         .mapToObj(
                                 i ->
-                                        RowDataUtils.createNullCheckingFieldGetter(
+                                        InternalRowUtils.createNullCheckingFieldGetter(
                                                 rowType.getTypeAt(i), i))
                         .toArray(InternalRow.FieldGetter[]::new);
     }
