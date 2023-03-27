@@ -29,8 +29,6 @@ This documentation is a guide for downloading Paimon Jars.
 
 ##  Engine Jars
 {{< unstable >}}
-**The snapshot version is not recommended for production use**
-download link [paimon snapshots jar](https://repository.apache.org/content/repositories/snapshots/org/apache/paimon/)
 | Version | Jar                                                                                                                                                                                |
 |---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Flink 1.16 | [paimon-flink-1.16-{{< version >}}.jar](https://repository.apache.org/content/groups/snapshots/org/apache/paimon/paimon-flink-1.16/{{< version >}}/) |

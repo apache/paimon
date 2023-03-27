@@ -42,4 +42,4 @@ FileSystem pluggable jars for user to query tables from Spark/Hive side.
 | Aliyun OSS        | oss://           | Y         |  |
 | S3                | s3://            | Y         |  |
 
-[Download Link]({{< ref "project/download#changelog-producers" >}})
+[Download Link]({{< ref "project/download#filesystem-jars" >}})
