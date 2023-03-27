@@ -27,6 +27,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 
@@ -173,8 +174,9 @@ public abstract class SparkReadTestBase {
                 FileStoreTableFactory.create(
                         LocalFileIO.create(),
                         new Path(warehousePath, String.format("default.db/%s", tableName)));
-        StreamTableWrite writer = fileStoreTable.newWrite(COMMIT_USER);
-        StreamTableCommit commit = fileStoreTable.newCommit(COMMIT_USER);
+        StreamWriteBuilder streamWriteBuilder = fileStoreTable.newStreamWriteBuilder();
+        StreamTableWrite writer = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
         for (GenericRow row : rows) {
             writer.write(row);
         }
