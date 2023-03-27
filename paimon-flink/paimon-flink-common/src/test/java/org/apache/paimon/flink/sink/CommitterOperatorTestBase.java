@@ -45,9 +45,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Base test class for {@link AtMostOnceCommitterOperator} and {@link ExactlyOnceCommitOperator}.
- */
+/** Base test class for {@link CommitterOperatorTest}. */
 public abstract class CommitterOperatorTestBase {
 
     private static final RowType ROW_TYPE =

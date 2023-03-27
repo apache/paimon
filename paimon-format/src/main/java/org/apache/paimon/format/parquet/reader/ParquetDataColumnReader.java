@@ -34,7 +34,7 @@ public interface ParquetDataColumnReader {
      *
      * @param valueCount value count
      * @param in page data
-     * @throws IOException
+     * @throws IOException the io exception
      */
     void initFromPage(int valueCount, ByteBufferInputStream in) throws IOException;
 
