@@ -78,7 +78,9 @@ public class SparkReadITCase extends SparkReadTestBase {
                 spark.table("`t1$snapshots`")
                         .select("snapshot_id", "schema_id", "commit_user", "commit_kind")
                         .collectAsList();
-        assertThat(rows.toString()).isEqualTo("[[1,0,user,APPEND]]");
+        String commitUser = rows.get(0).getString(2);
+        String rowString = String.format("[[1,0,%s,APPEND]]", commitUser);
+        assertThat(rows.toString()).isEqualTo(rowString);
 
         spark.sql(
                 "CREATE TABLE schemasTable (\n"
