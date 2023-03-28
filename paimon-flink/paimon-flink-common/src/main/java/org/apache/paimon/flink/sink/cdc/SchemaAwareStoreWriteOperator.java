@@ -31,6 +31,8 @@ import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.TypeUtils;
 
+import org.apache.flink.runtime.state.StateInitializationContext;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -59,6 +61,12 @@ public class SchemaAwareStoreWriteOperator extends AbstractStoreWriteOperator<Cd
             StoreSinkWrite.Provider storeSinkWriteProvider) {
         super(table, logSinkFunction, storeSinkWriteProvider);
         retrySleepMillis = table.coreOptions().toConfiguration().get(RETRY_SLEEP_TIME).toMillis();
+    }
+
+    @Override
+    public void initializeState(StateInitializationContext context) throws Exception {
+        table = table.copyWithLatestSchema();
+        super.initializeState(context);
     }
 
     @Override
