@@ -35,7 +35,7 @@ import static org.apache.paimon.mergetree.compact.UniversalCompaction.createUnit
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link UniversalCompaction}. */
-public class UniversalCompactionTest {
+public class UniversalCompactionTest extends CompactionTestBase {
 
     @Test
     public void testOutputLevel() {
@@ -279,21 +279,5 @@ public class UniversalCompactionTest {
         newSizes[0] = 1;
         System.arraycopy(sizes, 0, newSizes, 1, sizes.length);
         return newSizes;
-    }
-
-    private List<LevelSortedRun> level0(long... sizes) {
-        List<LevelSortedRun> runs = new ArrayList<>();
-        for (Long size : sizes) {
-            runs.add(new LevelSortedRun(0, SortedRun.fromSingle(file(size))));
-        }
-        return runs;
-    }
-
-    private LevelSortedRun level(int level, long size) {
-        return new LevelSortedRun(level, SortedRun.fromSingle(file(size)));
-    }
-
-    static DataFileMeta file(long size) {
-        return new DataFileMeta("", size, 1, null, null, null, null, 0, 0, 0, 0);
     }
 }

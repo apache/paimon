@@ -45,6 +45,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.CompactionStyle.LEVEL;
+import static org.apache.paimon.CoreOptions.CompactionStyle.UNIVERSAL;
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.description.TextElement.text;
 
@@ -552,6 +554,31 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Should assert disorder files, this just for compatibility with older versions.");
 
+    public static final ConfigOption<CompactionStyle> COMPACTION_STYLE =
+            key("compaction.style")
+                    .enumType(CompactionStyle.class)
+                    .defaultValue(CompactionStyle.UNIVERSAL)
+                    .withDescription("Specify the compaction style for paimon.");
+
+    public static final ConfigOption<Long> MAX_BYTES_FOR_LEVEL_BASE =
+            key("max_bytes_for_level_base")
+                    .longType()
+                    .defaultValue(256 * 1048576L)
+                    .withDescription(
+                            "Control maximum total data size for a level, max_bytes_for_level_base is the max total for level 1, maximum number of bytes for level L can be calculated as (max_bytes_for_level_base) * (max_bytes_for_level_multiplier ^ (L-1)).");
+
+    public static final ConfigOption<Integer> LEVEL0_FILE_NUM_COMPACTION_TRIGGER =
+            key("level0_file_num_compaction_trigger")
+                    .intType()
+                    .defaultValue(4)
+                    .withDescription("Number of files to trigger level 0 compaction.");
+
+    public static final ConfigOption<Integer> MAX_BYTES_FOR_LEVEL_MULTIPLIER =
+            key("max_bytes_for_level_multiplier")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription("The multiplier to calculate the total size of every level.");
+
     public static final ConfigOption<Integer> FULL_COMPACTION_DELTA_COMMITS =
             key("full-compaction.delta-commits")
                     .intType()
@@ -713,7 +740,16 @@ public class CoreOptions implements Serializable {
                 maxSortedRunNum() == Integer.MAX_VALUE
                         ? numSortedRunCompactionTrigger()
                         : numSortedRunStopTrigger();
-        numLevels = numLevels == null ? expectedRuns + 1 : numLevels;
+
+        if (null == numLevels) {
+            CompactionStyle compactionStyle = options.get(COMPACTION_STYLE);
+            if (compactionStyle.equals(LEVEL)) {
+                numLevels = 7;
+            } else if (compactionStyle.equals(UNIVERSAL)) {
+                numLevels = expectedRuns + 1;
+            }
+        }
+
         return numLevels;
     }
 
@@ -820,6 +856,61 @@ public class CoreOptions implements Serializable {
 
     public int readBatchSize() {
         return options.get(READ_BATCH_SIZE);
+    }
+
+    public CompactionStyle compactionStyle() {
+        return options.get(COMPACTION_STYLE);
+    }
+
+    public long maxBytesForLevelBase() {
+        return options.get(MAX_BYTES_FOR_LEVEL_BASE);
+    }
+
+    public int level0FileNumCompactionTrigger() {
+        return options.get(LEVEL0_FILE_NUM_COMPACTION_TRIGGER);
+    }
+
+    public int maxBytesForLevelMultiplier() {
+        return options.get(MAX_BYTES_FOR_LEVEL_MULTIPLIER);
+    }
+
+    /** CompactionStyle. */
+    public enum CompactionStyle implements DescribedEnum {
+        UNIVERSAL("universal", ""),
+        LEVEL("level", "");
+
+        private final String value;
+        private final String description;
+
+        CompactionStyle(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+
+        @VisibleForTesting
+        public static CompactionStyle fromValue(String value) {
+            for (CompactionStyle compactionStyle : CompactionStyle.values()) {
+                if (compactionStyle.value.equals(value)) {
+                    return compactionStyle;
+                }
+            }
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid compaction style type %s, only support [%s]",
+                            value,
+                            StringUtils.join(
+                                    Arrays.stream(FileFormatType.values()).iterator(), ",")));
+        }
     }
 
     /** Specifies the merge engine for table with primary key. */

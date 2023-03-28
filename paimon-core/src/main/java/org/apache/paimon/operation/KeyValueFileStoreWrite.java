@@ -38,6 +38,7 @@ import org.apache.paimon.mergetree.MergeTreeWriter;
 import org.apache.paimon.mergetree.compact.CompactRewriter;
 import org.apache.paimon.mergetree.compact.CompactStrategy;
 import org.apache.paimon.mergetree.compact.FullChangelogMergeTreeCompactRewriter;
+import org.apache.paimon.mergetree.compact.LevelCompaction;
 import org.apache.paimon.mergetree.compact.LookupCompaction;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
@@ -138,16 +139,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 writerFactoryBuilder.build(partition, bucket, options.fileCompressionPerLevel());
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
-        UniversalCompaction universalCompaction =
-                new UniversalCompaction(
-                        options.maxSizeAmplificationPercent(),
-                        options.sortedRunSizeRatio(),
-                        options.numSortedRunCompactionTrigger(),
-                        options.maxSortedRunNum());
-        CompactStrategy compactStrategy =
-                options.changelogProducer() == ChangelogProducer.LOOKUP
-                        ? new LookupCompaction(universalCompaction)
-                        : universalCompaction;
+
+        CompactStrategy compactStrategy = getCompaction(options, keyComparator);
+
         CompactManager compactManager =
                 createCompactManager(partition, bucket, compactStrategy, compactExecutor, levels);
         return new MergeTreeWriter(
@@ -162,6 +156,39 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 options.commitForceCompact(),
                 options.changelogProducer(),
                 restoreIncrement);
+    }
+
+    private CompactStrategy getCompaction(
+            CoreOptions options, Comparator<InternalRow> keyComparator) {
+        CompactStrategy compactStrategy = null;
+
+        UniversalCompaction universalCompaction =
+                new UniversalCompaction(
+                        options.maxSizeAmplificationPercent(),
+                        options.sortedRunSizeRatio(),
+                        options.numSortedRunCompactionTrigger(),
+                        options.maxSortedRunNum());
+        if (options.changelogProducer() == ChangelogProducer.LOOKUP) {
+            compactStrategy = new LookupCompaction(universalCompaction);
+        } else {
+            CoreOptions.CompactionStyle compactionStyle = options.compactionStyle();
+            switch (compactionStyle) {
+                case UNIVERSAL:
+                    compactStrategy = universalCompaction;
+                    break;
+                case LEVEL:
+                    compactStrategy =
+                            new LevelCompaction(
+                                    options.maxBytesForLevelBase(),
+                                    options.maxBytesForLevelMultiplier(),
+                                    options.level0FileNumCompactionTrigger(),
+                                    keyComparator,
+                                    options.numLevels());
+                    break;
+            }
+        }
+
+        return compactStrategy;
     }
 
     private boolean bufferSpillable() {

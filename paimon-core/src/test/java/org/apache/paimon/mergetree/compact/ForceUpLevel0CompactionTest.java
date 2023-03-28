@@ -28,7 +28,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Optional;
 
-import static org.apache.paimon.mergetree.compact.UniversalCompactionTest.file;
+import static org.apache.paimon.mergetree.compact.CompactionTestBase.file;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ForceUpLevel0Compaction}. */

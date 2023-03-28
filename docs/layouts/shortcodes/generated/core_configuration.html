@@ -374,5 +374,29 @@
             <td>Boolean</td>
             <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
         </tr>
+        <tr>
+            <td><h5>compaction.style</h5></td>
+            <td style="word-wrap: break-word;">universal</td>
+            <td>Enum</td>
+            <td>Specify the compaction style for paimon.<br /><br />Possible values:<ul><li>"universal": </li><li>"level": </li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>max_bytes_for_level_base</h5></td>
+            <td style="word-wrap: break-word;">268435456</td>
+            <td>Long</td>
+            <td>Control maximum total data size for a level, max_bytes_for_level_base is the max total for level 1, maximum number of bytes for level L can be calculated as (max_bytes_for_level_base) * (max_bytes_for_level_multiplier ^ (L-1)).</td>
+        </tr>
+        <tr>
+            <td><h5>level0_file_num_compaction_trigger</h5></td>
+            <td style="word-wrap: break-word;">4</td>
+            <td>Integer</td>
+            <td>Number of files to trigger level 0 compaction.</td>
+        </tr>
+        <tr>
+            <td><h5>max_bytes_for_level_multiplier</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>The multiplier to calculate the total size of every level.</td>
+        </tr>
     </tbody>
 </table>
