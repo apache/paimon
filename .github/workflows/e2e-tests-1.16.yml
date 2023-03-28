@@ -39,6 +39,7 @@ jobs:
       - name: Build Flink 1.16
         run: ./mvnw clean install -DskipTests
       - name: Test Flink 1.16
+        timeout-minutes: 60
         run: |
           # run tests with random timezone to find out timezone related bugs
           . .github/workflows/utils.sh
