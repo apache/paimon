@@ -18,13 +18,14 @@
 
 package org.apache.paimon.flink.util;
 
+import org.apache.paimon.testutils.junit.TestLoggerExtension;
 import org.apache.paimon.utils.FileIOUtils;
 
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
-import org.apache.flink.util.TestLogger;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.Logger;
@@ -36,7 +37,8 @@ import java.nio.file.Path;
 import java.util.UUID;
 
 /** Similar to Flink's AbstractTestBase but using Junit5. */
-public class AbstractTestBase extends TestLogger {
+@ExtendWith({TestLoggerExtension.class})
+public class AbstractTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractTestBase.class);
 
