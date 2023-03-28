@@ -69,7 +69,7 @@ public class LogHybridSourceFactory
         if (!(table instanceof DataTable)) {
             throw new UnsupportedOperationException(
                     String.format(
-                            "FlinkHybridSource only accepts DataTable. Unsupported table type: '%s'.",
+                            "FlinkHybridFirstSource only accepts DataTable. Unsupported table type: '%s'.",
                             table.getClass().getSimpleName()));
         }
 
@@ -105,14 +105,17 @@ public class LogHybridSourceFactory
         public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> restoreEnumerator(
                 SplitEnumeratorContext<FileStoreSourceSplit> context,
                 PendingSplitsCheckpoint checkpoint) {
-            Long snapshotId;
+            Long snapshotId = null;
             Collection<FileStoreSourceSplit> splits;
             if (checkpoint == null) {
                 FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
                 // get snapshot id and splits from scan
                 StreamTableScan scan = readBuilder.newStreamScan();
-                snapshotId = scan.checkpoint();
                 splits = splitGenerator.createSplits(scan.plan());
+                Long nextSnapshotId = scan.checkpoint();
+                if (nextSnapshotId != null) {
+                    snapshotId = nextSnapshotId - 1;
+                }
             } else {
                 // restore from checkpoint
                 snapshotId = checkpoint.currentSnapshotId();
