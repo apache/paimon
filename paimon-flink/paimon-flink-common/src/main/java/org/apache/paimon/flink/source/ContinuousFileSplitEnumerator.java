@@ -21,6 +21,7 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan.DataFilePlan;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.StreamDataTableScan;
 
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
@@ -41,7 +42,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.Callable;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -62,18 +62,18 @@ public class ContinuousFileSplitEnumerator
 
     private final FileStoreSourceSplitGenerator splitGenerator;
 
-    private final Callable<DataFilePlan> callable;
+    private final StreamDataTableScan scan;
 
-    private Long nextSnapshotId;
+    @Nullable private Long nextSnapshotId;
 
     private boolean finished = false;
 
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> remainSplits,
-            Long nextSnapshotId,
+            @Nullable Long nextSnapshotId,
             long discoveryInterval,
-            Callable<DataFilePlan> callable) {
+            StreamDataTableScan scan) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.bucketSplits = new HashMap<>();
@@ -82,7 +82,7 @@ public class ContinuousFileSplitEnumerator
         this.discoveryInterval = discoveryInterval;
         this.readersAwaitingSplit = new HashSet<>();
         this.splitGenerator = new FileStoreSourceSplitGenerator();
-        this.callable = callable;
+        this.scan = scan;
     }
 
     private void addSplits(Collection<FileStoreSourceSplit> splits) {
@@ -107,7 +107,7 @@ public class ContinuousFileSplitEnumerator
 
     @Override
     public void start() {
-        context.callAsync(callable, this::processDiscoveredSplits, 0, discoveryInterval);
+        context.callAsync(scan::plan, this::processDiscoveredSplits, 0, discoveryInterval);
     }
 
     @Override
@@ -167,7 +167,7 @@ public class ContinuousFileSplitEnumerator
             return;
         }
 
-        nextSnapshotId = plan.snapshotId + 1;
+        nextSnapshotId = scan.checkpoint();
         addSplits(splitGenerator.createSplits(plan));
         assignSplits();
     }

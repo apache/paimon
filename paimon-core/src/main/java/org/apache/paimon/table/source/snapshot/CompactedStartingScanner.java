@@ -20,11 +20,12 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.operation.ScanKind;
-import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 /** {@link StartingScanner} for the {@link CoreOptions.StartupMode#COMPACTED_FULL} startup mode. */
 public class CompactedStartingScanner implements StartingScanner {
@@ -32,14 +33,14 @@ public class CompactedStartingScanner implements StartingScanner {
     private static final Logger LOG = LoggerFactory.getLogger(CompactedStartingScanner.class);
 
     @Override
-    public DataTableScan.DataFilePlan getPlan(
-            SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
+    @Nullable
+    public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
         Long startingSnapshotId = snapshotManager.latestCompactedSnapshotId();
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no compact snapshot. Waiting for snapshot generation.");
             return null;
         }
-        return new DataTableScan.DataFilePlan(
+        return new Result(
                 startingSnapshotId,
                 snapshotSplitReader
                         .withKind(ScanKind.ALL)

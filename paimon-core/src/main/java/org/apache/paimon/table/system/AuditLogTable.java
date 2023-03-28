@@ -231,25 +231,25 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public DataTableScan withFilter(Predicate predicate) {
+        public BatchDataTableScan withFilter(Predicate predicate) {
             convert(predicate).ifPresent(batchScan::withFilter);
             return this;
         }
 
         @Override
-        public DataTableScan withKind(ScanKind kind) {
+        public BatchDataTableScan withKind(ScanKind kind) {
             batchScan.withKind(kind);
             return this;
         }
 
         @Override
-        public DataTableScan withSnapshot(long snapshotId) {
+        public BatchDataTableScan withSnapshot(long snapshotId) {
             batchScan.withSnapshot(snapshotId);
             return this;
         }
 
         @Override
-        public DataTableScan withLevelFilter(Filter<Integer> levelFilter) {
+        public BatchDataTableScan withLevelFilter(Filter<Integer> levelFilter) {
             batchScan.withLevelFilter(levelFilter);
             return this;
         }
@@ -274,25 +274,25 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public DataTableScan withFilter(Predicate predicate) {
+        public StreamDataTableScan withFilter(Predicate predicate) {
             convert(predicate).ifPresent(streamScan::withFilter);
             return this;
         }
 
         @Override
-        public DataTableScan withKind(ScanKind kind) {
+        public StreamDataTableScan withKind(ScanKind kind) {
             streamScan.withKind(kind);
             return this;
         }
 
         @Override
-        public DataTableScan withSnapshot(long snapshotId) {
+        public StreamDataTableScan withSnapshot(long snapshotId) {
             streamScan.withSnapshot(snapshotId);
             return this;
         }
 
         @Override
-        public DataTableScan withLevelFilter(Filter<Integer> levelFilter) {
+        public StreamDataTableScan withLevelFilter(Filter<Integer> levelFilter) {
             streamScan.withLevelFilter(levelFilter);
             return this;
         }

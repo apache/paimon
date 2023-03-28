@@ -148,7 +148,6 @@ public class CompactActionITCase extends ActionITCaseBase {
         // no full compaction has happened, so plan should be empty
         StreamDataTableScan scan = table.newStreamScan();
         DataTableScan.DataFilePlan plan = scan.plan();
-        Assertions.assertEquals(1, (long) plan.snapshotId);
         Assertions.assertTrue(plan.splits().isEmpty());
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();

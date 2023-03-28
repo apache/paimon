@@ -21,10 +21,12 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.utils.Filter;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.List;
 
 /** A {@link TableScan} for reading data. */
@@ -43,12 +45,10 @@ public interface DataTableScan extends InnerTableScan {
     /** Scanning plan containing snapshot ID and input splits. */
     class DataFilePlan implements Plan {
 
-        @Nullable public final Long snapshotId;
         public final List<DataSplit> splits;
 
         @VisibleForTesting
-        public DataFilePlan(@Nullable Long snapshotId, List<DataSplit> splits) {
-            this.snapshotId = snapshotId;
+        public DataFilePlan(List<DataSplit> splits) {
             this.splits = splits;
         }
 
@@ -56,6 +56,10 @@ public interface DataTableScan extends InnerTableScan {
         @Override
         public List<Split> splits() {
             return (List) splits;
+        }
+
+        public static DataFilePlan fromResult(@Nullable StartingScanner.Result result) {
+            return new DataFilePlan(result == null ? Collections.emptyList() : result.splits());
         }
     }
 }

@@ -87,11 +87,9 @@ public class TableStreamingReader {
         }
     }
 
-    @Nullable
     public Iterator<InternalRow> nextBatch() throws Exception {
         try {
-            DataFilePlan plan = scan.plan();
-            return plan == null ? null : read(plan);
+            return read(scan.plan());
         } catch (EndOfScanException e) {
             throw new IllegalArgumentException(
                     "TableStreamingReader does not support finished enumerator.", e);

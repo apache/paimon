@@ -19,11 +19,14 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.FollowUpScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
+import org.apache.paimon.utils.Filter;
 
 import javax.annotation.Nullable;
 
@@ -32,6 +35,18 @@ import java.util.HashMap;
 
 /** {@link DataTableScan} for streaming planning. */
 public interface StreamDataTableScan extends DataTableScan, InnerStreamTableScan {
+
+    @Override
+    StreamDataTableScan withSnapshot(long snapshotId);
+
+    @Override
+    StreamDataTableScan withFilter(Predicate predicate);
+
+    @Override
+    StreamDataTableScan withKind(ScanKind scanKind);
+
+    @Override
+    StreamDataTableScan withLevelFilter(Filter<Integer> levelFilter);
 
     boolean supportStreamingReadOverwrite();
 

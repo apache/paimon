@@ -19,11 +19,12 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
-
-import javax.annotation.Nullable;
 
 /** {@link DataTableScan} for batch planning. */
 public class BatchDataTableScanImpl extends AbstractDataTableScan implements BatchDataTableScan {
@@ -44,13 +45,36 @@ public class BatchDataTableScanImpl extends AbstractDataTableScan implements Bat
     }
 
     @Override
+    public BatchDataTableScan withSnapshot(long snapshotId) {
+        snapshotSplitReader.withSnapshot(snapshotId);
+        return this;
+    }
+
+    @Override
+    public BatchDataTableScan withFilter(Predicate predicate) {
+        snapshotSplitReader.withFilter(predicate);
+        return this;
+    }
+
+    @Override
+    public BatchDataTableScan withKind(ScanKind scanKind) {
+        snapshotSplitReader.withKind(scanKind);
+        return this;
+    }
+
+    @Override
+    public BatchDataTableScan withLevelFilter(Filter<Integer> levelFilter) {
+        snapshotSplitReader.withLevelFilter(levelFilter);
+        return this;
+    }
+
+    @Override
     public BatchDataTableScan withStartingScanner(StartingScanner startingScanner) {
         this.startingScanner = startingScanner;
         return this;
     }
 
     @Override
-    @Nullable
     public DataFilePlan plan() {
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
@@ -58,7 +82,9 @@ public class BatchDataTableScanImpl extends AbstractDataTableScan implements Bat
 
         if (hasNext) {
             hasNext = false;
-            return startingScanner.getPlan(snapshotManager, snapshotSplitReader);
+            StartingScanner.Result result =
+                    startingScanner.scan(snapshotManager, snapshotSplitReader);
+            return DataFilePlan.fromResult(result);
         } else {
             throw new EndOfScanException();
         }
