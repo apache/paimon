@@ -23,6 +23,8 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
 import java.util.Collections;
 import java.util.List;
 
@@ -32,6 +34,7 @@ import java.util.List;
  */
 public interface StartingScanner {
 
+    @Nullable
     Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader);
 
     /** Scan result of {@link #scan}. */
