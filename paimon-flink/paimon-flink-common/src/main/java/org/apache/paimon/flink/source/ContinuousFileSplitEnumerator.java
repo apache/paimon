@@ -19,9 +19,9 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.DataTableScan.DataFilePlan;
 import org.apache.paimon.table.source.EndOfScanException;
-import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableScan;
 
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
@@ -62,7 +62,7 @@ public class ContinuousFileSplitEnumerator
 
     private final FileStoreSourceSplitGenerator splitGenerator;
 
-    private final StreamDataTableScan scan;
+    private final StreamTableScan scan;
 
     @Nullable private Long nextSnapshotId;
 
@@ -73,7 +73,7 @@ public class ContinuousFileSplitEnumerator
             Collection<FileStoreSourceSplit> remainSplits,
             @Nullable Long nextSnapshotId,
             long discoveryInterval,
-            StreamDataTableScan scan) {
+            StreamTableScan scan) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.bucketSplits = new HashMap<>();
@@ -150,7 +150,7 @@ public class ContinuousFileSplitEnumerator
 
     // ------------------------------------------------------------------------
 
-    private void processDiscoveredSplits(DataFilePlan plan, Throwable error) {
+    private void processDiscoveredSplits(TableScan.Plan plan, Throwable error) {
         if (error != null) {
             if (error instanceof EndOfScanException) {
                 // finished

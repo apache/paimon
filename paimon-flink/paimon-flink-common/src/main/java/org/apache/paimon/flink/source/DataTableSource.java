@@ -33,7 +33,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
 import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Projection;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -64,14 +64,14 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_
  * Table source to create {@link StaticFileStoreSource} or {@link ContinuousFileStoreSource} under
  * batch mode or change-tracking is disabled. For streaming mode with change-tracking enabled and
  * FULL scan mode, it will create a {@link
- * org.apache.flink.connector.base.source.hybrid.HybridSource} of {@link StaticFileStoreSource} and
- * kafka log source created by {@link LogSourceProvider}.
+ * org.apache.flink.connector.base.source.hybrid.HybridSource} of {@code
+ * LogHybridSourceFactory.FlinkHybridFirstSource} and kafka log source created by {@link
+ * LogSourceProvider}.
  */
 public class DataTableSource extends FlinkTableSource
         implements LookupTableSource, SupportsWatermarkPushDown {
 
     private final ObjectIdentifier tableIdentifier;
-    private final FileStoreTable table;
     private final boolean streaming;
     private final DynamicTableFactory.Context context;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
@@ -80,7 +80,7 @@ public class DataTableSource extends FlinkTableSource
 
     public DataTableSource(
             ObjectIdentifier tableIdentifier,
-            FileStoreTable table,
+            Table table,
             boolean streaming,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
@@ -98,7 +98,7 @@ public class DataTableSource extends FlinkTableSource
 
     private DataTableSource(
             ObjectIdentifier tableIdentifier,
-            FileStoreTable table,
+            Table table,
             boolean streaming,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory,
@@ -108,7 +108,6 @@ public class DataTableSource extends FlinkTableSource
             @Nullable WatermarkStrategy<RowData> watermarkStrategy) {
         super(table, predicate, projectFields, limit);
         this.tableIdentifier = tableIdentifier;
-        this.table = table;
         this.streaming = streaming;
         this.context = context;
         this.logStoreTableFactory = logStoreTableFactory;
@@ -130,7 +129,7 @@ public class DataTableSource extends FlinkTableSource
         } else if (table instanceof ChangelogValueCountFileStoreTable) {
             return ChangelogMode.all();
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
-            Options options = Options.fromMap(table.schema().options());
+            Options options = Options.fromMap(table.options());
 
             if (options.get(LOG_SCAN_REMOVE_NORMALIZE)) {
                 return ChangelogMode.all();
@@ -164,7 +163,7 @@ public class DataTableSource extends FlinkTableSource
         }
 
         WatermarkStrategy<RowData> watermarkStrategy = this.watermarkStrategy;
-        Options options = table.coreOptions().toConfiguration();
+        Options options = Options.fromMap(table.options());
         if (watermarkStrategy != null) {
             WatermarkEmitStrategy emitStrategy = options.get(SCAN_WATERMARK_EMIT_STRATEGY);
             if (emitStrategy == WatermarkEmitStrategy.ON_EVENT) {
@@ -199,7 +198,7 @@ public class DataTableSource extends FlinkTableSource
                         .withPredicate(predicate)
                         .withLimit(limit)
                         .withParallelism(
-                                Options.fromMap(table.schema().options())
+                                Options.fromMap(table.options())
                                         .get(FlinkConnectorOptions.SCAN_PARALLELISM))
                         .withWatermarkStrategy(watermarkStrategy);
 
@@ -239,7 +238,7 @@ public class DataTableSource extends FlinkTableSource
         }
         int[] projection =
                 projectFields == null
-                        ? IntStream.range(0, table.schema().fields().size()).toArray()
+                        ? IntStream.range(0, table.rowType().getFieldCount()).toArray()
                         : Projection.of(projectFields).toTopLevelIndexes();
         int[] joinKey = Projection.of(context.getKeys()).toTopLevelIndexes();
         return LookupRuntimeProviderFactory.create(

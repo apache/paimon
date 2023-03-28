@@ -23,7 +23,7 @@ import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateFilter;
 import org.apache.paimon.reader.RecordReaderIterator;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataTableScan.DataFilePlan;
 import org.apache.paimon.utils.TypeUtils;
 
@@ -44,21 +44,16 @@ import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping
 /** A streaming reader to read table. */
 public class TableStreamingReader {
 
-    private final FileStoreTable table;
-    private final int[] projection;
-    @Nullable private final Predicate predicate;
+    private final ReadBuilder readBuilder;
     @Nullable private final PredicateFilter recordFilter;
     private final StreamDataTableScan scan;
 
-    public TableStreamingReader(
-            FileStoreTable table, int[] projection, @Nullable Predicate predicate) {
-        this.table = table;
-        this.projection = projection;
-        this.predicate = predicate;
+    public TableStreamingReader(Table table, int[] projection, @Nullable Predicate predicate) {
+        this.readBuilder = table.newReadBuilder().withProjection(projection).withFilter(predicate);
 
         if (predicate != null) {
-            List<String> fieldNames = table.schema().fieldNames();
-            List<String> primaryKeys = table.schema().primaryKeys();
+            List<String> fieldNames = table.rowType().getFieldNames();
+            List<String> primaryKeys = table.primaryKeys();
 
             // for pk table: only filter by pk, the stream is upsert instead of changelog
             // for non-pk table: filter all
@@ -71,20 +66,18 @@ public class TableStreamingReader {
                     };
 
             int[] fieldIdxToProjectionIdx =
-                    IntStream.range(0, table.schema().fields().size()).map(operator).toArray();
+                    IntStream.range(0, table.rowType().getFieldCount()).map(operator).toArray();
 
             this.recordFilter =
                     new PredicateFilter(
-                            TypeUtils.project(table.schema().logicalRowType(), projection),
+                            TypeUtils.project(table.rowType(), projection),
                             transformFieldMapping(predicate, fieldIdxToProjectionIdx).orElse(null));
         } else {
             recordFilter = null;
         }
 
-        scan = table.newStreamScan().withSnapshotStarting();
-        if (predicate != null) {
-            scan.withFilter(predicate);
-        }
+        scan = (StreamDataTableScan) readBuilder.newStreamScan();
+        scan.withSnapshotStarting();
     }
 
     public Iterator<InternalRow> nextBatch() throws Exception {
@@ -97,10 +90,7 @@ public class TableStreamingReader {
     }
 
     private Iterator<InternalRow> read(DataFilePlan plan) throws IOException {
-        InnerTableRead read = table.newRead().withProjection(projection);
-        if (predicate != null) {
-            read.withFilter(predicate);
-        }
+        TableRead read = readBuilder.newRead();
 
         List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
         for (DataSplit split : plan.splits) {

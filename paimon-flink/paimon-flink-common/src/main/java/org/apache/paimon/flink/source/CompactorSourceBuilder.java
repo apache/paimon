@@ -18,15 +18,13 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
+import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.source.StreamDataTableScan;
-import org.apache.paimon.table.source.snapshot.BoundedChecker;
-import org.apache.paimon.table.source.snapshot.ContinuousCompactorFollowUpScanner;
-import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
-import org.apache.paimon.table.source.snapshot.FullStartingScanner;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.system.BucketsTable;
 import org.apache.paimon.types.RowType;
 
@@ -93,31 +91,22 @@ public class CompactorSourceBuilder {
                                     .toArray(Predicate[]::new));
         }
 
+        ReadBuilder readBuilder = bucketsTable.newReadBuilder().withFilter(partitionPredicate);
         if (isContinuous) {
             return new ContinuousFileStoreSource(
-                    bucketsTable,
+                    readBuilder,
+                    bucketsTable.options(),
                     null,
-                    partitionPredicate,
-                    null,
-                    (table, nextSnapshotId) -> {
-                        StreamDataTableScan scan =
-                                table.newStreamScan()
-                                        .withStartingScanner(
-                                                new ContinuousCompactorStartingScanner())
-                                        .withFollowUpScanner(
-                                                new ContinuousCompactorFollowUpScanner())
-                                        .withBoundedChecker(BoundedChecker.neverEnd());
-                        scan.restore(nextSnapshotId);
-                        return scan;
-                    });
+                    TableScanUtils.compactStreamScanFactory());
         } else {
             return new StaticFileStoreSource(
-                    bucketsTable,
+                    readBuilder,
                     null,
-                    partitionPredicate,
-                    null,
-                    // static compactor source will compact all current files
-                    table -> table.newScan().withStartingScanner(new FullStartingScanner()));
+                    bucketsTable
+                            .coreOptions()
+                            .toConfiguration()
+                            .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
+                    TableScanUtils.compactBatchScanFactory());
         }
     }
 
