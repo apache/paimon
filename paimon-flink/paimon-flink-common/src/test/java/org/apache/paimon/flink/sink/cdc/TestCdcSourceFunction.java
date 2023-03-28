@@ -31,6 +31,8 @@ import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunctio
 
 import java.util.Arrays;
 import java.util.LinkedList;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -46,6 +48,8 @@ public class TestCdcSourceFunction extends RichParallelSourceFunction<TestCdcEve
     private final SerializableFunction<CdcRecord, Integer> getKeyHash;
 
     private volatile boolean isRunning = true;
+    private transient int numRecordsPerCheckpoint;
+    private transient AtomicInteger recordsThisCheckpoint;
     private transient ListState<Integer> remainingEventsCount;
 
     public TestCdcSourceFunction(
@@ -56,6 +60,9 @@ public class TestCdcSourceFunction extends RichParallelSourceFunction<TestCdcEve
 
     @Override
     public void initializeState(FunctionInitializationContext context) throws Exception {
+        numRecordsPerCheckpoint = events.size() / ThreadLocalRandom.current().nextInt(10, 20);
+        recordsThisCheckpoint = new AtomicInteger(0);
+
         remainingEventsCount =
                 context.getOperatorStateStore()
                         .getListState(new ListStateDescriptor<>("count", Integer.class));
@@ -73,6 +80,7 @@ public class TestCdcSourceFunction extends RichParallelSourceFunction<TestCdcEve
 
     @Override
     public void snapshotState(FunctionSnapshotContext context) throws Exception {
+        recordsThisCheckpoint.set(0);
         remainingEventsCount.clear();
         remainingEventsCount.add(events.size());
     }
@@ -80,6 +88,11 @@ public class TestCdcSourceFunction extends RichParallelSourceFunction<TestCdcEve
     @Override
     public void run(SourceContext<TestCdcEvent> ctx) throws Exception {
         while (isRunning && !events.isEmpty()) {
+            if (recordsThisCheckpoint.get() >= numRecordsPerCheckpoint) {
+                Thread.sleep(10);
+                continue;
+            }
+
             synchronized (ctx.getCheckpointLock()) {
                 TestCdcEvent event = events.poll();
                 if (event.records() != null) {
@@ -99,6 +112,7 @@ public class TestCdcSourceFunction extends RichParallelSourceFunction<TestCdcEve
                     }
                 }
                 ctx.collect(event);
+                recordsThisCheckpoint.incrementAndGet();
             }
         }
     }
