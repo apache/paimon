@@ -39,7 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class CompactionChangelogFollowUpScannerTest extends ScannerTestBase {
 
     @Test
-    public void testGetPlan() throws Exception {
+    public void testScan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -79,8 +79,7 @@ public class CompactionChangelogFollowUpScannerTest extends ScannerTestBase {
         snapshot = snapshotManager.snapshot(3);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        DataTableScan.DataFilePlan plan = scanner.getPlan(3, snapshotSplitReader);
-        assertThat(plan.snapshotId).isEqualTo(3);
+        DataTableScan.DataFilePlan plan = scanner.scan(3, snapshotSplitReader);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|102", "+I 1|20|200", "+I 1|30|300"));
 
@@ -91,8 +90,7 @@ public class CompactionChangelogFollowUpScannerTest extends ScannerTestBase {
         snapshot = snapshotManager.snapshot(5);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        plan = scanner.getPlan(5, snapshotSplitReader);
-        assertThat(plan.snapshotId).isEqualTo(5);
+        plan = scanner.scan(5, snapshotSplitReader);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(
                         Arrays.asList("-U 1|10|102", "+U 1|10|103", "-D 1|30|300", "+I 1|40|401"));

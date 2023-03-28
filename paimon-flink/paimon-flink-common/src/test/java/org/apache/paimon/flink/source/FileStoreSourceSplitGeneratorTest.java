@@ -80,7 +80,7 @@ public class FileStoreSourceSplitGeneratorTest {
                         false,
                         Collections::singletonList,
                         FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.ADD)));
-        DataTableScan.DataFilePlan tableScanPlan = new DataTableScan.DataFilePlan(1L, scanSplits);
+        DataTableScan.DataFilePlan tableScanPlan = new DataTableScan.DataFilePlan(scanSplits);
 
         List<FileStoreSourceSplit> splits =
                 new FileStoreSourceSplitGenerator().createSplits(tableScanPlan);

@@ -48,8 +48,8 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         StreamTableCommit commit = table.newCommit(commitUser);
         StreamDataTableScan scan = table.newStreamScan();
 
-        // first call without any snapshot, should return null
-        assertThat(scan.plan()).isNull();
+        // first call without any snapshot, should return empty plan
+        assertThat(scan.plan().splits()).isEmpty();
 
         // write base data
         write.write(rowData(1, 10, 100L));
@@ -64,12 +64,11 @@ public class StreamDataTableScanTest extends ScannerTestBase {
 
         // first call with snapshot, should return complete records from 2nd commit
         DataTableScan.DataFilePlan plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
 
-        // incremental call without new snapshots, should return null
-        assertThat(scan.plan()).isNull();
+        // incremental call without new snapshots, should return empty plan
+        assertThat(scan.plan().splits()).isEmpty();
 
         // write incremental data
         write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 101L));
@@ -85,18 +84,16 @@ public class StreamDataTableScanTest extends ScannerTestBase {
 
         // first incremental call, should return incremental records from 3rd commit
         plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(3);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|102", "+I 1|20|201", "+I 1|40|400"));
 
         // second incremental call, should return incremental records from 4th commit
         plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(4);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|103", "-D 1|40|400", "+I 1|50|500"));
 
-        // no more new snapshots, should return null
-        assertThat(scan.plan()).isNull();
+        // no more new snapshots, should return empty plan
+        assertThat(scan.plan().splits()).isEmpty();
 
         write.close();
         commit.close();
@@ -113,8 +110,8 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         StreamTableCommit commit = table.newCommit(commitUser);
         StreamDataTableScan scan = table.newStreamScan();
 
-        // first call without any snapshot, should return null
-        assertThat(scan.plan()).isNull();
+        // first call without any snapshot, should return empty plan
+        assertThat(scan.plan().splits()).isEmpty();
 
         // write base data
         write.write(rowData(1, 10, 100L));
@@ -137,12 +134,11 @@ public class StreamDataTableScanTest extends ScannerTestBase {
 
         // first call with snapshot, should return full compacted records from 3rd commit
         DataTableScan.DataFilePlan plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(4);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
 
-        // incremental call without new snapshots, should return null
-        assertThat(scan.plan()).isNull();
+        // incremental call without new snapshots, should return empty plan
+        assertThat(scan.plan().splits()).isEmpty();
 
         // write incremental data
         write.write(rowData(1, 10, 103L));
@@ -150,15 +146,14 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         write.write(rowData(1, 50, 500L));
         commit.commit(3, write.prepareCommit(true, 3));
 
-        // no new compact snapshots, should return null
-        assertThat(scan.plan()).isNull();
+        // no new compact snapshots, should return empty plan
+        assertThat(scan.plan().splits()).isEmpty();
 
         write.compact(binaryRow(1), 0, true);
         commit.commit(4, write.prepareCommit(true, 4));
 
         // full compaction done, read new changelog
         plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(6);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(
                         Arrays.asList(
@@ -168,8 +163,8 @@ public class StreamDataTableScanTest extends ScannerTestBase {
                                 "+U 1|20|201",
                                 "+I 1|50|500"));
 
-        // no more new snapshots, should return null
-        assertThat(scan.plan()).isNull();
+        // no more new snapshots, should return empty plan
+        assertThat(scan.plan().splits()).isEmpty();
 
         write.close();
         commit.close();
@@ -191,7 +186,6 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         commit.commit(committable);
 
         DataTableScan.DataFilePlan plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(1);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Collections.singletonList("+I 1|10|100"));
 
@@ -217,10 +211,9 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         commit.commit(committable);
 
         DataTableScan.DataFilePlan plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(1);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Collections.singletonList("+I 1|10|100"));
-        assertThat(scan.plan()).isNull();
+        assertThat(scan.plan().splits()).isEmpty();
 
         write.write(rowData(2, 20, 200L));
         committable = new ManifestCommittable(0, 7L);
@@ -228,10 +221,9 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         commit.commit(committable);
 
         plan = scan.plan();
-        assertThat(plan.snapshotId).isEqualTo(2);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Collections.singletonList("+I 2|20|200"));
-        assertThat(scan.plan()).isNull();
+        assertThat(scan.plan().splits()).isEmpty();
 
         write.write(rowData(3, 30, 300L));
         committable = new ManifestCommittable(0, 9L);

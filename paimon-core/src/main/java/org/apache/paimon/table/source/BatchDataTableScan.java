@@ -18,13 +18,28 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
+import org.apache.paimon.utils.Filter;
 
 import java.io.Serializable;
 
 /** {@link DataTableScan} for batch planning. */
 public interface BatchDataTableScan extends DataTableScan {
+
+    @Override
+    BatchDataTableScan withSnapshot(long snapshotId);
+
+    @Override
+    BatchDataTableScan withFilter(Predicate predicate);
+
+    @Override
+    BatchDataTableScan withKind(ScanKind scanKind);
+
+    @Override
+    BatchDataTableScan withLevelFilter(Filter<Integer> levelFilter);
 
     BatchDataTableScan withStartingScanner(StartingScanner startingScanner);
 

@@ -194,7 +194,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private void refresh() throws Exception {
         while (true) {
             Iterator<InternalRow> batch = streamingReader.nextBatch();
-            if (batch == null) {
+            if (!batch.hasNext()) {
                 return;
             }
             this.lookupTable.refresh(batch);

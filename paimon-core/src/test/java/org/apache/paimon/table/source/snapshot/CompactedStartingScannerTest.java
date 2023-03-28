@@ -20,7 +20,6 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -34,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class CompactedStartingScannerTest extends ScannerTestBase {
 
     @Test
-    public void testGetPlan() throws Exception {
+    public void testScan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -57,9 +56,9 @@ public class CompactedStartingScannerTest extends ScannerTestBase {
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(4);
 
         CompactedStartingScanner scanner = new CompactedStartingScanner();
-        DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, snapshotSplitReader);
-        assertThat(plan.snapshotId).isEqualTo(3);
-        assertThat(getResult(table.newRead(), plan.splits()))
+        StartingScanner.Result result = scanner.scan(snapshotManager, snapshotSplitReader);
+        assertThat(result.snapshotId()).isEqualTo(3);
+        assertThat(getResult(table.newRead(), toSplits(result.splits())))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
 
         write.close();
@@ -70,7 +69,7 @@ public class CompactedStartingScannerTest extends ScannerTestBase {
     public void testNoSnapshot() {
         SnapshotManager snapshotManager = table.snapshotManager();
         CompactedStartingScanner scanner = new CompactedStartingScanner();
-        assertThat(scanner.getPlan(snapshotManager, snapshotSplitReader)).isNull();
+        assertThat(scanner.scan(snapshotManager, snapshotSplitReader)).isNull();
     }
 
     @Test
@@ -87,7 +86,7 @@ public class CompactedStartingScannerTest extends ScannerTestBase {
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(1);
 
         CompactedStartingScanner scanner = new CompactedStartingScanner();
-        assertThat(scanner.getPlan(snapshotManager, snapshotSplitReader)).isNull();
+        assertThat(scanner.scan(snapshotManager, snapshotSplitReader)).isNull();
 
         write.close();
         commit.close();

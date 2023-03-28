@@ -52,8 +52,6 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -175,7 +173,6 @@ public class FilesTable implements ReadonlyTable {
             return plan.splits.stream().mapToLong(s -> s.files().size()).sum();
         }
 
-        @Nullable
         private DataTableScan.DataFilePlan dataFilePlan() {
             return storeTable.newScan().plan();
         }
@@ -237,12 +234,7 @@ public class FilesTable implements ReadonlyTable {
             // schema id directly
             FieldStatsConverters fieldStatsConverters =
                     new FieldStatsConverters(
-                            sid -> schemaManager.schema(sid).fields(),
-                            dataFilePlan.snapshotId == null
-                                    ? table.schema().id()
-                                    : table.snapshotManager()
-                                            .snapshot(dataFilePlan.snapshotId)
-                                            .schemaId());
+                            sid -> schemaManager.schema(sid).fields(), table.schema().id());
 
             RowDataToObjectArrayConverter partitionConverter =
                     new RowDataToObjectArrayConverter(table.schema().logicalPartitionType());

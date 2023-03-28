@@ -20,7 +20,6 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -32,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ContinuousCompactorStartingScannerTest extends ScannerTestBase {
 
     @Test
-    public void testGetPlan() throws Exception {
+    public void testScan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -60,9 +59,9 @@ public class ContinuousCompactorStartingScannerTest extends ScannerTestBase {
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(5);
 
         ContinuousCompactorStartingScanner scanner = new ContinuousCompactorStartingScanner();
-        DataTableScan.DataFilePlan plan = scanner.getPlan(snapshotManager, snapshotSplitReader);
-        assertThat(plan.snapshotId).isEqualTo(3);
-        assertThat(plan.splits()).isEmpty();
+        StartingScanner.Result result = scanner.scan(snapshotManager, snapshotSplitReader);
+        assertThat(result.snapshotId()).isEqualTo(3);
+        assertThat(result.splits()).isEmpty();
 
         write.close();
         commit.close();
@@ -72,6 +71,6 @@ public class ContinuousCompactorStartingScannerTest extends ScannerTestBase {
     public void testNoSnapshot() {
         SnapshotManager snapshotManager = table.snapshotManager();
         ContinuousCompactorStartingScanner scanner = new ContinuousCompactorStartingScanner();
-        assertThat(scanner.getPlan(snapshotManager, snapshotSplitReader)).isNull();
+        assertThat(scanner.scan(snapshotManager, snapshotSplitReader)).isNull();
     }
 }

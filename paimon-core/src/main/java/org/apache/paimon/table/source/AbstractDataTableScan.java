@@ -21,8 +21,6 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.operation.FileStoreScan;
-import org.apache.paimon.operation.ScanKind;
-import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromTimestampStartingScanner;
@@ -32,7 +30,6 @@ import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
-import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
 
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
@@ -44,30 +41,6 @@ public abstract class AbstractDataTableScan implements DataTableScan {
     protected AbstractDataTableScan(CoreOptions options, SnapshotSplitReader snapshotSplitReader) {
         this.options = options;
         this.snapshotSplitReader = snapshotSplitReader;
-    }
-
-    @Override
-    public AbstractDataTableScan withSnapshot(long snapshotId) {
-        snapshotSplitReader.withSnapshot(snapshotId);
-        return this;
-    }
-
-    @Override
-    public AbstractDataTableScan withFilter(Predicate predicate) {
-        snapshotSplitReader.withFilter(predicate);
-        return this;
-    }
-
-    @Override
-    public AbstractDataTableScan withKind(ScanKind scanKind) {
-        snapshotSplitReader.withKind(scanKind);
-        return this;
-    }
-
-    @Override
-    public AbstractDataTableScan withLevelFilter(Filter<Integer> levelFilter) {
-        snapshotSplitReader.withLevelFilter(levelFilter);
-        return this;
     }
 
     @VisibleForTesting

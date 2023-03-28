@@ -116,6 +116,7 @@ public class CompactorSourceBuilder {
                     null,
                     partitionPredicate,
                     null,
+                    // static compactor source will compact all current files
                     table -> table.newScan().withStartingScanner(new FullStartingScanner()));
         }
     }

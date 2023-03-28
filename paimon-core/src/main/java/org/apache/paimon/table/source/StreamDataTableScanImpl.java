@@ -20,6 +20,8 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
@@ -29,12 +31,15 @@ import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.InputChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+
+import java.util.Collections;
 
 /** {@link DataTableScan} for streaming planning. */
 public class StreamDataTableScanImpl extends AbstractDataTableScan implements StreamDataTableScan {
@@ -60,6 +65,30 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
         this.options = options;
         this.snapshotManager = snapshotManager;
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
+    }
+
+    @Override
+    public StreamDataTableScanImpl withSnapshot(long snapshotId) {
+        snapshotSplitReader.withSnapshot(snapshotId);
+        return this;
+    }
+
+    @Override
+    public StreamDataTableScanImpl withFilter(Predicate predicate) {
+        snapshotSplitReader.withFilter(predicate);
+        return this;
+    }
+
+    @Override
+    public StreamDataTableScanImpl withKind(ScanKind scanKind) {
+        snapshotSplitReader.withKind(scanKind);
+        return this;
+    }
+
+    @Override
+    public StreamDataTableScanImpl withLevelFilter(Filter<Integer> levelFilter) {
+        snapshotSplitReader.withLevelFilter(levelFilter);
+        return this;
     }
 
     @Override
@@ -94,7 +123,6 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
         return this;
     }
 
-    @Nullable
     @Override
     public DataFilePlan plan() {
         if (startingScanner == null) {
@@ -115,16 +143,15 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
     }
 
     private DataFilePlan tryFirstPlan() {
-        DataTableScan.DataFilePlan plan =
-                startingScanner.getPlan(snapshotManager, snapshotSplitReader);
-        if (plan != null) {
-            long snapshot = plan.snapshotId;
-            nextSnapshotId = snapshot + 1;
-            if (boundedChecker.shouldEndInput(snapshotManager.snapshot(snapshot))) {
+        StartingScanner.Result result = startingScanner.scan(snapshotManager, snapshotSplitReader);
+        if (result != null) {
+            long snapshotId = result.snapshotId();
+            nextSnapshotId = snapshotId + 1;
+            if (boundedChecker.shouldEndInput(snapshotManager.snapshot(snapshotId))) {
                 isEnd = true;
             }
         }
-        return plan;
+        return DataFilePlan.fromResult(result);
     }
 
     private DataFilePlan nextPlan() {
@@ -137,7 +164,7 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
                 LOG.debug(
                         "Next snapshot id {} does not exist, wait for the snapshot generation.",
                         nextSnapshotId);
-                return null;
+                return new DataFilePlan(Collections.emptyList());
             }
 
             Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);
@@ -158,7 +185,7 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
             } else if (followUpScanner.shouldScanSnapshot(snapshot)) {
                 LOG.debug("Find snapshot id {}.", nextSnapshotId);
                 DataTableScan.DataFilePlan plan =
-                        followUpScanner.getPlan(nextSnapshotId, snapshotSplitReader);
+                        followUpScanner.scan(nextSnapshotId, snapshotSplitReader);
                 nextSnapshotId++;
                 return plan;
             } else {

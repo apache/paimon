@@ -27,11 +27,11 @@ public interface FollowUpScanner {
 
     boolean shouldScanSnapshot(Snapshot snapshot);
 
-    DataTableScan.DataFilePlan getPlan(long snapshotId, SnapshotSplitReader snapshotSplitReader);
+    DataTableScan.DataFilePlan scan(long snapshotId, SnapshotSplitReader snapshotSplitReader);
 
     default DataTableScan.DataFilePlan getOverwriteChangesPlan(
             long snapshotId, SnapshotSplitReader snapshotSplitReader) {
         return new DataTableScan.DataFilePlan(
-                snapshotId, snapshotSplitReader.withSnapshot(snapshotId).overwriteSplits());
+                snapshotSplitReader.withSnapshot(snapshotId).overwriteSplits());
     }
 }

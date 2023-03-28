@@ -21,7 +21,6 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.ScanKind;
-import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -45,16 +44,16 @@ public class StaticFromTimestampStartingScanner implements StartingScanner {
     }
 
     @Override
-    public DataTableScan.DataFilePlan getPlan(
-            SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
-        Snapshot startingSnapshot = getSnapshot(snapshotManager, startupMillis);
+    @Nullable
+    public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
+        Snapshot startingSnapshot = timeTravelToTimestamp(snapshotManager, startupMillis);
         if (startingSnapshot == null) {
             LOG.debug(
                     "There is currently no snapshot earlier than or equal to timestamp[{}]",
                     startupMillis);
             return null;
         }
-        return new DataTableScan.DataFilePlan(
+        return new Result(
                 startingSnapshot.id(),
                 snapshotSplitReader
                         .withKind(ScanKind.ALL)
@@ -63,7 +62,7 @@ public class StaticFromTimestampStartingScanner implements StartingScanner {
     }
 
     @Nullable
-    public static Snapshot getSnapshot(SnapshotManager snapshotManager, long timestamp) {
+    public static Snapshot timeTravelToTimestamp(SnapshotManager snapshotManager, long timestamp) {
         return snapshotManager.earlierOrEqualTimeMills(timestamp);
     }
 }

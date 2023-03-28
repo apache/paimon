@@ -200,7 +200,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 return Optional.empty();
             case FROM_TIMESTAMP:
                 Snapshot snapshot =
-                        StaticFromTimestampStartingScanner.getSnapshot(
+                        StaticFromTimestampStartingScanner.timeTravelToTimestamp(
                                 snapshotManager(), coreOptions.scanTimestampMills());
                 if (snapshot != null) {
                     long schemaId = snapshot.schemaId();

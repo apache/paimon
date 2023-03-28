@@ -19,9 +19,12 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.table.source.BatchDataTableScan;
-import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.utils.SnapshotManager;
+
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Helper class for the first planning of {@link BatchDataTableScan} and {@link
@@ -29,6 +32,29 @@ import org.apache.paimon.utils.SnapshotManager;
  */
 public interface StartingScanner {
 
-    DataTableScan.DataFilePlan getPlan(
-            SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader);
+    Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader);
+
+    /** Scan result of {@link #scan}. */
+    class Result {
+
+        private final long snapshotId;
+        private final List<DataSplit> splits;
+
+        public Result(long snapshotId) {
+            this(snapshotId, Collections.emptyList());
+        }
+
+        public Result(long snapshotId, List<DataSplit> splits) {
+            this.snapshotId = snapshotId;
+            this.splits = splits;
+        }
+
+        public long snapshotId() {
+            return snapshotId;
+        }
+
+        public List<DataSplit> splits() {
+            return splits;
+        }
+    }
 }

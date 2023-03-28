@@ -46,7 +46,7 @@ public class ContinuousCompactorFollowUpScannerTest extends ScannerTestBase {
     private final DataFileMetaSerializer dataFileMetaSerializer = new DataFileMetaSerializer();
 
     @Test
-    public void testGetPlan() throws Exception {
+    public void testScan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -84,16 +84,14 @@ public class ContinuousCompactorFollowUpScannerTest extends ScannerTestBase {
         Snapshot snapshot = snapshotManager.snapshot(1);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        DataTableScan.DataFilePlan plan = scanner.getPlan(1, snapshotSplitReader);
-        assertThat(plan.snapshotId).isEqualTo(1);
+        DataTableScan.DataFilePlan plan = scanner.scan(1, snapshotSplitReader);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|1|0|1", "+I 1|2|0|1"));
 
         snapshot = snapshotManager.snapshot(2);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        plan = scanner.getPlan(2, snapshotSplitReader);
-        assertThat(plan.snapshotId).isEqualTo(2);
+        plan = scanner.scan(2, snapshotSplitReader);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Collections.singletonList("+I 2|2|0|1"));
 

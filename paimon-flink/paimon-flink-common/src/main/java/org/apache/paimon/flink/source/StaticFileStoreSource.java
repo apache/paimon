@@ -18,13 +18,11 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.source.BatchDataTableScan;
 import org.apache.paimon.table.source.DataTableScan;
-import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.SplitEnumerator;
@@ -32,7 +30,6 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Collection;
 
 /** Bounded {@link FlinkSource} for reading records. It does not monitor new snapshots. */
@@ -73,31 +70,21 @@ public class StaticFileStoreSource extends FlinkSource {
     public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> restoreEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
-        SnapshotManager snapshotManager = table.snapshotManager();
-
-        Long snapshotId = null;
         Collection<FileStoreSourceSplit> splits;
         if (checkpoint == null) {
-            splits = new ArrayList<>();
             FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
-
             // read all splits from scan
             DataTableScan.DataFilePlan plan =
                     scanFactory.create(table).withFilter(predicate).plan();
-            if (plan != null) {
-                snapshotId = plan.snapshotId;
-                splits.addAll(splitGenerator.createSplits(plan));
-            }
+            splits = splitGenerator.createSplits(plan);
         } else {
             // restore from checkpoint
-            snapshotId = checkpoint.currentSnapshotId();
             splits = checkpoint.splits();
         }
 
-        Snapshot snapshot = snapshotId == null ? null : snapshotManager.snapshot(snapshotId);
         return new StaticFileStoreSplitEnumerator(
                 context,
-                snapshot,
+                null,
                 splits,
                 table.coreOptions()
                         .toConfiguration()
