@@ -71,7 +71,7 @@ public class TableScanUtils {
     }
 
     /** Factory to create {@link StreamTableScan}. */
-    public interface StreamTableScanFactory {
+    public interface StreamTableScanFactory extends Serializable {
 
         StreamTableScan create(ReadBuilder readBuilder, @Nullable Long nextSnapshotId);
     }
