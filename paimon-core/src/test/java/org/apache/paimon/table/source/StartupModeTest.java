@@ -41,6 +41,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.StartupMode;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -69,7 +70,7 @@ public class StartupModeTest extends ScannerTestBase {
         DataTableScan.DataFilePlan secondPlan = dataTableScan.plan();
 
         assertThat(firstPlan.splits).isEmpty();
-        assertThat(secondPlan).isNull();
+        assertThat(secondPlan.splits).isEmpty();
 
         // write next data
         writeAndCommit(4, rowData(1, 10, 103L));
@@ -96,7 +97,7 @@ public class StartupModeTest extends ScannerTestBase {
 
         assertThat(firstPlan.splits)
                 .isEqualTo(snapshotSplitReader.withSnapshot(3).withKind(ScanKind.ALL).splits());
-        assertThat(secondPlan).isNull();
+        assertThat(secondPlan.splits).isEmpty();
 
         // write next data
         writeAndCommit(4, rowData(1, 10, 103L));
@@ -222,6 +223,7 @@ public class StartupModeTest extends ScannerTestBase {
     private void initializeTable(
             CoreOptions.StartupMode startupMode, Map<String, String> properties) throws Exception {
         Options options = new Options();
+        options.set(PATH, tablePath.getPath());
         options.set(CoreOptions.SCAN_MODE, startupMode);
         for (Map.Entry<String, String> property : properties.entrySet()) {
             options.set(property.getKey(), property.getValue());
