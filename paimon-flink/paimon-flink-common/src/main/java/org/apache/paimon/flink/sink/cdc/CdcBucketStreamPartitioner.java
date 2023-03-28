@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.cdc.CdcRecord;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
@@ -44,9 +45,13 @@ import java.util.stream.IntStream;
 /**
  * A {@link StreamPartitioner} which partitions {@link CdcRecord}s according to the hash value of
  * bucket keys (or primary keys if bucket keys are not specified).
+ *
+ * <p>TODO: merge this class with {@link org.apache.paimon.flink.sink.BucketStreamPartitioner} and
+ * refactor {@link BucketComputer} if possible.
  */
 public class CdcBucketStreamPartitioner extends StreamPartitioner<CdcRecord> {
 
+    private final int numBuckets;
     private final List<String> bucketKeys;
     private final DataType[] bucketTypes;
     private final List<String> partitionKeys;
@@ -60,11 +65,12 @@ public class CdcBucketStreamPartitioner extends StreamPartitioner<CdcRecord> {
     public CdcBucketStreamPartitioner(TableSchema schema, boolean shuffleByPartitionEnable) {
         List<String> bucketKeys = schema.originalBucketKeys();
         if (bucketKeys.isEmpty()) {
-            bucketKeys = schema.primaryKeys();
+            bucketKeys = schema.trimmedPrimaryKeys();
         }
         Preconditions.checkArgument(
                 bucketKeys.size() > 0, "Either bucket keys or primary keys must be defined");
 
+        this.numBuckets = new CoreOptions(schema.options()).bucket();
         this.bucketKeys = bucketKeys;
         this.bucketTypes = getTypes(this.bucketKeys, schema);
         this.partitionKeys = schema.partitionKeys();
@@ -100,15 +106,14 @@ public class CdcBucketStreamPartitioner extends StreamPartitioner<CdcRecord> {
         CdcRecord record = streamRecordSerializationDelegate.getInstance().getValue();
         BinaryRow bucketKeyRow =
                 toBinaryRow(record.fields(), bucketKeys, bucketTypes, bucketProjection);
+        int bucket = BucketComputer.bucket(bucketKeyRow.hashCode(), numBuckets);
         if (shuffleByPartitionEnable) {
             BinaryRow partitionKeyRow =
                     toBinaryRow(
                             record.fields(), partitionKeys, partitionTypes, partitionProjection);
-            return BucketComputer.bucket(
-                    Objects.hash(bucketKeyRow.hashCode(), partitionKeyRow.hashCode()),
-                    numberOfChannels);
+            return Math.abs(Objects.hash(bucket, partitionKeyRow.hashCode())) % numberOfChannels;
         } else {
-            return BucketComputer.bucket(bucketKeyRow.hashCode(), numberOfChannels);
+            return bucket % numberOfChannels;
         }
     }
 

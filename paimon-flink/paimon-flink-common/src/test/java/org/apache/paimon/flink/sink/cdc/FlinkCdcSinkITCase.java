@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.cdc.CdcRecord;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -50,6 +51,7 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -67,13 +69,16 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    @Timeout(60)
+    @Timeout(120)
     public void testRandomCdcEvents() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
-        int numEvents = random.nextInt(20000) + 1;
-        int numSchemaChanges = random.nextInt(20) + 1;
-        int numKeys = random.nextInt(2000) + 1;
+        int numEvents = random.nextInt(1500) + 1;
+        int numSchemaChanges = random.nextInt(10) + 1;
+        int numPartitions = random.nextInt(3) + 1;
+        int numKeys = random.nextInt(150) + 1;
+        int numBucket = random.nextInt(5) + 1;
+        boolean shuffleByPartitionEnable = random.nextBoolean();
         boolean enableFailure = random.nextBoolean();
 
         TestCdcEvent[] events = new TestCdcEvent[numEvents];
@@ -113,6 +118,8 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
                 Map<String, String> fields = new HashMap<>();
                 int key = random.nextInt(numKeys);
                 fields.put("k", String.valueOf(key));
+                int pt = key % numPartitions;
+                fields.put("pt", String.valueOf(pt));
                 for (int j = 0; j < fieldNames.size(); j++) {
                     String fieldName = fieldNames.get(j);
                     if (isBigInt.get(j)) {
@@ -151,13 +158,15 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
                         tablePath,
                         fileIO,
                         RowType.of(
-                                new DataType[] {DataTypes.INT(), DataTypes.INT()},
-                                new String[] {"k", "v0"}),
-                        Collections.emptyList(),
-                        Collections.singletonList("k"));
+                                new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
+                                new String[] {"pt", "k", "v0"}),
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "k"),
+                        numBucket,
+                        shuffleByPartitionEnable);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.getCheckpointConfig().setCheckpointInterval(1000);
+        env.getCheckpointConfig().setCheckpointInterval(100);
         TestCdcSourceFunction sourceFunction =
                 new TestCdcSourceFunction(
                         events, record -> Integer.valueOf(record.fields().get("k")));
@@ -171,7 +180,7 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
                 .build();
 
         // enable failure when running jobs if needed
-        FailingFileIO.reset(failingName, 100, 10000);
+        FailingFileIO.reset(failingName, 10, 10000);
 
         env.execute();
 
@@ -210,12 +219,15 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
             FileIO fileIO,
             RowType rowType,
             List<String> partitions,
-            List<String> primaryKeys)
+            List<String> primaryKeys,
+            int numBucket,
+            boolean shuffleByPartitionEnable)
             throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.BUCKET, 3);
+        conf.set(CoreOptions.BUCKET, numBucket);
         conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
         conf.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
+        conf.set(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION, shuffleByPartitionEnable);
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
