@@ -163,11 +163,12 @@ public class ContinuousFileSplitEnumerator
             return;
         }
 
-        if (plan == null) {
+        nextSnapshotId = scan.checkpoint();
+
+        if (plan.splits().isEmpty()) {
             return;
         }
 
-        nextSnapshotId = scan.checkpoint();
         addSplits(splitGenerator.createSplits(plan));
         assignSplits();
     }
