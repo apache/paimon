@@ -34,10 +34,12 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -246,15 +248,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public void overwrite(
-            List<Map<String, String>> partitions,
+            Map<String, String> partition,
             ManifestCommittable committable,
             Map<String, String> properties) {
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Ready to overwrite partition "
-                            + partitions.stream()
-                                    .map(Object::toString)
-                                    .collect(Collectors.joining(","))
+                            + partition.toString()
                             + "\n"
                             + committable.toString());
         }
@@ -287,33 +287,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         // sanity check, all changes must be done within the given partition
-        List<Predicate> partitionFilters = new ArrayList<>();
-        for (Map<String, String> partition : partitions) {
-            Predicate partitionFilter = PredicateBuilder.partition(partition, partitionType);
-            if (partitionFilter != null) {
-                for (ManifestEntry entry : appendTableFiles) {
-                    if (!partitionFilter.test(
-                            partitionObjectConverter.convert(entry.partition()))) {
-                        throw new IllegalArgumentException(
-                                "Trying to overwrite partition "
-                                        + partition
-                                        + ", but the changes in "
-                                        + pathFactory.getPartitionString(entry.partition())
-                                        + " does not belong to this partition");
-                    }
+        Predicate partitionFilter = PredicateBuilder.partition(partition, partitionType);
+        if (partitionFilter != null) {
+            for (ManifestEntry entry : appendTableFiles) {
+                if (!partitionFilter.test(partitionObjectConverter.convert(entry.partition()))) {
+                    throw new IllegalArgumentException(
+                            "Trying to overwrite partition "
+                                    + partition
+                                    + ", but the changes in "
+                                    + pathFactory.getPartitionString(entry.partition())
+                                    + " does not belong to this partition");
                 }
-
-                partitionFilters.add(partitionFilter);
             }
-        }
-
-        Predicate partitionFilter;
-        if (partitionFilters.size() == 0) {
-            partitionFilter = null;
-        } else if (partitionFilters.size() == 1) {
-            partitionFilter = partitionFilters.get(0);
-        } else {
-            partitionFilter = PredicateBuilder.or(partitionFilters);
         }
 
         // overwrite new files
@@ -334,6 +319,31 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     Snapshot.CommitKind.COMPACT,
                     null);
         }
+    }
+
+    @Override
+    public void dropPartitions(List<Map<String, String>> partitions) {
+        Preconditions.checkArgument(!partitions.isEmpty(), "Partitions list cannot be empty.");
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Ready to drop partitions {}",
+                    partitions.stream().map(Objects::toString).collect(Collectors.joining(",")));
+        }
+
+        Predicate partitionFilter =
+                partitions.stream()
+                        .map(partition -> PredicateBuilder.partition(partition, partitionType))
+                        .reduce(PredicateBuilder::or)
+                        .orElseThrow(() -> new RuntimeException("Failed to get partition filter."));
+
+        tryOverwrite(
+                partitionFilter,
+                Collections.emptyList(),
+                // identifier is MAX_VALUE to avoid conflict
+                BatchWriteBuilder.COMMIT_IDENTIFIER,
+                null,
+                Collections.emptyMap());
     }
 
     private void collectChanges(

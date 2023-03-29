@@ -44,7 +44,7 @@ public class TableCommitImpl implements InnerTableCommit {
     @Nullable private final FileStoreExpire expire;
     @Nullable private final PartitionExpire partitionExpire;
 
-    @Nullable private List<Map<String, String>> overwritePartitions = null;
+    @Nullable private Map<String, String> overwritePartition = null;
     @Nullable private Lock lock;
 
     private boolean batchCommitted = false;
@@ -59,8 +59,8 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
-    public TableCommitImpl withOverwrite(@Nullable List<Map<String, String>> overwritePartitions) {
-        this.overwritePartitions = overwritePartitions;
+    public TableCommitImpl withOverwrite(@Nullable Map<String, String> overwritePartitions) {
+        this.overwritePartition = overwritePartitions;
         return this;
     }
 
@@ -97,10 +97,10 @@ public class TableCommitImpl implements InnerTableCommit {
         for (CommitMessage commitMessage : commitMessages) {
             committable.addFileCommittable(commitMessage);
         }
-        if (overwritePartitions == null) {
+        if (overwritePartition == null) {
             commit.commit(committable, new HashMap<>());
         } else {
-            commit.overwrite(overwritePartitions, committable, new HashMap<>());
+            commit.overwrite(overwritePartition, committable, new HashMap<>());
         }
         expire();
     }
@@ -110,7 +110,7 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commitMultiple(List<ManifestCommittable> committables) {
-        if (overwritePartitions == null) {
+        if (overwritePartition == null) {
             for (ManifestCommittable committable : committables) {
                 commit.commit(committable, new HashMap<>());
             }
@@ -128,7 +128,7 @@ public class TableCommitImpl implements InnerTableCommit {
                 // TODO maybe it can be produced by CommitterOperator
                 committable = new ManifestCommittable(Long.MAX_VALUE);
             }
-            commit.overwrite(overwritePartitions, committable, new HashMap<>());
+            commit.overwrite(overwritePartition, committable, new HashMap<>());
         }
 
         expire();

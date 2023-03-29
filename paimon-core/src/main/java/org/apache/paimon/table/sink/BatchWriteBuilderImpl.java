@@ -23,7 +23,6 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -35,7 +34,7 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     private final InnerTable table;
     private final String commitUser = UUID.randomUUID().toString();
 
-    private List<Map<String, String>> staticPartitions;
+    private Map<String, String> staticPartition;
 
     public BatchWriteBuilderImpl(InnerTable table) {
         this.table = table;
@@ -52,19 +51,19 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     }
 
     @Override
-    public BatchWriteBuilder withOverwrite(@Nullable List<Map<String, String>> staticPartitions) {
-        this.staticPartitions = staticPartitions;
+    public BatchWriteBuilder withOverwrite(@Nullable Map<String, String> staticPartition) {
+        this.staticPartition = staticPartition;
         return this;
     }
 
     @Override
     public BatchTableWrite newWrite() {
-        return table.newWrite(commitUser).withOverwrite(staticPartitions != null);
+        return table.newWrite(commitUser).withOverwrite(staticPartition != null);
     }
 
     @Override
     public BatchTableCommit newCommit() {
-        InnerTableCommit commit = table.newCommit(commitUser).withOverwrite(staticPartitions);
+        InnerTableCommit commit = table.newCommit(commitUser).withOverwrite(staticPartition);
         commit.ignoreEmptyCommit(true);
         return commit;
     }
