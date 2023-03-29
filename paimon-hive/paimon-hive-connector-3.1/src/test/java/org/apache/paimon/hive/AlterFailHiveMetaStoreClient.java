@@ -18,7 +18,7 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.HiveMetaHookLoader;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
@@ -29,17 +29,18 @@ import org.apache.thrift.TException;
 
 /** A {@link HiveMetaStoreClient} to test altering table failed in Hive metastore client. */
 public class AlterFailHiveMetaStoreClient extends HiveMetaStoreClient implements IMetaStoreClient {
-    public AlterFailHiveMetaStoreClient(HiveConf conf) throws MetaException {
+
+    public AlterFailHiveMetaStoreClient(Configuration conf) throws MetaException {
         super(conf);
     }
 
-    public AlterFailHiveMetaStoreClient(HiveConf conf, HiveMetaHookLoader hookLoader)
+    public AlterFailHiveMetaStoreClient(Configuration conf, HiveMetaHookLoader hookLoader)
             throws MetaException {
         super(conf, hookLoader);
     }
 
     public AlterFailHiveMetaStoreClient(
-            HiveConf conf, HiveMetaHookLoader hookLoader, Boolean allowEmbedded)
+            Configuration conf, HiveMetaHookLoader hookLoader, Boolean allowEmbedded)
             throws MetaException {
         super(conf, hookLoader, allowEmbedded);
     }

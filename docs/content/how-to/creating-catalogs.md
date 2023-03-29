@@ -76,45 +76,14 @@ USE paimon.default;
 
 By using Paimon Hive catalog, changes to the catalog will directly affect the corresponding Hive metastore. Tables created in such catalog can also be accessed directly from Hive.
 
-### Preparing Paimon Hive Catalog Jar File
-
-Download the jar file with corresponding version.
-
-{{< stable >}}
-
-| Version    | Jar                                                                                                                                                                                    |
-|------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Hive 2 & 3 | [paimon-hive-catalog-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-hive-catalog-{{< version >}}.jar) |
-
-{{< /stable >}}
-
-{{< unstable >}}
-
-| Version    | Jar                                                                                                                                                                                    |
-|------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Hive 2 & 3 | [paimon-hive-catalog-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-catalog/{{< version >}}/) |
-
-{{< /unstable >}}
-
-You can also manually build bundled jar from the source code.
-
-To build from source code, [clone the git repository]({{< github_repo >}}).
-
-Build bundled jar with the following command.
-`mvn clean install -Dmaven.test.skip=true`
-
-You can find Hive catalog jar in `./paimon-hive/paimon-hive-catalog/target/paimon-hive-catalog-{{< version >}}.jar`.
-
-### Registering Hive Catalog
-
 {{< tabs "hive-metastore-example" >}}
 
 {{< tab "Flink" >}}
 
-To enable Paimon Hive catalog support in Flink, you can pick one of the following two methods.
+Paimon Hive catalog in Flink relies on Flink Hive connector bundled jar. You should first download Flink Hive connector bundled jar [from here](https://nightlies.apache.org/flink/flink-docs-release-1.17/docs/connectors/table/hive/overview/#using-bundled-hive-jar). To add bundled jar to classpath, you can pick one of the following two methods.
 
-* Copy Paimon Hive catalog jar file into the `lib` directory of your Flink installation directory. Note that this must be done before starting your Flink cluster.
-* If you're using Flink's SQL client, append `--jar /path/to/paimon-hive-catalog-{{< version >}}.jar` to the starting command of SQL client.
+* Copy bundled jar into the `lib` directory of your Flink installation directory. Note that this must be done before starting your Flink cluster.
+* If you're using Flink's SQL client, append `--jar /path/to/bundled-jar.jar` to the starting command of SQL client.
 
 The following Flink SQL registers and uses a Paimon Hive catalog named `my_hive`. Metadata and table files are stored under `hdfs://path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
 
@@ -132,8 +101,6 @@ USE CATALOG my_hive;
 {{< /tab >}}
 
 {{< tab "Spark3" >}}
-
-To enable Paimon Hive catalog support in Spark3, append the path of Paimon Hive catalog jar file to `--jars` argument when starting spark.
 
 The following shell command registers a Table tore Hive catalog named `paimon`. Metadata and table files are stored under `hdfs://path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
 

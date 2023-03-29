@@ -84,7 +84,7 @@ NOTE: If you are using HDFS, make sure that the environment variable `HADOOP_HOM
 
 By using paimon Hive catalog, you can create, drop and insert into paimon tables from Flink. These operations directly affect the corresponding Hive metastore. Tables created in this way can also be accessed directly from Hive.
 
-**Step 1: Prepare Paimon Hive Catalog Jar File for Flink**
+**Step 1: Prepare Flink Hive Connector Bundled Jar**
 
 See [creating a catalog with Hive metastore]({{< ref "how-to/creating-catalogs#creating-a-catalog-with-hive-metastore" >}}).
 
