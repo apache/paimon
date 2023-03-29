@@ -102,7 +102,9 @@ USE CATALOG my_hive;
 
 {{< tab "Spark3" >}}
 
-The following shell command registers a Table tore Hive catalog named `paimon`. Metadata and table files are stored under `hdfs://path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
+Your Spark installation should be able to detect, or already contains Hive dependencies. See [here](https://spark.apache.org/docs/latest/sql-data-sources-hive-tables.html) for more information.
+
+The following shell command registers a Paimon Hive catalog named `paimon`. Metadata and table files are stored under `hdfs://path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
 
 ```bash
 spark-sql ... \
