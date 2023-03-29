@@ -43,7 +43,7 @@ public abstract class FlinkTableSource
                 SupportsProjectionPushDown,
                 SupportsLimitPushDown {
 
-    private final Table table;
+    protected final Table table;
 
     @Nullable protected Predicate predicate;
     @Nullable protected int[][] projectFields;

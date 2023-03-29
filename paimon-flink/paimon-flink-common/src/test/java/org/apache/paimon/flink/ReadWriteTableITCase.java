@@ -57,7 +57,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
-import static org.apache.paimon.flink.AbstractFlinkTableFactory.buildFileStoreTable;
+import static org.apache.paimon.flink.AbstractFlinkTableFactory.buildPaimonTable;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_PARALLELISM;
 import static org.apache.paimon.flink.FlinkTestBase.createResolvedTable;
@@ -1155,7 +1155,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         DynamicTableSink tableSink =
                 new FlinkTableSink(
-                        context.getObjectIdentifier(), buildFileStoreTable(context), context, null);
+                        context.getObjectIdentifier(), buildPaimonTable(context), context, null);
         assertThat(tableSink).isInstanceOf(FlinkTableSink.class);
 
         // 2. get sink provider
