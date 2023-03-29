@@ -18,7 +18,7 @@
 
 package org.apache.paimon.options;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.options.description.Description;
 
 import java.time.Duration;
@@ -68,7 +68,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class ConfigOptions {
 
     /**

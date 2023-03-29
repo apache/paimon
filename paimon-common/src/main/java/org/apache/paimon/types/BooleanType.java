@@ -18,14 +18,14 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 /**
  * Data type of a boolean with a (possibly) three-valued logic of {@code TRUE, FALSE, UNKNOWN}.
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class BooleanType extends DataType {
 
     private static final long serialVersionUID = 1L;

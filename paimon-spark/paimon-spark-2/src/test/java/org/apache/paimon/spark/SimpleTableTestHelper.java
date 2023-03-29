@@ -29,6 +29,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.RowType;
 
 import java.util.Collections;
@@ -59,9 +60,9 @@ public class SimpleTableTestHelper {
         conf.setString("path", path.toString());
         FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), conf);
 
-        String commitUser = "user";
-        this.writer = table.newWrite(commitUser);
-        this.commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        writer = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
 
         this.commitIdentifier = 0;
     }

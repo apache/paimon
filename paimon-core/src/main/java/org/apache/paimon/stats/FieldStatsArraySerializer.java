@@ -28,7 +28,7 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.RowDataUtils;
+import org.apache.paimon.utils.InternalRowUtils;
 
 import javax.annotation.Nullable;
 
@@ -60,7 +60,7 @@ public class FieldStatsArraySerializer {
                 IntStream.range(0, safeType.getFieldCount())
                         .mapToObj(
                                 i ->
-                                        RowDataUtils.createNullCheckingFieldGetter(
+                                        InternalRowUtils.createNullCheckingFieldGetter(
                                                 safeType.getTypeAt(i), i))
                         .toArray(InternalRow.FieldGetter[]::new);
         this.indexMapping = indexMapping;

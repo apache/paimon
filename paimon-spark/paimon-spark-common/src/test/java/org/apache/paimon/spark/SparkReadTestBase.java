@@ -27,6 +27,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 
@@ -40,8 +41,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -166,13 +169,14 @@ public abstract class SparkReadTestBase {
                         tableName));
     }
 
-    private static void writeTable(String tableName, GenericRow... rows) throws Exception {
+    protected static void writeTable(String tableName, GenericRow... rows) throws Exception {
         FileStoreTable fileStoreTable =
                 FileStoreTableFactory.create(
                         LocalFileIO.create(),
                         new Path(warehousePath, String.format("default.db/%s", tableName)));
-        StreamTableWrite writer = fileStoreTable.newWrite(COMMIT_USER);
-        StreamTableCommit commit = fileStoreTable.newCommit(COMMIT_USER);
+        StreamWriteBuilder streamWriteBuilder = fileStoreTable.newStreamWriteBuilder();
+        StreamTableWrite writer = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
         for (GenericRow row : rows) {
             writer.write(row);
         }
@@ -185,5 +189,18 @@ public abstract class SparkReadTestBase {
                 String.format(
                         "INSERT INTO paimon.default.%s VALUES %s",
                         tableName, StringUtils.join(values, ",")));
+    }
+
+    // return of 'SHOW CREATE TABLE' excluding TBLPROPERTIES
+    protected String showCreateString(String table, String... fieldSpec) {
+        return String.format(
+                "CREATE TABLE %s (%s)\n",
+                table,
+                Arrays.stream(fieldSpec).map(s -> "\n  " + s).collect(Collectors.joining(",")));
+    }
+
+    // default schema
+    protected String defaultShowCreateString(String table) {
+        return showCreateString(table, "a INT NOT NULL", "b BIGINT", "c STRING");
     }
 }

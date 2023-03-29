@@ -37,7 +37,7 @@ public interface DataTable extends InnerTable {
     @Override
     StreamDataTableScan newStreamScan();
 
-    CoreOptions options();
+    CoreOptions coreOptions();
 
     SnapshotManager snapshotManager();
 

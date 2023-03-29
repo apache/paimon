@@ -231,7 +231,7 @@ public class ForceCompactionITCase extends CatalogITCaseBase {
                         getTableDirectory(tableName),
                         partType,
                         "default",
-                        CoreOptions.FILE_FORMAT.defaultValue());
+                        CoreOptions.FILE_FORMAT.defaultValue().toString());
 
         List<ManifestFileMeta> manifestFileMetas =
                 new ManifestList.Factory(LocalFileIO.create(), partType, avro, pathFactory)

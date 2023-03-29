@@ -23,7 +23,7 @@ import org.apache.paimon.benchmark.utils.BenchmarkUtils;
 import javax.annotation.Nullable;
 
 /**
- * Metric collected per {@link org.apache.paimon.benchmark.BenchmarkOptions#METRIC_MONITOR_DURATION}
+ * Metric collected per {@link org.apache.paimon.benchmark.BenchmarkOptions#METRIC_MONITOR_INTERVAL}
  * for a single query.
  */
 public class BenchmarkMetric {

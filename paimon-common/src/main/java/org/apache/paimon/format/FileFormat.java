@@ -18,7 +18,8 @@
 
 package org.apache.paimon.format;
 
-import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
@@ -75,20 +76,18 @@ public abstract class FileFormat {
         return Optional.empty();
     }
 
-    /** Create a {@link FileFormat} from table options. */
-    public static FileFormat fromTableOptions(
-            Options tableOptions, ConfigOption<String> formatOption) {
-        String formatIdentifier = tableOptions.get(formatOption);
-        return fromIdentifier(formatIdentifier, tableOptions.removePrefix(formatIdentifier + "."));
+    @VisibleForTesting
+    public static FileFormat fromIdentifier(String identifier, Options options) {
+        return fromIdentifier(identifier, new FormatContext(options, 1024));
     }
 
     /** Create a {@link FileFormat} from format identifier and format options. */
-    public static FileFormat fromIdentifier(String identifier, Options options) {
+    public static FileFormat fromIdentifier(String identifier, FormatContext context) {
         Optional<FileFormat> format =
-                fromIdentifier(identifier, options, Thread.currentThread().getContextClassLoader());
+                fromIdentifier(identifier, context, Thread.currentThread().getContextClassLoader());
         return format.orElseGet(
                 () ->
-                        fromIdentifier(identifier, options, FileFormat.class.getClassLoader())
+                        fromIdentifier(identifier, context, FileFormat.class.getClassLoader())
                                 .orElseThrow(
                                         () ->
                                                 new RuntimeException(
@@ -99,12 +98,12 @@ public abstract class FileFormat {
     }
 
     private static Optional<FileFormat> fromIdentifier(
-            String formatIdentifier, Options formatOptions, ClassLoader classLoader) {
+            String formatIdentifier, FormatContext context, ClassLoader classLoader) {
         ServiceLoader<FileFormatFactory> serviceLoader =
                 ServiceLoader.load(FileFormatFactory.class, classLoader);
         for (FileFormatFactory factory : serviceLoader) {
             if (factory.identifier().equals(formatIdentifier.toLowerCase())) {
-                return Optional.of(factory.create(formatOptions));
+                return Optional.of(factory.create(context));
             }
         }
 

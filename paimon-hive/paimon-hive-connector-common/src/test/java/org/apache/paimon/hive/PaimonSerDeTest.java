@@ -21,7 +21,7 @@ package org.apache.paimon.hive;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.hive.objectinspector.PaimonRowDataObjectInspector;
+import org.apache.paimon.hive.objectinspector.PaimonInternalRowObjectInspector;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 
@@ -50,8 +50,8 @@ public class PaimonSerDeTest {
     public void testInitialize() throws Exception {
         PaimonSerDe serDe = createInitializedSerDe();
         ObjectInspector o = serDe.getObjectInspector();
-        assertThat(o).isInstanceOf(PaimonRowDataObjectInspector.class);
-        PaimonRowDataObjectInspector oi = (PaimonRowDataObjectInspector) o;
+        assertThat(o).isInstanceOf(PaimonInternalRowObjectInspector.class);
+        PaimonInternalRowObjectInspector oi = (PaimonInternalRowObjectInspector) o;
         GenericRow rowData = generate();
         List<? extends StructField> structFields = oi.getAllStructFieldRefs();
         for (int i = 0; i < structFields.size(); i++) {

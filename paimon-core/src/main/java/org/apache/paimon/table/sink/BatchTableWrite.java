@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 import java.util.List;
 
@@ -27,7 +27,7 @@ import java.util.List;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface BatchTableWrite extends TableWrite {
 
     /**

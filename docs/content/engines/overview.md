@@ -40,3 +40,5 @@ Apache Spark and Apache Hive.
 | Spark     | 2.4 | batch read | Projection, Filter |
 | Trino     | 388/358 | batch read | Projection, Filter |
 | Presto    | 0.236 and above | batch read | Projection, Filter |
+
+[Download Link]({{< ref "project/download#engine-jars" >}})

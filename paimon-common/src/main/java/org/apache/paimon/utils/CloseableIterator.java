@@ -18,7 +18,7 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 import javax.annotation.Nonnull;
 
@@ -41,7 +41,7 @@ import static java.util.Arrays.asList;
  * @param <T> the type of iterated elements.
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface CloseableIterator<T> extends Iterator<T>, AutoCloseable {
 
     CloseableIterator<?> EMPTY_INSTANCE =

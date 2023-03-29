@@ -18,7 +18,7 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -28,7 +28,7 @@ import java.io.OutputStream;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public abstract class PositionOutputStream extends OutputStream {
 
     /**

@@ -20,6 +20,7 @@ package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -37,29 +38,32 @@ import static org.apache.paimon.format.parquet.ParquetFileFormatFactory.IDENTIFI
 /** Parquet {@link FileFormat}. */
 public class ParquetFileFormat extends FileFormat {
 
-    private final Options formatOptions;
+    private final FormatContext formatContext;
 
-    public ParquetFileFormat(Options formatOptions) {
+    public ParquetFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
-        this.formatOptions = formatOptions;
+        this.formatContext = formatContext;
     }
 
     @VisibleForTesting
     Options formatOptions() {
-        return formatOptions;
+        return formatContext.formatOptions();
     }
 
     @Override
     public FormatReaderFactory createReaderFactory(
             RowType type, int[][] projection, List<Predicate> filters) {
         return new ParquetReaderFactory(
-                getParquetConfiguration(formatOptions), Projection.of(projection).project(type));
+                getParquetConfiguration(formatContext.formatOptions()),
+                Projection.of(projection).project(type),
+                formatContext.readBatchSize());
     }
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
         return new ParquetWriterFactory(
-                new RowDataParquetBuilder(type, getParquetConfiguration(formatOptions)));
+                new RowDataParquetBuilder(
+                        type, getParquetConfiguration(formatContext.formatOptions())));
     }
 
     @Override

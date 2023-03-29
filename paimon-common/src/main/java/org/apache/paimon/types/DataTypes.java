@@ -18,7 +18,7 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 import java.util.Arrays;
 
@@ -27,7 +27,7 @@ import java.util.Arrays;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class DataTypes {
 
     public static IntType INT() {

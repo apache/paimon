@@ -39,7 +39,7 @@ import org.apache.spark.sql.types.Decimal;
 import org.apache.spark.unsafe.types.CalendarInterval;
 import org.apache.spark.unsafe.types.UTF8String;
 
-import static org.apache.paimon.utils.RowDataUtils.copyRowData;
+import static org.apache.paimon.utils.InternalRowUtils.copyInternalRow;
 import static org.apache.paimon.utils.TypeUtils.timestampPrecision;
 
 /** Spark {@link org.apache.spark.sql.catalyst.InternalRow} to wrap {@link InternalRow}. */
@@ -75,7 +75,7 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
 
     @Override
     public org.apache.spark.sql.catalyst.InternalRow copy() {
-        return new SparkInternalRow(rowType).replace(copyRowData(row, rowType));
+        return new SparkInternalRow(rowType).replace(copyInternalRow(row, rowType));
     }
 
     @Override

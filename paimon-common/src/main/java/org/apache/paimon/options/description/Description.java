@@ -18,7 +18,7 @@
 
 package org.apache.paimon.options.description;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -29,7 +29,7 @@ import java.util.List;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class Description {
 
     private final List<BlockElement> blocks;

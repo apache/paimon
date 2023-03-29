@@ -18,7 +18,7 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.local.LocalFileIO;
 
@@ -44,7 +44,7 @@ import java.util.UUID;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface FileIO extends Serializable {
 
     Logger LOG = LoggerFactory.getLogger(FileIO.class);

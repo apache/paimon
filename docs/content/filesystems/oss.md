@@ -28,18 +28,19 @@ under the License.
 
 {{< stable >}}
 
-## Download
-
-[Download](https://repo.maven.apache.org/maven2/org/apache/flink/paimon-oss/{{< version >}}/paimon-oss-{{< version >}}.jar)
-flink paimon shaded jar.
+Download [paimon-oss-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-oss-{{< version >}}.jar).
 
 {{< /stable >}}
 
 {{< unstable >}}
 
-## Build
+Download [paimon-oss-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-oss/{{< version >}}/).
 
-To build from source code, either [download the source of a release](https://flink.apache.org/downloads.html) or [clone the git repository]({{< github_repo >}}).
+{{< /unstable >}}
+
+You can also manually build bundled jar from the source code.
+
+To build from source code, [clone the git repository]({{< github_repo >}}).
 
 Build shaded jar with the following command.
 
@@ -50,13 +51,13 @@ mvn clean install -DskipTests
 You can find the shaded jars under
 `./paimon-filesystems/paimon-oss/target/paimon-oss-{{< version >}}.jar`.
 
-{{< /unstable >}}
-
-## Usage
-
 {{< tabs "oss" >}}
 
 {{< tab "Flink" >}}
+
+{{< hint info >}}
+If you have already configured oss access through Flink (Via Flink FileSystem), here you can skip the following configuration.
+{{< /hint >}}
 
 Put `paimon-oss-{{< version >}}.jar` into `lib` directory of your Flink home, and create catalog:
 
@@ -74,6 +75,10 @@ CREATE CATALOG my_catalog WITH (
 
 {{< tab "Spark" >}}
 
+{{< hint info >}}
+If you have already configured oss access through Spark (Via Hadoop FileSystem), here you can skip the following configuration.
+{{< /hint >}}
+
 Place `paimon-oss-{{< version >}}.jar` together with `paimon-spark-{{< version >}}.jar` under Spark's jars directory, and start like
 
 ```shell
@@ -88,6 +93,10 @@ spark-sql \
 {{< /tab >}}
 
 {{< tab "Hive" >}}
+
+{{< hint info >}}
+If you have already configured oss access through Hive (Via Hadoop FileSystem), here you can skip the following configuration.
+{{< /hint >}}
 
 NOTE: You need to ensure that Hive metastore can access `oss`.
 

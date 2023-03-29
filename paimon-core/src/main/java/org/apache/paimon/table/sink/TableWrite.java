@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -29,7 +29,7 @@ import org.apache.paimon.table.Table;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface TableWrite extends AutoCloseable {
 
     /** With {@link IOManager}, this is needed if 'write-buffer-spillable' is set to true. */

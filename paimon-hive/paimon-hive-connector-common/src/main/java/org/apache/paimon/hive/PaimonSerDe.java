@@ -18,7 +18,7 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.hive.objectinspector.PaimonRowDataObjectInspector;
+import org.apache.paimon.hive.objectinspector.PaimonInternalRowObjectInspector;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.serde2.AbstractSerDe;
@@ -38,14 +38,14 @@ import java.util.Properties;
  */
 public class PaimonSerDe extends AbstractSerDe {
 
-    private PaimonRowDataObjectInspector inspector;
+    private PaimonInternalRowObjectInspector inspector;
 
     @Override
     public void initialize(@Nullable Configuration configuration, Properties properties)
             throws SerDeException {
         HiveSchema schema = HiveSchema.extract(configuration, properties);
         inspector =
-                new PaimonRowDataObjectInspector(
+                new PaimonInternalRowObjectInspector(
                         schema.fieldNames(), schema.fieldTypes(), schema.fieldComments());
     }
 

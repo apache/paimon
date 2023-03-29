@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
@@ -148,7 +149,8 @@ public abstract class FileStoreTableTestBase {
 
     @Test
     public void testChangeFormat() throws Exception {
-        FileStoreTable table = createFileStoreTable(conf -> conf.set(FILE_FORMAT, "orc"));
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.set(FILE_FORMAT, CoreOptions.FileFormatType.ORC));
 
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -167,7 +169,9 @@ public abstract class FileStoreTableTestBase {
                         "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
 
-        table = createFileStoreTable(conf -> conf.set(FILE_FORMAT, "avro"));
+        table =
+                createFileStoreTable(
+                        conf -> conf.set(FILE_FORMAT, CoreOptions.FileFormatType.AVRO));
         write = table.newWrite(commitUser);
         commit = table.newCommit(commitUser);
         write.write(rowData(1, 11, 111L));
@@ -249,7 +253,7 @@ public abstract class FileStoreTableTestBase {
     @Test
     public void testReadFilter() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        if (table.options().fileFormat().getFormatIdentifier().equals("parquet")) {
+        if (table.coreOptions().fileFormat().getFormatIdentifier().equals("parquet")) {
             // TODO support parquet reader filter push down
             return;
         }
@@ -383,7 +387,7 @@ public abstract class FileStoreTableTestBase {
         SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
         schemaManager.commitChanges(SchemaChange.addColumn("added", DataTypes.INT()));
         table = table.copyWithLatestSchema();
-        assertThat(table.options().snapshotNumRetainMax()).isEqualTo(100);
+        assertThat(table.coreOptions().snapshotNumRetainMax()).isEqualTo(100);
         write = table.newWrite(commitUser);
 
         write.write(new JoinedRow(rowData(1, 30, 300L), GenericRow.of(3000)));

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
@@ -37,7 +37,7 @@ import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class CatalogContext {
 
     private final Options options;

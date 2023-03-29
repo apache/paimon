@@ -320,8 +320,8 @@ Run the following command to submit a 'merge-into' job for the table.
     --database <database-name> \
     --table <target-table> \
     [--target-as <target-table-alias>] \
-    --source-table <source-table> \
-    [--source-as <source-table-alias>] \
+    --source-table <source-table-name> \
+    [--source-sql <sql> ...]\
     --on <merge-condition> \
     --merge-actions <matched-upsert,matched-delete,not-matched-insert,not-matched-by-source-upsert,not-matched-by-source-delete> \
     --matched-upsert-condition <matched-condition> \
@@ -333,7 +333,7 @@ Run the following command to submit a 'merge-into' job for the table.
     --not-matched-by-source-upsert-set <not-matched-upsert-changes> \
     --not-matched-by-source-delete-condition <not-matched-by-source-condition>
     
-Alternatively, you can use '--source-sql <sql> [, --source-sql <sql> ...]' to create a new table as source table at runtime.
+You can pass sqls by '--source-sql <sql> [, --source-sql <sql> ...]' to config environment and create source table at runtime.
     
 -- Examples:
 -- Find all orders mentioned in the source table, then mark as important if the price is above 100 
@@ -389,7 +389,7 @@ Alternatively, you can use '--source-sql <sql> [, --source-sql <sql> ...]' to cr
     --not-matched-by-source-upsert-set "price = T.price - 20" \
     --not-matched-by-source-delete-condition "T.mark = 'trivial'"
     
--- An source-sql example: 
+-- A --source-sql example: 
 -- Create a temporary view S in new catalog and use it as source table
 ./flink run \
     -c org.apache.paimon.flink.action.FlinkActions \
@@ -399,11 +399,9 @@ Alternatively, you can use '--source-sql <sql> [, --source-sql <sql> ...]' to cr
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table T \
-    --source-sql "CREATE CATALOG test WITH (...)" \
-    --source-sql "USE CATALOG test" \
-    --source-sql "USE DATABASE default" \
-    --source-sql "CREATE TEMPORARY VIEW S AS SELECT order_id, price, 'important' FROM important_order" \
-    --source-as test.default.S \
+    --source-sql "CREATE CATALOG test_cat WITH (...)" \
+    --source-sql "CREATE TEMPORARY VIEW test_cat.`default`.S AS SELECT order_id, price, 'important' FROM important_order" \
+    --source-table test_cat.default.S \
     --on "T.id = S.order_id" \
     --merge-actions not-matched-insert\
     --not-matched-insert-values *
@@ -417,9 +415,7 @@ row based on merge-condition and optional not-matched-condition (source - target
 3. not-matched-by-source: changed rows are from target table and all row cannot match any source 
 table row based on merge-condition and optional not-matched-by-source-condition (target - source).
 
-Parameters format:\
-All conditions, set changes and values should use Flink SQL syntax. Please quote them
-with \" to escape special characters.
+Parameters format:
 1. matched-upsert-changes:\
 col = \<source-table>.col | expression [, ...] (Means setting \<target-table>.col with given value. Do not 
 add '\<target-table>.' before 'col'.)\
@@ -437,13 +433,32 @@ is equal to source's).
 5. not-matched-by-source-condition cannot use source table's columns to construct condition expression.
 
 {{< hint warning >}}
-1. source-alias cannot be duplicated with existed table name. If you use --source-ddl, source-alias 
-must be specified and equal to the table name in "CREATE" statement.
-2. If the source table is not in the same place as target table, the source-table-name or the source-alias 
-should be qualified (database.table or catalog.database.table if in different catalog).
+1. Target alias cannot be duplicated with existed table name. 
+2. If the source table is not in the current catalog and current database, the source-table-name must be 
+qualified (database.table or catalog.database.table if created a new catalog). 
+For examples:\
+(1) If source table 'my_source' is in 'my_db', qualify it:\
+\--source-table "my_db.my_source"\
+(2) Example for sqls:\
+When sqls changed current catalog and database, it's OK to not qualify the source table name:\
+\--source-sql "CREATE CATALOG my_cat WITH (...)"\
+\--source-sql "USE CATALOG my_cat"\
+\--source-sql "CREATE DATABASE my_db"\
+\--source-sql "USE my_db"\
+\--source-sql "CREATE TABLE S ..."\
+\--source-table S\
+but you must qualify it in the following case:\
+\--source-sql "CREATE CATALOG my_cat WITH (...)"\
+\--source-sql "CREATE TABLE my_cat.\`default`.S ..."\
+\--source-table my_cat.default.S\
+You can use just 'S' as source table name in following arguments.
 3. At least one merge action must be specified.
 4. If both matched-upsert and matched-delete actions are present, their conditions must both be present too 
 (same to not-matched-by-source-upsert and not-matched-by-source-delete). Otherwise, all conditions are optional.
+5. All conditions, set changes and values should use Flink SQL syntax. To ensure the whole command runs normally
+in Shell, please quote them with \"\" to escape blank spaces and use '\\' to escape special characters in statement. 
+For example:\
+\--source-sql "CREATE TABLE T (k INT) WITH ('special-key' = '123\\!')"
 
 {{< /hint >}}
 

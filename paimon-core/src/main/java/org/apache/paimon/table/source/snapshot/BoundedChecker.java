@@ -16,12 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table;
+package org.apache.paimon.table.source.snapshot;
 
-import java.util.List;
+import org.apache.paimon.Snapshot;
 
-/** An interface for {@link Table} partition support. */
-public interface SupportsPartition {
+/** Checker to check whether the bounded stream is end. */
+public interface BoundedChecker {
 
-    List<String> partitionKeys();
+    boolean shouldEndInput(Snapshot snapshot);
+
+    static BoundedChecker neverEnd() {
+        return snapshot -> false;
+    }
+
+    static BoundedChecker watermark(long boundedWatermark) {
+        return snapshot -> {
+            Long watermark = snapshot.watermark();
+            return watermark != null && watermark > boundedWatermark;
+        };
+    }
 }

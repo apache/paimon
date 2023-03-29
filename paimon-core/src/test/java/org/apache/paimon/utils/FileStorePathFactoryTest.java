@@ -84,7 +84,7 @@ public class FileStorePathFactoryTest {
                                 new DataType[] {new VarCharType(10), new IntType()},
                                 new String[] {"dt", "hr"}),
                         "default",
-                        CoreOptions.FILE_FORMAT.defaultValue());
+                        CoreOptions.FILE_FORMAT.defaultValue().toString());
 
         assertPartition("20211224", 16, pathFactory, "/dt=20211224/hr=16");
         assertPartition("20211224", null, pathFactory, "/dt=20211224/hr=default");

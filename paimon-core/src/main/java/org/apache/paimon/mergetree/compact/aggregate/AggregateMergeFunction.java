@@ -33,8 +33,8 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 import static org.apache.paimon.options.ConfigOptions.key;
+import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
-import static org.apache.paimon.utils.RowDataUtils.createFieldGetters;
 
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record,

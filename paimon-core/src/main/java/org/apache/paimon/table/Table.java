@@ -18,21 +18,23 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.RowType;
 
 import java.io.Serializable;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * A table provides basic abstraction for table type and table scan and table read.
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface Table extends Serializable {
 
     /** A name to identify this table. */
@@ -40,6 +42,18 @@ public interface Table extends Serializable {
 
     /** Returns the row type of this table. */
     RowType rowType();
+
+    /** Partition keys of this table. */
+    List<String> partitionKeys();
+
+    /** Primary keys of this table. */
+    List<String> primaryKeys();
+
+    /** Options of this table. */
+    Map<String, String> options();
+
+    /** Optional comment of this table. */
+    Optional<String> comment();
 
     /** Copy this table with adding dynamic options. */
     Table copy(Map<String, String> dynamicOptions);

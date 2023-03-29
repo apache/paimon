@@ -59,6 +59,7 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
 
     private static final Logger LOG = LoggerFactory.getLogger(FullChangelogStoreSinkWrite.class);
 
+    private final SnapshotManager snapshotManager;
     private final long fullCompactionThresholdMs;
 
     private final Set<Tuple2<BinaryRow, Integer>> currentWrittenBuckets;
@@ -81,6 +82,7 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
             throws Exception {
         super(table, context, initialCommitUser, ioManager, isOverwrite);
 
+        this.snapshotManager = table.snapshotManager();
         this.fullCompactionThresholdMs = fullCompactionThresholdMs;
 
         currentWrittenBuckets = new HashSet<>();
@@ -197,7 +199,6 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
     }
 
     private void checkSuccessfulFullCompaction() {
-        SnapshotManager snapshotManager = table.snapshotManager();
         Long latestId = snapshotManager.latestSnapshotId();
         if (latestId == null) {
             return;

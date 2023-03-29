@@ -296,8 +296,8 @@ public class SchemaEvolutionTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage(
                         String.format(
-                                "Field name[%s] in schema cannot be exist in [%s]",
-                                "_VALUE_COUNT", SYSTEM_FIELD_NAMES.toString()));
+                                "Field name[%s] in schema cannot be exist in %s",
+                                "_VALUE_COUNT", SYSTEM_FIELD_NAMES));
 
         Schema schema2 =
                 new Schema(
@@ -333,8 +333,8 @@ public class SchemaEvolutionTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage(
                         String.format(
-                                "Field name[%s] in schema cannot be exist in [%s]",
-                                "_VALUE_KIND", SYSTEM_FIELD_NAMES.toString()));
+                                "Field name[%s] in schema cannot be exist in %s",
+                                "_VALUE_KIND", SYSTEM_FIELD_NAMES));
     }
 
     private List<String> readRecords(FileStoreTable table, Predicate filter) throws IOException {

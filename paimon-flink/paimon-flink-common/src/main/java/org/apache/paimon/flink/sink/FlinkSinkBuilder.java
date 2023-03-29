@@ -87,7 +87,7 @@ public class FlinkSinkBuilder {
         BucketStreamPartitioner partitioner =
                 new BucketStreamPartitioner(
                         table.schema(),
-                        table.options()
+                        table.coreOptions()
                                 .toConfiguration()
                                 .get(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION));
         PartitionTransformation<RowData> partitioned =

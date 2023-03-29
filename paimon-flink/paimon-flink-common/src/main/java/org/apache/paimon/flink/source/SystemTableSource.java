@@ -35,11 +35,13 @@ public class SystemTableSource extends FlinkTableSource {
 
     private final Table table;
     private final boolean isStreamingMode;
+    private final int splitBatchSize;
 
-    public SystemTableSource(Table table, boolean isStreamingMode) {
+    public SystemTableSource(Table table, boolean isStreamingMode, int splitBatchSize) {
         super(table);
         this.table = table;
         this.isStreamingMode = isStreamingMode;
+        this.splitBatchSize = splitBatchSize;
     }
 
     public SystemTableSource(
@@ -47,10 +49,12 @@ public class SystemTableSource extends FlinkTableSource {
             boolean isStreamingMode,
             @Nullable Predicate predicate,
             @Nullable int[][] projectFields,
-            @Nullable Long limit) {
+            @Nullable Long limit,
+            int splitBatchSize) {
         super(table, predicate, projectFields, limit);
         this.table = table;
         this.isStreamingMode = isStreamingMode;
+        this.splitBatchSize = splitBatchSize;
     }
 
     @Override
@@ -74,14 +78,16 @@ public class SystemTableSource extends FlinkTableSource {
                             table.newReadBuilder()
                                     .withFilter(predicate)
                                     .withProjection(projectFields),
-                            limit);
+                            limit,
+                            splitBatchSize);
         }
         return SourceProvider.of(source);
     }
 
     @Override
     public DynamicTableSource copy() {
-        return new SystemTableSource(table, isStreamingMode, predicate, projectFields, limit);
+        return new SystemTableSource(
+                table, isStreamingMode, predicate, projectFields, limit, splitBatchSize);
     }
 
     @Override

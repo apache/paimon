@@ -18,14 +18,14 @@
 
 package org.apache.paimon.memory;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 /**
  * Interface describing entities that can provide memory segments.
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface MemorySegmentSource {
 
     /**

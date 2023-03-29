@@ -417,7 +417,7 @@ public class FileStoreITCase extends AbstractTestBase {
             FailingFileIO.reset(failingName, 3, 100);
             options.set(PATH, FailingFileIO.getFailingPath(failingName, temporaryPath));
         }
-        options.set(FILE_FORMAT, "avro");
+        options.set(FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
         return options;
     }
 

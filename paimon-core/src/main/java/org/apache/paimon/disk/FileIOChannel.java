@@ -18,7 +18,7 @@
 
 package org.apache.paimon.disk;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.File;
@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface FileIOChannel {
 
     /**

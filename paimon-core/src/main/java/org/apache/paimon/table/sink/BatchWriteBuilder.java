@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
@@ -51,7 +51,7 @@ import java.util.Map;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface BatchWriteBuilder extends WriteBuilder {
 
     long COMMIT_IDENTIFIER = Long.MAX_VALUE;
