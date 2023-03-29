@@ -105,6 +105,24 @@ public class SplitGeneratorTest {
                                                 newFileFromSequence("2", 13, 0, 20))))
                 .hasMessageContaining(
                         "There should no overlap in append files, there is a bug! Range1(0, 20), Range2(20, 30)");
+
+        assertThatThrownBy(
+                        () ->
+                                generator.split(
+                                        Arrays.asList(
+                                                newFileFromSequence("1", 11, 0, 30),
+                                                newFileFromSequence("2", 13, 10, 20))))
+                .hasMessageContaining(
+                        "There should no overlap in append files, there is a bug! Range1(10, 20), Range2(0, 30)");
+
+        assertThatThrownBy(
+                        () ->
+                                generator.split(
+                                        Arrays.asList(
+                                                newFileFromSequence("1", 11, 10, 20),
+                                                newFileFromSequence("2", 13, 0, 30))))
+                .hasMessageContaining(
+                        "There should no overlap in append files, there is a bug! Range1(0, 30), Range2(10, 20)");
     }
 
     @Test

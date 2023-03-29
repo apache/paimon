@@ -329,11 +329,6 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     }
 
     private static boolean isOverlap(DataFileMeta o1, DataFileMeta o2) {
-        if (o1.minSequenceNumber() <= o2.maxSequenceNumber()
-                && o1.maxSequenceNumber() >= o2.minSequenceNumber()) {
-            return true;
-        }
-
         return o2.minSequenceNumber() <= o1.maxSequenceNumber()
                 && o2.maxSequenceNumber() >= o1.minSequenceNumber();
     }
