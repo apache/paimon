@@ -18,7 +18,7 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.HiveMetaHookLoader;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
@@ -33,17 +33,17 @@ public class TestHiveMetaStoreClient extends HiveMetaStoreClient implements IMet
 
     public static final String MOCK_DATABASE = "test_mock_database";
 
-    public TestHiveMetaStoreClient(HiveConf conf) throws MetaException {
+    public TestHiveMetaStoreClient(Configuration conf) throws MetaException {
         super(conf);
     }
 
-    public TestHiveMetaStoreClient(HiveConf conf, HiveMetaHookLoader hookLoader)
+    public TestHiveMetaStoreClient(Configuration conf, HiveMetaHookLoader hookLoader)
             throws MetaException {
         super(conf, hookLoader);
     }
 
     public TestHiveMetaStoreClient(
-            HiveConf conf, HiveMetaHookLoader hookLoader, Boolean allowEmbedded)
+            Configuration conf, HiveMetaHookLoader hookLoader, Boolean allowEmbedded)
             throws MetaException {
         super(conf, hookLoader, allowEmbedded);
     }

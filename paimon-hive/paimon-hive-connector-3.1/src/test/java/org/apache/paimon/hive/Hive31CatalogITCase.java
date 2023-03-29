@@ -60,7 +60,7 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
             };
 
     @Test
-    public void testCustomMetastoreClient(Class<?> clientClass) throws Exception {
+    public void testCustomMetastoreClient() throws Exception {
         path = folder.newFolder().toURI().toString();
         EnvironmentSettings settings = EnvironmentSettings.newInstance().inBatchMode().build();
         tEnv = TableEnvironmentImpl.create(settings);
