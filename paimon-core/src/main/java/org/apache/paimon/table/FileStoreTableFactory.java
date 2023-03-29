@@ -72,6 +72,11 @@ public class FileStoreTableFactory {
     public static FileStoreTable create(
             FileIO fileIO, Path tablePath, TableSchema tableSchema, Options dynamicOptions) {
         FileStoreTable table;
+        tableSchema =
+                tableSchema.copy(
+                        Options.fromMap(tableSchema.options())
+                                .set(PATH, tablePath.toString())
+                                .toMap());
         if (Options.fromMap(tableSchema.options()).get(CoreOptions.WRITE_MODE)
                 == WriteMode.APPEND_ONLY) {
             table = new AppendOnlyFileStoreTable(fileIO, tablePath, tableSchema);
