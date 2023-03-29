@@ -30,15 +30,39 @@ This documentation is a guide for using Paimon in Presto.
 
 Paimon currently supports Presto 0.236 and above.
 
-## Deploy Paimon Presto Connector
+## Preparing Paimon Jar File
+
+{{< stable >}}
+
+Download the jar file with corresponding version.
+
+|     Version      | Jar                                                                                                                                                                                                            |
+|------------------|-------------------------------------------------------------------------|
+| [0.236,0.268)    | [paimon-presto-0.236-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-presto-0.236-{{< version >}}.jar) |
+| [0.268,0.273)    | [paimon-presto-0.268-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-presto-0.268-{{< version >}}.jar) |
+| [0.273,0.279]    | [paimon-presto-0.273-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-presto-0.273-{{< version >}}.jar) |
+
+{{< /stable >}}
+
+{{< unstable >}}
+
+|     Version      | Jar                                                                                                                                                                                                            |
+|------------------|-------------------------------------------------------------------------|
+| [0.236,0.268)    | [paimon-presto-0.236-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.236/{{< version >}}/) |
+| [0.268,0.273)    | [paimon-presto-0.268-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.268/{{< version >}}/) |
+| [0.273,0.279]    | [paimon-presto-0.273-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.273/{{< version >}}/) |
+
+{{< /unstable >}}
+
+You can also manually build bundled jar from the source code.
+
+To build from source code, [clone the git repository]({{< github_repo >}}).
 
 Build bundled jar with the following command.
 
-|     Version      | Command                                                                                                                                                                                                            |
-|------------------|-------------------------------------------------------------------------|
-| [0.236,0.268)    | mvn clean install -Dmaven.test.skip=true -Ppresto-0.236                 |
-| [0.268,0.273)    | mvn clean install -Dmaven.test.skip=true -Ppresto-0.268                 |
-| [0.273,0.279]    | mvn clean install -Dmaven.test.skip=true -Ppresto-0.273                 |
+```
+mvn clean install -DskipTests
+```
 
 You can find Presto connector jar in `./paimon-presto/paimon-presto-<presto-version>/target/paimon-presto-*.jar`.
 
