@@ -80,10 +80,7 @@ By using Paimon Hive catalog, changes to the catalog will directly affect the co
 
 {{< tab "Flink" >}}
 
-Paimon Hive catalog in Flink relies on Flink Hive connector bundled jar. You should first download Flink Hive connector bundled jar [from here](https://nightlies.apache.org/flink/flink-docs-release-1.17/docs/connectors/table/hive/overview/#using-bundled-hive-jar). To add bundled jar to classpath, you can pick one of the following two methods.
-
-* Copy bundled jar into the `lib` directory of your Flink installation directory. Note that this must be done before starting your Flink cluster.
-* If you're using Flink's SQL client, append `--jar /path/to/bundled-jar.jar` to the starting command of SQL client.
+Paimon Hive catalog in Flink relies on Flink Hive connector bundled jar. You should first download Flink Hive connector bundled jar and add it to classpath. See [here](https://nightlies.apache.org/flink/flink-docs-release-1.17/docs/connectors/table/hive/overview/#using-bundled-hive-jar) for more info.
 
 The following Flink SQL registers and uses a Paimon Hive catalog named `my_hive`. Metadata and table files are stored under `hdfs://path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
 
