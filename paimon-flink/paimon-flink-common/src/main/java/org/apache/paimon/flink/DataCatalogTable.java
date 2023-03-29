@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.catalog.CatalogBaseTable;
@@ -33,10 +34,10 @@ import java.util.Map;
 /** A {@link CatalogTableImpl} to wrap {@link FileStoreTable}. */
 public class DataCatalogTable extends CatalogTableImpl {
 
-    private final FileStoreTable table;
+    private final Table table;
 
     public DataCatalogTable(
-            FileStoreTable table,
+            Table table,
             TableSchema tableSchema,
             List<String> partitionKeys,
             Map<String, String> properties,
@@ -45,7 +46,7 @@ public class DataCatalogTable extends CatalogTableImpl {
         this.table = table;
     }
 
-    public FileStoreTable table() {
+    public Table table() {
         return table;
     }
 

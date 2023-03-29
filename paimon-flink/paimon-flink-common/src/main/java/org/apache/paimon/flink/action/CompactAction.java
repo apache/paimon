@@ -53,6 +53,12 @@ public class CompactAction extends ActionBase {
 
     CompactAction(String warehouse, String database, String tableName) {
         super(warehouse, database, tableName, new Options().set(CoreOptions.WRITE_ONLY, false));
+        if (!(table instanceof FileStoreTable)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Only FileStoreTable supports compact action. The table type is '%s'.",
+                            table.getClass().getName()));
+        }
 
         sourceBuilder =
                 new CompactorSourceBuilder(identifier.getFullName(), (FileStoreTable) table);

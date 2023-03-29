@@ -91,7 +91,7 @@ public class StaticFileStoreSplitEnumerator
         while (taskSplits != null && !taskSplits.isEmpty() && assignment.size() < splitBatchSize) {
             assignment.add(taskSplits.poll());
         }
-        if (assignment != null && assignment.size() > 0) {
+        if (assignment.size() > 0) {
             context.assignSplits(
                     new SplitsAssignment<>(Collections.singletonMap(subtask, assignment)));
         } else {

@@ -22,12 +22,11 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
+import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateFilter;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.TableStreamingReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
@@ -70,7 +69,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreLookupFunction.class);
 
-    private final FileStoreTable table;
+    private final Table table;
     private final List<String> projectFields;
     private final List<String> joinKeys;
     @Nullable private final Predicate predicate;
@@ -85,31 +84,27 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private transient TableStreamingReader streamingReader;
 
     public FileStoreLookupFunction(
-            FileStoreTable table,
-            int[] projection,
-            int[] joinKeyIndex,
-            @Nullable Predicate predicate) {
-        TableSchema schema = table.schema();
+            Table table, int[] projection, int[] joinKeyIndex, @Nullable Predicate predicate) {
         checkArgument(
-                schema.partitionKeys().isEmpty(), "Currently only support non-partitioned table.");
-        checkArgument(schema.primaryKeys().size() > 0, "Currently only support primary key table.");
-        StreamDataTableScan.validate(table.schema());
+                table.partitionKeys().isEmpty(), "Currently only support non-partitioned table.");
+        checkArgument(table.primaryKeys().size() > 0, "Currently only support primary key table.");
+        TableScanUtils.streamingReadingValidate(table);
 
         this.table = table;
 
         // join keys are based on projection fields
         this.joinKeys =
                 Arrays.stream(joinKeyIndex)
-                        .mapToObj(i -> schema.fieldNames().get(projection[i]))
+                        .mapToObj(i -> table.rowType().getFieldNames().get(projection[i]))
                         .collect(Collectors.toList());
 
         this.projectFields =
                 Arrays.stream(projection)
-                        .mapToObj(i -> schema.fieldNames().get(i))
+                        .mapToObj(i -> table.rowType().getFieldNames().get(i))
                         .collect(Collectors.toList());
 
         // add primary keys
-        for (String field : schema.primaryKeys()) {
+        for (String field : table.primaryKeys()) {
             if (!projectFields.contains(field)) {
                 projectFields.add(field);
             }
@@ -122,20 +117,20 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         String tmpDirectory = getTmpDirectory(context);
         this.path = new File(tmpDirectory, "lookup-" + UUID.randomUUID());
 
-        Options options = Options.fromMap(table.schema().options());
+        Options options = Options.fromMap(table.options());
         this.refreshInterval = options.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL);
         this.stateFactory = new RocksDBStateFactory(path.toString(), options);
 
-        List<String> fieldNames = table.schema().logicalRowType().getFieldNames();
+        List<String> fieldNames = table.rowType().getFieldNames();
         int[] projection = projectFields.stream().mapToInt(fieldNames::indexOf).toArray();
-        RowType rowType = TypeUtils.project(table.schema().logicalRowType(), projection);
+        RowType rowType = TypeUtils.project(table.rowType(), projection);
 
         PredicateFilter recordFilter = createRecordFilter(projection);
         this.lookupTable =
                 LookupTable.create(
                         stateFactory,
                         rowType,
-                        table.schema().primaryKeys(),
+                        table.primaryKeys(),
                         joinKeys,
                         recordFilter,
                         options.get(LOOKUP_CACHE_ROWS));
@@ -153,13 +148,13 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             adjustedPredicate =
                     transformFieldMapping(
                                     this.predicate,
-                                    IntStream.range(0, table.schema().fields().size())
+                                    IntStream.range(0, table.rowType().getFieldCount())
                                             .map(i -> Ints.indexOf(projection, i))
                                             .toArray())
                             .orElse(null);
         }
         return new PredicateFilter(
-                TypeUtils.project(table.schema().logicalRowType(), projection), adjustedPredicate);
+                TypeUtils.project(table.rowType(), projection), adjustedPredicate);
     }
 
     public Collection<RowData> lookup(RowData keyRow) {

@@ -18,9 +18,10 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.DataTable;
-import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.utils.TableScanUtils;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableRead;
 
 import org.apache.flink.api.connector.source.Boundedness;
@@ -32,6 +33,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Map;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.STREAMING_READ_ATOMIC;
 
@@ -40,28 +42,22 @@ public class ContinuousFileStoreSource extends FlinkSource {
 
     private static final long serialVersionUID = 3L;
 
-    private final DataTable table;
-    private final StreamDataTableScan.Factory scanFactory;
-    private final Predicate predicate;
+    private final Map<String, String> options;
+    private final TableScanUtils.StreamTableScanFactory scanFactory;
 
     public ContinuousFileStoreSource(
-            DataTable table,
-            @Nullable int[][] projectedFields,
-            @Nullable Predicate predicate,
-            @Nullable Long limit) {
-        this(table, projectedFields, predicate, limit, new StreamDataTableScan.DefaultFactory());
+            ReadBuilder readBuilder, Map<String, String> options, @Nullable Long limit) {
+        this(readBuilder, options, limit, TableScanUtils.defaultStreamScanFactory());
     }
 
     public ContinuousFileStoreSource(
-            DataTable table,
-            @Nullable int[][] projectedFields,
-            @Nullable Predicate predicate,
+            ReadBuilder readBuilder,
+            Map<String, String> options,
             @Nullable Long limit,
-            StreamDataTableScan.Factory scanFactory) {
-        super(table.newReadBuilder().withProjection(projectedFields).withFilter(predicate), limit);
-        this.table = table;
+            TableScanUtils.StreamTableScanFactory scanFactory) {
+        super(readBuilder, limit);
+        this.options = options;
         this.scanFactory = scanFactory;
-        this.predicate = predicate;
     }
 
     @Override
@@ -84,19 +80,19 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 context,
                 splits,
                 nextSnapshotId,
-                table.coreOptions().continuousDiscoveryInterval().toMillis(),
-                scanFactory.create(table, nextSnapshotId).withFilter(predicate));
+                CoreOptions.fromMap(options).continuousDiscoveryInterval().toMillis(),
+                scanFactory.create(readBuilder, nextSnapshotId));
     }
 
     @Override
     public FileStoreSourceReader<?> createSourceReader(
             SourceReaderContext context, TableRead read, @Nullable Long limit) {
-        return table.coreOptions().toConfiguration().get(STREAMING_READ_ATOMIC)
+        return Options.fromMap(options).get(STREAMING_READ_ATOMIC)
                 ? new FileStoreSourceReader<>(RecordsFunction.forSingle(), context, read, limit)
                 : new FileStoreSourceReader<>(RecordsFunction.forIterate(), context, read, limit);
     }
 
     private boolean isBounded() {
-        return table.coreOptions().scanBoundedWatermark() != null;
+        return CoreOptions.fromMap(options).scanBoundedWatermark() != null;
     }
 }

@@ -18,11 +18,8 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.DataTable;
-import org.apache.paimon.table.source.BatchDataTableScan;
-import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.flink.utils.TableScanUtils;
+import org.apache.paimon.table.source.ReadBuilder;
 
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.SplitEnumerator;
@@ -37,28 +34,22 @@ public class StaticFileStoreSource extends FlinkSource {
 
     private static final long serialVersionUID = 3L;
 
-    private final DataTable table;
-    private final BatchDataTableScan.Factory scanFactory;
-    private final Predicate predicate;
+    private final int splitBatchSize;
+    private final TableScanUtils.TableScanFactory scanFactory;
 
     public StaticFileStoreSource(
-            DataTable table,
-            @Nullable int[][] projectedFields,
-            @Nullable Predicate predicate,
-            @Nullable Long limit) {
-        this(table, projectedFields, predicate, limit, DataTable::newScan);
+            ReadBuilder readBuilder, @Nullable Long limit, int splitBatchSize) {
+        this(readBuilder, limit, splitBatchSize, ReadBuilder::newScan);
     }
 
     public StaticFileStoreSource(
-            DataTable table,
-            @Nullable int[][] projectedFields,
-            @Nullable Predicate predicate,
+            ReadBuilder readBuilder,
             @Nullable Long limit,
-            BatchDataTableScan.Factory scanFactory) {
-        super(table.newReadBuilder().withFilter(predicate).withProjection(projectedFields), limit);
-        this.table = table;
+            int splitBatchSize,
+            TableScanUtils.TableScanFactory scanFactory) {
+        super(readBuilder, limit);
+        this.splitBatchSize = splitBatchSize;
         this.scanFactory = scanFactory;
-        this.predicate = predicate;
     }
 
     @Override
@@ -70,24 +61,12 @@ public class StaticFileStoreSource extends FlinkSource {
     public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> restoreEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
-        Collection<FileStoreSourceSplit> splits;
-        if (checkpoint == null) {
-            FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
-            // read all splits from scan
-            DataTableScan.DataFilePlan plan =
-                    scanFactory.create(table).withFilter(predicate).plan();
-            splits = splitGenerator.createSplits(plan);
-        } else {
-            // restore from checkpoint
-            splits = checkpoint.splits();
-        }
+        Collection<FileStoreSourceSplit> splits =
+                checkpoint == null
+                        ? new FileStoreSourceSplitGenerator()
+                                .createSplits(scanFactory.create(readBuilder).plan())
+                        : checkpoint.splits();
 
-        return new StaticFileStoreSplitEnumerator(
-                context,
-                null,
-                splits,
-                table.coreOptions()
-                        .toConfiguration()
-                        .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE));
+        return new StaticFileStoreSplitEnumerator(context, null, splits, splitBatchSize);
     }
 }
