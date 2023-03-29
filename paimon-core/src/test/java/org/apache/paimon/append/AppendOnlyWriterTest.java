@@ -306,7 +306,22 @@ public class AppendOnlyWriterTest {
             long targetFileSize, boolean forceCompact, List<DataFileMeta> scannedFiles) {
         FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>(scannedFiles);
-        return Pair.of(
+        AppendOnlyCompactManager compactManager =
+                new AppendOnlyCompactManager(
+                        LocalFileIO.create(),
+                        Executors.newSingleThreadScheduledExecutor(
+                                new ExecutorThreadFactory("compaction-thread")),
+                        toCompact,
+                        MIN_FILE_NUM,
+                        MAX_FILE_NUM,
+                        targetFileSize,
+                        compactBefore ->
+                                compactBefore.isEmpty()
+                                        ? Collections.emptyList()
+                                        : Collections.singletonList(
+                                                generateCompactAfter(compactBefore)),
+                        pathFactory);
+        AppendOnlyWriter writer =
                 new AppendOnlyWriter(
                         LocalFileIO.create(),
                         SCHEMA_ID,
@@ -314,24 +329,11 @@ public class AppendOnlyWriterTest {
                         targetFileSize,
                         AppendOnlyWriterTest.SCHEMA,
                         getMaxSequenceNumber(toCompact),
-                        new AppendOnlyCompactManager(
-                                LocalFileIO.create(),
-                                Executors.newSingleThreadScheduledExecutor(
-                                        new ExecutorThreadFactory("compaction-thread")),
-                                toCompact,
-                                MIN_FILE_NUM,
-                                MAX_FILE_NUM,
-                                targetFileSize,
-                                compactBefore ->
-                                        compactBefore.isEmpty()
-                                                ? Collections.emptyList()
-                                                : Collections.singletonList(
-                                                        generateCompactAfter(compactBefore)),
-                                pathFactory),
+                        compactManager,
                         forceCompact,
                         pathFactory,
-                        null),
-                toCompact);
+                        null);
+        return Pair.of(writer, (LinkedList<DataFileMeta>) compactManager.allFiles());
     }
 
     private DataFileMeta generateCompactAfter(List<DataFileMeta> toCompact) {
