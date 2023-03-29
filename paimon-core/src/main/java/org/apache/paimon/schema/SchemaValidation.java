@@ -67,9 +67,9 @@ public class SchemaValidation {
             checkOptionExistInMode(
                     options, SCAN_TIMESTAMP_MILLIS, CoreOptions.StartupMode.FROM_TIMESTAMP);
             checkOptionsConflict(options, SCAN_SNAPSHOT_ID, SCAN_TIMESTAMP_MILLIS);
-        } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT) {
-            checkOptionExistInMode(
-                    options, SCAN_SNAPSHOT_ID, CoreOptions.StartupMode.FROM_SNAPSHOT);
+        } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT
+                || options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT_FULL) {
+            checkOptionExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
             checkOptionsConflict(options, SCAN_TIMESTAMP_MILLIS, SCAN_SNAPSHOT_ID);
         } else {
             checkOptionNotExistInMode(options, SCAN_TIMESTAMP_MILLIS, options.startupMode());
