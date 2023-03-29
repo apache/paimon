@@ -62,10 +62,10 @@ public class AppendOnlyCompactManagerTest {
                         newFile(1L, 1024L),
                         newFile(1025L, 2049L),
                         newFile(2050L, 2100L),
-                        newFile(2100L, 2110L)),
+                        newFile(2101L, 2110L)),
                 false,
                 Collections.emptyList(),
-                Arrays.asList(newFile(2050L, 2100L), newFile(2100L, 2110L)));
+                Arrays.asList(newFile(2050L, 2100L), newFile(2101L, 2110L)));
         innerTest(
                 Arrays.asList(newFile(1L, 1024L), newFile(1025L, 2049L), newFile(2050L, 2500L)),
                 false,
