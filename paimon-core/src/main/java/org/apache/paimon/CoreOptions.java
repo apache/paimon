@@ -355,7 +355,7 @@ public class CoreOptions implements Serializable {
                     .longType()
                     .noDefaultValue()
                     .withDescription(
-                            "Optional snapshot id used in case of \"from-snapshot\" scan mode");
+                            "Optional snapshot id used in case of \"from-snapshot\" or \"from-snapshot-full\" scan mode");
 
     public static final ConfigOption<Long> SCAN_BOUNDED_WATERMARK =
             key("scan.bounded.watermark")
@@ -854,6 +854,12 @@ public class CoreOptions implements Serializable {
                 "For streaming sources, continuously reads changes "
                         + "starting from snapshot specified by \"scan.snapshot-id\", "
                         + "without producing a snapshot at the beginning. For batch sources, "
+                        + "produces a snapshot specified by \"scan.snapshot-id\" but does not read new changes."),
+
+        FROM_SNAPSHOT_FULL(
+                "from-snapshot-full",
+                "For streaming sources, produces from snapshot specified by \"scan.snapshot-id\" "
+                        + "on the table upon first startup, and continuously reads changes. For batch sources, "
                         + "produces a snapshot specified by \"scan.snapshot-id\" but does not read new changes.");
 
         private final String value;

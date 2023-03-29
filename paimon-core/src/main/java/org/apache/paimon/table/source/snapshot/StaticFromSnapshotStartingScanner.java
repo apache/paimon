@@ -25,8 +25,9 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 /**
- * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_SNAPSHOT} startup mode of a
- * batch read.
+ * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_SNAPSHOT} or {@link
+ * org.apache.flink.table.store.CoreOptions.StartupMode#FROM_SNAPSHOT_FULL} startup mode of a batch
+ * read.
  */
 public class StaticFromSnapshotStartingScanner implements StartingScanner {
     private final long snapshotId;

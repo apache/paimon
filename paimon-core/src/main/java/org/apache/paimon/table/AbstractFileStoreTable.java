@@ -192,6 +192,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
         switch (coreOptions.startupMode()) {
             case FROM_SNAPSHOT:
+            case FROM_SNAPSHOT_FULL:
                 snapshotId = coreOptions.scanSnapshotId();
                 if (snapshotManager().snapshotExists(snapshotId)) {
                     long schemaId = snapshotManager().snapshot(snapshotId).schemaId();
