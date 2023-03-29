@@ -20,7 +20,6 @@ package org.apache.paimon.hive;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
-import org.apache.flink.connectors.hive.FlinkEmbeddedHiveRunner;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
@@ -39,7 +38,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /** IT cases for {@link HiveCatalog} with custom Hive metastore client. */
-@RunWith(FlinkEmbeddedHiveRunner.class)
+@RunWith(PaimonEmbeddedHiveRunner.class)
 public class CustomHiveMetastoreClientITCase {
 
     @Rule public TemporaryFolder folder = new TemporaryFolder();

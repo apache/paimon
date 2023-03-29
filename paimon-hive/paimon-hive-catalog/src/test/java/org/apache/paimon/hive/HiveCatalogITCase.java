@@ -30,7 +30,6 @@ import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveRunnerSetup;
 import com.klarna.hiverunner.annotations.HiveSQL;
 import com.klarna.hiverunner.config.HiveRunnerConfig;
-import org.apache.flink.connectors.hive.FlinkEmbeddedHiveRunner;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
@@ -65,7 +64,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** IT cases for {@link HiveCatalog}. */
-@RunWith(FlinkEmbeddedHiveRunner.class)
+@RunWith(PaimonEmbeddedHiveRunner.class)
 public class HiveCatalogITCase {
 
     @Rule public TemporaryFolder folder = new TemporaryFolder();
