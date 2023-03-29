@@ -24,6 +24,8 @@ import org.apache.paimon.utils.OrderedPacking;
 import java.util.List;
 import java.util.function.Function;
 
+import static org.apache.paimon.append.AppendOnlyCompactManager.sortFiles;
+
 /** Append only implementation of {@link SplitGenerator}. */
 public class AppendOnlySplitGenerator implements SplitGenerator {
 
@@ -36,8 +38,8 @@ public class AppendOnlySplitGenerator implements SplitGenerator {
     }
 
     @Override
-    public List<List<DataFileMeta>> split(List<DataFileMeta> files) {
+    public List<List<DataFileMeta>> split(List<DataFileMeta> input) {
         Function<DataFileMeta, Long> weightFunc = file -> Math.max(file.fileSize(), openFileCost);
-        return OrderedPacking.pack(files, weightFunc, targetSplitSize);
+        return OrderedPacking.pack(sortFiles(input), weightFunc, targetSplitSize);
     }
 }

@@ -30,6 +30,7 @@ import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
@@ -54,7 +55,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     public AppendOnlyCompactManager(
             FileIO fileIO,
             ExecutorService executor,
-            LinkedList<DataFileMeta> toCompact,
+            List<DataFileMeta> restored,
             int minFileNum,
             int maxFileNum,
             long targetFileSize,
@@ -62,7 +63,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
             DataFilePathFactory pathFactory) {
         this.fileIO = fileIO;
         this.executor = executor;
-        this.toCompact = toCompact;
+        this.toCompact = new LinkedList<>(sortFiles(restored));
         this.minFileNum = minFileNum;
         this.maxFileNum = maxFileNum;
         this.targetFileSize = targetFileSize;
@@ -300,5 +301,40 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     /** Compact rewriter for append-only table. */
     public interface CompactRewriter {
         List<DataFileMeta> rewrite(List<DataFileMeta> compactBefore) throws Exception;
+    }
+
+    /**
+     * New files may be created during the compaction process, then the results of the compaction
+     * may be put after the new files, and this order will be disrupted. We need to ensure this
+     * order, so we force the order by sequence.
+     */
+    public static List<DataFileMeta> sortFiles(Collection<DataFileMeta> input) {
+        List<DataFileMeta> files = new ArrayList<>(input);
+        files.sort(
+                (o1, o2) -> {
+                    if (isOverlap(o1, o2)) {
+                        throw new RuntimeException(
+                                String.format(
+                                        "There should no overlap in append files, there is a bug!"
+                                                + " Range1(%s, %s), Range2(%s, %s)",
+                                        o1.minSequenceNumber(),
+                                        o1.maxSequenceNumber(),
+                                        o2.minSequenceNumber(),
+                                        o2.maxSequenceNumber()));
+                    }
+
+                    return Long.compare(o1.minSequenceNumber(), o2.minSequenceNumber());
+                });
+        return files;
+    }
+
+    private static boolean isOverlap(DataFileMeta o1, DataFileMeta o2) {
+        if (o1.minSequenceNumber() <= o2.maxSequenceNumber()
+                && o1.maxSequenceNumber() >= o2.minSequenceNumber()) {
+            return true;
+        }
+
+        return o2.minSequenceNumber() <= o1.maxSequenceNumber()
+                && o2.maxSequenceNumber() >= o1.minSequenceNumber();
     }
 }

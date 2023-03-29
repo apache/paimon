@@ -43,7 +43,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.util.Collections;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
@@ -97,7 +96,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
             ExecutorService compactExecutor) {
         // let writer and compact manager hold the same reference
         // and make restore files mutable to update
-        LinkedList<DataFileMeta> restored = new LinkedList<>(restoredFiles);
+        long maxSequenceNumber = getMaxSequenceNumber(restoredFiles);
         DataFilePathFactory factory = pathFactory.createDataFilePathFactory(partition, bucket);
         CompactManager compactManager =
                 skipCompaction
@@ -105,7 +104,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                         : new AppendOnlyCompactManager(
                                 fileIO,
                                 compactExecutor,
-                                restored,
+                                restoredFiles,
                                 compactionMinFileNum,
                                 compactionMaxFileNum,
                                 targetFileSize,
@@ -117,7 +116,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                 fileFormat,
                 targetFileSize,
                 rowType,
-                getMaxSequenceNumber(restored),
+                maxSequenceNumber,
                 compactManager,
                 commitForceCompact,
                 factory,
