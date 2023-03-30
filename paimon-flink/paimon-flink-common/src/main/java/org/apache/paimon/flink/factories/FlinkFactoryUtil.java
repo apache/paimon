@@ -26,8 +26,6 @@ import org.apache.flink.configuration.FallbackKey;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.table.catalog.ObjectIdentifier;
-import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.connector.format.DecodingFormat;
 import org.apache.flink.table.connector.format.EncodingFormat;
 import org.apache.flink.table.factories.DecodingFormatFactory;
@@ -36,13 +34,11 @@ import org.apache.flink.table.factories.DynamicTableFactory.Context;
 import org.apache.flink.table.factories.EncodingFormatFactory;
 import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.factories.FormatFactory;
-import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -151,9 +147,7 @@ public final class FlinkFactoryUtil {
      *
      * <p>Note: When created, this utility merges the options from {@link
      * org.apache.flink.table.factories.DynamicTableFactory.Context#getEnrichmentOptions()} using
-     * {@link DynamicTablePaimonFactory#forwardOptions()}. When invoking {@link
-     * FlinkTableFactoryHelper#validate()}, this utility checks for left-over options in the final
-     * step.
+     * {@link DynamicTablePaimonFactory#forwardOptions()}.
      */
     public static FlinkTableFactoryHelper createFlinkTableFactoryHelper(
             DynamicTablePaimonFactory factory,
@@ -263,37 +257,6 @@ public final class FlinkFactoryUtil {
         optionalOptions.forEach(option -> readOption(options, option));
     }
 
-    /** Validates unconsumed option keys. */
-    public static void validateUnconsumedKeys(
-            String factoryIdentifier,
-            Set<String> allOptionKeys,
-            Set<String> consumedOptionKeys,
-            Set<String> deprecatedOptionKeys) {
-        final Set<String> remainingOptionKeys = new HashSet<>(allOptionKeys);
-        remainingOptionKeys.removeAll(consumedOptionKeys);
-        if (!remainingOptionKeys.isEmpty()) {
-            throw new ValidationException(
-                    String.format(
-                            "Unsupported options found for '%s'.\n\n"
-                                    + "Unsupported options:\n\n"
-                                    + "%s\n\n"
-                                    + "Supported options:\n\n"
-                                    + "%s",
-                            factoryIdentifier,
-                            remainingOptionKeys.stream().sorted().collect(Collectors.joining("\n")),
-                            consumedOptionKeys.stream()
-                                    .map(
-                                            k -> {
-                                                if (deprecatedOptionKeys.contains(k)) {
-                                                    return String.format("%s (deprecated)", k);
-                                                }
-                                                return k;
-                                            })
-                                    .sorted()
-                                    .collect(Collectors.joining("\n"))));
-        }
-    }
-
     /** Returns the required option prefix for options of the given format. */
     public static String getFormatPrefix(
             ConfigOption<String> formatOption, String formatIdentifier) {
@@ -395,66 +358,6 @@ public final class FlinkFactoryUtil {
                 .map(FallbackKey::getKey);
     }
 
-    // --------------------------------------------------------------------------------------------
-    // Helper classes
-    // --------------------------------------------------------------------------------------------
-
-    /** Default implementation of {@link Context}. */
-    public static class DefaultDynamicTableContext implements Context {
-
-        private final ObjectIdentifier objectIdentifier;
-        private final ResolvedCatalogTable catalogTable;
-        private final Map<String, String> enrichmentOptions;
-        private final ReadableConfig configuration;
-        private final ClassLoader classLoader;
-        private final boolean isTemporary;
-
-        public DefaultDynamicTableContext(
-                ObjectIdentifier objectIdentifier,
-                ResolvedCatalogTable catalogTable,
-                Map<String, String> enrichmentOptions,
-                ReadableConfig configuration,
-                ClassLoader classLoader,
-                boolean isTemporary) {
-            this.objectIdentifier = objectIdentifier;
-            this.catalogTable = catalogTable;
-            this.enrichmentOptions = enrichmentOptions;
-            this.configuration = configuration;
-            this.classLoader = classLoader;
-            this.isTemporary = isTemporary;
-        }
-
-        @Override
-        public ObjectIdentifier getObjectIdentifier() {
-            return objectIdentifier;
-        }
-
-        @Override
-        public ResolvedCatalogTable getCatalogTable() {
-            return catalogTable;
-        }
-
-        @Override
-        public Map<String, String> getEnrichmentOptions() {
-            return enrichmentOptions;
-        }
-
-        @Override
-        public ReadableConfig getConfiguration() {
-            return configuration;
-        }
-
-        @Override
-        public ClassLoader getClassLoader() {
-            return classLoader;
-        }
-
-        @Override
-        public boolean isTemporary() {
-            return isTemporary;
-        }
-    }
-
     /** Base flink helper utility for validating all options for a {@link PaimonFactory}. */
     public static class FlinkFactoryHelper<F extends PaimonFactory> {
 
@@ -486,36 +389,6 @@ public final class FlinkFactoryUtil {
                     consumedOptions.stream()
                             .flatMap(FlinkFactoryUtil::deprecatedKeys)
                             .collect(Collectors.toSet());
-        }
-
-        /** Validates the options of the factory. It checks for unconsumed option keys. */
-        public void validate() {
-            FlinkFactoryUtil.validateFactoryOptions(factory, allOptions);
-            validateUnconsumedKeys(
-                    factory.factoryIdentifier(),
-                    allOptions.keySet(),
-                    consumedOptionKeys,
-                    deprecatedOptionKeys);
-        }
-
-        /**
-         * Validates the options of the factory. It checks for unconsumed option keys while ignoring
-         * the options with given prefixes.
-         *
-         * <p>The option keys that have given prefix {@code prefixToSkip} would just be skipped for
-         * validation.
-         *
-         * @param prefixesToSkip Set of option key prefixes to skip validation
-         */
-        public void validateExcept(String... prefixesToSkip) {
-            Preconditions.checkArgument(
-                    prefixesToSkip.length > 0, "Prefixes to skip can not be empty.");
-            final List<String> prefixesList = Arrays.asList(prefixesToSkip);
-            consumedOptionKeys.addAll(
-                    allOptions.keySet().stream()
-                            .filter(key -> prefixesList.stream().anyMatch(key::startsWith))
-                            .collect(Collectors.toSet()));
-            validate();
         }
 
         /** Returns all options currently being consumed by the factory. */

@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.factories;
 
-import org.apache.paimon.flink.factories.PaimonFactoryUtil.PaimonTableFactoryHelper;
-
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
@@ -35,9 +33,6 @@ import java.util.Set;
  *
  * <p>Dynamic tables are the core concept of Flink's Table & SQL API for processing both bounded and
  * unbounded data in a unified fashion.
- *
- * <p>The options {@link PaimonFactoryUtil#PROPERTY_VERSION} and {@link PaimonFactoryUtil#CONNECTOR}
- * are implicitly added and must not be declared.
  */
 public interface DynamicTablePaimonFactory extends PaimonFactory {
 
@@ -55,7 +50,6 @@ public interface DynamicTablePaimonFactory extends PaimonFactory {
      * option that defines whether the connector supports {@link SupportsReadingMetadata} or not is
      * not allowed. The planner might not react to changed abilities anymore.
      *
-     * @see PaimonTableFactoryHelper#getOptions()
      * @see FormatFactory#forwardOptions()
      */
     default Set<ConfigOption<?>> forwardOptions() {
