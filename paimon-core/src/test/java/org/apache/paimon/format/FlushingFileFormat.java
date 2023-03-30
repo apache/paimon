@@ -67,4 +67,9 @@ public class FlushingFileFormat extends FileFormat {
             };
         };
     }
+
+    @Override
+    public void validateDataFields(RowType rowType) {
+        return;
+    }
 }
