@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.factories;
 
+import org.apache.paimon.flink.log.LogStoreTableFactory;
+
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
 import org.slf4j.Logger;
@@ -31,18 +33,18 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.table.factories.ManagedTableFactory.DEFAULT_IDENTIFIER;
 
-/** Utility for working with {@link PaimonFactory}s. */
-public final class PaimonFactoryUtil {
+/** Utility for working with {@link LogStoreTableFactory}s. */
+public final class LogStoreFactoryUtil {
 
-    private static final Logger LOG = LoggerFactory.getLogger(PaimonFactoryUtil.class);
+    private static final Logger LOG = LoggerFactory.getLogger(LogStoreFactoryUtil.class);
 
-    /** Discovers a paimonFactory using the given factory base class and identifier. */
+    /** Discovers a LogStoreTableFactory using the given factory base class and identifier. */
     @SuppressWarnings("unchecked")
-    public static <T extends PaimonFactory> T discoverPaimonFactory(
+    public static <T extends LogStoreTableFactory> T discoverLogStoreFactory(
             ClassLoader classLoader, Class<T> factoryClass, String factoryIdentifier) {
-        final List<PaimonFactory> factories = discoverPaimonFactories(classLoader);
+        final List<LogStoreTableFactory> factories = discoverPaimonFactories(classLoader);
 
-        final List<PaimonFactory> foundFactories =
+        final List<LogStoreTableFactory> foundFactories =
                 factories.stream()
                         .filter(f -> factoryClass.isAssignableFrom(f.getClass()))
                         .collect(Collectors.toList());
@@ -54,7 +56,7 @@ public final class PaimonFactoryUtil {
                             factoryClass.getName()));
         }
 
-        final List<PaimonFactory> matchingFactories =
+        final List<LogStoreTableFactory> matchingFactories =
                 foundFactories.stream()
                         .filter(f -> f.factoryIdentifier().equals(factoryIdentifier))
                         .collect(Collectors.toList());
@@ -68,7 +70,7 @@ public final class PaimonFactoryUtil {
                             factoryIdentifier,
                             factoryClass.getName(),
                             foundFactories.stream()
-                                    .map(PaimonFactory::factoryIdentifier)
+                                    .map(LogStoreTableFactory::factoryIdentifier)
                                     .filter(identifier -> !DEFAULT_IDENTIFIER.equals(identifier))
                                     .distinct()
                                     .sorted()
@@ -95,11 +97,11 @@ public final class PaimonFactoryUtil {
     // Helper methods
     // --------------------------------------------------------------------------------------------
 
-    static List<PaimonFactory> discoverPaimonFactories(ClassLoader classLoader) {
-        final Iterator<PaimonFactory> serviceLoaderIterator =
-                ServiceLoader.load(PaimonFactory.class, classLoader).iterator();
+    static List<LogStoreTableFactory> discoverPaimonFactories(ClassLoader classLoader) {
+        final Iterator<LogStoreTableFactory> serviceLoaderIterator =
+                ServiceLoader.load(LogStoreTableFactory.class, classLoader).iterator();
 
-        final List<PaimonFactory> loadResults = new ArrayList<>();
+        final List<LogStoreTableFactory> loadResults = new ArrayList<>();
         while (true) {
             try {
                 // error handling should also be applied to the hasNext() call because service
@@ -113,7 +115,7 @@ public final class PaimonFactoryUtil {
                 if (t instanceof NoClassDefFoundError) {
                     LOG.debug(
                             "NoClassDefFoundError when loading a "
-                                    + PaimonFactory.class.getCanonicalName()
+                                    + LogStoreTableFactory.class.getCanonicalName()
                                     + ". This is expected when trying to load a format dependency but no flink-connector-files is loaded.",
                             t);
                 } else {
@@ -128,7 +130,7 @@ public final class PaimonFactoryUtil {
 
     // --------------------------------------------------------------------------------------------
 
-    private PaimonFactoryUtil() {
+    private LogStoreFactoryUtil() {
         // no instantiation
     }
 }

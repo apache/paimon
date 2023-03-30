@@ -18,9 +18,8 @@
 
 package org.apache.paimon.flink.log;
 
-import org.apache.paimon.flink.factories.DynamicTablePaimonFactory;
 import org.apache.paimon.flink.factories.FlinkFactoryUtil.FlinkTableFactoryHelper;
-import org.apache.paimon.flink.factories.PaimonFactoryUtil;
+import org.apache.paimon.flink.factories.LogStoreFactoryUtil;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.serialization.SerializationSchema;
@@ -52,7 +51,16 @@ import static org.apache.paimon.CoreOptions.LOG_KEY_FORMAT;
  * <p>Log tables are for processing only unbounded data. Support streaming reading and streaming
  * writing.
  */
-public interface LogStoreTableFactory extends DynamicTablePaimonFactory {
+public interface LogStoreTableFactory {
+
+    /**
+     * Returns a unique identifier among same factory interfaces.
+     *
+     * <p>For consistency, an identifier should be declared as one lower case word (e.g. {@code
+     * kafka}). If multiple factories exist for different versions, a version should be appended
+     * using "-" (e.g. {@code elasticsearch-7}).
+     */
+    String factoryIdentifier();
 
     /**
      * Creates a {@link LogSourceProvider} instance from a {@link CatalogTable} and additional
@@ -84,7 +92,8 @@ public interface LogStoreTableFactory extends DynamicTablePaimonFactory {
     }
 
     static LogStoreTableFactory discoverLogStoreFactory(ClassLoader cl, String identifier) {
-        return PaimonFactoryUtil.discoverPaimonFactory(cl, LogStoreTableFactory.class, identifier);
+        return LogStoreFactoryUtil.discoverLogStoreFactory(
+                cl, LogStoreTableFactory.class, identifier);
     }
 
     static DecodingFormat<DeserializationSchema<RowData>> getKeyDecodingFormat(

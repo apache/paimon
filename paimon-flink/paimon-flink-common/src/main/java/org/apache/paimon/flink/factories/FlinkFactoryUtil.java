@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.factories;
 
+import org.apache.paimon.flink.log.LogStoreTableFactory;
+
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
@@ -86,41 +88,19 @@ public final class FlinkFactoryUtil {
                             "Defines the format identifier for encoding data. "
                                     + "The identifier is used to discover a suitable format factory.");
 
-    public static final ConfigOption<Integer> SINK_PARALLELISM =
-            ConfigOptions.key("sink.parallelism")
-                    .intType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Defines a custom parallelism for the sink. "
-                                    + "By default, if this option is not defined, the planner will derive the parallelism "
-                                    + "for each statement individually by also considering the global configuration.");
-
-    public static final ConfigOption<List<String>> SQL_GATEWAY_ENDPOINT_TYPE =
-            ConfigOptions.key("sql-gateway.endpoint.type")
-                    .stringType()
-                    .asList()
-                    .defaultValues("rest")
-                    .withDescription("Specify the endpoints that are used.");
-
     /**
      * Suffix for keys of {@link ConfigOption} in case a connector requires multiple formats (e.g.
      * for both key and value).
      *
-     * <p>See {@link #createFlinkTableFactoryHelper(DynamicTablePaimonFactory, Context)} Context)}
-     * for more information.
+     * <p>See {@link #createFlinkTableFactoryHelper(LogStoreTableFactory, Context)} Context)} for
+     * more information.
      */
     public static final String FORMAT_SUFFIX = ".format";
 
     /**
-     * The placeholder symbol to be used for keys of options which can be templated. See {@link
-     * PaimonFactory} for details.
-     */
-    public static final String PLACEHOLDER_SYMBOL = "#";
-
-    /**
      * Creates a utility that helps in discovering formats, merging options with {@link
-     * org.apache.flink.table.factories.DynamicTableFactory.Context#getEnrichmentOptions()} and
-     * validating them all for a {@link DynamicTablePaimonFactory}.
+     * DynamicTableFactory.Context#getEnrichmentOptions()} and validating them all for a {@link
+     * LogStoreTableFactory}.
      *
      * <p>The following example sketches the usage:
      *
@@ -146,11 +126,10 @@ public final class FlinkFactoryUtil {
      * prefix is used to project the options for the format factory.
      *
      * <p>Note: When created, this utility merges the options from {@link
-     * org.apache.flink.table.factories.DynamicTableFactory.Context#getEnrichmentOptions()} using
+     * DynamicTableFactory.Context#getEnrichmentOptions()} using
      */
     public static FlinkTableFactoryHelper createFlinkTableFactoryHelper(
-            DynamicTablePaimonFactory factory,
-            org.apache.flink.table.factories.DynamicTableFactory.Context context) {
+            LogStoreTableFactory factory, DynamicTableFactory.Context context) {
         return new FlinkTableFactoryHelper(factory, context);
     }
 
@@ -209,53 +188,6 @@ public final class FlinkFactoryUtil {
         return (T) matchingFactories.get(0);
     }
 
-    /**
-     * Validates the required and optional {@link ConfigOption}s of a paimonFactory.
-     *
-     * <p>Note: It does not check for left-over options.
-     */
-    public static void validateFactoryOptions(PaimonFactory paimonFactory, ReadableConfig options) {
-        validateFactoryOptions(
-                paimonFactory.requiredOptions(), paimonFactory.optionalOptions(), options);
-    }
-
-    /**
-     * Validates the required options and optional options.
-     *
-     * <p>Note: It does not check for left-over options.
-     */
-    public static void validateFactoryOptions(
-            Set<ConfigOption<?>> requiredOptions,
-            Set<ConfigOption<?>> optionalOptions,
-            ReadableConfig options) {
-        // currently Flink's options have no validation feature which is why we access them eagerly
-        // to provoke a parsing error
-
-        final List<String> missingRequiredOptions =
-                requiredOptions.stream()
-                        // Templated options will never appear with their template key, so we need
-                        // to ignore them as required properties here
-                        .filter(
-                                option ->
-                                        allKeys(option)
-                                                .noneMatch(k -> k.contains(PLACEHOLDER_SYMBOL)))
-                        .filter(option -> readOption(options, option) == null)
-                        .map(ConfigOption::key)
-                        .sorted()
-                        .collect(Collectors.toList());
-
-        if (!missingRequiredOptions.isEmpty()) {
-            throw new ValidationException(
-                    String.format(
-                            "One or more required options are missing.\n\n"
-                                    + "Missing required options are:\n\n"
-                                    + "%s",
-                            String.join("\n", missingRequiredOptions)));
-        }
-
-        optionalOptions.forEach(option -> readOption(options, option));
-    }
-
     /** Returns the required option prefix for options of the given format. */
     public static String getFormatPrefix(
             ConfigOption<String> formatOption, String formatIdentifier) {
@@ -298,7 +230,7 @@ public final class FlinkFactoryUtil {
                 if (t instanceof NoClassDefFoundError) {
                     LOG.debug(
                             "NoClassDefFoundError when loading a "
-                                    + PaimonFactory.class.getCanonicalName()
+                                    + LogStoreTableFactory.class.getCanonicalName()
                                     + ". This is expected when trying to load a format dependency but no flink-connector-files is loaded.",
                             t);
                 } else {
@@ -357,8 +289,8 @@ public final class FlinkFactoryUtil {
                 .map(FallbackKey::getKey);
     }
 
-    /** Base flink helper utility for validating all options for a {@link PaimonFactory}. */
-    public static class FlinkFactoryHelper<F extends PaimonFactory> {
+    /** Base flink helper utility for validating all options for a {@link LogStoreTableFactory}. */
+    public static class FlinkFactoryHelper<F extends LogStoreTableFactory> {
 
         protected final F factory;
 
@@ -375,8 +307,6 @@ public final class FlinkFactoryUtil {
 
             final List<ConfigOption<?>> consumedOptions = new ArrayList<>();
             consumedOptions.addAll(Arrays.asList(implicitOptions));
-            consumedOptions.addAll(factory.requiredOptions());
-            consumedOptions.addAll(factory.optionalOptions());
 
             consumedOptionKeys =
                     consumedOptions.stream()
@@ -400,16 +330,15 @@ public final class FlinkFactoryUtil {
      * Helper utility for discovering formats and validating all options for a {@link
      * DynamicTableFactory}.
      *
-     * @see #createFlinkTableFactoryHelper(DynamicTablePaimonFactory, Context)
+     * @see #createFlinkTableFactoryHelper(LogStoreTableFactory, Context)
      */
-    public static class FlinkTableFactoryHelper
-            extends FlinkFactoryHelper<DynamicTablePaimonFactory> {
+    public static class FlinkTableFactoryHelper extends FlinkFactoryHelper<LogStoreTableFactory> {
 
         private final Context context;
 
         private final Configuration enrichingOptions;
 
-        private FlinkTableFactoryHelper(DynamicTablePaimonFactory tableFactory, Context context) {
+        private FlinkTableFactoryHelper(LogStoreTableFactory tableFactory, Context context) {
             super(
                     tableFactory,
                     context.getCatalogTable().getOptions(),

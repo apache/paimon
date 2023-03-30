@@ -25,7 +25,6 @@ import org.apache.paimon.options.Options;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.serialization.SerializationSchema;
-import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.catalog.ResolvedSchema;
@@ -39,11 +38,9 @@ import org.apache.flink.table.types.utils.DataTypeUtils;
 
 import javax.annotation.Nullable;
 
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.Set;
 
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
@@ -63,16 +60,6 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
     @Override
     public String factoryIdentifier() {
         return IDENTIFIER;
-    }
-
-    @Override
-    public Set<ConfigOption<?>> requiredOptions() {
-        return new HashSet<>();
-    }
-
-    @Override
-    public Set<ConfigOption<?>> optionalOptions() {
-        return new HashSet<>();
     }
 
     private String topic(Context context) {
