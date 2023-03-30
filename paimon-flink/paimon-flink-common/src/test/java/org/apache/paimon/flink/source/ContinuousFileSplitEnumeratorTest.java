@@ -112,7 +112,7 @@ public class ContinuousFileSplitEnumeratorTest {
 
         List<FileStoreSourceSplit> initialSplits = new ArrayList<>();
         for (int i = 1; i <= 18; i++) {
-            initialSplits.add(createSnapshotSplit(i, 0, Collections.emptyList()));
+            initialSplits.add(createSnapshotSplit(i, i, Collections.emptyList()));
         }
         final ContinuousFileSplitEnumerator enumerator =
                 new Builder()
@@ -267,7 +267,7 @@ public class ContinuousFileSplitEnumeratorTest {
         private Collection<FileStoreSourceSplit> initialSplits = Collections.emptyList();
         private long discoveryInterval = Long.MAX_VALUE;
 
-        private int splitBatchSize = 1;
+        private int splitBatchSize = 10;
         private StreamDataTableScan scan;
 
         public Builder setSplitEnumeratorContext(
