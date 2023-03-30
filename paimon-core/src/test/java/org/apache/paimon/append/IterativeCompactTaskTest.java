@@ -67,7 +67,7 @@ public class IterativeCompactTaskTest {
 
         // almost-full files
         innerTest(
-                Arrays.asList(newFile(1L, 1024L), newFile(2L, 2048L)),
+                Arrays.asList(newFile(1L, 1024L), newFile(1025L, 2048L)),
                 Collections.emptyList(),
                 Collections.emptyList(),
                 Collections.emptyList());
@@ -248,7 +248,7 @@ public class IterativeCompactTaskTest {
             // assert the temporary files are deleted
             assertThat(task.deleted).containsExactlyInAnyOrderElementsOf(expectDeleted);
         } catch (Exception e) {
-            fail("This should not happen");
+            fail("This should not happen", e);
         }
     }
 
