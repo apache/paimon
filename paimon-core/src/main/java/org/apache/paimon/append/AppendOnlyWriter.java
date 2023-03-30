@@ -42,8 +42,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
-import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
-
 /**
  * A {@link RecordWriter} implementation that only accepts records which are always insert
  * operations and don't have any unique keys or sort keys.
@@ -135,10 +133,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
         if (writer != null) {
             writer.close();
             flushedFiles.addAll(writer.result());
-
-            // Reopen the writer to accept further records.
-            seqNumCounter.reset();
-            seqNumCounter.add(getMaxSequenceNumber(flushedFiles) + 1);
             writer = createRollingRowWriter();
         }
 
