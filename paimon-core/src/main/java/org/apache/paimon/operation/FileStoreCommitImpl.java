@@ -18,7 +18,6 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -101,6 +100,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final int numBucket;
     private final MemorySize manifestTargetSize;
     private final int manifestMergeMinCount;
+    private final boolean dynamicPartitionOverwrite;
     @Nullable private final Comparator<InternalRow> keyComparator;
 
     @Nullable private Lock lock;
@@ -119,6 +119,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             int numBucket,
             MemorySize manifestTargetSize,
             int manifestMergeMinCount,
+            boolean dynamicPartitionOverwrite,
             @Nullable Comparator<InternalRow> keyComparator) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
@@ -133,6 +134,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.numBucket = numBucket;
         this.manifestTargetSize = manifestTargetSize;
         this.manifestMergeMinCount = manifestMergeMinCount;
+        this.dynamicPartitionOverwrite = dynamicPartitionOverwrite;
         this.keyComparator = keyComparator;
 
         this.lock = null;
@@ -290,7 +292,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         boolean skipOverwrite = false;
         // partition filter is built from static or dynamic partition according to properties
         Predicate partitionFilter = null;
-        if (CoreOptions.fromMap(properties).dynamicPartitionOverwrite()) {
+        if (dynamicPartitionOverwrite) {
             if (appendTableFiles.isEmpty()) {
                 // in dynamic mode, if there is no changes to commit, no data will be deleted
                 skipOverwrite = true;
@@ -300,7 +302,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 .map(ManifestEntry::partition)
                                 .distinct()
                                 // partition filter is built from new data's partitions
-                                .map(p -> PredicateBuilder.partition(p, partitionType))
+                                .map(p -> PredicateBuilder.equalPartition(p, partitionType))
                                 .reduce(PredicateBuilder::or)
                                 .orElseThrow(
                                         () ->

@@ -407,15 +407,14 @@ public class CoreOptions implements Serializable {
                             "Whether to create underlying storage when reading and writing the table.");
 
     public static final ConfigOption<Boolean> STREAMING_READ_OVERWRITE =
-            key("overwrite.support-streaming-read")
+            key("streaming-read-overwrite")
                     .booleanType()
                     .defaultValue(false)
-                    .withDeprecatedKeys("streaming-read-overwrite")
                     .withDescription(
                             "Whether to read the changes from overwrite in streaming mode.");
 
     public static final ConfigOption<Boolean> DYNAMIC_PARTITION_OVERWRITE =
-            key("overwrite.dynamic-partition")
+            key("dynamic-partition-overwrite")
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(

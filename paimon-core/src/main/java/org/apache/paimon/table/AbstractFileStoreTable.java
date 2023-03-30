@@ -183,9 +183,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         return new TableCommitImpl(
                 store().newCommit(commitUser),
                 coreOptions().writeOnly() ? null : store().newExpire(),
-                coreOptions().writeOnly() ? null : store().newPartitionExpire(commitUser),
-                !tableSchema.partitionKeys().isEmpty()
-                        && coreOptions().dynamicPartitionOverwrite());
+                coreOptions().writeOnly() ? null : store().newPartitionExpire(commitUser));
     }
 
     private Optional<TableSchema> tryTimeTravel(Options options) {

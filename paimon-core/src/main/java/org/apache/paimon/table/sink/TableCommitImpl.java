@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreExpire;
@@ -44,7 +43,6 @@ public class TableCommitImpl implements InnerTableCommit {
     private final FileStoreCommit commit;
     @Nullable private final FileStoreExpire expire;
     @Nullable private final PartitionExpire partitionExpire;
-    private final Map<String, String> overwriteProperties = new HashMap<>();
 
     @Nullable private Map<String, String> overwritePartition = null;
     @Nullable private Lock lock;
@@ -54,14 +52,10 @@ public class TableCommitImpl implements InnerTableCommit {
     public TableCommitImpl(
             FileStoreCommit commit,
             @Nullable FileStoreExpire expire,
-            @Nullable PartitionExpire partitionExpire,
-            boolean dynamicPartitionOverwrite) {
+            @Nullable PartitionExpire partitionExpire) {
         this.commit = commit;
         this.expire = expire;
         this.partitionExpire = partitionExpire;
-        overwriteProperties.put(
-                CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(),
-                String.valueOf(dynamicPartitionOverwrite));
     }
 
     @Override
@@ -106,7 +100,7 @@ public class TableCommitImpl implements InnerTableCommit {
         if (overwritePartition == null) {
             commit.commit(committable, new HashMap<>());
         } else {
-            commit.overwrite(overwritePartition, committable, overwriteProperties);
+            commit.overwrite(overwritePartition, committable, Collections.emptyMap());
         }
         expire();
     }
@@ -134,7 +128,7 @@ public class TableCommitImpl implements InnerTableCommit {
                 // TODO maybe it can be produced by CommitterOperator
                 committable = new ManifestCommittable(Long.MAX_VALUE);
             }
-            commit.overwrite(overwritePartition, committable, overwriteProperties);
+            commit.overwrite(overwritePartition, committable, Collections.emptyMap());
         }
 
         expire();

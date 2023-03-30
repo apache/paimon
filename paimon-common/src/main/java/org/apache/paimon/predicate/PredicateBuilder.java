@@ -347,14 +347,14 @@ public class PredicateBuilder {
         return predicate;
     }
 
-    public static Predicate partition(BinaryRow partition, RowType rowType) {
+    public static Predicate equalPartition(BinaryRow partition, RowType partitionType) {
         Preconditions.checkArgument(
-                partition.getFieldCount() == rowType.getFieldCount(),
-                "Partition's field count should be equal to rowType's field count.");
+                partition.getFieldCount() == partitionType.getFieldCount(),
+                "Partition's field count should be equal to partitionType's field count.");
 
-        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(rowType);
+        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(partitionType);
         Predicate predicate = null;
-        PredicateBuilder builder = new PredicateBuilder(rowType);
+        PredicateBuilder builder = new PredicateBuilder(partitionType);
         Object[] literals = converter.convert(partition);
         for (int i = 0; i < literals.length; i++) {
             if (predicate == null) {
