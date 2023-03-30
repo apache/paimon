@@ -69,8 +69,6 @@ public class TypeUtils {
                 return toBoolean(str);
             case BINARY:
             case VARBINARY:
-                // this implementation does not match the new behavior of StringToBinaryCastRule,
-                // change this if needed
                 return s.getBytes();
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) type;

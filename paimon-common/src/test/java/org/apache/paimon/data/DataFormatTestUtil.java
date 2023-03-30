@@ -38,7 +38,12 @@ public class DataFormatTestUtil {
             } else {
                 InternalRow.FieldGetter fieldGetter =
                         InternalRow.createFieldGetter(type.getTypeAt(i), i);
-                build.append(fieldGetter.getFieldOrNull(row));
+                Object field = fieldGetter.getFieldOrNull(row);
+                if (field instanceof byte[]) {
+                    build.append(new String((byte[]) field));
+                } else {
+                    build.append(field);
+                }
             }
         }
         return build.toString();
