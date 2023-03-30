@@ -241,7 +241,7 @@ public class IterativeCompactTaskTest {
                 new MockIterativeCompactTask(
                         compactFiles, TARGET_FILE_SIZE, MIN_FILE_NUM, MAX_FILE_NUM, rewriter());
         try {
-            CompactResult actual = task.doCompact(compactFiles);
+            CompactResult actual = task.doCompact();
             assertThat(actual.before()).containsExactlyInAnyOrderElementsOf(expectBefore);
             assertThat(actual.after()).containsExactlyInAnyOrderElementsOf(expectAfter);
 

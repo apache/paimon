@@ -38,6 +38,7 @@ import org.apache.paimon.utils.RecordWriter;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -116,7 +117,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
     }
 
     @Override
-    public List<DataFileMeta> dataFiles() {
+    public Collection<DataFileMeta> dataFiles() {
         return compactManager.allFiles();
     }
 

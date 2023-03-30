@@ -21,7 +21,7 @@ package org.apache.paimon.compact;
 import org.apache.paimon.io.DataFileMeta;
 
 import java.io.Closeable;
-import java.util.List;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 
@@ -34,7 +34,7 @@ public interface CompactManager extends Closeable {
     /** Add a new file. */
     void addNewFile(DataFileMeta file);
 
-    List<DataFileMeta> allFiles();
+    Collection<DataFileMeta> allFiles();
 
     /**
      * Trigger a new compaction task.
