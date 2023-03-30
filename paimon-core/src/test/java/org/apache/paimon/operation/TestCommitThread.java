@@ -18,7 +18,6 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
@@ -26,7 +25,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.MergeTreeWriter;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
@@ -162,10 +160,7 @@ public class TestCommitThread extends Thread {
                         commit.overwrite(
                                 TestKeyValueGenerator.toPartitionMap(partition, MULTI_PARTITIONED),
                                 committable,
-                                // use static partition overwrite mode
-                                new Options()
-                                        .set(CoreOptions.DYNAMIC_PARTITION_OVERWRITE, false)
-                                        .toMap()));
+                                Collections.emptyMap()));
     }
 
     private void doFinalCompact() {
