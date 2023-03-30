@@ -18,36 +18,42 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.types.RowType;
 
 import java.util.List;
 
-import static org.apache.paimon.CoreOptions.PATH;
-
 /** Test utils related to {@link FileStore}. */
 public class FileStoreTestUtils {
 
-    public static FileStoreTable createFileStoreTable(
+    private static final String TABLE_NAME = "hive_test_table";
+
+    private static final String DATABASE_NAME = "default";
+
+    private static final Identifier TABLE_IDENTIFIER = Identifier.create(DATABASE_NAME, TABLE_NAME);
+
+    public static Table createFileStoreTable(
             Options conf, RowType rowType, List<String> partitionKeys, List<String> primaryKeys)
             throws Exception {
-        Path tablePath = CoreOptions.path(conf);
-        new SchemaManager(LocalFileIO.create(), tablePath)
-                .createTable(
-                        new Schema(
-                                rowType.getFields(), partitionKeys, primaryKeys, conf.toMap(), ""));
-
-        // only path, other config should be read from file store.
-        conf = new Options();
-        conf.set(PATH, tablePath.toString());
-        return FileStoreTableFactory.create(LocalFileIO.create(), conf);
+        // create CatalogContext using the options
+        CatalogContext catalogContext = CatalogContext.create(conf);
+        Catalog catalog = CatalogFactory.createCatalog(catalogContext);
+        // create database
+        catalog.createDatabase(DATABASE_NAME, false);
+        // create table
+        catalog.createTable(
+                TABLE_IDENTIFIER,
+                new Schema(rowType.getFields(), partitionKeys, primaryKeys, conf.toMap(), ""),
+                false);
+        Table table = catalog.getTable(TABLE_IDENTIFIER);
+        catalog.close();
+        return table;
     }
 }
