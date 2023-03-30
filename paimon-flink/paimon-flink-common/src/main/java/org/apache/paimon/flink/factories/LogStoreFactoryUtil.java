@@ -42,7 +42,7 @@ public final class LogStoreFactoryUtil {
     @SuppressWarnings("unchecked")
     public static <T extends LogStoreTableFactory> T discoverLogStoreFactory(
             ClassLoader classLoader, Class<T> factoryClass, String factoryIdentifier) {
-        final List<LogStoreTableFactory> factories = discoverPaimonFactories(classLoader);
+        final List<LogStoreTableFactory> factories = discoverLogStoreFactories(classLoader);
 
         final List<LogStoreTableFactory> foundFactories =
                 factories.stream()
@@ -97,7 +97,7 @@ public final class LogStoreFactoryUtil {
     // Helper methods
     // --------------------------------------------------------------------------------------------
 
-    static List<LogStoreTableFactory> discoverPaimonFactories(ClassLoader classLoader) {
+    static List<LogStoreTableFactory> discoverLogStoreFactories(ClassLoader classLoader) {
         final Iterator<LogStoreTableFactory> serviceLoaderIterator =
                 ServiceLoader.load(LogStoreTableFactory.class, classLoader).iterator();
 
