@@ -208,6 +208,16 @@ public class HiveCatalog extends AbstractCatalog {
                     identifier.getDatabaseName(), identifier.getObjectName(), true, false, true);
         } catch (TException e) {
             throw new RuntimeException("Failed to drop table " + identifier.getFullName(), e);
+        } finally {
+            // Deletes table directory to avoid schema in filesystem exists.
+            Path path = getDataTableLocation(identifier);
+            try {
+                if (fileIO.exists(path)) {
+                    fileIO.deleteDirectoryQuietly(path);
+                }
+            } catch (Exception ee) {
+                LOG.error("Delete directory[{}] fail for table {}", path, identifier, ee);
+            }
         }
     }
 

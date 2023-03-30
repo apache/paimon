@@ -241,7 +241,7 @@ public abstract class HiveCatalogITCaseBase {
                         .contains("Table Type:         \tEXTERNAL_TABLE      \tNULL"));
         tEnv.executeSql("DROP TABLE t").await();
         Path tablePath = new Path(path, "test_db.db/t");
-        Assert.assertTrue(tablePath.getFileSystem().exists(tablePath));
+        Assert.assertFalse(tablePath.getFileSystem().exists(tablePath));
     }
 
     @Test
