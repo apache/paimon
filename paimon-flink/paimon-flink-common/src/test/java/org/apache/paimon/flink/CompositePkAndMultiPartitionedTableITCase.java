@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.util.AbstractTestBase;
 
 import org.apache.flink.types.Row;
@@ -26,7 +27,9 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
@@ -43,6 +46,13 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
 
 /** Paimon IT case when the table has composite primary keys and multiple partition fields. */
 public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase {
+
+    private final Map<String, String> staticPartitionOverwrite =
+            new HashMap<String, String>() {
+                {
+                    put(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false");
+                }
+            };
 
     @BeforeEach
     public void setUp() {
@@ -277,7 +287,8 @@ public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase 
                                 "rate_by_to_currency DOUBLE",
                                 "dt STRING"),
                         Arrays.asList("from_currency", "to_currency", "dt"),
-                        Collections.singletonList("dt"));
+                        Collections.singletonList("dt"),
+                        staticPartitionOverwrite);
 
         insertIntoFromTable(temporaryTable, table);
 
@@ -595,7 +606,8 @@ public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase 
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt STRING", "hh STRING"),
                         Collections.emptyList(),
-                        Arrays.asList("dt", "hh"));
+                        Arrays.asList("dt", "hh"),
+                        staticPartitionOverwrite);
 
         insertIntoFromTable(temporaryTable, table);
 
