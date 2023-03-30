@@ -18,17 +18,19 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.operation.FileStoreCommit;
+import org.apache.paimon.table.AbstractFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.apache.paimon.flink.action.Action.getPartitions;
 import static org.apache.paimon.flink.action.Action.getTablePath;
@@ -38,7 +40,8 @@ public class DropPartitionAction extends ActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(DropPartitionAction.class);
 
-    private final BatchTableCommit commit;
+    private final List<Map<String, String>> partitions;
+    private final FileStoreCommit commit;
 
     DropPartitionAction(
             String warehouse,
@@ -46,8 +49,17 @@ public class DropPartitionAction extends ActionBase {
             String tableName,
             List<Map<String, String>> partitions) {
         super(warehouse, databaseName, tableName);
+        if (!(table instanceof FileStoreTable)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Only FileStoreTable supports drop-partition action. The table type is '%s'.",
+                            table.getClass().getName()));
+        }
 
-        this.commit = table.newBatchWriteBuilder().withOverwrite(partitions).newCommit();
+        this.partitions = partitions;
+
+        AbstractFileStoreTable fileStoreTable = (AbstractFileStoreTable) table;
+        this.commit = fileStoreTable.store().newCommit(UUID.randomUUID().toString());
     }
 
     public static Optional<Action> create(String[] args) {
@@ -112,6 +124,6 @@ public class DropPartitionAction extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        this.commit.commit(Collections.emptyList());
+        commit.dropPartitions(partitions);
     }
 }
