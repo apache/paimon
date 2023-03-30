@@ -30,8 +30,6 @@ import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
-import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 
 /** Factory to create {@link HiveCatalog}. */
 public class HiveCatalogFactory implements CatalogFactory {
@@ -41,12 +39,11 @@ public class HiveCatalogFactory implements CatalogFactory {
     private static final ConfigOption<String> METASTORE_CLIENT_CLASS =
             ConfigOptions.key("metastore.client.class")
                     .stringType()
-                    .defaultValue(HiveMetaStoreClient.class.getName())
+                    .defaultValue("org.apache.hadoop.hive.metastore.HiveMetaStoreClient")
                     .withDescription(
                             "Class name of Hive metastore client.\n"
                                     + "NOTE: This class must directly implements "
-                                    + IMetaStoreClient.class.getName()
-                                    + ".");
+                                    + "org.apache.hadoop.hive.metastore.IMetaStoreClient.");
 
     @Override
     public String identifier() {

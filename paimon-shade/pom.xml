@@ -75,6 +75,20 @@ under the License.
             <version>${lz4.version}</version>
         </dependency>
 
+        <!-- paimon catalogs -->
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-hive-catalog</artifactId>
+            <version>${project.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
         <!-- other runtime dependencies -->
 
         <dependency>
@@ -121,6 +135,9 @@ under the License.
                                     <include>org.apache.paimon:paimon-core</include>
                                     <include>org.apache.paimon:paimon-format</include>
                                     <include>org.apache.paimon:paimon-codegen-loader</include>
+
+                                    <!-- Paimon catalogs -->
+                                    <include>org.apache.paimon:paimon-hive-catalog</include>
 
                                     <!-- Others, not shade to reduce conflicting -->
                                     <!-- <include>org.xerial.snappy:snappy-java</include> -->
