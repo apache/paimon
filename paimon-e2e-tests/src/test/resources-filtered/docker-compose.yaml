@@ -29,7 +29,15 @@ services:
     volumes:
       - testdata:/test-data
       - /tmp/paimon-e2e-tests-jars:/jars
-    entrypoint: /bin/bash -c "cp /jars/paimon-flink.jar /jars/bundled-hadoop.jar /jars/paimon-hive-catalog.jar /jars/flink-sql-connector-kafka.jar /opt/flink/lib && /docker-entrypoint.sh jobmanager"
+    entrypoint: >
+      /bin/bash -c "
+      cp /jars/paimon-flink.jar /jars/bundled-hadoop.jar
+      /jars/flink-sql-connector-kafka.jar /jars/flink-sql-connector-hive.jar /opt/flink/lib ;
+      echo 'See FLINK-31659 for why we need the following two steps' ;
+      mv /opt/flink/opt/flink-table-planner*.jar /opt/flink/lib/ ;
+      mv /opt/flink/lib/flink-table-planner-loader-*.jar /opt/flink/opt/ ;
+      /docker-entrypoint.sh jobmanager
+      "
     env_file:
       - ./flink.env
     networks:
@@ -44,7 +52,15 @@ services:
     volumes:
       - testdata:/test-data
       - /tmp/paimon-e2e-tests-jars:/jars
-    entrypoint: /bin/bash -c "cp /jars/paimon-flink.jar /jars/bundled-hadoop.jar /jars/paimon-hive-catalog.jar /jars/flink-sql-connector-kafka.jar /opt/flink/lib && /docker-entrypoint.sh taskmanager"
+    entrypoint: >
+      /bin/bash -c "
+      cp /jars/paimon-flink.jar /jars/bundled-hadoop.jar
+      /jars/flink-sql-connector-kafka.jar /jars/flink-sql-connector-hive.jar /opt/flink/lib ;
+      echo 'See FLINK-31659 for why we need the following two steps' ;
+      mv /opt/flink/opt/flink-table-planner*.jar /opt/flink/lib/ ;
+      mv /opt/flink/lib/flink-table-planner-loader-*.jar /opt/flink/opt/ ;
+      /docker-entrypoint.sh taskmanager
+      "
     env_file:
       - ./flink.env
     networks:

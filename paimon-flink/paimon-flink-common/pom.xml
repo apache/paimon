@@ -250,10 +250,14 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
+                                    <!--
+                                    TODO change these to paimon-shade once we get rid of flink-shaded dependencies
+                                    -->
                                     <include>org.apache.paimon:paimon-common</include>
                                     <include>org.apache.paimon:paimon-core</include>
                                     <include>org.apache.paimon:paimon-format</include>
                                     <include>org.apache.paimon:paimon-codegen-loader</include>
+                                    <include>org.apache.paimon:paimon-hive-catalog</include>
                                 </includes>
                             </artifactSet>
                             <relocations>

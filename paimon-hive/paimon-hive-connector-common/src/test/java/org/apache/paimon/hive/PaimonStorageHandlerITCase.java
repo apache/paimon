@@ -92,6 +92,10 @@ public class PaimonStorageHandlerITCase {
             hiveShell.execute("SET tez.local.mode=true");
             hiveShell.execute("SET hive.jar.directory=" + folder.getRoot().getAbsolutePath());
             hiveShell.execute("SET tez.staging-dir=" + folder.getRoot().getAbsolutePath());
+            // JVM will crash if we do not set this and include paimon-flink-common as dependency
+            // not sure why
+            // in real use case there won't be any Flink dependency in Hive's classpath, so it's OK
+            hiveShell.execute("SET hive.tez.exec.inplace.progress=false");
         } else {
             throw new UnsupportedOperationException("Unsupported engine " + engine);
         }
