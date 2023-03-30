@@ -210,13 +210,11 @@ public class ContinuousFileSplitEnumerator
                                 readersAwaitingSplit.remove(task);
                                 return;
                             }
-                            List<FileStoreSourceSplit> taskAssignment = new ArrayList<>();
-                            while (!splits.isEmpty() && taskAssignment.size() < splitBatchSize) {
+                            List<FileStoreSourceSplit> taskAssignment =
+                                    assignment.computeIfAbsent(task, i -> new ArrayList<>());
+                            if (taskAssignment.size() < splitBatchSize) {
                                 taskAssignment.add(splits.poll());
                             }
-                            assignment
-                                    .computeIfAbsent(task, i -> new ArrayList<>())
-                                    .addAll(taskAssignment);
                         }
                     }
                 });
