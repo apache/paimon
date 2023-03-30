@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 
+/** Test for avro file format. */
 public class AvroFileFormatTest {
 
     private static AvroFileFormat fileFormat;
