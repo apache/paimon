@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.kafka;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.factories.FlinkFactoryUtil.FlinkTableFactoryHelper;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
 
@@ -32,7 +33,7 @@ import org.apache.flink.table.catalog.UniqueConstraint;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.factories.FactoryUtil;
+import org.apache.flink.table.factories.DynamicTableFactory.Context;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.utils.DataTypeUtils;
 
@@ -44,12 +45,12 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
-import static org.apache.flink.table.factories.FactoryUtil.createTableFactoryHelper;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.paimon.CoreOptions.LogConsistency;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
+import static org.apache.paimon.flink.factories.FlinkFactoryUtil.createFlinkTableFactoryHelper;
 import static org.apache.paimon.flink.kafka.KafkaLogOptions.TOPIC;
 
 /** The Kafka {@link LogStoreTableFactory} implementation. */
@@ -83,7 +84,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
             Context context,
             DynamicTableSource.Context sourceContext,
             @Nullable int[][] projectFields) {
-        FactoryUtil.TableFactoryHelper helper = createTableFactoryHelper(this, context);
+        FlinkTableFactoryHelper helper = createFlinkTableFactoryHelper(this, context);
         ResolvedSchema schema = context.getCatalogTable().getResolvedSchema();
         DataType physicalType = schema.toPhysicalRowDataType();
         DeserializationSchema<RowData> primaryKeyDeserializer = null;
@@ -115,7 +116,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
     @Override
     public KafkaLogSinkProvider createSinkProvider(
             Context context, DynamicTableSink.Context sinkContext) {
-        FactoryUtil.TableFactoryHelper helper = createTableFactoryHelper(this, context);
+        FlinkTableFactoryHelper helper = createFlinkTableFactoryHelper(this, context);
         ResolvedSchema schema = context.getCatalogTable().getResolvedSchema();
         DataType physicalType = schema.toPhysicalRowDataType();
         SerializationSchema<RowData> primaryKeySerializer = null;
