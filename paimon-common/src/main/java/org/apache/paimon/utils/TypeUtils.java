@@ -21,6 +21,8 @@ package org.apache.paimon.utils;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
@@ -28,6 +30,8 @@ import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VarBinaryType;
+import org.apache.paimon.types.VarCharType;
 
 import java.math.BigDecimal;
 import java.time.DateTimeException;
@@ -64,12 +68,27 @@ public class TypeUtils {
         switch (type.getTypeRoot()) {
             case CHAR:
             case VARCHAR:
+                int stringLength = getStringLength(type);
+                if (s.length() > stringLength) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Length of type %s is %d, but casting result has a length of %d",
+                                    type, stringLength, s.length()));
+                }
                 return str;
             case BOOLEAN:
                 return toBoolean(str);
             case BINARY:
             case VARBINARY:
-                return s.getBytes();
+                int binaryLength = getBinaryLength(type);
+                byte[] bytes = s.getBytes();
+                if (bytes.length > binaryLength) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Length of type %s is %d, but casting result has a length of %d",
+                                    type, binaryLength, bytes.length));
+                }
+                return bytes;
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) type;
                 return Decimal.fromBigDecimal(
@@ -102,6 +121,26 @@ public class TypeUtils {
             default:
                 throw new UnsupportedOperationException("Unsupported type " + type);
         }
+    }
+
+    public static int getStringLength(DataType dataType) {
+        if (dataType instanceof CharType) {
+            return ((CharType) dataType).getLength();
+        } else if (dataType instanceof VarCharType) {
+            return ((VarCharType) dataType).getLength();
+        }
+
+        throw new IllegalArgumentException(String.format("Unsupported type %s", dataType));
+    }
+
+    public static int getBinaryLength(DataType dataType) {
+        if (dataType instanceof VarBinaryType) {
+            return ((VarBinaryType) dataType).getLength();
+        } else if (dataType instanceof BinaryType) {
+            return ((BinaryType) dataType).getLength();
+        }
+
+        throw new IllegalArgumentException(String.format("Unsupported type %s", dataType));
     }
 
     public static int timestampPrecision(DataType type) {

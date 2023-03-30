@@ -289,6 +289,12 @@ public class MySqlCtasAction implements Action {
         }
 
         if (primaryKeys.size() > 0) {
+            for (String key : primaryKeys) {
+                if (!mySqlSchema.fields.containsKey(key)) {
+                    throw new IllegalArgumentException(
+                            "Specified primary key " + key + " does not exist in MySQL tables");
+                }
+            }
             builder.primaryKey(primaryKeys);
         } else if (mySqlSchema.primaryKeys.size() > 0) {
             builder.primaryKey(mySqlSchema.primaryKeys);
@@ -356,7 +362,7 @@ public class MySqlCtasAction implements Action {
                     } else if (SchemaChangeProcessFunction.canConvert(newType, oldType)) {
                         // nothing to do
                     } else {
-                        throw new UnsupportedOperationException(
+                        throw new IllegalArgumentException(
                                 String.format(
                                         "Column %s have different types in table %s.%s and table %s.%s",
                                         fieldName,

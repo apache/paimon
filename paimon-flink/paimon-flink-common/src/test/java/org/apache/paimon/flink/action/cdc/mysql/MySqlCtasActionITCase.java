@@ -58,6 +58,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** IT cases for {@link MySqlCtasAction}. */
 public class MySqlCtasActionITCase extends ActionITCaseBase {
@@ -113,7 +114,7 @@ public class MySqlCtasActionITCase extends ActionITCaseBase {
                         database,
                         tableName,
                         Collections.emptyList(),
-                        Collections.singletonList("_id"),
+                        Collections.emptyList(),
                         new HashMap<>(),
                         ThreadLocalRandom.current().nextInt(3) + 1);
         action.build(env);
@@ -433,6 +434,128 @@ public class MySqlCtasActionITCase extends ActionITCaseBase {
                                 + "NULL, NULL, NULL"
                                 + "]");
         waitForResult(expected, table, rowType, Collections.singletonList("_id"));
+    }
+
+    @Test
+    public void testIncompatibleMySqlTable() {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "incompatible_field_\\d+");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        MySqlCtasAction action =
+                new MySqlCtasAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.emptyList(),
+                        Collections.singletonList("_id"),
+                        new HashMap<>(),
+                        1);
+
+        IllegalArgumentException e =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> action.build(env),
+                        "Expecting IllegalArgumentException");
+        assertThat(e)
+                .hasMessage(
+                        "Column v1 have different types in table "
+                                + DATABASE_NAME
+                                + ".incompatible_field_1 and table "
+                                + DATABASE_NAME
+                                + ".incompatible_field_2");
+    }
+
+    @Test
+    public void testIncompatiblePaimonTable() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "incompatible_pk_\\d+");
+
+        createFileStoreTable(
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT(), DataTypes.DOUBLE()},
+                        new String[] {"a", "b", "c"}),
+                Collections.emptyList(),
+                Collections.singletonList("a"),
+                new HashMap<>());
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        MySqlCtasAction action =
+                new MySqlCtasAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.emptyList(),
+                        Collections.singletonList("a"),
+                        new HashMap<>(),
+                        1);
+
+        IllegalArgumentException e =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> action.build(env),
+                        "Expecting IllegalArgumentException");
+        assertThat(e).hasMessageContaining("Paimon schema and MySQL schema are not compatible.");
+    }
+
+    @Test
+    public void testInvalidPrimaryKey() {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "schema_evolution_\\d+");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        MySqlCtasAction action =
+                new MySqlCtasAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.emptyList(),
+                        Collections.singletonList("pk"),
+                        new HashMap<>(),
+                        1);
+
+        IllegalArgumentException e =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> action.build(env),
+                        "Expecting IllegalArgumentException");
+        assertThat(e).hasMessage("Specified primary key pk does not exist in MySQL tables");
+    }
+
+    @Test
+    public void testNoPrimaryKey() {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "incompatible_pk_\\d+");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        MySqlCtasAction action =
+                new MySqlCtasAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        1);
+
+        IllegalArgumentException e =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> action.build(env),
+                        "Expecting IllegalArgumentException");
+        assertThat(e)
+                .hasMessage(
+                        "Primary keys are not specified. "
+                                + "Also, can't infer primary keys from MySQL table schemas because "
+                                + "MySQL tables have no primary keys or have different primary keys.");
     }
 
     private void waitForResult(

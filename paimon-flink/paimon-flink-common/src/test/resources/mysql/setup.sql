@@ -125,3 +125,29 @@ INSERT INTO all_types_table VALUES (
     NULL, NULL, NULL,
     NULL, NULL, NULL
 );
+
+CREATE TABLE incompatible_field_1 (
+    _id INT,
+    v1 DATETIME,
+    PRIMARY KEY (_id)
+);
+
+CREATE TABLE incompatible_field_2 (
+    _id INT,
+    v1 INT,
+    PRIMARY KEY (_id)
+);
+
+CREATE TABLE incompatible_pk_1 (
+    a INT,
+    b BIGINT,
+    c VARCHAR(20),
+    PRIMARY KEY (a, b)
+);
+
+CREATE TABLE incompatible_pk_2 (
+    a INT,
+    b BIGINT,
+    c VARCHAR(20),
+    PRIMARY KEY (a)
+);
