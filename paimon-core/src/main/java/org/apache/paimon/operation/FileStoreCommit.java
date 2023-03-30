@@ -55,12 +55,12 @@ public interface FileStoreCommit {
     /**
      * Overwrite from manifest committable and partition.
      *
-     * <p>TODO: The method's semantics can be dynamic or static overwrite according to properties.
-     *
      * @param partition A single partition maps each partition key to a partition value. Depending
      *     on the user-defined statement, the partition might not include all partition keys. Also
      *     note that this partition does not necessarily equal to the partitions of the newly added
      *     key-values. This is just the partition to be cleaned up.
+     * @param properties Contains configurations that can change overwrite behavior, such as dynamic
+     *     partition overwrite mode.
      */
     void overwrite(
             Map<String, String> partition,

@@ -188,7 +188,13 @@ public class TestFileStore extends KeyValueFileStore {
                 null,
                 null,
                 (commit, committable) ->
-                        commit.overwrite(partition, committable, Collections.emptyMap()));
+                        commit.overwrite(
+                                partition,
+                                committable,
+                                // use static partition overwrite mode
+                                new Options()
+                                        .set(CoreOptions.DYNAMIC_PARTITION_OVERWRITE, false)
+                                        .toMap()));
     }
 
     public Snapshot dropPartitions(List<Map<String, String>> partitions) {

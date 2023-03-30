@@ -201,6 +201,18 @@
             <td>Define the default false positive probability for bloom filters.</td>
         </tr>
         <tr>
+            <td><h5>overwrite.dynamic-partition</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether only overwrite dynamic partition when overwriting a partitioned table with dynamic partition columns. Works only when the table has partition keys.</td>
+        </tr>
+        <tr>
+            <td><h5>overwrite.support-streaming-read</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to read the changes from overwrite in streaming mode.</td>
+        </tr>
+        <tr>
             <td><h5>page-size</h5></td>
             <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>
@@ -325,12 +337,6 @@
             <td style="word-wrap: break-word;">128 mb</td>
             <td>MemorySize</td>
             <td>Target size of a source split when scanning a bucket.</td>
-        </tr>
-        <tr>
-            <td><h5>streaming-read-overwrite</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to read the changes from overwrite in streaming mode.</td>
         </tr>
         <tr>
             <td><h5>target-file-size</h5></td>
