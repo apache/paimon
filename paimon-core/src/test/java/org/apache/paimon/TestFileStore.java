@@ -152,9 +152,7 @@ public class TestFileStore extends KeyValueFileStore {
                 false,
                 null,
                 watermark,
-                (commit, committable) -> {
-                    commit.commit(committable, Collections.emptyMap());
-                });
+                (commit, committable) -> commit.commit(committable, Collections.emptyMap()));
     }
 
     public List<Snapshot> commitData(
@@ -191,6 +189,23 @@ public class TestFileStore extends KeyValueFileStore {
                 null,
                 (commit, committable) ->
                         commit.overwrite(partition, committable, Collections.emptyMap()));
+    }
+
+    public Snapshot dropPartitions(List<Map<String, String>> partitions) {
+        FileStoreCommit commit = newCommit(commitUser);
+
+        SnapshotManager snapshotManager = snapshotManager();
+        Long snapshotIdBeforeCommit = snapshotManager.latestSnapshotId();
+        if (snapshotIdBeforeCommit == null) {
+            snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
+        }
+        commit.dropPartitions(partitions);
+
+        Long snapshotIdAfterCommit = snapshotManager.latestSnapshotId();
+        assertThat(snapshotIdAfterCommit).isNotNull();
+        assertThat(snapshotIdBeforeCommit + 1).isEqualTo(snapshotIdAfterCommit);
+
+        return snapshotManager.snapshot(snapshotIdAfterCommit);
     }
 
     public List<Snapshot> commitDataImpl(

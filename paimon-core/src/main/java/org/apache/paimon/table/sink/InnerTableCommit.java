@@ -22,26 +22,17 @@ import org.apache.paimon.operation.Lock;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 
 /** Inner {@link TableCommit} contains overwrite setter. */
 public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
 
     /** Overwrite writing, same as the 'INSERT OVERWRITE T PARTITION (...)' semantics of SQL. */
-    default InnerTableCommit withOverwrite(@Nullable Map<String, String> staticPartition) {
-        if (staticPartition != null) {
-            withOverwrite(Collections.singletonList(staticPartition));
-        }
-        return this;
-    }
-
-    InnerTableCommit withOverwrite(@Nullable List<Map<String, String>> overwritePartitions);
+    InnerTableCommit withOverwrite(@Nullable Map<String, String> staticPartition);
 
     /**
      * If this is set to true, when there is no new data, no snapshot will be generated. By default,
-     * empty commit is be ignored.
+     * empty commit is ignored.
      *
      * <ul>
      *   <li>For Streaming: the default value of 'ignoreEmptyCommit' is false.
