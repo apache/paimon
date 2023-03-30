@@ -92,7 +92,7 @@ public class FileStoreITCase extends AbstractTestBase {
             new RowType(
                     Arrays.asList(
                             new RowType.RowField("v", new IntType()),
-                            new RowType.RowField("p", new VarCharType()),
+                            new RowType.RowField("p", new VarCharType(10)),
                             // rename key
                             new RowType.RowField("_k", new IntType())));
 
