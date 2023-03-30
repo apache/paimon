@@ -147,7 +147,6 @@ public final class FlinkFactoryUtil {
      *
      * <p>Note: When created, this utility merges the options from {@link
      * org.apache.flink.table.factories.DynamicTableFactory.Context#getEnrichmentOptions()} using
-     * {@link DynamicTablePaimonFactory#forwardOptions()}.
      */
     public static FlinkTableFactoryHelper createFlinkTableFactoryHelper(
             DynamicTablePaimonFactory factory,
@@ -418,7 +417,6 @@ public final class FlinkFactoryUtil {
                     CONNECTOR);
             this.context = context;
             this.enrichingOptions = Configuration.fromMap(context.getEnrichmentOptions());
-            this.forwardOptions();
         }
 
         /**
@@ -516,20 +514,6 @@ public final class FlinkFactoryUtil {
         }
 
         // ----------------------------------------------------------------------------------------
-
-        /**
-         * Forwards the options declared in {@link DynamicTableFactory#forwardOptions()} and
-         * possibly {@link FormatFactory#forwardOptions()} from {@link
-         * Context#getEnrichmentOptions()} to the final options, if present.
-         */
-        @SuppressWarnings({"unchecked"})
-        private void forwardOptions() {
-            for (ConfigOption<?> option : factory.forwardOptions()) {
-                enrichingOptions
-                        .getOptional(option)
-                        .ifPresent(o -> allOptions.set((ConfigOption<? super Object>) option, o));
-            }
-        }
 
         private <F extends Factory> Optional<F> discoverOptionalFormatFactory(
                 Class<F> formatFactoryClass, ConfigOption<String> formatOption) {
