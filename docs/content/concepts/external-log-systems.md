@@ -50,11 +50,11 @@ Download the flink-sql-connector-kafka jar file with corresponding version.
 
 {{< stable >}}
 
-| Version | Jar                                                                                                                                                             |
-|---|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Flink 1.16 | [flink-connector-kafka-1.16.1.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-sql-connector-kafka/1.16.1/flink-sql-connector-kafka-1.16.0.jar) |
-| Flink 1.15 | [flink-connector-kafka-1.15.4.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-sql-connector-kafka/1.15.4/flink-sql-connector-kafka-1.15.4.jar) |
-| Flink 1.14 | [flink-sql-connector-kafka_2.11-1.14.4.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-sql-connector-kafka_2.11/1.14.4/flink-sql-connector-kafka_2.11-1.14.4.jar)               |
+| Version | Jar                                                                                                                                                                                |
+|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 1.16 | [flink-sql-connector-kafka-1.16.1.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-sql-connector-kafka/1.16.1/flink-sql-connector-kafka-1.16.0.jar)                |
+| Flink 1.15 | [flink-sql-connector-kafka-1.15.4.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-sql-connector-kafka/1.15.4/flink-sql-connector-kafka-1.15.4.jar)                   |
+| Flink 1.14 | [flink-sql-connector-kafka_2.11-1.14.4.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-sql-connector-kafka_2.11/1.14.4/flink-sql-connector-kafka_2.11-1.14.4.jar) |
 
 {{< /stable >}}
 
