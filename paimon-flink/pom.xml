@@ -38,6 +38,7 @@ under the License.
         <module>paimon-flink-1.14</module>
         <module>paimon-flink-1.15</module>
         <module>paimon-flink-1.16</module>
+        <module>paimon-flink-1.17</module>
     </modules>
 
     <dependencies>
