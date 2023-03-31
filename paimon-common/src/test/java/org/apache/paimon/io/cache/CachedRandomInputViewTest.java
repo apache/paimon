@@ -33,6 +33,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Test for {@link CachedRandomInputView}. */
 public class CachedRandomInputViewTest {
@@ -68,26 +69,27 @@ public class CachedRandomInputViewTest {
         CachedRandomInputView view = new CachedRandomInputView(file, cacheManager);
 
         // read first one
-        view.setReadPosition(0);
+        // this assertThatCode check the ConcurrentModificationException is not threw.
+        assertThatCode(() -> view.setReadPosition(0)).doesNotThrowAnyException();
         assertThat(view.readLong()).isEqualTo(segment.getLongBigEndian(0));
 
         // read mid
         int mid = bytes.length / 2;
-        view.setReadPosition(mid);
+        assertThatCode(() -> view.setReadPosition(mid)).doesNotThrowAnyException();
         assertThat(view.readLong()).isEqualTo(segment.getLongBigEndian(mid));
 
         // read special
-        view.setReadPosition(1021);
+        assertThatCode(() -> view.setReadPosition(1021)).doesNotThrowAnyException();
         assertThat(view.readLong()).isEqualTo(segment.getLongBigEndian(1021));
 
         // read last one
-        view.setReadPosition(bytes.length - 1);
+        assertThatCode(() -> view.setReadPosition(bytes.length - 1)).doesNotThrowAnyException();
         assertThat(view.readByte()).isEqualTo(bytes[bytes.length - 1]);
 
         // random read
         for (int i = 0; i < 10000; i++) {
             int position = rnd.nextInt(bytes.length - 8);
-            view.setReadPosition(position);
+            assertThatCode(() -> view.setReadPosition(position)).doesNotThrowAnyException();
             assertThat(view.readLong()).isEqualTo(segment.getLongBigEndian(position));
         }
 

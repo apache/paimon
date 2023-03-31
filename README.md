@@ -53,7 +53,7 @@ Paimon tracks issues in GitHub and prefers to receive contributions as pull requ
 <b style="color:red">Please make sure you are subscribed to the mailing list you are posting to!</b> If you are not subscribed to the mailing list, your message will either be rejected (dev@ list) or you won't receive the response (user@ list).
 
 ## Building
-JDK 8 is required for building the project.
+JDK 8/11 is required for building the project.
 
 - Run the `mvn clean package -DskipTests` command to build the project.
 - Run the `mvn spotless:apply` to format the project (both Java and Scala).

@@ -34,6 +34,7 @@ under the License.
     <properties>
         <spark2.version>2.4.8</spark2.version>
         <jackson.version>2.13.3</jackson.version>
+        <asm6.version>4.10</asm6.version>
     </properties>
 
     <dependencies>
@@ -75,6 +76,10 @@ under the License.
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-log4j12</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>org.apache.xbean</groupId>
+                    <artifactId>xbean-asm6-shaded</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
 
@@ -83,6 +88,11 @@ under the License.
             <artifactId>jackson-module-scala_2.11</artifactId>
             <version>${jackson.version}</version>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.xbean</groupId>
+            <artifactId>xbean-asm6-shaded</artifactId>
+            <version>${asm6.version}</version>
         </dependency>
     </dependencies>
 
