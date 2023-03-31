@@ -24,7 +24,6 @@ import org.apache.hadoop.hive.serde2.io.TimestampWritable;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 
 import java.time.LocalDateTime;
 
@@ -33,7 +32,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for {@link PaimonTimestampObjectInspector}. */
 public class PaimonTimestampObjectInspectorTest {
 
-    @DisabledIfSystemProperty(named = "hive.main.version", matches = "3")
     @Test
     public void testCategoryAndClass() {
         PaimonTimestampObjectInspector oi = new PaimonTimestampObjectInspector();
@@ -67,7 +65,6 @@ public class PaimonTimestampObjectInspectorTest {
         assertThat(oi.getPrimitiveWritableObject(null)).isNull();
     }
 
-    @DisabledIfSystemProperty(named = "hive.main.version", matches = "3")
     @Test
     public void testCopyObject() {
         PaimonTimestampObjectInspector oi = new PaimonTimestampObjectInspector();
