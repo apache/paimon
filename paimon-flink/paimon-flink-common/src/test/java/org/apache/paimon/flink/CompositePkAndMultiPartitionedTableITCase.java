@@ -27,7 +27,6 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -48,11 +47,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
 public class CompositePkAndMultiPartitionedTableITCase extends AbstractTestBase {
 
     private final Map<String, String> staticPartitionOverwrite =
-            new HashMap<String, String>() {
-                {
-                    put(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false");
-                }
-            };
+            Collections.singletonMap(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false");
 
     @BeforeEach
     public void setUp() {

@@ -227,9 +227,8 @@ public class FileStoreITCase extends AbstractTestBase {
                         InternalTypeInfo.of(TABLE_TYPE));
         new FlinkSinkBuilder(
                         table.copy(
-                                new Options()
-                                        .set(CoreOptions.DYNAMIC_PARTITION_OVERWRITE, false)
-                                        .toMap()))
+                                Collections.singletonMap(
+                                        CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false")))
                 .withInput(partialData)
                 .withOverwritePartition(new HashMap<>())
                 .build();

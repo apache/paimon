@@ -86,18 +86,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class ReadWriteTableITCase extends AbstractTestBase {
 
     private final Map<String, String> streamingReadOverwrite =
-            new HashMap<String, String>() {
-                {
-                    put(CoreOptions.STREAMING_READ_OVERWRITE.key(), "true");
-                }
-            };
+            Collections.singletonMap(CoreOptions.STREAMING_READ_OVERWRITE.key(), "true");
 
     private final Map<String, String> staticPartitionOverwrite =
-            new HashMap<String, String>() {
-                {
-                    put(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false");
-                }
-            };
+            Collections.singletonMap(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false");
 
     @BeforeEach
     public void setUp() {
