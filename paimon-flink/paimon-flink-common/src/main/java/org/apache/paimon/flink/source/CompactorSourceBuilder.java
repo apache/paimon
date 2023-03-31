@@ -18,9 +18,10 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
-import org.apache.paimon.flink.utils.TableScanUtils;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
@@ -92,14 +93,24 @@ public class CompactorSourceBuilder {
                                     .toArray(Predicate[]::new));
         }
 
-        ReadBuilder readBuilder = bucketsTable.newReadBuilder().withFilter(partitionPredicate);
         if (isContinuous) {
+            // set 'streaming-compact' and 'scan.bounded.watermark'
+            Options options = bucketsTable.coreOptions().toConfiguration();
+            options.set(CoreOptions.STREAMING_COMPACT, true);
+            options.set(CoreOptions.SCAN_BOUNDED_WATERMARK, null);
+            bucketsTable = bucketsTable.copy(options.toMap());
             return new ContinuousFileStoreSource(
-                    readBuilder,
+                    bucketsTable.newReadBuilder().withFilter(partitionPredicate),
                     bucketsTable.options(),
-                    null,
-                    TableScanUtils.compactStreamScanFactory());
+                    null);
         } else {
+            // static compactor source will compact all current files
+            bucketsTable =
+                    bucketsTable.copy(
+                            Collections.singletonMap(
+                                    CoreOptions.SCAN_MODE.key(),
+                                    CoreOptions.StartupMode.LATEST_FULL.toString()));
+            ReadBuilder readBuilder = bucketsTable.newReadBuilder().withFilter(partitionPredicate);
             List<Split> splits = readBuilder.newScan().plan().splits();
             return new StaticFileStoreSource(
                     readBuilder,
@@ -108,8 +119,7 @@ public class CompactorSourceBuilder {
                             .coreOptions()
                             .toConfiguration()
                             .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
-                    splits,
-                    TableScanUtils.compactBatchScanFactory());
+                    splits);
         }
     }
 

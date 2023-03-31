@@ -36,7 +36,7 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -192,7 +192,7 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
         TableSchema schema = schemaManager.latest().get();
 
         Map<Integer, Map<String, String>> actual = new HashMap<>();
-        DataTableScan.DataFilePlan plan = table.newScan().plan();
+        TableScan.Plan plan = table.newScan().plan();
         try (RecordReaderIterator<InternalRow> it =
                 new RecordReaderIterator<>(table.newRead().createReader(plan))) {
             while (it.hasNext()) {

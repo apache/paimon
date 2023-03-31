@@ -31,11 +31,11 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.TableCommitImpl;
-import org.apache.paimon.table.source.BatchDataTableScan;
-import org.apache.paimon.table.source.BatchDataTableScanImpl;
+import org.apache.paimon.table.source.InnerStreamTableScan;
+import org.apache.paimon.table.source.InnerStreamTableScanImpl;
+import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.InnerTableScanImpl;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.table.source.StreamDataTableScan;
-import org.apache.paimon.table.source.StreamDataTableScanImpl;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
@@ -78,14 +78,13 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public BatchDataTableScan newScan() {
-        return new BatchDataTableScanImpl(
-                coreOptions(), newSnapshotSplitReader(), snapshotManager());
+    public InnerTableScan newScan() {
+        return new InnerTableScanImpl(coreOptions(), newSnapshotSplitReader(), snapshotManager());
     }
 
     @Override
-    public StreamDataTableScan newStreamScan() {
-        return new StreamDataTableScanImpl(
+    public InnerStreamTableScan newStreamScan() {
+        return new InnerStreamTableScanImpl(
                 coreOptions(),
                 newSnapshotSplitReader(),
                 snapshotManager(),

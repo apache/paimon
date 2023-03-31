@@ -23,8 +23,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.system.BucketsTable;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.SnapshotManager;
@@ -84,7 +84,7 @@ public class ContinuousCompactorFollowUpScannerTest extends ScannerTestBase {
         Snapshot snapshot = snapshotManager.snapshot(1);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        DataTableScan.DataFilePlan plan = scanner.scan(1, snapshotSplitReader);
+        TableScan.Plan plan = scanner.scan(1, snapshotSplitReader);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|1|0|1", "+I 1|2|0|1"));
 

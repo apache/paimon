@@ -19,19 +19,19 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.table.source.DataTableScan;
-import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.source.DataFilePlan;
+import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableScan;
 
-/** Helper class for the follow-up planning of {@link StreamDataTableScan}. */
+/** Helper class for the follow-up planning of {@link StreamTableScan}. */
 public interface FollowUpScanner {
 
     boolean shouldScanSnapshot(Snapshot snapshot);
 
-    DataTableScan.DataFilePlan scan(long snapshotId, SnapshotSplitReader snapshotSplitReader);
+    TableScan.Plan scan(long snapshotId, SnapshotSplitReader snapshotSplitReader);
 
-    default DataTableScan.DataFilePlan getOverwriteChangesPlan(
+    default TableScan.Plan getOverwriteChangesPlan(
             long snapshotId, SnapshotSplitReader snapshotSplitReader) {
-        return new DataTableScan.DataFilePlan(
-                snapshotSplitReader.withSnapshot(snapshotId).overwriteSplits());
+        return new DataFilePlan(snapshotSplitReader.withSnapshot(snapshotId).overwriteSplits());
     }
 }

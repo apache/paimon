@@ -19,19 +19,9 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
-
-import java.util.List;
 
 /** Inner {@link TableScan} contains filter push down. */
 public interface InnerTableScan extends TableScan {
-
-    default InnerTableScan withFilter(List<Predicate> predicates) {
-        if (predicates == null || predicates.isEmpty()) {
-            return this;
-        }
-        return withFilter(PredicateBuilder.and(predicates));
-    }
 
     InnerTableScan withFilter(Predicate predicate);
 }

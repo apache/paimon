@@ -35,11 +35,11 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -166,14 +166,14 @@ public class FilesTable implements ReadonlyTable {
 
         @Override
         public long rowCount() {
-            DataTableScan.DataFilePlan plan = dataFilePlan();
-            if (plan == null) {
-                return 0;
-            }
-            return plan.splits.stream().mapToLong(s -> s.files().size()).sum();
+            TableScan.Plan plan = plan();
+            return plan.splits().stream()
+                    .map(s -> (DataSplit) s)
+                    .mapToLong(s -> s.files().size())
+                    .sum();
         }
 
-        private DataTableScan.DataFilePlan dataFilePlan() {
+        private TableScan.Plan plan() {
             return storeTable.newScan().plan();
         }
 
@@ -224,8 +224,8 @@ public class FilesTable implements ReadonlyTable {
             }
             FilesSplit filesSplit = (FilesSplit) split;
             FileStoreTable table = filesSplit.storeTable;
-            DataTableScan.DataFilePlan dataFilePlan = filesSplit.dataFilePlan();
-            if (dataFilePlan == null) {
+            TableScan.Plan plan = filesSplit.plan();
+            if (plan.splits().isEmpty()) {
                 return new IteratorRecordReader<>(Collections.emptyIterator());
             }
 
@@ -260,13 +260,13 @@ public class FilesTable implements ReadonlyTable {
                                     });
                         }
                     };
-            for (DataSplit dataSplit : dataFilePlan.splits) {
+            for (Split dataSplit : plan.splits()) {
                 iteratorList.add(
                         Iterators.transform(
-                                dataSplit.files().iterator(),
+                                ((DataSplit) dataSplit).files().iterator(),
                                 file ->
                                         toRow(
-                                                dataSplit,
+                                                (DataSplit) dataSplit,
                                                 partitionConverter,
                                                 keyConverters,
                                                 file,
