@@ -56,8 +56,8 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.validateStream
 public class CompositePkAndMultiPartitionedTableWIthKafkaLogITCase extends KafkaTableTestBase {
 
     @BeforeEach
-    public void setUp() throws Exception {
-        init(createAndRegisterTempFile("").toString());
+    public void setUp() {
+        init(getTempDirPath());
     }
 
     // ----------------------------------------------------------------------------------------------------------------

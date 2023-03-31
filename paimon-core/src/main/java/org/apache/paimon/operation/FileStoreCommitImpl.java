@@ -100,6 +100,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final int numBucket;
     private final MemorySize manifestTargetSize;
     private final int manifestMergeMinCount;
+    private final boolean dynamicPartitionOverwrite;
     @Nullable private final Comparator<InternalRow> keyComparator;
 
     @Nullable private Lock lock;
@@ -118,6 +119,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             int numBucket,
             MemorySize manifestTargetSize,
             int manifestMergeMinCount,
+            boolean dynamicPartitionOverwrite,
             @Nullable Comparator<InternalRow> keyComparator) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
@@ -132,6 +134,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.numBucket = numBucket;
         this.manifestTargetSize = manifestTargetSize;
         this.manifestMergeMinCount = manifestMergeMinCount;
+        this.dynamicPartitionOverwrite = dynamicPartitionOverwrite;
         this.keyComparator = keyComparator;
 
         this.lock = null;
@@ -253,10 +256,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Map<String, String> properties) {
         if (LOG.isDebugEnabled()) {
             LOG.debug(
-                    "Ready to overwrite partition "
-                            + partition.toString()
-                            + "\n"
-                            + committable.toString());
+                    "Ready to overwrite partition {}\nManifestCommittable: {}\nProperties: {}",
+                    partition,
+                    committable,
+                    properties);
         }
 
         List<ManifestEntry> appendTableFiles = new ArrayList<>();
@@ -286,28 +289,53 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             LOG.warn(warnMessage.toString());
         }
 
-        // sanity check, all changes must be done within the given partition
-        Predicate partitionFilter = PredicateBuilder.partition(partition, partitionType);
-        if (partitionFilter != null) {
-            for (ManifestEntry entry : appendTableFiles) {
-                if (!partitionFilter.test(partitionObjectConverter.convert(entry.partition()))) {
-                    throw new IllegalArgumentException(
-                            "Trying to overwrite partition "
-                                    + partition
-                                    + ", but the changes in "
-                                    + pathFactory.getPartitionString(entry.partition())
-                                    + " does not belong to this partition");
+        boolean skipOverwrite = false;
+        // partition filter is built from static or dynamic partition according to properties
+        Predicate partitionFilter = null;
+        if (dynamicPartitionOverwrite) {
+            if (appendTableFiles.isEmpty()) {
+                // in dynamic mode, if there is no changes to commit, no data will be deleted
+                skipOverwrite = true;
+            } else {
+                partitionFilter =
+                        appendTableFiles.stream()
+                                .map(ManifestEntry::partition)
+                                .distinct()
+                                // partition filter is built from new data's partitions
+                                .map(p -> PredicateBuilder.equalPartition(p, partitionType))
+                                .reduce(PredicateBuilder::or)
+                                .orElseThrow(
+                                        () ->
+                                                new RuntimeException(
+                                                        "Failed to get dynamic partition filter. This is unexpected."));
+            }
+        } else {
+            partitionFilter = PredicateBuilder.partition(partition, partitionType);
+            // sanity check, all changes must be done within the given partition
+            if (partitionFilter != null) {
+                for (ManifestEntry entry : appendTableFiles) {
+                    if (!partitionFilter.test(
+                            partitionObjectConverter.convert(entry.partition()))) {
+                        throw new IllegalArgumentException(
+                                "Trying to overwrite partition "
+                                        + partition
+                                        + ", but the changes in "
+                                        + pathFactory.getPartitionString(entry.partition())
+                                        + " does not belong to this partition");
+                    }
                 }
             }
         }
 
         // overwrite new files
-        tryOverwrite(
-                partitionFilter,
-                appendTableFiles,
-                committable.identifier(),
-                committable.watermark(),
-                committable.logOffsets());
+        if (!skipOverwrite) {
+            tryOverwrite(
+                    partitionFilter,
+                    appendTableFiles,
+                    committable.identifier(),
+                    committable.watermark(),
+                    committable.logOffsets());
+        }
 
         if (!compactTableFiles.isEmpty()) {
             tryCommit(

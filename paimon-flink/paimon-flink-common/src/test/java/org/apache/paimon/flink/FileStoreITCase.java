@@ -61,7 +61,6 @@ import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -121,7 +120,7 @@ public class FileStoreITCase extends AbstractTestBase {
 
     private final StreamExecutionEnvironment env;
 
-    public FileStoreITCase(boolean isBatch) throws IOException {
+    public FileStoreITCase(boolean isBatch) {
         this.isBatch = isBatch;
         this.env = isBatch ? buildBatchEnv() : buildStreamEnv();
     }
@@ -203,7 +202,7 @@ public class FileStoreITCase extends AbstractTestBase {
         Row[] expected = new Row[] {Row.of(9, "p2", 5), Row.of(5, "p1", 1), Row.of(0, "p1", 2)};
         assertThat(results).containsExactlyInAnyOrder(expected);
 
-        // overwrite all
+        // test dynamic partition overwrite
         partialData =
                 env.fromCollection(
                         Collections.singletonList(
@@ -217,7 +216,27 @@ public class FileStoreITCase extends AbstractTestBase {
 
         // read
         results = executeAndCollect(new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
-        expected = new Row[] {Row.of(19, "p2", 6)};
+        expected = new Row[] {Row.of(19, "p2", 6), Row.of(5, "p1", 1), Row.of(0, "p1", 2)};
+        assertThat(results).containsExactlyInAnyOrder(expected);
+
+        // test static overwrite all
+        partialData =
+                env.fromCollection(
+                        Collections.singletonList(
+                                wrap(GenericRowData.of(20, StringData.fromString("p2"), 3))),
+                        InternalTypeInfo.of(TABLE_TYPE));
+        new FlinkSinkBuilder(
+                        table.copy(
+                                Collections.singletonMap(
+                                        CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false")))
+                .withInput(partialData)
+                .withOverwritePartition(new HashMap<>())
+                .build();
+        env.execute();
+
+        // read
+        results = executeAndCollect(new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
+        expected = new Row[] {Row.of(20, "p2", 3)};
         assertThat(results).containsExactlyInAnyOrder(expected);
     }
 

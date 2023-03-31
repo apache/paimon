@@ -413,6 +413,14 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to read the changes from overwrite in streaming mode.");
 
+    public static final ConfigOption<Boolean> DYNAMIC_PARTITION_OVERWRITE =
+            key("dynamic-partition-overwrite")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether only overwrite dynamic partition when overwriting a partitioned table with "
+                                    + "dynamic partition columns. Works only when the table has partition keys.");
+
     public static final ConfigOption<Duration> PARTITION_EXPIRATION_TIME =
             key("partition.expiration-time")
                     .durationType()
@@ -762,6 +770,10 @@ public class CoreOptions implements Serializable {
 
     public boolean streamingReadOverwrite() {
         return options.get(STREAMING_READ_OVERWRITE);
+    }
+
+    public boolean dynamicPartitionOverwrite() {
+        return options.get(DYNAMIC_PARTITION_OVERWRITE);
     }
 
     public Duration partitionExpireTime() {
