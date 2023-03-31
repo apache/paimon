@@ -50,6 +50,11 @@ public class FileStatsExtractingAvroFormat extends FileFormat {
     }
 
     @Override
+    public void validateDataFields(RowType rowType) {
+        return;
+    }
+
+    @Override
     public Optional<FileStatsExtractor> createStatsExtractor(RowType type) {
         return Optional.of(new TestFileStatsExtractor(this, type));
     }
