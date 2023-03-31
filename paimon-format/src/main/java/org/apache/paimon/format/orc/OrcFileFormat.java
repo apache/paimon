@@ -111,6 +111,12 @@ public class OrcFileFormat extends FileFormat {
                 formatContext.readBatchSize());
     }
 
+    @Override
+    public void validateDataFields(RowType rowType) {
+        DataType refinedType = refineDataType(rowType);
+        OrcSplitReaderUtil.toOrcType(refinedType);
+    }
+
     /**
      * The {@link OrcWriterFactory} will create {@link ThreadLocalClassLoaderConfiguration} from the
      * input writer config to avoid classloader leaks.

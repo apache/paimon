@@ -83,6 +83,14 @@ public class AvroFileFormat extends FileFormat {
         return new RowDataAvroWriterFactory(type, formatOptions.get(AVRO_OUTPUT_CODEC));
     }
 
+    @Override
+    public void validateDataFields(RowType rowType) {
+        List<DataType> fieldTypes = rowType.getFieldTypes();
+        for (DataType dataType : fieldTypes) {
+            AvroSchemaConverter.convertToSchema(dataType);
+        }
+    }
+
     private static class AvroGenericRecordBulkFormat extends AbstractAvroBulkFormat<GenericRecord> {
 
         private static final long serialVersionUID = 1L;

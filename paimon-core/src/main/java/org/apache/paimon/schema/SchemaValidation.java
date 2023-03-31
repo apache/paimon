@@ -20,7 +20,9 @@ package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -104,8 +106,10 @@ public class SchemaValidation {
 
         // Get the format type here which will try to convert string value to {@Code
         // FileFormatType}. If the string value is illegal, an exception will be thrown.
-        // TODO Check fields type according to the format type
-        options.formatType();
+        CoreOptions.FileFormatType fileFormatType = options.formatType();
+        FileFormat fileFormat =
+                FileFormat.fromIdentifier(fileFormatType.name(), new Options(schema.options()));
+        fileFormat.validateDataFields(new RowType(schema.fields()));
 
         // Check column names in schema
         schema.fieldNames()
