@@ -25,17 +25,20 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.hive.FileStoreTestUtils;
 import org.apache.paimon.hive.RowDataContainer;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -46,7 +49,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -54,19 +56,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class PaimonRecordReaderTest {
 
     @TempDir java.nio.file.Path tempDir;
-    private String commitUser;
-
-    @BeforeEach
-    public void beforeEach() {
-        commitUser = UUID.randomUUID().toString();
-    }
 
     @Test
     public void testPk() throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, tempDir.toString());
+        conf.set(CatalogOptions.WAREHOUSE, tempDir.toString());
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
-        FileStoreTable table =
+        Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(
@@ -75,8 +71,9 @@ public class PaimonRecordReaderTest {
                         Collections.emptyList(),
                         Collections.singletonList("a"));
 
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
         write.write(GenericRow.of(1L, BinaryString.fromString("Hi")));
         write.write(GenericRow.of(2L, BinaryString.fromString("Hello")));
         write.write(GenericRow.of(3L, BinaryString.fromString("World")));
@@ -102,9 +99,9 @@ public class PaimonRecordReaderTest {
     @Test
     public void testValueCount() throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, tempDir.toString());
+        conf.set(CatalogOptions.WAREHOUSE, tempDir.toString());
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
-        FileStoreTable table =
+        Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(
@@ -113,8 +110,9 @@ public class PaimonRecordReaderTest {
                         Collections.emptyList(),
                         Collections.emptyList());
 
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
         write.write(GenericRow.of(1, BinaryString.fromString("Hi")));
         write.write(GenericRow.of(2, BinaryString.fromString("Hello")));
         write.write(GenericRow.of(3, BinaryString.fromString("World")));
@@ -141,9 +139,9 @@ public class PaimonRecordReaderTest {
     @Test
     public void testProjectionPushdown() throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, tempDir.toString());
+        conf.set(CatalogOptions.WAREHOUSE, tempDir.toString());
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
-        FileStoreTable table =
+        Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(
@@ -154,8 +152,9 @@ public class PaimonRecordReaderTest {
                         Collections.emptyList(),
                         Collections.emptyList());
 
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
         write.write(GenericRow.of(1, 10L, BinaryString.fromString("Hi")));
         write.write(GenericRow.of(2, 20L, BinaryString.fromString("Hello")));
         write.write(GenericRow.of(1, 10L, BinaryString.fromString("Hi")));
@@ -176,20 +175,20 @@ public class PaimonRecordReaderTest {
         assertThat(actual).isEqualTo(expected);
     }
 
-    private PaimonRecordReader read(FileStoreTable table, BinaryRow partition, int bucket)
-            throws Exception {
-        return read(table, partition, bucket, table.schema().fieldNames());
+    private PaimonRecordReader read(Table table, BinaryRow partition, int bucket) throws Exception {
+        return read(table, partition, bucket, ((FileStoreTable) table).schema().fieldNames());
     }
 
     private PaimonRecordReader read(
-            FileStoreTable table, BinaryRow partition, int bucket, List<String> selectedColumns)
+            Table table, BinaryRow partition, int bucket, List<String> selectedColumns)
             throws Exception {
-        for (DataSplit split : table.newScan().plan().splits) {
-            if (split.partition().equals(partition) && split.bucket() == bucket) {
+        for (Split split : table.newReadBuilder().newScan().plan().splits()) {
+            DataSplit dataSplit = (DataSplit) split;
+            if (dataSplit.partition().equals(partition) && dataSplit.bucket() == bucket) {
                 return new PaimonRecordReader(
                         table.newReadBuilder(),
-                        new PaimonInputSplit(tempDir.toString(), split),
-                        table.schema().fieldNames(),
+                        new PaimonInputSplit(tempDir.toString(), dataSplit),
+                        ((FileStoreTable) table).schema().fieldNames(),
                         selectedColumns);
             }
         }
