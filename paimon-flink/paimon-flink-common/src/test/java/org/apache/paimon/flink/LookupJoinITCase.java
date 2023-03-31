@@ -498,7 +498,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
-                "SELECT /*+ LOOKUP('table'='DIM', 'retry-predicate'='lookup_miss',"
+                "SELECT /*+ LOOKUP('table'='D', 'retry-predicate'='lookup_miss',"
                         + " 'retry-strategy'='fixed_delay', 'fixed-delay'='1s','max-attempts'='60') */"
                         + " T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
