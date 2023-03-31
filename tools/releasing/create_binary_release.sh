@@ -56,6 +56,7 @@ mkdir ${RELEASE_DIR}
 ###########################
 
 mvn clean install -Dcheckstyle.skip=true -Dgpg.skip -DskipTests
+cp paimon-flink/paimon-flink-1.17/target/paimon-flink-1.17-${RELEASE_VERSION}.jar ${RELEASE_DIR}
 cp paimon-flink/paimon-flink-1.16/target/paimon-flink-1.16-${RELEASE_VERSION}.jar ${RELEASE_DIR}
 cp paimon-flink/paimon-flink-1.15/target/paimon-flink-1.15-${RELEASE_VERSION}.jar ${RELEASE_DIR}
 cp paimon-flink/paimon-flink-1.14/target/paimon-flink-1.14-${RELEASE_VERSION}.jar ${RELEASE_DIR}
@@ -74,6 +75,7 @@ cp paimon-spark/paimon-spark-3.1/target/paimon-spark-3.1-${RELEASE_VERSION}.jar 
 cp paimon-spark/paimon-spark-2/target/paimon-spark-2-${RELEASE_VERSION}.jar ${RELEASE_DIR}
 
 cd ${RELEASE_DIR}
+gpg --armor --detach-sig "paimon-flink-1.17-${RELEASE_VERSION}.jar"
 gpg --armor --detach-sig "paimon-flink-1.16-${RELEASE_VERSION}.jar"
 gpg --armor --detach-sig "paimon-flink-1.15-${RELEASE_VERSION}.jar"
 gpg --armor --detach-sig "paimon-flink-1.14-${RELEASE_VERSION}.jar"
@@ -88,6 +90,7 @@ gpg --armor --detach-sig "paimon-spark-3.2-${RELEASE_VERSION}.jar"
 gpg --armor --detach-sig "paimon-spark-3.1-${RELEASE_VERSION}.jar"
 gpg --armor --detach-sig "paimon-spark-2-${RELEASE_VERSION}.jar"
 
+$SHASUM "paimon-flink-1.17-${RELEASE_VERSION}.jar" > "paimon-flink-1.17-${RELEASE_VERSION}.jar.sha512"
 $SHASUM "paimon-flink-1.16-${RELEASE_VERSION}.jar" > "paimon-flink-1.16-${RELEASE_VERSION}.jar.sha512"
 $SHASUM "paimon-flink-1.15-${RELEASE_VERSION}.jar" > "paimon-flink-1.15-${RELEASE_VERSION}.jar.sha512"
 $SHASUM "paimon-flink-1.14-${RELEASE_VERSION}.jar" > "paimon-flink-1.14-${RELEASE_VERSION}.jar.sha512"
