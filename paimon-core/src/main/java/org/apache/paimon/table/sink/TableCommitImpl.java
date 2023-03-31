@@ -100,7 +100,7 @@ public class TableCommitImpl implements InnerTableCommit {
         if (overwritePartition == null) {
             commit.commit(committable, new HashMap<>());
         } else {
-            commit.overwrite(overwritePartition, committable, new HashMap<>());
+            commit.overwrite(overwritePartition, committable, Collections.emptyMap());
         }
         expire();
     }
@@ -128,7 +128,7 @@ public class TableCommitImpl implements InnerTableCommit {
                 // TODO maybe it can be produced by CommitterOperator
                 committable = new ManifestCommittable(Long.MAX_VALUE);
             }
-            commit.overwrite(overwritePartition, committable, new HashMap<>());
+            commit.overwrite(overwritePartition, committable, Collections.emptyMap());
         }
 
         expire();

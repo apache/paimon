@@ -19,6 +19,7 @@
 package org.apache.paimon.predicate;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
@@ -27,6 +28,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.TypeUtils;
 
 import javax.annotation.Nullable;
@@ -342,6 +344,26 @@ public class PredicateBuilder {
                 predicate = PredicateBuilder.and(predicate, builder.equal(idx, literal));
             }
         }
+        return predicate;
+    }
+
+    public static Predicate equalPartition(BinaryRow partition, RowType partitionType) {
+        Preconditions.checkArgument(
+                partition.getFieldCount() == partitionType.getFieldCount(),
+                "Partition's field count should be equal to partitionType's field count.");
+
+        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(partitionType);
+        Predicate predicate = null;
+        PredicateBuilder builder = new PredicateBuilder(partitionType);
+        Object[] literals = converter.convert(partition);
+        for (int i = 0; i < literals.length; i++) {
+            if (predicate == null) {
+                predicate = builder.equal(i, literals[i]);
+            } else {
+                predicate = PredicateBuilder.and(predicate, builder.equal(i, literals[i]));
+            }
+        }
+
         return predicate;
     }
 }

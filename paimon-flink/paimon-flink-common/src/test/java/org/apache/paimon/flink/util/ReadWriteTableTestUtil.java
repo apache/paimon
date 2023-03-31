@@ -148,6 +148,7 @@ public class ReadWriteTableTestUtil {
                                 put(LOG_SYSTEM.key(), "kafka");
                                 put(BOOTSTRAP_SERVERS.key(), getBootstrapServers());
                                 put(TOPIC.key(), topic);
+                                put(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false");
                             }
                         });
 

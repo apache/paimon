@@ -556,6 +556,9 @@ public class TestFileStore extends KeyValueFileStore {
 
             conf.set(CoreOptions.CHANGELOG_PRODUCER, changelogProducer);
 
+            // disable dynamic-partition-overwrite in FileStoreCommit layer test
+            conf.set(CoreOptions.DYNAMIC_PARTITION_OVERWRITE, false);
+
             return new TestFileStore(
                     root,
                     new CoreOptions(conf),
