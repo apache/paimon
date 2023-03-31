@@ -105,6 +105,45 @@ public class ContinuousFileSplitEnumeratorTest {
     }
 
     @Test
+    public void testSplitWithBatch() {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingSplitEnumeratorContext<>(1);
+        context.registerReader(0, "test-host");
+
+        List<FileStoreSourceSplit> initialSplits = new ArrayList<>();
+        for (int i = 1; i <= 18; i++) {
+            initialSplits.add(createSnapshotSplit(i, i, Collections.emptyList()));
+        }
+        final ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(initialSplits)
+                        .setDiscoveryInterval(3)
+                        .setSplitBatchSize(10)
+                        .build();
+
+        // The first time split is allocated, split1 and split2 should be allocated
+        enumerator.handleSplitRequest(0, "test-host");
+        Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
+                context.getSplitAssignments();
+        // Only subtask-0 is allocated.
+        assertThat(assignments).containsOnlyKeys(0);
+        assertThat(assignments.get(0).getAssignedSplits()).hasSize(10);
+
+        // test second batch assign
+        enumerator.handleSplitRequest(0, "test-host");
+
+        assertThat(assignments).containsOnlyKeys(0);
+        assertThat(assignments.get(0).getAssignedSplits()).hasSize(18);
+
+        // test third batch assign
+        enumerator.handleSplitRequest(0, "test-host");
+
+        assertThat(assignments).containsOnlyKeys(0);
+        assertThat(assignments.get(0).getAssignedSplits()).hasSize(18);
+    }
+
+    @Test
     public void testSplitAllocationIsFair() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 new TestingSplitEnumeratorContext<>(1);
@@ -227,6 +266,8 @@ public class ContinuousFileSplitEnumeratorTest {
         private SplitEnumeratorContext<FileStoreSourceSplit> context;
         private Collection<FileStoreSourceSplit> initialSplits = Collections.emptyList();
         private long discoveryInterval = Long.MAX_VALUE;
+
+        private int splitBatchSize = 10;
         private StreamDataTableScan scan;
 
         public Builder setSplitEnumeratorContext(
@@ -245,6 +286,11 @@ public class ContinuousFileSplitEnumeratorTest {
             return this;
         }
 
+        public Builder setSplitBatchSize(int splitBatchSize) {
+            this.splitBatchSize = splitBatchSize;
+            return this;
+        }
+
         public Builder setScan(StreamDataTableScan scan) {
             this.scan = scan;
             return this;
@@ -252,7 +298,7 @@ public class ContinuousFileSplitEnumeratorTest {
 
         public ContinuousFileSplitEnumerator build() {
             return new ContinuousFileSplitEnumerator(
-                    context, initialSplits, null, discoveryInterval, scan);
+                    context, initialSplits, null, discoveryInterval, splitBatchSize, scan);
         }
     }
 
