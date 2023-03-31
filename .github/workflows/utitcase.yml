@@ -40,9 +40,9 @@ jobs:
         with:
           java-version: ${{ matrix.java }}
           distribution: 'adopt'
-      - name: Build on ${{ matrix.java }}
+      - name: Build on JDK ${{ matrix.java }}
         run: ./mvnw clean install -DskipTests
-      - name: Test on ${{ matrix.java }}
+      - name: Test on JDK ${{ matrix.java }}
         timeout-minutes: 60
         run: |
           # run tests with random timezone to find out timezone related bugs
