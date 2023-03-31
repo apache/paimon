@@ -31,6 +31,7 @@ This documentation is a guide for downloading Paimon Jars.
 {{< unstable >}}
 | Version | Jar                                                                                                                                                                                |
 |---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 1.17 | [paimon-flink-1.17-{{< version >}}.jar](https://repository.apache.org/content/groups/snapshots/org/apache/paimon/paimon-flink-1.17/{{< version >}}/) |
 | Flink 1.16 | [paimon-flink-1.16-{{< version >}}.jar](https://repository.apache.org/content/groups/snapshots/org/apache/paimon/paimon-flink-1.16/{{< version >}}/) |
 | Flink 1.15 | [paimon-flink-1.15-{{< version >}}.jar](https://repository.apache.org/content/groups/snapshots/org/apache/paimon/paimon-flink-1.15/{{< version >}}/) |
 | Flink 1.14 | [paimon-flink-1.14-{{< version >}}.jar](https://repository.apache.org/content/groups/snapshots/org/apache/paimon/paimon-flink-1.14/{{< version >}}/) |
@@ -49,6 +50,7 @@ This documentation is a guide for downloading Paimon Jars.
 {{< stable >}}
 | Version | Jar                                                                                                                                                                                |
 |---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 1.17 | [paimon-flink-1.17-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.17/{{< version >}}/paimon-flink-1.17-{{< version >}}.jar) |
 | Flink 1.16 | [paimon-flink-1.16-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.16/{{< version >}}/paimon-flink-1.16-{{< version >}}.jar) |
 | Flink 1.15 | [paimon-flink-1.15-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.15/{{< version >}}/paimon-flink-1.15-{{< version >}}.jar) |
 | Flink 1.14 | [paimon-flink-1.14-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.14/{{< version >}}/paimon-flink-1.14-{{< version >}}.jar) |
