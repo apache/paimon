@@ -225,4 +225,21 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
                                 ""));
         return new ChangelogValueCountFileStoreTable(LocalFileIO.create(), tablePath, tableSchema);
     }
+
+    @Override
+    protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                OVERWRITE_TEST_ROW_TYPE.getFields(),
+                                Arrays.asList("pt0", "pt1"),
+                                Arrays.asList("pk", "pt0", "pt1"),
+                                conf.toMap(),
+                                ""));
+        return new ChangelogValueCountFileStoreTable(LocalFileIO.create(), tablePath, tableSchema);
+    }
 }
