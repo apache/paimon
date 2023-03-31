@@ -40,6 +40,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -66,6 +67,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
+import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -814,6 +816,42 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                         "Aggregate function 'max' does not support retraction,"
                                 + " If you allow this function to ignore retraction messages,"
                                 + " you can configure 'fields.${field_name}.ignore-retract'='true'");
+    }
+
+    @Test
+    public void testFullCompactedRead() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "2");
+        options.put(CoreOptions.SCAN_MODE.key(), "compacted-full");
+        options.put(BUCKET.key(), "1");
+        FileStoreTable table = createFileStoreTable().copy(options);
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = writeBuilder.newWrite();
+        StreamTableCommit commit = writeBuilder.newCommit();
+
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 10, 200L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.compact(binaryRow(1), 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        write.write(rowData(1, 10, 300L));
+        write.compact(binaryRow(1), 0, true);
+        commit.commit(3, write.prepareCommit(true, 3));
+
+        write.close();
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        assertThat(
+                        getResult(
+                                readBuilder.newRead(),
+                                readBuilder.newScan().plan().splits(),
+                                BATCH_ROW_TO_STRING))
+                .containsExactly("1|10|200|binary|varbinary|mapKey:mapVal|multiset");
     }
 
     @Override

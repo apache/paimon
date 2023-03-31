@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -51,43 +50,43 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
-/**
- * {@link StoreSinkWrite} for {@link CoreOptions.ChangelogProducer#FULL_COMPACTION} changelog
- * producer. This writer will perform full compaction once in a while.
- *
- * @deprecated use {@link GlobalFullCompactionSinkWrite}.
- */
-public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
+import static org.apache.paimon.table.source.snapshot.FullCompactedStartingScanner.isFullCompactedIdentifier;
 
-    private static final Logger LOG = LoggerFactory.getLogger(FullChangelogStoreSinkWrite.class);
+/**
+ * {@link StoreSinkWrite} for execute full compaction globally. All writers will be full compaction
+ * at the same time (in the specified checkpoint).
+ */
+public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
+
+    private static final Logger LOG = LoggerFactory.getLogger(GlobalFullCompactionSinkWrite.class);
+
+    private final int deltaCommits;
 
     private final SnapshotManager snapshotManager;
-    private final long fullCompactionThresholdMs;
 
     private final Set<Tuple2<BinaryRow, Integer>> currentWrittenBuckets;
     private final NavigableMap<Long, Set<Tuple2<BinaryRow, Integer>>> writtenBuckets;
     private final ListState<Tuple3<Long, BinaryRow, Integer>> writtenBucketState;
 
-    private Long currentFirstWriteMs;
-    private final NavigableMap<Long, Long> firstWriteMs;
-    private final ListState<Tuple2<Long, Long>> firstWriteMsState;
-
     private final TreeSet<Long> commitIdentifiersToCheck;
 
-    public FullChangelogStoreSinkWrite(
+    public GlobalFullCompactionSinkWrite(
             FileStoreTable table,
             StateInitializationContext context,
             String initialCommitUser,
             IOManager ioManager,
             boolean isOverwrite,
-            long fullCompactionThresholdMs)
+            boolean waitCompaction,
+            int deltaCommits)
             throws Exception {
-        super(table, context, initialCommitUser, ioManager, isOverwrite, false);
+        super(table, context, initialCommitUser, ioManager, isOverwrite, waitCompaction);
+
+        this.deltaCommits = deltaCommits;
 
         this.snapshotManager = table.snapshotManager();
-        this.fullCompactionThresholdMs = fullCompactionThresholdMs;
 
         currentWrittenBuckets = new HashSet<>();
+        @SuppressWarnings("unchecked")
         TupleSerializer<Tuple3<Long, BinaryRow, Integer>> writtenBucketStateSerializer =
                 new TupleSerializer<>(
                         (Class<Tuple3<Long, BinaryRow, Integer>>) (Class<?>) Tuple3.class,
@@ -110,19 +109,6 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
                                 writtenBuckets
                                         .computeIfAbsent(t.f0, k -> new HashSet<>())
                                         .add(Tuple2.of(t.f1, t.f2)));
-
-        currentFirstWriteMs = null;
-        TupleSerializer<Tuple2<Long, Long>> firstWriteMsStateSerializer =
-                new TupleSerializer<>(
-                        (Class<Tuple2<Long, Long>>) (Class<?>) Tuple2.class,
-                        new TypeSerializer[] {LongSerializer.INSTANCE, LongSerializer.INSTANCE});
-        firstWriteMsState =
-                context.getOperatorStateStore()
-                        .getListState(
-                                new ListStateDescriptor<>(
-                                        "first_write_ms", firstWriteMsStateSerializer));
-        firstWriteMs = new TreeMap<>();
-        firstWriteMsState.get().forEach(t -> firstWriteMs.put(t.f0, t.f1));
 
         commitIdentifiersToCheck = new TreeSet<>();
     }
@@ -150,10 +136,6 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
         if (!currentWrittenBuckets.contains(Tuple2.of(partition, bucket))) {
             currentWrittenBuckets.add(Tuple2.of(partition.copy(), bucket));
         }
-
-        if (currentFirstWriteMs == null) {
-            currentFirstWriteMs = System.currentTimeMillis();
-        }
     }
 
     @Override
@@ -161,14 +143,12 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
             throws IOException {
         checkSuccessfulFullCompaction();
 
-        // check what buckets we've modified during this checkpoint interval
+        // collects what buckets we've modified during this checkpoint interval
         if (!currentWrittenBuckets.isEmpty()) {
             writtenBuckets
                     .computeIfAbsent(checkpointId, k -> new HashSet<>())
                     .addAll(currentWrittenBuckets);
             currentWrittenBuckets.clear();
-            firstWriteMs.putIfAbsent(checkpointId, currentFirstWriteMs);
-            currentFirstWriteMs = null;
         }
 
         if (LOG.isDebugEnabled()) {
@@ -182,10 +162,7 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
             }
         }
 
-        if (!writtenBuckets.isEmpty() // there should be something to compact
-                && System.currentTimeMillis() - firstWriteMs.firstEntry().getValue()
-                        >= fullCompactionThresholdMs // time without full compaction exceeds
-        ) {
+        if (!writtenBuckets.isEmpty() && isFullCompactedIdentifier(checkpointId, deltaCommits)) {
             doCompaction = true;
         }
 
@@ -193,7 +170,7 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Submit full compaction for checkpoint #{}", checkpointId);
             }
-            submitFullCompaction();
+            submitFullCompaction(checkpointId);
             commitIdentifiersToCheck.add(checkpointId);
         }
 
@@ -234,7 +211,6 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
                                 commitIdentifier);
                     }
                     writtenBuckets.headMap(commitIdentifier, true).clear();
-                    firstWriteMs.headMap(commitIdentifier, true).clear();
                     commitIdentifiersToCheck.headSet(commitIdentifier).clear();
                     break;
                 }
@@ -242,7 +218,10 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
         }
     }
 
-    private void submitFullCompaction() {
+    private void submitFullCompaction(long currentCheckpointId) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Submit full compaction for checkpoint #{}", currentCheckpointId);
+        }
         Set<Tuple2<BinaryRow, Integer>> compactedBuckets = new HashSet<>();
         writtenBuckets.forEach(
                 (checkpointId, buckets) -> {
@@ -271,11 +250,5 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
             }
         }
         writtenBucketState.update(writtenBucketList);
-
-        List<Tuple2<Long, Long>> firstWriteMsList = new ArrayList<>();
-        for (Map.Entry<Long, Long> entry : firstWriteMs.entrySet()) {
-            firstWriteMsList.add(Tuple2.of(entry.getKey(), entry.getValue()));
-        }
-        firstWriteMsState.update(firstWriteMsList);
     }
 }

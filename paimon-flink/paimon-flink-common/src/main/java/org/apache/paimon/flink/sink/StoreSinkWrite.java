@@ -45,7 +45,7 @@ public interface StoreSinkWrite {
 
     void notifyNewFiles(long snapshotId, BinaryRow partition, int bucket, List<DataFileMeta> files);
 
-    List<Committable> prepareCommit(boolean doCompaction, long checkpointId) throws IOException;
+    List<Committable> prepareCommit(boolean waitCompaction, long checkpointId) throws IOException;
 
     void snapshotState(StateSnapshotContext context) throws Exception;
 

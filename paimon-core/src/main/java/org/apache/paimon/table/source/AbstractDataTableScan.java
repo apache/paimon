@@ -19,18 +19,22 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousLatestStartingScanner;
+import org.apache.paimon.table.source.snapshot.FullCompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.Preconditions;
+
+import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 
 /** An abstraction layer above {@link FileStoreScan} to provide input split generation. */
 public abstract class AbstractDataTableScan implements DataTableScan {
@@ -63,7 +67,16 @@ public abstract class AbstractDataTableScan implements DataTableScan {
                         ? new ContinuousLatestStartingScanner()
                         : new FullStartingScanner();
             case COMPACTED_FULL:
-                return new CompactedStartingScanner();
+                if (options.changelogProducer() == ChangelogProducer.FULL_COMPACTION
+                        || options.toConfiguration().contains(FULL_COMPACTION_DELTA_COMMITS)) {
+                    int deltaCommits =
+                            options.toConfiguration()
+                                    .getOptional(FULL_COMPACTION_DELTA_COMMITS)
+                                    .orElse(1);
+                    return new FullCompactedStartingScanner(deltaCommits);
+                } else {
+                    return new CompactedStartingScanner();
+                }
             case FROM_TIMESTAMP:
                 Long startupMillis = options.scanTimestampMills();
                 Preconditions.checkNotNull(
