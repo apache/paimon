@@ -60,6 +60,10 @@ under the License.
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-log4j12</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>org.pentaho</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
 
@@ -331,6 +335,10 @@ under the License.
                     <groupId>org.jamon</groupId>
                     <artifactId>jamon-runtime</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>org.pentaho</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
 
@@ -392,6 +400,10 @@ under the License.
                     <groupId>org.jamon</groupId>
                     <artifactId>jamon-runtime</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>org.pentaho</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
 
@@ -423,7 +435,7 @@ under the License.
                 </exclusion>
                 <exclusion>
                     <groupId>org.pentaho</groupId>
-                    <artifactId>pentaho-aggdesigner-algorithm</artifactId>
+                    <artifactId>*</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -478,7 +490,6 @@ under the License.
                     <groupId>org.apache.orc</groupId>
                     <artifactId>orc-core</artifactId>
                 </exclusion>
-                <!-- this dependency cannot be fetched from central maven repository anymore -->
                 <exclusion>
                     <groupId>org.pentaho</groupId>
                     <artifactId>*</artifactId>
