@@ -78,7 +78,7 @@ public class HiveSchema {
                             + "so location property must be set.");
         }
         Path path = new Path(location);
-        Options options = new Options();
+        Options options = PaimonJobConf.extractCatalogConfig(configuration);
         options.set(CoreOptions.PATH, path.toUri().toString());
         CatalogContext catalogContext = CatalogContext.create(options, configuration);
         TableSchema tableSchema = FileStoreTableFactory.create(catalogContext).schema();

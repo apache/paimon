@@ -76,7 +76,7 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
 
     private FileStoreTable createFileStoreTable(JobConf jobConf) {
         PaimonJobConf wrapper = new PaimonJobConf(jobConf);
-        Options options = new Options();
+        Options options = PaimonJobConf.extractCatalogConfig(jobConf);
         options.set(CoreOptions.PATH, wrapper.getLocation());
         CatalogContext catalogContext = CatalogContext.create(options, jobConf);
         return FileStoreTableFactory.create(catalogContext);
