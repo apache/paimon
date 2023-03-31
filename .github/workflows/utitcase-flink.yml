@@ -25,24 +25,24 @@ on:
       - 'docs/**'
       - '**/*.md'
 
-env:
-  JDK_VERSION: 8
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java: [ '8', '11' ]
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
-      - name: Set up JDK ${{ env.JDK_VERSION }}
+      - name: Set up JDK ${{ matrix.java }}
         uses: actions/setup-java@v2
         with:
-          java-version: ${{ env.JDK_VERSION }}
+          java-version: ${{ matrix.java }}
           distribution: 'adopt'
-      - name: Build
+      - name: Build on ${{ matrix.java }}
         run: ./mvnw clean install -DskipTests
-      - name: Test
+      - name: Test on ${{ matrix.java }}
         timeout-minutes: 60
         run: |
           # run tests with random timezone to find out timezone related bugs
