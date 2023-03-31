@@ -60,6 +60,9 @@ public abstract class FileFormat {
     /** Create a {@link FormatWriterFactory} from the type. */
     public abstract FormatWriterFactory createWriterFactory(RowType type);
 
+    /** Validate data field type supported or not. */
+    public abstract void validateDataFields(RowType rowType);
+
     public FormatReaderFactory createReaderFactory(RowType rowType) {
         int[][] projection = new int[rowType.getFieldCount()][];
         for (int i = 0; i < projection.length; i++) {

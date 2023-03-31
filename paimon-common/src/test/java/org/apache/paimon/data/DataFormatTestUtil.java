@@ -45,7 +45,7 @@ public class DataFormatTestUtil {
     }
 
     /** Stringify the given {@link InternalRow}. */
-    public static String rowDataToString(InternalRow row, RowType type) {
+    public static String internalRowToString(InternalRow row, RowType type) {
         return row.getRowKind().shortString() + "[" + toStringNoRowKind(row, type) + ']';
     }
 

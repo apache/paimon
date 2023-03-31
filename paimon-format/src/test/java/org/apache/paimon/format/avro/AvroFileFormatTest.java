@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,52 +16,33 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.orc;
+package org.apache.paimon.format.avro;
 
-import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
-import java.util.List;
 
-import static org.apache.paimon.format.orc.OrcFileFormatFactory.IDENTIFIER;
-import static org.assertj.core.api.Assertions.assertThat;
+/** Test for avro file format. */
+public class AvroFileFormatTest {
 
-/** Test for {@link OrcFileFormatFactory}. */
-public class OrcFileFormatTest {
+    private static AvroFileFormat fileFormat;
 
-    @Test
-    public void testAbsent() {
-        Options options = new Options();
-        options.setString("haha", "1");
-        OrcFileFormat orc = new OrcFileFormatFactory().create(new FormatContext(options, 1024));
-        assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");
-        assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", "")).isEqualTo("lz4");
-    }
-
-    @Test
-    public void testPresent() {
-        Options options = new Options();
-        options.setString("haha", "1");
-        options.setString("compress", "zlib");
-        OrcFileFormat orc = new OrcFileFormatFactory().create(new FormatContext(options, 1024));
-        assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");
-        assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", "")).isEqualTo("zlib");
+    @BeforeAll
+    public static void before() {
+        fileFormat = new AvroFileFormat(new Options());
     }
 
     @Test
     public void testSupportedDataTypes() {
-        OrcFileFormat orc =
-                new OrcFileFormatFactory().create(new FormatContext(new Options(), 1024));
-
+        ArrayList<DataField> dataFields = new ArrayList<>();
         int index = 0;
-        List<DataField> dataFields = new ArrayList<DataField>();
         dataFields.add(new DataField(index++, "boolean_type", DataTypes.BOOLEAN()));
         dataFields.add(new DataField(index++, "tinyint_type", DataTypes.TINYINT()));
         dataFields.add(new DataField(index++, "smallint_type", DataTypes.SMALLINT()));
@@ -76,24 +57,39 @@ public class OrcFileFormatTest {
         dataFields.add(new DataField(index++, "timestamp_type", DataTypes.TIMESTAMP(3)));
         dataFields.add(new DataField(index++, "date_type", DataTypes.DATE()));
         dataFields.add(new DataField(index++, "decimal_type", DataTypes.DECIMAL(10, 3)));
-        orc.validateDataFields(new RowType(dataFields));
+
+        RowType rowType = new RowType(dataFields);
+        fileFormat.validateDataFields(rowType);
     }
 
     @Test
-    public void testUnSupportedDataTypes() {
-        OrcFileFormat orc =
-                new OrcFileFormatFactory().create(new FormatContext(new Options(), 1024));
-
+    public void testSupportedComplexDataTypes() {
+        ArrayList<DataField> dataFields = new ArrayList<>();
         int index = 0;
-        List<DataField> dataFields = new ArrayList<DataField>();
         dataFields.add(
                 new DataField(
                         index++,
-                        "timestamp_with_timezone",
-                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE()));
+                        "map_type",
+                        DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT())));
+        dataFields.add(new DataField(index++, "array_type", DataTypes.ARRAY(DataTypes.STRING())));
+        dataFields.add(
+                new DataField(
+                        index++,
+                        "row_type",
+                        DataTypes.ROW(DataTypes.STRING(), DataTypes.BIGINT())));
+
+        RowType rowType = new RowType(dataFields);
+        fileFormat.validateDataFields(rowType);
+    }
+
+    @Test
+    public void testUnsupportedDataTypes() {
+        ArrayList<DataField> dataFields = new ArrayList<>();
+        int index = 0;
+        dataFields.add(new DataField(index++, "timestamp_type", DataTypes.TIMESTAMP(6)));
+
+        RowType rowType = new RowType(dataFields);
         Assertions.assertThrows(
-                UnsupportedOperationException.class,
-                () -> orc.validateDataFields(new RowType(dataFields)));
-        dataFields.clear();
+                IllegalArgumentException.class, () -> fileFormat.validateDataFields(rowType));
     }
 }

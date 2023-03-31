@@ -61,6 +61,7 @@ import static org.apache.paimon.flink.AbstractFlinkTableFactory.buildPaimonTable
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_PARALLELISM;
 import static org.apache.paimon.flink.FlinkTestBase.createResolvedTable;
+import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.assertNoMoreRecords;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bExeEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildQuery;
@@ -85,11 +86,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class ReadWriteTableITCase extends AbstractTestBase {
 
     private final Map<String, String> streamingReadOverwrite =
-            new HashMap<String, String>() {
-                {
-                    put(CoreOptions.STREAMING_READ_OVERWRITE.key(), "true");
-                }
-            };
+            Collections.singletonMap(CoreOptions.STREAMING_READ_OVERWRITE.key(), "true");
+
+    private final Map<String, String> staticPartitionOverwrite =
+            Collections.singletonMap(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false");
 
     @BeforeEach
     public void setUp() {
@@ -660,7 +660,76 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     // ----------------------------------------------------------------------------------------------------------------
-    // Purge data using overwrite
+    // Dynamic partition overwrite (default option)
+    // ----------------------------------------------------------------------------------------------------------------
+
+    @Test
+    public void testDynamicOverwrite() throws Exception {
+        String table =
+                createTable(
+                        Arrays.asList("pk INT", "part0 INT", "part1 STRING", "v STRING"),
+                        Arrays.asList("pk", "part0", "part1"),
+                        Arrays.asList("part0", "part1"),
+                        streamingReadOverwrite);
+
+        insertInto(
+                table,
+                "(1, 1, 'A', 'Hi')",
+                "(2, 1, 'A', 'Hello')",
+                "(3, 1, 'A', 'World')",
+                "(4, 1, 'B', 'To')",
+                "(5, 1, 'B', 'Apache')",
+                "(6, 1, 'B', 'Paimon')",
+                "(7, 2, 'A', 'Test')",
+                "(8, 2, 'B', 'Case')");
+
+        BlockingIterator<Row, Row> streamItr =
+                testStreamingRead(
+                        buildSimpleQuery(table),
+                        Arrays.asList(
+                                changelogRow("+I", 1, 1, "A", "Hi"),
+                                changelogRow("+I", 2, 1, "A", "Hello"),
+                                changelogRow("+I", 3, 1, "A", "World"),
+                                changelogRow("+I", 4, 1, "B", "To"),
+                                changelogRow("+I", 5, 1, "B", "Apache"),
+                                changelogRow("+I", 6, 1, "B", "Paimon"),
+                                changelogRow("+I", 7, 2, "A", "Test"),
+                                changelogRow("+I", 8, 2, "B", "Case")));
+
+        bEnv.executeSql(
+                        String.format(
+                                "INSERT OVERWRITE `%s` VALUES (4, 1, 'B', 'Where'), (5, 1, 'B', 'When'), (10, 2, 'A', 'Static'), (11, 2, 'A', 'Dynamic')",
+                                table))
+                .await();
+
+        assertThat(streamItr.collect(8))
+                .containsExactlyInAnyOrder(
+                        changelogRow("-D", 4, 1, "B", "To"),
+                        changelogRow("-D", 5, 1, "B", "Apache"),
+                        changelogRow("-D", 6, 1, "B", "Paimon"),
+                        changelogRow("-D", 7, 2, "A", "Test"),
+                        changelogRow("+I", 4, 1, "B", "Where"),
+                        changelogRow("+I", 5, 1, "B", "When"),
+                        changelogRow("+I", 10, 2, "A", "Static"),
+                        changelogRow("+I", 11, 2, "A", "Dynamic"));
+        assertNoMoreRecords(streamItr);
+        streamItr.close();
+
+        testBatchRead(
+                buildSimpleQuery(table),
+                Arrays.asList(
+                        changelogRow("+I", 1, 1, "A", "Hi"),
+                        changelogRow("+I", 2, 1, "A", "Hello"),
+                        changelogRow("+I", 3, 1, "A", "World"),
+                        changelogRow("+I", 4, 1, "B", "Where"),
+                        changelogRow("+I", 5, 1, "B", "When"),
+                        changelogRow("+I", 10, 2, "A", "Static"),
+                        changelogRow("+I", 11, 2, "A", "Dynamic"),
+                        changelogRow("+I", 8, 2, "B", "Case")));
+    }
+
+    // ----------------------------------------------------------------------------------------------------------------
+    // Purge data using overwrite (NOTE: set overwrite.dynamic-partition = false)
     // ----------------------------------------------------------------------------------------------------------------
 
     @Test
@@ -669,9 +738,10 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("k0 INT", "k1 STRING", "v STRING"),
                         Collections.emptyList(),
-                        Collections.emptyList());
+                        Collections.emptyList(),
+                        staticPartitionOverwrite);
 
-        validateOverwriteResult(table, "", "*", Collections.emptyList());
+        validatePurgingResult(table, "", "*", Collections.emptyList());
     }
 
     @Test
@@ -680,9 +750,13 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         // single partition key
         String table =
-                createTable(fieldsSpec, Collections.emptyList(), Collections.singletonList("k0"));
+                createTable(
+                        fieldsSpec,
+                        Collections.emptyList(),
+                        Collections.singletonList("k0"),
+                        staticPartitionOverwrite);
 
-        validateOverwriteResult(
+        validatePurgingResult(
                 table,
                 "PARTITION (k0 = 0)",
                 "k1, v",
@@ -692,9 +766,14 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         changelogRow("+I", 1, "2023-01-02", "store")));
 
         // multiple partition keys and overwrite one partition key
-        table = createTable(fieldsSpec, Collections.emptyList(), Arrays.asList("k0", "k1"));
+        table =
+                createTable(
+                        fieldsSpec,
+                        Collections.emptyList(),
+                        Arrays.asList("k0", "k1"),
+                        staticPartitionOverwrite);
 
-        validateOverwriteResult(
+        validatePurgingResult(
                 table,
                 "PARTITION (k0 = 0)",
                 "k1, v",
@@ -704,9 +783,14 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         changelogRow("+I", 1, "2023-01-02", "store")));
 
         // multiple partition keys and overwrite all partition keys
-        table = createTable(fieldsSpec, Collections.emptyList(), Arrays.asList("k0", "k1"));
+        table =
+                createTable(
+                        fieldsSpec,
+                        Collections.emptyList(),
+                        Arrays.asList("k0", "k1"),
+                        staticPartitionOverwrite);
 
-        validateOverwriteResult(
+        validatePurgingResult(
                 table,
                 "PARTITION (k0 = 0, k1 = '2023-01-01')",
                 "v",
@@ -1085,7 +1169,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     // Tools
     // ----------------------------------------------------------------------------------------------------------------
 
-    private void validateOverwriteResult(
+    private void validatePurgingResult(
             String table, String partitionSpec, String projectionSpec, List<Row> expected)
             throws Exception {
         insertInto(

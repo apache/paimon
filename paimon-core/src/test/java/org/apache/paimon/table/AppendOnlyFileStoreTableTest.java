@@ -303,4 +303,21 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 ""));
         return new AppendOnlyFileStoreTable(LocalFileIO.create(), tablePath, tableSchema);
     }
+
+    @Override
+    protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                OVERWRITE_TEST_ROW_TYPE.getFields(),
+                                Arrays.asList("pt0", "pt1"),
+                                Collections.emptyList(),
+                                conf.toMap(),
+                                ""));
+        return new AppendOnlyFileStoreTable(LocalFileIO.create(), tablePath, tableSchema);
+    }
 }

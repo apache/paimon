@@ -64,6 +64,9 @@ public class ContinuousFileSplitEnumerator
 
     private final StreamTableScan scan;
 
+    /** Default batch splits size to avoid exceed `akka.framesize`. */
+    private final int splitBatchSize;
+
     @Nullable private Long nextSnapshotId;
 
     private boolean finished = false;
@@ -73,6 +76,7 @@ public class ContinuousFileSplitEnumerator
             Collection<FileStoreSourceSplit> remainSplits,
             @Nullable Long nextSnapshotId,
             long discoveryInterval,
+            int splitBatchSize,
             StreamTableScan scan) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
@@ -80,6 +84,7 @@ public class ContinuousFileSplitEnumerator
         addSplits(remainSplits);
         this.nextSnapshotId = nextSnapshotId;
         this.discoveryInterval = discoveryInterval;
+        this.splitBatchSize = splitBatchSize;
         this.readersAwaitingSplit = new HashSet<>();
         this.splitGenerator = new FileStoreSourceSplitGenerator();
         this.scan = scan;
@@ -205,9 +210,11 @@ public class ContinuousFileSplitEnumerator
                                 readersAwaitingSplit.remove(task);
                                 return;
                             }
-                            assignment
-                                    .computeIfAbsent(task, i -> new ArrayList<>())
-                                    .add(splits.poll());
+                            List<FileStoreSourceSplit> taskAssignment =
+                                    assignment.computeIfAbsent(task, i -> new ArrayList<>());
+                            if (taskAssignment.size() < splitBatchSize) {
+                                taskAssignment.add(splits.poll());
+                            }
                         }
                     }
                 });

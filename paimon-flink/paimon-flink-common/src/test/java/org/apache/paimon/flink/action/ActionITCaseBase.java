@@ -112,7 +112,7 @@ public class ActionITCaseBase extends AbstractTestBase {
         RecordReader<InternalRow> recordReader = read.createReader(splits);
         List<String> result = new ArrayList<>();
         recordReader.forEachRemaining(
-                row -> result.add(DataFormatTestUtil.rowDataToString(row, rowType)));
+                row -> result.add(DataFormatTestUtil.internalRowToString(row, rowType)));
         return result;
     }
 }
