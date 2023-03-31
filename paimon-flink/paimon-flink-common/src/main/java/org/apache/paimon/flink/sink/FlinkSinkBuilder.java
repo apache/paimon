@@ -18,11 +18,11 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
