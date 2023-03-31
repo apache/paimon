@@ -35,6 +35,7 @@ under the License.
 
     <properties>
         <flink.version>1.17.1</flink.version>
+        <flink.pulsar.version>4.0.0-1.17</flink.pulsar.version>
         <flink.cdc.version>2.3.0</flink.cdc.version>
         <frocksdbjni.version>6.20.3-ververica-2.0</frocksdbjni.version>
         <geometry.version>2.2.0</geometry.version>
@@ -104,6 +105,13 @@ under the License.
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-kafka</artifactId>
             <version>${flink.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-pulsar</artifactId>
+            <version>${flink.pulsar.version}</version>
             <scope>provided</scope>
         </dependency>
 
@@ -258,6 +266,13 @@ under the License.
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-kafka</artifactId>
             <version>${flink.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-pulsar</artifactId>
+            <version>${flink.pulsar.version}</version>
             <type>test-jar</type>
             <scope>test</scope>
         </dependency>

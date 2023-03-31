@@ -125,6 +125,7 @@ under the License.
         <json-smart.version>2.4.9</json-smart.version>
         <avro.version>1.11.1</avro.version>
         <kafka.version>3.2.3</kafka.version>
+        <pulsar.version>3.0.0</pulsar.version>
     </properties>
 
     <dependencies>
