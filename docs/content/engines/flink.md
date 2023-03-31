@@ -36,8 +36,9 @@ Download the jar file with corresponding version.
 
 {{< stable >}}
 
-| Version | Jar                                                                                                                                                                                |
-|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Version    | Jar                                                                                                                                               |
+|------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 1.17 | [paimon-flink-1.17-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.17-{{< version >}}.jar) |
 | Flink 1.16 | [paimon-flink-1.16-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.16-{{< version >}}.jar) |
 | Flink 1.15 | [paimon-flink-1.15-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.15-{{< version >}}.jar) |
 | Flink 1.14 | [paimon-flink-1.14-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.14-{{< version >}}.jar) |
@@ -46,8 +47,9 @@ Download the jar file with corresponding version.
 
 {{< unstable >}}
 
-| Version | Jar                                                                                                                                                                                |
-|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Version    | Jar                                                                                                                                   |
+|------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 1.17 | [paimon-flink-1.17-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.17/{{< version >}}/) |
 | Flink 1.16 | [paimon-flink-1.16-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.16/{{< version >}}/) |
 | Flink 1.15 | [paimon-flink-1.15-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.15/{{< version >}}/) |
 | Flink 1.14 | [paimon-flink-1.14-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.14/{{< version >}}/) |
