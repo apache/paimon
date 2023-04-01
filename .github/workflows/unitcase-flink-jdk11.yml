@@ -31,7 +31,9 @@ env:
 
 jobs:
   build:
-    if: contains(github.event.comment.html_url, '/pull/') && contains(github.event.comment.body, '/jdk11')
+    if: |
+      github.event_name == 'schedule' ||
+      (contains(github.event.comment.html_url, '/pull/') && contains(github.event.comment.body, '/jdk11'))
     runs-on: ubuntu-latest
 
     steps:
