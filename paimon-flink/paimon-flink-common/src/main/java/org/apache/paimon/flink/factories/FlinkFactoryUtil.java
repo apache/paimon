@@ -61,25 +61,6 @@ public final class FlinkFactoryUtil {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkFactoryUtil.class);
 
-    /**
-     * Describes the property version. This can be used for backwards compatibility in case the
-     * property format changes.
-     */
-    public static final ConfigOption<Integer> PROPERTY_VERSION =
-            ConfigOptions.key("property-version")
-                    .intType()
-                    .defaultValue(1)
-                    .withDescription(
-                            "Version of the overall property design. This option is meant for future backwards compatibility.");
-
-    public static final ConfigOption<String> CONNECTOR =
-            ConfigOptions.key("connector")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Uniquely identifies the connector of a dynamic table that is used for accessing data in "
-                                    + "an external system. Its value is used during table source and table sink discovery.");
-
     public static final ConfigOption<String> FORMAT =
             ConfigOptions.key("format")
                     .stringType()
@@ -115,18 +96,6 @@ public final class FlinkFactoryUtil {
      *
      * ... // construct connector with discovered formats
      * }</pre>
-     *
-     * <p>Note: The format option parameter of {@link
-     * FlinkTableFactoryHelper#discoverEncodingFormat(Class, ConfigOption)} and {@link
-     * FlinkTableFactoryHelper#discoverDecodingFormat(Class, ConfigOption)} must be {@link #FORMAT}
-     * or end with {@link #FORMAT_SUFFIX}. The discovery logic will replace 'format' with the
-     * factory identifier value as the format prefix. For example, assuming the identifier is
-     * 'json', if the format option key is 'format', then the format prefix is 'json.'. If the
-     * format option key is 'value.format', then the format prefix is 'value.json'. The format
-     * prefix is used to project the options for the format factory.
-     *
-     * <p>Note: When created, this utility merges the options from {@link
-     * DynamicTableFactory.Context#getEnrichmentOptions()} using
      */
     public static FlinkTableFactoryHelper createFlinkTableFactoryHelper(
             LogStoreTableFactory factory, DynamicTableFactory.Context context) {
@@ -243,15 +212,6 @@ public final class FlinkFactoryUtil {
         return loadResults;
     }
 
-    private static <T> T readOption(ReadableConfig options, ConfigOption<T> option) {
-        try {
-            return options.get(option);
-        } catch (Throwable t) {
-            throw new ValidationException(
-                    String.format("Invalid value for option '%s'.", option.key()), t);
-        }
-    }
-
     private static Set<String> allKeysExpanded(ConfigOption<?> option, Set<String> actualKeys) {
         return allKeysExpanded("", option, actualKeys);
     }
@@ -339,11 +299,7 @@ public final class FlinkFactoryUtil {
         private final Configuration enrichingOptions;
 
         private FlinkTableFactoryHelper(LogStoreTableFactory tableFactory, Context context) {
-            super(
-                    tableFactory,
-                    context.getCatalogTable().getOptions(),
-                    PROPERTY_VERSION,
-                    CONNECTOR);
+            super(tableFactory, context.getCatalogTable().getOptions());
             this.context = context;
             this.enrichingOptions = Configuration.fromMap(context.getEnrichmentOptions());
         }
