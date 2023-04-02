@@ -118,7 +118,7 @@ public class Hive23CatalogITCase extends HiveCatalogITCaseBase {
     }
 
     @Test
-    public void m() throws Exception {
+    public void testAlterTableFailedInHive() throws Exception {
         tEnv.executeSql(
                         String.join(
                                 "\n",
@@ -139,8 +139,8 @@ public class Hive23CatalogITCase extends HiveCatalogITCaseBase {
                 .isInstanceOf(TableException.class)
                 .hasMessage(
                         "Could not execute "
-                                + "ALTER TABLE my_alter_hive.default.alter_failed_table \n"
-                                + " SET 'aa' = 'bb'");
+                                + "ALTER TABLE my_alter_hive.default.alter_failed_table\n"
+                                + "  SET 'aa' = 'bb'");
 
         assertTrue(
                 new SchemaManager(
