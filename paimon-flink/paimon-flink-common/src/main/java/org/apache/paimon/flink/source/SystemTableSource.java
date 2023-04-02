@@ -24,6 +24,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.table.connector.ChangelogMode;
@@ -32,6 +33,8 @@ import org.apache.flink.table.connector.source.SourceProvider;
 import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
+
+import java.util.List;
 
 /** A {@link FlinkTableSource} for system table. */
 public class SystemTableSource extends FlinkTableSource {
@@ -73,7 +76,8 @@ public class SystemTableSource extends FlinkTableSource {
         if (isStreamingMode && table instanceof DataTable) {
             source = new ContinuousFileStoreSource(readBuilder, table.options(), limit);
         } else {
-            source = new StaticFileStoreSource(readBuilder, limit, splitBatchSize);
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            source = new StaticFileStoreSource(readBuilder, limit, splitBatchSize, splits);
         }
         return SourceProvider.of(source);
     }

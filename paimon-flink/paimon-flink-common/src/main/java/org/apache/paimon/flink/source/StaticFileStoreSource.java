@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.SplitEnumerator;
@@ -28,6 +29,7 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import javax.annotation.Nullable;
 
 import java.util.Collection;
+import java.util.List;
 
 /** Bounded {@link FlinkSource} for reading records. It does not monitor new snapshots. */
 public class StaticFileStoreSource extends FlinkSource {
@@ -36,19 +38,25 @@ public class StaticFileStoreSource extends FlinkSource {
 
     private final int splitBatchSize;
     private final TableScanUtils.TableScanFactory scanFactory;
+    private final List<Split> splitList;
 
     public StaticFileStoreSource(
-            ReadBuilder readBuilder, @Nullable Long limit, int splitBatchSize) {
-        this(readBuilder, limit, splitBatchSize, ReadBuilder::newScan);
+            ReadBuilder readBuilder,
+            @Nullable Long limit,
+            int splitBatchSize,
+            List<Split> splitList) {
+        this(readBuilder, limit, splitBatchSize, splitList, ReadBuilder::newScan);
     }
 
     public StaticFileStoreSource(
             ReadBuilder readBuilder,
             @Nullable Long limit,
             int splitBatchSize,
+            List<Split> splitList,
             TableScanUtils.TableScanFactory scanFactory) {
         super(readBuilder, limit);
         this.splitBatchSize = splitBatchSize;
+        this.splitList = splitList;
         this.scanFactory = scanFactory;
     }
 
@@ -62,11 +70,16 @@ public class StaticFileStoreSource extends FlinkSource {
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
         Collection<FileStoreSourceSplit> splits =
-                checkpoint == null
-                        ? new FileStoreSourceSplitGenerator()
-                                .createSplits(scanFactory.create(readBuilder).plan())
-                        : checkpoint.splits();
-
+                checkpoint == null ? getSplits() : checkpoint.splits();
         return new StaticFileStoreSplitEnumerator(context, null, splits, splitBatchSize);
+    }
+
+    private List<FileStoreSourceSplit> getSplits() {
+        FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
+        if (null != splitList) {
+            return splitGenerator.createSplits(splitList);
+        } else {
+            return splitGenerator.createSplits(scanFactory.create(readBuilder).plan());
+        }
     }
 }

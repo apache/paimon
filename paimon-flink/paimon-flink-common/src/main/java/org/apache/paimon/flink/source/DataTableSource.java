@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
@@ -33,10 +34,15 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
 import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
+import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Projection;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.DynamicTableSource;
@@ -48,6 +54,7 @@ import org.apache.flink.table.factories.DynamicTableFactory;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
@@ -197,13 +204,41 @@ public class DataTableSource extends FlinkTableSource
                         .withProjection(projectFields)
                         .withPredicate(predicate)
                         .withLimit(limit)
-                        .withParallelism(
-                                Options.fromMap(table.options())
-                                        .get(FlinkConnectorOptions.SCAN_PARALLELISM))
                         .withWatermarkStrategy(watermarkStrategy);
 
         return new PaimonDataStreamScanProvider(
-                !streaming, env -> sourceBuilder.withEnv(env).build());
+                !streaming, env -> configureSource(sourceBuilder, env));
+    }
+
+    private DataStreamSource<RowData> configureSource(
+            FlinkSourceBuilder sourceBuilder, StreamExecutionEnvironment env) {
+        Options options = Options.fromMap(this.table.options());
+        Integer parallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);
+        List<Split> splits = null;
+        if (options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
+            // for streaming mode, set the default parallelism to the bucket number.
+            if (streaming) {
+                parallelism = options.get(CoreOptions.BUCKET);
+            } else {
+
+                Preconditions.checkState(table instanceof DataTable);
+                DataTable dataTable = (DataTable) table;
+                splits = dataTable.newScan().plan().splits();
+
+                if (null != splits) {
+                    parallelism = splits.size();
+                }
+                if (null != limit && limit > 0) {
+                    int limitCount =
+                            limit >= Integer.MAX_VALUE ? Integer.MAX_VALUE : limit.intValue();
+                    parallelism = Math.min(parallelism, limitCount);
+                }
+
+                parallelism = null == parallelism ? 1 : Math.max(1, parallelism);
+            }
+        }
+
+        return sourceBuilder.withParallelism(parallelism).withSplits(splits).withEnv(env).build();
     }
 
     @Override

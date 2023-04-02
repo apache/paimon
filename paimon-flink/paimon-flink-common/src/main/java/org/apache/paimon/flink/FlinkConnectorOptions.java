@@ -83,7 +83,16 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Define a custom parallelism for the scan source. "
                                     + "By default, if this option is not defined, the planner will derive the parallelism "
-                                    + "for each statement individually by also considering the global configuration.");
+                                    + "for each statement individually by also considering the global configuration. "
+                                    + "If user enable the scan.infer-parallelism, the planner will derive the parallelism by inferred parallelism.");
+    public static final ConfigOption<Boolean> INFER_SCAN_PARALLELISM =
+            ConfigOptions.key("scan.infer-parallelism")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If it is false, parallelism of source are set by "
+                                    + SCAN_PARALLELISM.key()
+                                    + ". Otherwise, source parallelism is inferred from splits number (batch mode) or bucket number(streaming mode).");
 
     public static final ConfigOption<Boolean> STREAMING_READ_ATOMIC =
             ConfigOptions.key("streaming-read-atomic")
