@@ -25,6 +25,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.system.BucketsTable;
 import org.apache.paimon.types.RowType;
 
@@ -99,6 +100,7 @@ public class CompactorSourceBuilder {
                     null,
                     TableScanUtils.compactStreamScanFactory());
         } else {
+            List<Split> splits = readBuilder.newScan().plan().splits();
             return new StaticFileStoreSource(
                     readBuilder,
                     null,
@@ -106,6 +108,7 @@ public class CompactorSourceBuilder {
                             .coreOptions()
                             .toConfiguration()
                             .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
+                    splits,
                     TableScanUtils.compactBatchScanFactory());
         }
     }
