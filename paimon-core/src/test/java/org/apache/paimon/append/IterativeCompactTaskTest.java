@@ -271,7 +271,8 @@ public class IterativeCompactTaskTest {
                     minFileNum,
                     maxFileNum,
                     rewriter,
-                    null);
+                    null,
+                    false);
             deleted = new HashSet<>();
         }
 

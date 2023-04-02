@@ -321,7 +321,8 @@ public class AppendOnlyWriterTest {
                                         ? Collections.emptyList()
                                         : Collections.singletonList(
                                                 generateCompactAfter(compactBefore)),
-                        pathFactory);
+                        pathFactory,
+                        false);
         AppendOnlyWriter writer =
                 new AppendOnlyWriter(
                         LocalFileIO.create(),

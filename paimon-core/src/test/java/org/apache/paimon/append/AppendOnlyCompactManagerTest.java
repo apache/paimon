@@ -210,8 +210,8 @@ public class AppendOnlyCompactManagerTest {
                         maxFileNum,
                         targetFileSize,
                         null, // not used
-                        null // not used
-                        );
+                        null, // not used
+                        false);
         Optional<List<DataFileMeta>> actual = manager.pickCompactBefore();
         assertThat(actual.isPresent()).isEqualTo(expectedPresent);
         if (expectedPresent) {

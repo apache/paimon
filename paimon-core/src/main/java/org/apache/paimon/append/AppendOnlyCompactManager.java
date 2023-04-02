@@ -53,6 +53,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     private final long targetFileSize;
     private final CompactRewriter rewriter;
     private final DataFilePathFactory pathFactory;
+    private final boolean assertDisorder;
 
     public AppendOnlyCompactManager(
             FileIO fileIO,
@@ -62,10 +63,12 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
             int maxFileNum,
             long targetFileSize,
             CompactRewriter rewriter,
-            DataFilePathFactory pathFactory) {
+            DataFilePathFactory pathFactory,
+            boolean assertDisorder) {
         this.fileIO = fileIO;
         this.executor = executor;
-        this.toCompact = new TreeSet<>(comparator());
+        this.assertDisorder = assertDisorder;
+        this.toCompact = new TreeSet<>(fileComparator(assertDisorder));
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
         this.maxFileNum = maxFileNum;
@@ -97,7 +100,8 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
                                 minFileNum,
                                 maxFileNum,
                                 rewriter,
-                                pathFactory));
+                                pathFactory,
+                                assertDisorder));
     }
 
     private void triggerCompactionWithBestEffort() {
@@ -204,6 +208,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
         private final int maxFileNum;
         private final CompactRewriter rewriter;
         private final DataFilePathFactory factory;
+        private final boolean assertDisorder;
 
         public IterativeCompactTask(
                 FileIO fileIO,
@@ -212,7 +217,8 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
                 int minFileNum,
                 int maxFileNum,
                 CompactRewriter rewriter,
-                DataFilePathFactory factory) {
+                DataFilePathFactory factory,
+                boolean assertDisorder) {
             this.fileIO = fileIO;
             this.inputs = inputs;
             this.targetFileSize = targetFileSize;
@@ -220,11 +226,12 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
             this.maxFileNum = maxFileNum;
             this.rewriter = rewriter;
             this.factory = factory;
+            this.assertDisorder = assertDisorder;
         }
 
         @Override
         protected CompactResult doCompact() throws Exception {
-            TreeSet<DataFileMeta> toCompact = new TreeSet<>(comparator());
+            TreeSet<DataFileMeta> toCompact = new TreeSet<>(fileComparator(assertDisorder));
             toCompact.addAll(inputs);
             Set<DataFileMeta> compactBefore = new LinkedHashSet<>();
             List<DataFileMeta> compactAfter = new ArrayList<>();
@@ -311,19 +318,13 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
      * may be put after the new files, and this order will be disrupted. We need to ensure this
      * order, so we force the order by sequence.
      */
-    public static List<DataFileMeta> sortFiles(Collection<DataFileMeta> input) {
-        List<DataFileMeta> files = new ArrayList<>(input);
-        files.sort(comparator());
-        return files;
-    }
-
-    private static Comparator<DataFileMeta> comparator() {
+    public static Comparator<DataFileMeta> fileComparator(boolean assertDisorder) {
         return (o1, o2) -> {
             if (o1 == o2) {
                 return 0;
             }
 
-            if (isOverlap(o1, o2)) {
+            if (assertDisorder && isOverlap(o1, o2)) {
                 throw new RuntimeException(
                         String.format(
                                 "There should no overlap in append files, there is a bug!"
