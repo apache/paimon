@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
+import org.apache.paimon.CoreOptions.StreamReadType;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
@@ -53,6 +54,7 @@ import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
+import static org.apache.paimon.CoreOptions.STREAMING_READ_FROM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.NONE;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
@@ -123,6 +125,7 @@ public abstract class AbstractFlinkTableFactory
 
     private static void validateFileStoreContinuous(Options options) {
         LogChangelogMode changelogMode = options.get(LOG_CHANGELOG_MODE);
+        StreamReadType streamReadType = options.get(STREAMING_READ_FROM);
         if (changelogMode == LogChangelogMode.UPSERT) {
             throw new ValidationException(
                     "File store continuous reading dose not support upsert changelog mode.");
@@ -131,6 +134,10 @@ public abstract class AbstractFlinkTableFactory
         if (consistency == LogConsistency.EVENTUAL) {
             throw new ValidationException(
                     "File store continuous reading dose not support eventual consistency mode.");
+        }
+        if (streamReadType == StreamReadType.LOG_STORE) {
+            throw new ValidationException(
+                    "Table data is stored only in the file store, can not reading from the log_store.");
         }
     }
 

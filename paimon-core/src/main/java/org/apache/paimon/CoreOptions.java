@@ -25,11 +25,13 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
+import org.apache.paimon.options.description.TextElement;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.Serializable;
@@ -542,6 +544,25 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1024)
                     .withDescription("Read batch size for orc and parquet.");
 
+    public static final ConfigOption<StreamReadType> STREAMING_READ_FROM =
+            ConfigOptions.key("streaming-read-from")
+                    .enumType(StreamReadType.class)
+                    .defaultValue(StreamReadType.FILE_STORE)
+                    .withDescription(
+                            Description.builder()
+                                    .text("Read the store type of the paimon table.")
+                                    .linebreak()
+                                    .linebreak()
+                                    .text("Possible values:")
+                                    .linebreak()
+                                    .list(
+                                            TextElement.text(
+                                                    "\"file-store\": Will read from the file store"))
+                                    .list(
+                                            TextElement.text(
+                                                    "\"log-store\":Will read from the file store, the user must configure log.system"))
+                                    .build());
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -796,6 +817,10 @@ public class CoreOptions implements Serializable {
         return options.get(READ_BATCH_SIZE);
     }
 
+    public static StreamReadType streamReadType(Options options) {
+        return options.get(STREAMING_READ_FROM);
+    }
+
     /** Specifies the merge engine for table with primary key. */
     public enum MergeEngine implements DescribedEnum {
         DEDUPLICATE("deduplicate", "De-duplicate and keep the last row."),
@@ -1024,6 +1049,45 @@ public class CoreOptions implements Serializable {
                             value,
                             StringUtils.join(
                                     Arrays.stream(FileFormatType.values()).iterator(), ",")));
+        }
+    }
+
+    /** Specifies the type for streaming read. */
+    public enum StreamReadType implements DescribedEnum {
+        LOG_STORE("log-store", "Read from log store such as kafka."),
+        FILE_STORE("file-store", "Read from file store.");
+
+        private final String value;
+        private final String description;
+
+        StreamReadType(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+
+        @VisibleForTesting
+        public static StreamReadType fromValue(String value) {
+            for (StreamReadType formatType : StreamReadType.values()) {
+                if (formatType.value.equals(value)) {
+                    return formatType;
+                }
+            }
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid format type %s, only support [%s]",
+                            value,
+                            StringUtils.join(
+                                    Arrays.stream(StreamReadType.values()).iterator(), ",")));
         }
     }
 
