@@ -83,6 +83,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.sEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testStreamingRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.validateStreamingReadResult;
+import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.warehouse;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -193,6 +194,43 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 Arrays.asList(
                         changelogRow("+I", "US Dollar", "2022-01-01"),
                         changelogRow("+I", "Euro", "2022-01-01")));
+    }
+
+    @Test
+    public void testNaNType() throws Exception {
+        bEnv.executeSql(
+                "CREATE TEMPORARY TABLE S ( a DOUBLE,b DOUBLE,c STRING) WITH ( 'connector' = 'filesystem', 'format'='json' , 'path' ='"
+                        + warehouse
+                        + "/S' )");
+        bEnv.executeSql(
+                        "INSERT INTO S VALUES "
+                                + "(1.0,2.0,'a'),\n"
+                                + "(0.0,0.0,'b'),\n"
+                                + "(1.0,1.0,'c'),\n"
+                                + "(0.0,0.0,'d'),\n"
+                                + "(1.0,0.0,'e'),\n"
+                                + "(0.0,0.0,'f'),\n"
+                                + "(-1.0,0.0,'g'),\n"
+                                + "(1.0,-1.0,'h'),\n"
+                                + "(1.0,-2.0,'i')")
+                .await();
+
+        bEnv.executeSql("CREATE TABLE T (d STRING, e DOUBLE)");
+        bEnv.executeSql("INSERT INTO T SELECT c,a/b FROM S").await();
+
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(bEnv.executeSql("SELECT * FROM  T").collect());
+        assertThat(iterator.collect(9))
+                .containsExactlyInAnyOrder(
+                        Row.of("a", 0.5),
+                        Row.of("b", Double.NaN),
+                        Row.of("c", 1.0),
+                        Row.of("d", Double.NaN),
+                        Row.of("e", Double.POSITIVE_INFINITY),
+                        Row.of("f", Double.NaN),
+                        Row.of("g", Double.NEGATIVE_INFINITY),
+                        Row.of("h", -1.0),
+                        Row.of("i", -0.5));
     }
 
     @Test
