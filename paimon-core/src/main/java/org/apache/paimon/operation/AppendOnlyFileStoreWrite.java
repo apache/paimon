@@ -43,10 +43,10 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.util.Collections;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
+import static org.apache.paimon.CoreOptions.APPEND_ONLY_ASSERT_DISORDER;
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
 
 /** {@link FileStoreWrite} for {@link AppendOnlyFileStore}. */
@@ -63,6 +63,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
     private final int compactionMaxFileNum;
     private final boolean commitForceCompact;
     private final boolean skipCompaction;
+    private final boolean assertDisorder;
 
     public AppendOnlyFileStoreWrite(
             FileIO fileIO,
@@ -86,6 +87,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
         this.compactionMaxFileNum = options.compactionMaxFileNum();
         this.commitForceCompact = options.commitForceCompact();
         this.skipCompaction = options.writeOnly();
+        this.assertDisorder = options.toConfiguration().get(APPEND_ONLY_ASSERT_DISORDER);
     }
 
     @Override
@@ -97,7 +99,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
             ExecutorService compactExecutor) {
         // let writer and compact manager hold the same reference
         // and make restore files mutable to update
-        LinkedList<DataFileMeta> restored = new LinkedList<>(restoredFiles);
+        long maxSequenceNumber = getMaxSequenceNumber(restoredFiles);
         DataFilePathFactory factory = pathFactory.createDataFilePathFactory(partition, bucket);
         CompactManager compactManager =
                 skipCompaction
@@ -105,19 +107,20 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                         : new AppendOnlyCompactManager(
                                 fileIO,
                                 compactExecutor,
-                                restored,
+                                restoredFiles,
                                 compactionMinFileNum,
                                 compactionMaxFileNum,
                                 targetFileSize,
                                 compactRewriter(partition, bucket),
-                                factory);
+                                factory,
+                                assertDisorder);
         return new AppendOnlyWriter(
                 fileIO,
                 schemaId,
                 fileFormat,
                 targetFileSize,
                 rowType,
-                getMaxSequenceNumber(restored),
+                maxSequenceNumber,
                 compactManager,
                 commitForceCompact,
                 factory,

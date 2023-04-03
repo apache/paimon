@@ -76,7 +76,8 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                                 10,
                                 10,
                                 null,
-                                dataFilePathFactory), // not used
+                                dataFilePathFactory,
+                                false), // not used
                         false,
                         dataFilePathFactory,
                         null);

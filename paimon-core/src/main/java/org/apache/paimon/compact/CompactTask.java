@@ -31,16 +31,10 @@ public abstract class CompactTask implements Callable<CompactResult> {
 
     private static final Logger LOG = LoggerFactory.getLogger(CompactTask.class);
 
-    private final List<DataFileMeta> inputs;
-
-    public CompactTask(List<DataFileMeta> inputs) {
-        this.inputs = inputs;
-    }
-
     @Override
     public CompactResult call() throws Exception {
         long startMillis = System.currentTimeMillis();
-        CompactResult result = doCompact(inputs);
+        CompactResult result = doCompact();
 
         if (LOG.isDebugEnabled()) {
             logMetric(startMillis, result.before(), result.after());
@@ -64,10 +58,9 @@ public abstract class CompactTask implements Callable<CompactResult> {
     /**
      * Perform compaction.
      *
-     * @param inputs the candidate files to be compacted
      * @return {@link CompactResult} of compact before and compact after files.
      */
-    protected abstract CompactResult doCompact(List<DataFileMeta> inputs) throws Exception;
+    protected abstract CompactResult doCompact() throws Exception;
 
     private long collectRewriteSize(List<DataFileMeta> files) {
         return files.stream().mapToLong(DataFileMeta::fileSize).sum();
