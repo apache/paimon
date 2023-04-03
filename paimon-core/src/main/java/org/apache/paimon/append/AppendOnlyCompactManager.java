@@ -127,18 +127,18 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     public Optional<CompactResult> getCompactionResult(boolean blocking)
             throws ExecutionException, InterruptedException {
         Optional<CompactResult> result = innerGetCompactionResult(blocking);
-        result.ifPresent(
-                r -> {
-                    compacting.clear();
-                    if (!r.after().isEmpty()) {
-                        // if the last compacted file is still small,
-                        // add it back to the head
-                        DataFileMeta lastFile = r.after().get(r.after().size() - 1);
-                        if (lastFile.fileSize() < targetFileSize) {
-                            toCompact.add(lastFile);
-                        }
-                    }
-                });
+        if (result.isPresent()) {
+            CompactResult compactResult = result.get();
+            if (!compactResult.after().isEmpty()) {
+                // if the last compacted file is still small,
+                // add it back to the head
+                DataFileMeta lastFile = compactResult.after().get(compactResult.after().size() - 1);
+                if (lastFile.fileSize() < targetFileSize) {
+                    toCompact.add(lastFile);
+                }
+            }
+            compacting = null;
+        }
         return result;
     }
 
