@@ -86,8 +86,15 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     public FileStoreLookupFunction(
             Table table, int[] projection, int[] joinKeyIndex, @Nullable Predicate predicate) {
         checkArgument(
-                table.partitionKeys().isEmpty(), "Currently only support non-partitioned table.");
-        checkArgument(table.primaryKeys().size() > 0, "Currently only support primary key table.");
+                table.partitionKeys().isEmpty(),
+                String.format(
+                        "Currently only support non-partitioned table, the lookup table is [%s].",
+                        table.name()));
+        checkArgument(
+                table.primaryKeys().size() > 0,
+                String.format(
+                        "Currently only support primary key table, the lookup table is [%s].",
+                        table.name()));
         TableScanUtils.streamingReadingValidate(table);
 
         this.table = table;
