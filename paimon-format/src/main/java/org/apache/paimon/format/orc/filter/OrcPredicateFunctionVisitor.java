@@ -201,6 +201,7 @@ public class OrcPredicateFunctionVisitor
             case VARCHAR:
                 return PredicateLeaf.Type.STRING;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 return PredicateLeaf.Type.TIMESTAMP;
             case DATE:
                 return PredicateLeaf.Type.DATE;
