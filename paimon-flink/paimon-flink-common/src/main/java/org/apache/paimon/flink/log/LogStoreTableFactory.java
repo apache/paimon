@@ -18,6 +18,9 @@
 
 package org.apache.paimon.flink.log;
 
+import org.apache.paimon.flink.factories.FlinkFactoryUtil.FlinkTableFactoryHelper;
+import org.apache.paimon.flink.factories.LogStoreFactoryUtil;
+
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.configuration.ConfigOption;
@@ -32,9 +35,7 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DeserializationFormatFactory;
-import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.factories.FactoryUtil;
-import org.apache.flink.table.factories.FactoryUtil.TableFactoryHelper;
+import org.apache.flink.table.factories.DynamicTableFactory.Context;
 import org.apache.flink.table.factories.SerializationFormatFactory;
 import org.apache.flink.types.RowKind;
 
@@ -50,7 +51,16 @@ import static org.apache.paimon.CoreOptions.LOG_KEY_FORMAT;
  * <p>Log tables are for processing only unbounded data. Support streaming reading and streaming
  * writing.
  */
-public interface LogStoreTableFactory extends DynamicTableFactory {
+public interface LogStoreTableFactory {
+
+    /**
+     * Returns a unique identifier among same factory interfaces.
+     *
+     * <p>For consistency, an identifier should be declared as one lower case word (e.g. {@code
+     * kafka}). If multiple factories exist for different versions, a version should be appended
+     * using "-" (e.g. {@code elasticsearch-7}).
+     */
+    String factoryIdentifier();
 
     /**
      * Creates a {@link LogSourceProvider} instance from a {@link CatalogTable} and additional
@@ -82,11 +92,12 @@ public interface LogStoreTableFactory extends DynamicTableFactory {
     }
 
     static LogStoreTableFactory discoverLogStoreFactory(ClassLoader cl, String identifier) {
-        return FactoryUtil.discoverFactory(cl, LogStoreTableFactory.class, identifier);
+        return LogStoreFactoryUtil.discoverLogStoreFactory(
+                cl, LogStoreTableFactory.class, identifier);
     }
 
     static DecodingFormat<DeserializationSchema<RowData>> getKeyDecodingFormat(
-            TableFactoryHelper helper) {
+            FlinkTableFactoryHelper helper) {
         DecodingFormat<DeserializationSchema<RowData>> format =
                 helper.discoverDecodingFormat(DeserializationFormatFactory.class, logKeyFormat());
         validateKeyFormat(format, helper.getOptions().get(logKeyFormat()));
@@ -94,7 +105,7 @@ public interface LogStoreTableFactory extends DynamicTableFactory {
     }
 
     static EncodingFormat<SerializationSchema<RowData>> getKeyEncodingFormat(
-            TableFactoryHelper helper) {
+            FlinkTableFactoryHelper helper) {
         EncodingFormat<SerializationSchema<RowData>> format =
                 helper.discoverEncodingFormat(SerializationFormatFactory.class, logKeyFormat());
         validateKeyFormat(format, helper.getOptions().get(logKeyFormat()));
@@ -102,7 +113,7 @@ public interface LogStoreTableFactory extends DynamicTableFactory {
     }
 
     static DecodingFormat<DeserializationSchema<RowData>> getValueDecodingFormat(
-            TableFactoryHelper helper) {
+            FlinkTableFactoryHelper helper) {
         DecodingFormat<DeserializationSchema<RowData>> format =
                 helper.discoverDecodingFormat(DeserializationFormatFactory.class, logFormat());
         validateValueFormat(format, helper.getOptions().get(logFormat()));
@@ -110,7 +121,7 @@ public interface LogStoreTableFactory extends DynamicTableFactory {
     }
 
     static EncodingFormat<SerializationSchema<RowData>> getValueEncodingFormat(
-            TableFactoryHelper helper) {
+            FlinkTableFactoryHelper helper) {
         EncodingFormat<SerializationSchema<RowData>> format =
                 helper.discoverEncodingFormat(SerializationFormatFactory.class, logFormat());
         validateValueFormat(format, helper.getOptions().get(logFormat()));

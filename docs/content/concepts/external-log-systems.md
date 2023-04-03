@@ -42,6 +42,23 @@ If `'log.consistency' = 'eventual'` is set, in order to achieve correct results,
 
 ### Kafka
 
+#### Preparing flink-sql-connector-kafka Jar File
+
+Paimon currently supports Flink 1.16, 1.15 and 1.14. We recommend the latest Flink version for a better experience.
+
+Download the flink-sql-connector-kafka jar file with corresponding version.
+
+{{< stable >}}
+
+| Version | Jar                                                                                                                                                                                |
+|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 1.16 | [flink-sql-connector-kafka-1.16.1.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-sql-connector-kafka/1.16.1/flink-sql-connector-kafka-1.16.0.jar)                |
+| Flink 1.15 | [flink-sql-connector-kafka-1.15.4.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-sql-connector-kafka/1.15.4/flink-sql-connector-kafka-1.15.4.jar)                   |
+| Flink 1.14 | [flink-sql-connector-kafka_2.11-1.14.4.jar](https://repo.maven.apache.org/maven2/org/apache/flink/flink-sql-connector-kafka_2.11/1.14.4/flink-sql-connector-kafka_2.11-1.14.4.jar) |
+
+{{< /stable >}}
+
+
 By specifying `'log.system' = 'kafka'`, users can write changes into Kafka along with table files.
 
 {{< tabs "kafka-example" >}}
