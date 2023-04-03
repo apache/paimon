@@ -327,8 +327,10 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
             if (assertDisorder && isOverlap(o1, o2)) {
                 throw new RuntimeException(
                         String.format(
-                                "There should no overlap in append files, there is a bug!"
-                                        + " Range1(%s, %s), Range2(%s, %s)",
+                                "There should no overlap in append files, but Range1(%s, %s), Range2(%s, %s).\n "
+                                        + "If you are recovering from an older version of paimon (<= 0.3), "
+                                        + "you can configure 'append-only.assert-disorder'='false' to avoid exceptions. \n "
+                                        + "If it was not restored from an older version, there is a bug!",
                                 o1.minSequenceNumber(),
                                 o1.maxSequenceNumber(),
                                 o2.minSequenceNumber(),
