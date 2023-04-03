@@ -205,7 +205,7 @@ public class AppendOnlyCompactManagerTest {
                                         newFileFromSequence("1", 11, 0, 20),
                                         newFileFromSequence("2", 13, 20, 30)))
                 .hasMessageContaining(
-                        "There should no overlap in append files, there is a bug! Range1(0, 20), Range2(20, 30)");
+                        "There should no overlap in append files, but Range1(0, 20), Range2(20, 30)");
 
         assertThatThrownBy(
                         () ->
@@ -213,7 +213,7 @@ public class AppendOnlyCompactManagerTest {
                                         newFileFromSequence("1", 11, 20, 30),
                                         newFileFromSequence("2", 13, 0, 20)))
                 .hasMessageContaining(
-                        "There should no overlap in append files, there is a bug! Range1(20, 30), Range2(0, 20)");
+                        "There should no overlap in append files, but Range1(20, 30), Range2(0, 20)");
 
         assertThatThrownBy(
                         () ->
@@ -221,7 +221,7 @@ public class AppendOnlyCompactManagerTest {
                                         newFileFromSequence("1", 11, 0, 30),
                                         newFileFromSequence("2", 13, 10, 20)))
                 .hasMessageContaining(
-                        "There should no overlap in append files, there is a bug! Range1(0, 30), Range2(10, 20)");
+                        "There should no overlap in append files, but Range1(0, 30), Range2(10, 20)");
 
         assertThatThrownBy(
                         () ->
@@ -229,7 +229,7 @@ public class AppendOnlyCompactManagerTest {
                                         newFileFromSequence("1", 11, 10, 20),
                                         newFileFromSequence("2", 13, 0, 30)))
                 .hasMessageContaining(
-                        "There should no overlap in append files, there is a bug! Range1(10, 20), Range2(0, 30)");
+                        "There should no overlap in append files, but Range1(10, 20), Range2(0, 30)");
     }
 
     private void innerTest(
