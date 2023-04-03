@@ -19,11 +19,11 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.schema.SchemaManager;
 
 import com.klarna.hiverunner.annotations.HiveRunnerSetup;
 import com.klarna.hiverunner.config.HiveRunnerConfig;
-import org.apache.flink.connectors.hive.FlinkEmbeddedHiveRunner;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
@@ -42,7 +42,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** IT cases for using Paimon {@link HiveCatalog} together with Paimon Hive 3.1 connector. */
-@RunWith(FlinkEmbeddedHiveRunner.class)
+@RunWith(PaimonEmbeddedHiveRunner.class)
 public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
 
     @HiveRunnerSetup

@@ -74,6 +74,13 @@ under the License.
 
         <dependency>
             <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-files</artifactId>
+            <version>${test.flink.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
             <artifactId>flink-table-planner_${scala.binary.version}</artifactId>
             <version>${test.flink.version}</version>
             <scope>test</scope>
@@ -84,21 +91,6 @@ under the License.
             <artifactId>flink-table-runtime</artifactId>
             <version>${test.flink.version}</version>
             <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-connector-hive_${scala.binary.version}</artifactId>
-            <version>${test.flink.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-connector-hive_${scala.binary.version}</artifactId>
-            <version>${test.flink.version}</version>
-            <scope>test</scope>
-            <type>test-jar</type>
         </dependency>
 
         <dependency>
@@ -480,7 +472,7 @@ under the License.
         </dependency>
 
         <!--
-        hive-exec must stay after flink-connector-hive and avro to avoid conflicts
+        hive-exec must stay after avro to avoid conflicts
         -->
         <dependency>
             <groupId>org.apache.hive</groupId>

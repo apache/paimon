@@ -26,6 +26,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.hive.mapred.PaimonInputFormat;
 import org.apache.paimon.hive.objectinspector.PaimonObjectInspectorFactory;
+import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
@@ -39,7 +40,6 @@ import org.apache.paimon.types.RowType;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
-import org.apache.flink.connectors.hive.FlinkEmbeddedHiveRunner;
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.serde2.objectinspector.ListObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.MapObjectInspector;
@@ -65,7 +65,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 /** IT cases for {@link PaimonStorageHandler} and {@link PaimonInputFormat}. */
-@RunWith(FlinkEmbeddedHiveRunner.class)
+@RunWith(PaimonEmbeddedHiveRunner.class)
 public class PaimonStorageHandlerITCase {
 
     @ClassRule public static TemporaryFolder folder = new TemporaryFolder();

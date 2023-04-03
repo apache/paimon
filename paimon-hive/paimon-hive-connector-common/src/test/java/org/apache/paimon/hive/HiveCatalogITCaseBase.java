@@ -24,10 +24,10 @@ import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
-import org.apache.flink.connectors.hive.FlinkEmbeddedHiveRunner;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
@@ -56,7 +56,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 /** IT cases for using Paimon {@link HiveCatalog} together with Paimon Hive connector. */
-@RunWith(FlinkEmbeddedHiveRunner.class)
+@RunWith(PaimonEmbeddedHiveRunner.class)
 public abstract class HiveCatalogITCaseBase {
 
     @Rule public TemporaryFolder folder = new TemporaryFolder();
