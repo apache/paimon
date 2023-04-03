@@ -1,6 +1,6 @@
 ---
 title: "Expiring Snapshots"
-weight: 2
+weight: 3
 type: docs
 aliases:
 - /maintenance/expiring-snapshots.html

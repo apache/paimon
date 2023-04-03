@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 
@@ -31,6 +32,7 @@ import java.util.Iterator;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
+import java.util.function.Predicate;
 
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 
@@ -98,6 +100,10 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Long latestCompactedSnapshotId() {
+        return pickSnapshot(s -> s.commitKind() == CommitKind.COMPACT);
+    }
+
+    public @Nullable Long pickSnapshot(Predicate<Snapshot> predicate) {
         Long latestId = latestSnapshotId();
         Long earliestId = earliestSnapshotId();
         if (latestId == null || earliestId == null) {
@@ -107,7 +113,7 @@ public class SnapshotManager implements Serializable {
         for (long snapshotId = latestId; snapshotId >= earliestId; snapshotId--) {
             if (snapshotExists(snapshotId)) {
                 Snapshot snapshot = snapshot(snapshotId);
-                if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
+                if (predicate.test(snapshot)) {
                     return snapshot.id();
                 }
             }

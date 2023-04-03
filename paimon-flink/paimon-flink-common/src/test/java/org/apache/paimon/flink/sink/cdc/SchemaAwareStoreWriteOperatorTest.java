@@ -216,7 +216,8 @@ public class SchemaAwareStoreWriteOperatorTest {
                         table,
                         null,
                         (t, context, ioManager) ->
-                                new StoreSinkWriteImpl(t, context, commitUser, ioManager, false));
+                                new StoreSinkWriteImpl(
+                                        t, context, commitUser, ioManager, false, false));
         TypeSerializer<CdcRecord> inputSerializer = new JavaSerializer<>();
         TypeSerializer<Committable> outputSerializer =
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());

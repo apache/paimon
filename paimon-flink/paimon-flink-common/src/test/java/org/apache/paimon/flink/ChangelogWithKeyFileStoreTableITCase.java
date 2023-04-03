@@ -101,7 +101,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
         innerTestChangelogProducing(
                 Arrays.asList(
                         "'changelog-producer' = 'full-compaction'",
-                        "'changelog-producer.compaction-interval' = '1s'"));
+                        "'full-compaction.delta-commits' = '3'"));
     }
 
     @Test
@@ -125,7 +125,6 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
                         + ") WITH ("
                         + "  'bucket' = '1',"
                         + "  'changelog-producer' = 'full-compaction',"
-                        + "  'changelog-producer.compaction-interval' = '2s',"
                         + "  'write-only' = 'true'"
                         + ")");
 
@@ -335,7 +334,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
                                 "'write-buffer-size' = '%s',",
                                 random.nextBoolean() ? "512kb" : "1mb")
                         + "'changelog-producer' = 'full-compaction',"
-                        + "'changelog-producer.compaction-interval' = '1s'");
+                        + "'full-compaction.delta-commits' = '3'");
 
         // sleep for a random amount of time to check
         // if we can first read complete records then read incremental records correctly
@@ -378,7 +377,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
                                 "'write-buffer-size' = '%s',",
                                 random.nextBoolean() ? "512kb" : "1mb")
                         + "'changelog-producer' = 'full-compaction',"
-                        + "'changelog-producer.compaction-interval' = '2s',"
+                        + "'full-compaction.delta-commits' = '3',"
                         + "'write-only' = 'true'");
 
         // sleep for a random amount of time to check

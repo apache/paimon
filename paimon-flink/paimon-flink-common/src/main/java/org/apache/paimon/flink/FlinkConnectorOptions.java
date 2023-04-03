@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.description.DescribedEnum;
@@ -111,6 +112,8 @@ public class FlinkConnectorOptions {
                                                     + " Downstream can see intermediate state.")
                                     .build());
 
+    @Deprecated
+    @ExcludeFromDocumentation("Deprecated")
     public static final ConfigOption<Duration> CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL =
             key("changelog-producer.compaction-interval")
                     .durationType()

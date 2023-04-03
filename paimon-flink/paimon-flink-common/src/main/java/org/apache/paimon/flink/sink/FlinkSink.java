@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -40,6 +41,7 @@ import org.apache.flink.util.function.SerializableFunction;
 import java.io.Serializable;
 import java.util.UUID;
 
+import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_LOOKUP_WAIT;
 
@@ -60,34 +62,47 @@ public abstract class FlinkSink<T> implements Serializable {
     }
 
     protected StoreSinkWrite.Provider createWriteProvider(String initialCommitUser) {
-        if (!table.coreOptions().writeOnly()) {
+        boolean waitCompaction;
+        if (table.coreOptions().writeOnly()) {
+            waitCompaction = false;
+        } else {
             Options options = table.coreOptions().toConfiguration();
-            switch (table.coreOptions().changelogProducer()) {
-                case FULL_COMPACTION:
-                    long fullCompactionThresholdMs =
-                            options.get(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL)
-                                    .toMillis();
-                    return (table, context, ioManager) ->
-                            new FullChangelogStoreSinkWrite(
-                                    table,
-                                    context,
-                                    initialCommitUser,
-                                    ioManager,
-                                    isOverwrite,
-                                    fullCompactionThresholdMs);
-                case LOOKUP:
-                    if (options.get(CHANGELOG_PRODUCER_LOOKUP_WAIT)) {
-                        return (table, context, ioManager) ->
-                                new LookupChangelogStoreSinkWrite(
-                                        table, context, initialCommitUser, ioManager, isOverwrite);
-                    }
-                    break;
-                default:
+            ChangelogProducer changelogProducer = table.coreOptions().changelogProducer();
+            if (changelogProducer == ChangelogProducer.FULL_COMPACTION
+                    && options.contains(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL)) {
+                long fullCompactionThresholdMs =
+                        options.get(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL).toMillis();
+                return (table, context, ioManager) ->
+                        new FullChangelogStoreSinkWrite(
+                                table,
+                                context,
+                                initialCommitUser,
+                                ioManager,
+                                isOverwrite,
+                                fullCompactionThresholdMs);
+            }
+
+            waitCompaction =
+                    changelogProducer == ChangelogProducer.LOOKUP
+                            && options.get(CHANGELOG_PRODUCER_LOOKUP_WAIT);
+            if (changelogProducer == ChangelogProducer.FULL_COMPACTION
+                    || options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
+                int deltaCommits = options.getOptional(FULL_COMPACTION_DELTA_COMMITS).orElse(1);
+                return (table, context, ioManager) ->
+                        new GlobalFullCompactionSinkWrite(
+                                table,
+                                context,
+                                initialCommitUser,
+                                ioManager,
+                                isOverwrite,
+                                waitCompaction,
+                                deltaCommits);
             }
         }
 
         return (table, context, ioManager) ->
-                new StoreSinkWriteImpl(table, context, initialCommitUser, ioManager, isOverwrite);
+                new StoreSinkWriteImpl(
+                        table, context, initialCommitUser, ioManager, isOverwrite, waitCompaction);
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<T> input) {
