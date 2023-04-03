@@ -23,21 +23,16 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactFutureManager;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactTask;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.Iterator;
-import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -45,36 +40,32 @@ import java.util.concurrent.ExecutorService;
 /** Compact manager for {@link AppendOnlyFileStore}. */
 public class AppendOnlyCompactManager extends CompactFutureManager {
 
-    private final FileIO fileIO;
+    private static final int FULL_COMPACT_MIN_FILE = 3;
+
     private final ExecutorService executor;
     private final TreeSet<DataFileMeta> toCompact;
     private final int minFileNum;
     private final int maxFileNum;
     private final long targetFileSize;
     private final CompactRewriter rewriter;
-    private final DataFilePathFactory pathFactory;
-    private final boolean assertDisorder;
+
+    private List<DataFileMeta> compacting;
 
     public AppendOnlyCompactManager(
-            FileIO fileIO,
             ExecutorService executor,
             List<DataFileMeta> restored,
             int minFileNum,
             int maxFileNum,
             long targetFileSize,
             CompactRewriter rewriter,
-            DataFilePathFactory pathFactory,
             boolean assertDisorder) {
-        this.fileIO = fileIO;
         this.executor = executor;
-        this.assertDisorder = assertDisorder;
         this.toCompact = new TreeSet<>(fileComparator(assertDisorder));
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
         this.maxFileNum = maxFileNum;
         this.targetFileSize = targetFileSize;
         this.rewriter = rewriter;
-        this.pathFactory = pathFactory;
     }
 
     @Override
@@ -91,28 +82,24 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
                 taskFuture == null,
                 "A compaction task is still running while the user "
                         + "forces a new compaction. This is unexpected.");
-        taskFuture =
-                executor.submit(
-                        new AppendOnlyCompactManager.IterativeCompactTask(
-                                fileIO,
-                                toCompact,
-                                targetFileSize,
-                                minFileNum,
-                                maxFileNum,
-                                rewriter,
-                                pathFactory,
-                                assertDisorder));
+        if (toCompact.size() < FULL_COMPACT_MIN_FILE) {
+            return;
+        }
+
+        taskFuture = executor.submit(new FullCompactTask(toCompact, targetFileSize, rewriter));
+        compacting = new ArrayList<>(toCompact);
+        toCompact.clear();
     }
 
     private void triggerCompactionWithBestEffort() {
         if (taskFuture != null) {
             return;
         }
-        pickCompactBefore()
-                .ifPresent(
-                        (inputs) ->
-                                taskFuture =
-                                        executor.submit(new AutoCompactTask(inputs, rewriter)));
+        Optional<List<DataFileMeta>> picked = pickCompactBefore();
+        if (picked.isPresent()) {
+            compacting = picked.get();
+            taskFuture = executor.submit(new AutoCompactTask(compacting, rewriter));
+        }
     }
 
     @Override
@@ -126,8 +113,13 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     }
 
     @Override
-    public Collection<DataFileMeta> allFiles() {
-        return toCompact;
+    public List<DataFileMeta> allFiles() {
+        List<DataFileMeta> allFiles = new ArrayList<>();
+        if (compacting != null) {
+            allFiles.addAll(compacting);
+        }
+        allFiles.addAll(toCompact);
+        return allFiles;
     }
 
     /** Finish current task, and update result files to {@link #toCompact}. */
@@ -135,27 +127,23 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     public Optional<CompactResult> getCompactionResult(boolean blocking)
             throws ExecutionException, InterruptedException {
         Optional<CompactResult> result = innerGetCompactionResult(blocking);
-        result.ifPresent(
-                r -> {
-                    if (!r.after().isEmpty()) {
-                        // if the last compacted file is still small,
-                        // add it back to the head
-                        DataFileMeta lastFile = r.after().get(r.after().size() - 1);
-                        if (lastFile.fileSize() < targetFileSize) {
-                            toCompact.add(lastFile);
-                        }
-                    }
-                });
+        if (result.isPresent()) {
+            CompactResult compactResult = result.get();
+            if (!compactResult.after().isEmpty()) {
+                // if the last compacted file is still small,
+                // add it back to the head
+                DataFileMeta lastFile = compactResult.after().get(compactResult.after().size() - 1);
+                if (lastFile.fileSize() < targetFileSize) {
+                    toCompact.add(lastFile);
+                }
+            }
+            compacting = null;
+        }
         return result;
     }
 
     @VisibleForTesting
     Optional<List<DataFileMeta>> pickCompactBefore() {
-        return pick(toCompact, targetFileSize, minFileNum, maxFileNum);
-    }
-
-    private static Optional<List<DataFileMeta>> pick(
-            TreeSet<DataFileMeta> toCompact, long targetFileSize, int minFileNum, int maxFileNum) {
         if (toCompact.isEmpty()) {
             return Optional.empty();
         }
@@ -192,82 +180,51 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     @Override
     public void close() throws IOException {}
 
-    /**
-     * A {@link CompactTask} impl for full compaction of append-only table.
-     *
-     * <p>This task accepts a pre-scanned file list as input and pick the candidate files to compact
-     * iteratively until reach the end of the input. There might be multiple times of rewrite
-     * happens during one task.
-     */
-    public static class IterativeCompactTask extends CompactTask {
+    /** A {@link CompactTask} impl for full compaction of append-only table. */
+    public static class FullCompactTask extends CompactTask {
 
-        private final FileIO fileIO;
-        private final Collection<DataFileMeta> inputs;
+        private final LinkedList<DataFileMeta> inputs;
         private final long targetFileSize;
-        private final int minFileNum;
-        private final int maxFileNum;
         private final CompactRewriter rewriter;
-        private final DataFilePathFactory factory;
-        private final boolean assertDisorder;
 
-        public IterativeCompactTask(
-                FileIO fileIO,
-                Collection<DataFileMeta> inputs,
-                long targetFileSize,
-                int minFileNum,
-                int maxFileNum,
-                CompactRewriter rewriter,
-                DataFilePathFactory factory,
-                boolean assertDisorder) {
-            this.fileIO = fileIO;
-            this.inputs = inputs;
+        public FullCompactTask(
+                Collection<DataFileMeta> inputs, long targetFileSize, CompactRewriter rewriter) {
+            this.inputs = new LinkedList<>(inputs);
             this.targetFileSize = targetFileSize;
-            this.minFileNum = minFileNum;
-            this.maxFileNum = maxFileNum;
             this.rewriter = rewriter;
-            this.factory = factory;
-            this.assertDisorder = assertDisorder;
         }
 
         @Override
         protected CompactResult doCompact() throws Exception {
-            TreeSet<DataFileMeta> toCompact = new TreeSet<>(fileComparator(assertDisorder));
-            toCompact.addAll(inputs);
-            Set<DataFileMeta> compactBefore = new LinkedHashSet<>();
-            List<DataFileMeta> compactAfter = new ArrayList<>();
-            while (!toCompact.isEmpty()) {
-                Optional<List<DataFileMeta>> candidates =
-                        AppendOnlyCompactManager.pick(
-                                toCompact, targetFileSize, minFileNum, maxFileNum);
-                if (candidates.isPresent()) {
-                    List<DataFileMeta> before = candidates.get();
-                    compactBefore.addAll(before);
-                    List<DataFileMeta> after = rewriter.rewrite(before);
-                    compactAfter.addAll(after);
-                    DataFileMeta lastFile = after.get(after.size() - 1);
-                    if (lastFile.fileSize() < targetFileSize) {
-                        toCompact.add(lastFile);
-                    }
+            // remove large files
+            while (!inputs.isEmpty()) {
+                DataFileMeta file = inputs.peekFirst();
+                if (file.fileSize() >= targetFileSize) {
+                    inputs.poll();
+                    continue;
+                }
+                break;
+            }
+
+            // compute small files
+            int big = 0;
+            int small = 0;
+            for (DataFileMeta file : inputs) {
+                if (file.fileSize() >= targetFileSize) {
+                    big++;
                 } else {
-                    break;
+                    small++;
                 }
             }
-            // remove and delete intermediate files
-            Iterator<DataFileMeta> afterIterator = compactAfter.iterator();
-            while (afterIterator.hasNext()) {
-                DataFileMeta file = afterIterator.next();
-                if (compactBefore.contains(file)) {
-                    compactBefore.remove(file);
-                    afterIterator.remove();
-                    delete(file);
-                }
+
+            // do compaction
+            List<DataFileMeta> compactBefore = new ArrayList<>();
+            List<DataFileMeta> compactAfter = new ArrayList<>();
+            if (small > big && inputs.size() >= FULL_COMPACT_MIN_FILE) {
+                compactBefore = new ArrayList<>(inputs);
+                compactAfter = rewriter.rewrite(inputs);
             }
             return result(new ArrayList<>(compactBefore), compactAfter);
-        }
-
-        @VisibleForTesting
-        void delete(DataFileMeta tmpFile) {
-            fileIO.deleteQuietly(factory.toPath(tmpFile.fileName()));
         }
     }
 

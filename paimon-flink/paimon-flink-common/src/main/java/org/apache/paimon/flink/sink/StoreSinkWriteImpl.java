@@ -45,6 +45,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     private static final Logger LOG = LoggerFactory.getLogger(StoreSinkWriteImpl.class);
 
     protected final String commitUser;
+    private final boolean waitCompaction;
+
     protected TableWriteImpl<?> write;
 
     public StoreSinkWriteImpl(
@@ -52,7 +54,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             StateInitializationContext context,
             String initialCommitUser,
             IOManager ioManager,
-            boolean isOverwrite)
+            boolean isOverwrite,
+            boolean waitCompaction)
             throws Exception {
         // Each job can only have one user name and this name must be consistent across restarts.
         // We cannot use job id as commit user name here because user may change job id by creating
@@ -76,6 +79,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                                     new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()))
                             .withOverwrite(isOverwrite);
         }
+
+        this.waitCompaction = waitCompaction;
     }
 
     @Override
@@ -108,12 +113,13 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     }
 
     @Override
-    public List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
+    public List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
         List<Committable> committables = new ArrayList<>();
         if (write != null) {
             try {
-                for (CommitMessage committable : write.prepareCommit(doCompaction, checkpointId)) {
+                for (CommitMessage committable :
+                        write.prepareCommit(this.waitCompaction || waitCompaction, checkpointId)) {
                     committables.add(
                             new Committable(checkpointId, Committable.Kind.FILE, committable));
                 }
