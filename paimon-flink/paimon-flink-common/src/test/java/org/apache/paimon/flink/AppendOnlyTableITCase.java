@@ -25,6 +25,7 @@ import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -213,6 +214,15 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     public void testComplexType() {
         batchSql("INSERT INTO complex_table VALUES (1, CAST(NULL AS MAP<INT, INT>))");
         assertThat(batchSql("SELECT * FROM complex_table")).containsExactly(Row.of(1, null));
+    }
+
+    @Test
+    public void testTimestampLzType() {
+        sql(
+                "CREATE TABLE t_table (id INT, data TIMESTAMP_LTZ(3)) WITH ('write-mode'='append-only')");
+        batchSql("INSERT INTO t_table VALUES (1, TIMESTAMP '2023-02-03 20:20:20')");
+        assertThat(batchSql("SELECT * FROM t_table"))
+                .containsExactly(Row.of(1, Instant.parse("2023-02-03T12:20:20Z")));
     }
 
     @Override
