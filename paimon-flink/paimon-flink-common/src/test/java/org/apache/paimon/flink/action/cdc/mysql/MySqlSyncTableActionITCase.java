@@ -60,10 +60,10 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/** IT cases for {@link MySqlCtasAction}. */
-public class MySqlCtasActionITCase extends ActionITCaseBase {
+/** IT cases for {@link MySqlSyncTableAction}. */
+public class MySqlSyncTableActionITCase extends ActionITCaseBase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(MySqlCtasActionITCase.class);
+    private static final Logger LOG = LoggerFactory.getLogger(MySqlSyncTableActionITCase.class);
 
     private static final MySqlContainer MYSQL_CONTAINER = createMySqlContainer(MySqlVersion.V5_7);
     private static final String USER = "paimonuser";
@@ -107,16 +107,19 @@ public class MySqlCtasActionITCase extends ActionITCaseBase {
         env.enableCheckpointing(1000);
         env.setRestartStrategy(RestartStrategies.noRestart());
 
-        MySqlCtasAction action =
-                new MySqlCtasAction(
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        Map<String, String> paimonConfig = new HashMap<>();
+        paimonConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        paimonConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        MySqlSyncTableAction action =
+                new MySqlSyncTableAction(
                         mySqlConfig,
                         warehouse,
                         database,
                         tableName,
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        new HashMap<>(),
-                        ThreadLocalRandom.current().nextInt(3) + 1);
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "_id"),
+                        paimonConfig);
         action.build(env);
         JobClient client = env.executeAsync();
 
@@ -145,59 +148,72 @@ public class MySqlCtasActionITCase extends ActionITCaseBase {
         FileStoreTable table = getFileStoreTable();
         statement.executeUpdate("USE paimon_test");
 
-        statement.executeUpdate("INSERT INTO schema_evolution_1 VALUES (1, 'one')");
-        statement.executeUpdate("INSERT INTO schema_evolution_2 VALUES (2, 'two'), (4, 'four')");
+        statement.executeUpdate("INSERT INTO schema_evolution_1 VALUES (1, 1, 'one')");
+        statement.executeUpdate(
+                "INSERT INTO schema_evolution_2 VALUES (1, 2, 'two'), (2, 4, 'four')");
         RowType rowType =
                 RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
-                        new String[] {"_id", "v1"});
-        List<String> primaryKeys = Collections.singletonList("_id");
-        List<String> expected = Arrays.asList("+I[1, one]", "+I[2, two]", "+I[4, four]");
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10)
+                        },
+                        new String[] {"pt", "_id", "v1"});
+        List<String> primaryKeys = Arrays.asList("pt", "_id");
+        List<String> expected = Arrays.asList("+I[1, 1, one]", "+I[1, 2, two]", "+I[2, 4, four]");
         waitForResult(expected, table, rowType, primaryKeys);
 
         statement.executeUpdate("ALTER TABLE schema_evolution_1 ADD COLUMN v2 INT");
         statement.executeUpdate(
-                "INSERT INTO schema_evolution_1 VALUES (3, 'three', 30), (5, 'five', 50)");
+                "INSERT INTO schema_evolution_1 VALUES (2, 3, 'three', 30), (1, 5, 'five', 50)");
         statement.executeUpdate("ALTER TABLE schema_evolution_2 ADD COLUMN v2 INT");
-        statement.executeUpdate("INSERT INTO schema_evolution_2 VALUES (6, 'six', 60)");
+        statement.executeUpdate("INSERT INTO schema_evolution_2 VALUES (1, 6, 'six', 60)");
         statement.executeUpdate("UPDATE schema_evolution_2 SET v1 = 'second' WHERE _id = 2");
         rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10),
+                            DataTypes.INT()
                         },
-                        new String[] {"_id", "v1", "v2"});
+                        new String[] {"pt", "_id", "v1", "v2"});
         expected =
                 Arrays.asList(
-                        "+I[1, one, NULL]",
-                        "+I[2, second, NULL]",
-                        "+I[3, three, 30]",
-                        "+I[4, four, NULL]",
-                        "+I[5, five, 50]",
-                        "+I[6, six, 60]");
+                        "+I[1, 1, one, NULL]",
+                        "+I[1, 2, second, NULL]",
+                        "+I[2, 3, three, 30]",
+                        "+I[2, 4, four, NULL]",
+                        "+I[1, 5, five, 50]",
+                        "+I[1, 6, six, 60]");
         waitForResult(expected, table, rowType, primaryKeys);
 
         statement.executeUpdate("ALTER TABLE schema_evolution_1 MODIFY COLUMN v2 BIGINT");
-        statement.executeUpdate("INSERT INTO schema_evolution_1 VALUES (7, 'seven', 70000000000)");
+        statement.executeUpdate(
+                "INSERT INTO schema_evolution_1 VALUES (2, 7, 'seven', 70000000000)");
         statement.executeUpdate("UPDATE schema_evolution_1 SET v2 = 30000000000 WHERE _id = 3");
         statement.executeUpdate("ALTER TABLE schema_evolution_2 MODIFY COLUMN v2 BIGINT");
-        statement.executeUpdate("INSERT INTO schema_evolution_2 VALUES (8, 'eight', 80000000000)");
+        statement.executeUpdate(
+                "INSERT INTO schema_evolution_2 VALUES (2, 8, 'eight', 80000000000)");
         rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.BIGINT()
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10),
+                            DataTypes.BIGINT()
                         },
-                        new String[] {"_id", "v1", "v2"});
+                        new String[] {"pt", "_id", "v1", "v2"});
         expected =
                 Arrays.asList(
-                        "+I[1, one, NULL]",
-                        "+I[2, second, NULL]",
-                        "+I[3, three, 30000000000]",
-                        "+I[4, four, NULL]",
-                        "+I[5, five, 50]",
-                        "+I[6, six, 60]",
-                        "+I[7, seven, 70000000000]",
-                        "+I[8, eight, 80000000000]");
+                        "+I[1, 1, one, NULL]",
+                        "+I[1, 2, second, NULL]",
+                        "+I[2, 3, three, 30000000000]",
+                        "+I[2, 4, four, NULL]",
+                        "+I[1, 5, five, 50]",
+                        "+I[1, 6, six, 60]",
+                        "+I[2, 7, seven, 70000000000]",
+                        "+I[2, 8, eight, 80000000000]");
         waitForResult(expected, table, rowType, primaryKeys);
 
         statement.executeUpdate("ALTER TABLE schema_evolution_1 ADD COLUMN v3 NUMERIC(8, 3)");
@@ -205,7 +221,7 @@ public class MySqlCtasActionITCase extends ActionITCaseBase {
         statement.executeUpdate("ALTER TABLE schema_evolution_1 ADD COLUMN v5 FLOAT");
         statement.executeUpdate("ALTER TABLE schema_evolution_1 MODIFY COLUMN v1 VARCHAR(20)");
         statement.executeUpdate(
-                "INSERT INTO schema_evolution_1 VALUES (9, 'nine', 90000000000, 99999.999, 'nine.bin', 9.9)");
+                "INSERT INTO schema_evolution_1 VALUES (1, 9, 'nine', 90000000000, 99999.999, 'nine.bin', 9.9)");
         statement.executeUpdate("ALTER TABLE schema_evolution_2 ADD COLUMN v3 NUMERIC(8, 3)");
         statement.executeUpdate("ALTER TABLE schema_evolution_2 ADD COLUMN v4 VARBINARY(10)");
         statement.executeUpdate("ALTER TABLE schema_evolution_2 ADD COLUMN v5 FLOAT");
@@ -216,24 +232,25 @@ public class MySqlCtasActionITCase extends ActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
                             DataTypes.VARCHAR(20),
                             DataTypes.BIGINT(),
                             DataTypes.DECIMAL(8, 3),
                             DataTypes.VARBINARY(10),
                             DataTypes.FLOAT()
                         },
-                        new String[] {"_id", "v1", "v2", "v3", "v4", "v5"});
+                        new String[] {"pt", "_id", "v1", "v2", "v3", "v4", "v5"});
         expected =
                 Arrays.asList(
-                        "+I[1, one, NULL, NULL, NULL, NULL]",
-                        "+I[2, second, NULL, NULL, NULL, NULL]",
-                        "+I[3, three, 30000000000, NULL, NULL, NULL]",
-                        "+I[4, four, NULL, NULL, NULL, NULL]",
-                        "+I[5, five, 50, NULL, NULL, NULL]",
-                        "+I[6, six, 60, NULL, NULL, NULL]",
-                        "+I[7, seven, 70000000000, NULL, NULL, NULL]",
-                        "+I[8, very long string, 80000000000, NULL, NULL, NULL]",
-                        "+I[9, nine, 90000000000, 99999.999, nine.bin, 9.9]");
+                        "+I[1, 1, one, NULL, NULL, NULL, NULL]",
+                        "+I[1, 2, second, NULL, NULL, NULL, NULL]",
+                        "+I[2, 3, three, 30000000000, NULL, NULL, NULL]",
+                        "+I[2, 4, four, NULL, NULL, NULL, NULL]",
+                        "+I[1, 5, five, 50, NULL, NULL, NULL]",
+                        "+I[1, 6, six, 60, NULL, NULL, NULL]",
+                        "+I[2, 7, seven, 70000000000, NULL, NULL, NULL]",
+                        "+I[2, 8, very long string, 80000000000, NULL, NULL, NULL]",
+                        "+I[1, 9, nine, 90000000000, 99999.999, nine.bin, 9.9]");
         waitForResult(expected, table, rowType, primaryKeys);
 
         statement.executeUpdate("ALTER TABLE schema_evolution_1 MODIFY COLUMN v4 VARBINARY(20)");
@@ -248,24 +265,25 @@ public class MySqlCtasActionITCase extends ActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
                             DataTypes.VARCHAR(20),
                             DataTypes.BIGINT(),
                             DataTypes.DECIMAL(8, 3),
                             DataTypes.VARBINARY(20),
                             DataTypes.DOUBLE()
                         },
-                        new String[] {"_id", "v1", "v2", "v3", "v4", "v5"});
+                        new String[] {"pt", "_id", "v1", "v2", "v3", "v4", "v5"});
         expected =
                 Arrays.asList(
-                        "+I[1, one, NULL, NULL, NULL, NULL]",
-                        "+I[2, second, NULL, NULL, NULL, NULL]",
-                        "+I[3, three, 30000000000, NULL, NULL, NULL]",
-                        "+I[4, four, NULL, NULL, four.bin.long, 4.00000000004]",
-                        "+I[5, five, 50, NULL, NULL, NULL]",
-                        "+I[6, six, 60, NULL, NULL, NULL]",
-                        "+I[7, seven, 70000000000, NULL, NULL, NULL]",
-                        "+I[8, very long string, 80000000000, NULL, NULL, NULL]",
-                        "+I[9, nine, 90000000000, 99999.999, nine.bin.long, 9.00000000009]");
+                        "+I[1, 1, one, NULL, NULL, NULL, NULL]",
+                        "+I[1, 2, second, NULL, NULL, NULL, NULL]",
+                        "+I[2, 3, three, 30000000000, NULL, NULL, NULL]",
+                        "+I[2, 4, four, NULL, NULL, four.bin.long, 4.00000000004]",
+                        "+I[1, 5, five, 50, NULL, NULL, NULL]",
+                        "+I[1, 6, six, 60, NULL, NULL, NULL]",
+                        "+I[2, 7, seven, 70000000000, NULL, NULL, NULL]",
+                        "+I[2, 8, very long string, 80000000000, NULL, NULL, NULL]",
+                        "+I[1, 9, nine, 90000000000, 99999.999, nine.bin.long, 9.00000000009]");
         waitForResult(expected, table, rowType, primaryKeys);
     }
 
@@ -281,16 +299,15 @@ public class MySqlCtasActionITCase extends ActionITCaseBase {
         env.enableCheckpointing(1000);
         env.setRestartStrategy(RestartStrategies.noRestart());
 
-        MySqlCtasAction action =
-                new MySqlCtasAction(
+        MySqlSyncTableAction action =
+                new MySqlSyncTableAction(
                         mySqlConfig,
                         warehouse,
                         database,
                         tableName,
                         Collections.emptyList(),
-                        Collections.singletonList("_id"),
-                        new HashMap<>(),
-                        1);
+                        Collections.emptyList(),
+                        new HashMap<>());
         action.build(env);
         env.executeAsync();
 
@@ -443,16 +460,15 @@ public class MySqlCtasActionITCase extends ActionITCaseBase {
         mySqlConfig.put("table-name", "incompatible_field_\\d+");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        MySqlCtasAction action =
-                new MySqlCtasAction(
+        MySqlSyncTableAction action =
+                new MySqlSyncTableAction(
                         mySqlConfig,
                         warehouse,
                         database,
                         tableName,
                         Collections.emptyList(),
                         Collections.singletonList("_id"),
-                        new HashMap<>(),
-                        1);
+                        new HashMap<>());
 
         IllegalArgumentException e =
                 assertThrows(
@@ -483,16 +499,15 @@ public class MySqlCtasActionITCase extends ActionITCaseBase {
                 new HashMap<>());
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        MySqlCtasAction action =
-                new MySqlCtasAction(
+        MySqlSyncTableAction action =
+                new MySqlSyncTableAction(
                         mySqlConfig,
                         warehouse,
                         database,
                         tableName,
                         Collections.emptyList(),
                         Collections.singletonList("a"),
-                        new HashMap<>(),
-                        1);
+                        new HashMap<>());
 
         IllegalArgumentException e =
                 assertThrows(
@@ -509,16 +524,15 @@ public class MySqlCtasActionITCase extends ActionITCaseBase {
         mySqlConfig.put("table-name", "schema_evolution_\\d+");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        MySqlCtasAction action =
-                new MySqlCtasAction(
+        MySqlSyncTableAction action =
+                new MySqlSyncTableAction(
                         mySqlConfig,
                         warehouse,
                         database,
                         tableName,
                         Collections.emptyList(),
                         Collections.singletonList("pk"),
-                        new HashMap<>(),
-                        1);
+                        new HashMap<>());
 
         IllegalArgumentException e =
                 assertThrows(
@@ -535,16 +549,15 @@ public class MySqlCtasActionITCase extends ActionITCaseBase {
         mySqlConfig.put("table-name", "incompatible_pk_\\d+");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        MySqlCtasAction action =
-                new MySqlCtasAction(
+        MySqlSyncTableAction action =
+                new MySqlSyncTableAction(
                         mySqlConfig,
                         warehouse,
                         database,
                         tableName,
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        new HashMap<>(),
-                        1);
+                        new HashMap<>());
 
         IllegalArgumentException e =
                 assertThrows(

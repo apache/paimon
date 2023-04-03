@@ -22,12 +22,12 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.DecimalUtils;
 import org.apache.paimon.utils.StringUtils;
-import org.apache.paimon.utils.TypeUtils;
 
 import javax.annotation.Nullable;
 
@@ -131,7 +131,7 @@ public class CastExecutors {
             case VARCHAR:
                 if (outputType.getTypeRoot() == CHAR || outputType.getTypeRoot() == VARCHAR) {
                     final boolean targetCharType = outputType.getTypeRoot() == CHAR;
-                    final int targetLength = TypeUtils.getStringLength(outputType);
+                    final int targetLength = DataTypeChecks.getLength(outputType);
                     return value -> {
                         BinaryString result;
                         String strVal = value.toString();
@@ -155,7 +155,7 @@ public class CastExecutors {
                         return result;
                     };
                 } else if (outputType.getTypeRoot() == VARBINARY) {
-                    final int targetLength = TypeUtils.getBinaryLength(outputType);
+                    final int targetLength = DataTypeChecks.getLength(outputType);
                     return value -> {
                         byte[] byteArrayTerm = ((BinaryString) value).toBytes();
                         if (byteArrayTerm.length <= targetLength) {
@@ -170,7 +170,7 @@ public class CastExecutors {
             case VARBINARY:
                 if (outputType.getTypeRoot() == BINARY || outputType.getTypeRoot() == VARBINARY) {
                     boolean targetBinaryType = outputType.getTypeRoot() == BINARY;
-                    final int targetLength = TypeUtils.getBinaryLength(outputType);
+                    final int targetLength = DataTypeChecks.getLength(outputType);
                     return value -> {
                         byte[] bytes = (byte[]) value;
                         if (((byte[]) value).length == targetLength) {

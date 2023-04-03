@@ -28,12 +28,14 @@ GRANT ALL PRIVILEGES ON *.* TO 'mysqluser'@'%';
 USE paimon_test;
 
 CREATE TABLE schema_evolution_1 (
+    pt INT,
     _id INT,
     v1 VARCHAR(10),
     PRIMARY KEY (_id)
 );
 
 CREATE TABLE schema_evolution_2 (
+    pt INT,
     _id INT,
     v1 VARCHAR(10),
     PRIMARY KEY (_id)
@@ -87,7 +89,8 @@ CREATE TABLE all_types_table (
     _text TEXT,
     _bin BINARY(10),
     _varbin VARBINARY(20),
-    _blob BLOB
+    _blob BLOB,
+    PRIMARY KEY (_id)
 );
 
 INSERT INTO all_types_table VALUES (

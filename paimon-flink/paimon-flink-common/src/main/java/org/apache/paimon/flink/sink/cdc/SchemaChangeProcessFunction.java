@@ -22,9 +22,9 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
@@ -125,13 +125,13 @@ public class SchemaChangeProcessFunction extends ProcessFunction<SchemaChange, V
         int oldIdx = STRING_TYPES.indexOf(oldType.getTypeRoot());
         int newIdx = STRING_TYPES.indexOf(newType.getTypeRoot());
         if (oldIdx >= 0 && newIdx >= 0) {
-            return TypeUtils.getStringLength(oldType) <= TypeUtils.getStringLength(newType);
+            return DataTypeChecks.getLength(oldType) <= DataTypeChecks.getLength(newType);
         }
 
         oldIdx = BINARY_TYPES.indexOf(oldType.getTypeRoot());
         newIdx = BINARY_TYPES.indexOf(newType.getTypeRoot());
         if (oldIdx >= 0 && newIdx >= 0) {
-            return TypeUtils.getBinaryLength(oldType) <= TypeUtils.getBinaryLength(newType);
+            return DataTypeChecks.getLength(oldType) <= DataTypeChecks.getLength(newType);
         }
 
         oldIdx = INTEGER_TYPES.indexOf(oldType.getTypeRoot());

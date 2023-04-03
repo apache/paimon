@@ -44,7 +44,13 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** {@link EventParser} for MySQL Debezium JSON. */
+/**
+ * {@link EventParser} for MySQL Debezium JSON.
+ *
+ * <p>Some implementation is referenced from <a
+ * href="https://github.com/apache/doris-flink-connector/blob/master/flink-doris-connector/src/main/java/org/apache/doris/flink/sink/writer/JsonDebeziumSchemaSerializer.java">apache
+ * / doris-flink-connector</a>.
+ */
 public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlDebeziumJsonEventParser.class);
