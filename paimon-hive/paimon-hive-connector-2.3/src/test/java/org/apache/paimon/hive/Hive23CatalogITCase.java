@@ -138,11 +138,9 @@ public class Hive23CatalogITCase extends HiveCatalogITCaseBase {
         assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE alter_failed_table SET ('aa'='bb')"))
                 .isInstanceOf(TableException.class)
                 .hasMessage(
-                        String.format(
-                                "Could not execute "
-                                        + "ALTER TABLE my_alter_hive.default.alter_failed_table "
-                                        + "SET (aa: [bb], path: [%sdefault.db/alter_failed_table])",
-                                path));
+                        "Could not execute "
+                                + "ALTER TABLE my_alter_hive.default.alter_failed_table\n"
+                                + "  SET 'aa' = 'bb'");
 
         assertTrue(
                 new SchemaManager(
