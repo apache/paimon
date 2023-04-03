@@ -105,14 +105,12 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                 skipCompaction
                         ? new NoopCompactManager()
                         : new AppendOnlyCompactManager(
-                                fileIO,
                                 compactExecutor,
                                 restoredFiles,
                                 compactionMinFileNum,
                                 compactionMaxFileNum,
                                 targetFileSize,
                                 compactRewriter(partition, bucket),
-                                factory,
                                 assertDisorder);
         return new AppendOnlyWriter(
                 fileIO,

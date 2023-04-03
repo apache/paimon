@@ -26,7 +26,12 @@ under the License.
 
 # Read Performance
 
-## Primary Key Table
+## Full Compaction
+
+Configure 'full-compaction.delta-commits' perform full-compaction periodically in Flink writing.
+And it can ensure that partitions are full compacted before writing ends.
+
+### Primary Key Table
 
 For Primary Key Table, it's a 'MergeOnRead' technology. When reading data, multiple layers of LSM data are merged,
 and the number of parallelism will be limited by the number of buckets. Although Paimon's merge will be efficient,
@@ -38,6 +43,14 @@ If you want to query fast enough in certain scenarios, but can only find older d
 2. Configure 'scan.mode' to 'compacted-full', when reading data, snapshot of full compaction is picked. Read performance is good.
 
 You can flexibly balance query performance and data latency when reading.
+
+### Append Only Table
+
+Small files can slow reading and affect DFS stability. By default, when there are more than 'compaction.max.file-num'
+(default 50) small files in a single bucket, a compaction is triggered. However, when there are multiple buckets, many
+small files will be generated.
+
+You can use full-compaction to reduce small files. Full-compaction will eliminate most small files.
 
 ## Format
 

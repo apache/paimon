@@ -309,7 +309,6 @@ public class AppendOnlyWriterTest {
         LinkedList<DataFileMeta> toCompact = new LinkedList<>(scannedFiles);
         AppendOnlyCompactManager compactManager =
                 new AppendOnlyCompactManager(
-                        LocalFileIO.create(),
                         Executors.newSingleThreadScheduledExecutor(
                                 new ExecutorThreadFactory("compaction-thread")),
                         toCompact,
@@ -321,7 +320,6 @@ public class AppendOnlyWriterTest {
                                         ? Collections.emptyList()
                                         : Collections.singletonList(
                                                 generateCompactAfter(compactBefore)),
-                        pathFactory,
                         false);
         AppendOnlyWriter writer =
                 new AppendOnlyWriter(

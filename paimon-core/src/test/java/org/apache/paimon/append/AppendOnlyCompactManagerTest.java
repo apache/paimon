@@ -18,7 +18,6 @@
 
 package org.apache.paimon.append;
 
-import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 
 import org.junit.jupiter.api.Test;
@@ -26,7 +25,6 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 
@@ -242,13 +240,11 @@ public class AppendOnlyCompactManagerTest {
         long targetFileSize = 1024;
         AppendOnlyCompactManager manager =
                 new AppendOnlyCompactManager(
-                        LocalFileIO.create(),
                         null, // not used
-                        new LinkedList<>(toCompactBeforePick),
+                        toCompactBeforePick,
                         minFileNum,
                         maxFileNum,
                         targetFileSize,
-                        null, // not used
                         null, // not used
                         false);
         Optional<List<DataFileMeta>> actual = manager.pickCompactBefore();

@@ -300,9 +300,10 @@ public class CoreOptions implements Serializable {
                                     + "which is not cost-effective.");
 
     public static final ConfigOption<Integer> COMPACTION_MAX_FILE_NUM =
-            key("compaction.early-max.file-num")
+            key("compaction.max.file-num")
                     .intType()
                     .defaultValue(50)
+                    .withDeprecatedKeys("compaction.early-max.file-num")
                     .withDescription(
                             "For file set [f_0,...,f_N], the maximum file number to trigger a compaction "
                                     + "for append-only table, even if sum(size(f_i)) < targetFileSize. This value "
