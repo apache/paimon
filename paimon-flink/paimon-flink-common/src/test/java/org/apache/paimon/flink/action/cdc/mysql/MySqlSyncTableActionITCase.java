@@ -250,7 +250,7 @@ public class MySqlSyncTableActionITCase extends ActionITCaseBase {
                         "+I[1, 6, six, 60, NULL, NULL, NULL]",
                         "+I[2, 7, seven, 70000000000, NULL, NULL, NULL]",
                         "+I[2, 8, very long string, 80000000000, NULL, NULL, NULL]",
-                        "+I[1, 9, nine, 90000000000, 99999.999, nine.bin, 9.9]");
+                        "+I[1, 9, nine, 90000000000, 99999.999, [110, 105, 110, 101, 46, 98, 105, 110], 9.9]");
         waitForResult(expected, table, rowType, primaryKeys);
 
         statement.executeUpdate("ALTER TABLE schema_evolution_1 MODIFY COLUMN v4 VARBINARY(20)");
@@ -278,12 +278,12 @@ public class MySqlSyncTableActionITCase extends ActionITCaseBase {
                         "+I[1, 1, one, NULL, NULL, NULL, NULL]",
                         "+I[1, 2, second, NULL, NULL, NULL, NULL]",
                         "+I[2, 3, three, 30000000000, NULL, NULL, NULL]",
-                        "+I[2, 4, four, NULL, NULL, four.bin.long, 4.00000000004]",
+                        "+I[2, 4, four, NULL, NULL, [102, 111, 117, 114, 46, 98, 105, 110, 46, 108, 111, 110, 103], 4.00000000004]",
                         "+I[1, 5, five, 50, NULL, NULL, NULL]",
                         "+I[1, 6, six, 60, NULL, NULL, NULL]",
                         "+I[2, 7, seven, 70000000000, NULL, NULL, NULL]",
                         "+I[2, 8, very long string, 80000000000, NULL, NULL, NULL]",
-                        "+I[1, 9, nine, 90000000000, 99999.999, nine.bin.long, 9.00000000009]");
+                        "+I[1, 9, nine, 90000000000, 99999.999, [110, 105, 110, 101, 46, 98, 105, 110, 46, 108, 111, 110, 103], 9.00000000009]");
         waitForResult(expected, table, rowType, primaryKeys);
     }
 
@@ -431,7 +431,9 @@ public class MySqlSyncTableActionITCase extends ActionITCaseBase {
                                 + "11111, 22222, 33333, "
                                 + "19439, 2023-03-23T14:30:05, 2023-03-23T15:00:10.123456, "
                                 + "Paimon, Apache Paimon, Apache Paimon MySQL Test Data, "
-                                + "bytes\u0000\u0000\u0000\u0000\u0000, more bytes, very long bytes test data"
+                                + "[98, 121, 116, 101, 115, 0, 0, 0, 0, 0], "
+                                + "[109, 111, 114, 101, 32, 98, 121, 116, 101, 115], "
+                                + "[118, 101, 114, 121, 32, 108, 111, 110, 103, 32, 98, 121, 116, 101, 115, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97]"
                                 + "]",
                         "+I["
                                 + "2, NULL, NULL, NULL, NULL, "
