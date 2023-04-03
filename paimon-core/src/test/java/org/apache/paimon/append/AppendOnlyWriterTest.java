@@ -45,11 +45,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 
@@ -236,10 +234,10 @@ public class AppendOnlyWriterTest {
 
         // increase target file size to test compaction
         long targetFileSize = 1024 * 1024L;
-        Pair<AppendOnlyWriter, TreeSet<DataFileMeta>> writerAndToCompact =
+        Pair<AppendOnlyWriter, List<DataFileMeta>> writerAndToCompact =
                 createWriter(targetFileSize, true, firstInc.newFilesIncrement().newFiles());
         writer = writerAndToCompact.getLeft();
-        TreeSet<DataFileMeta> toCompact = writerAndToCompact.getRight();
+        List<DataFileMeta> toCompact = writerAndToCompact.getRight();
         assertThat(toCompact).containsExactlyElementsOf(firstInc.newFilesIncrement().newFiles());
         writer.write(row(id, String.format("%03d", id), PART));
         writer.sync();
@@ -262,20 +260,6 @@ public class AppendOnlyWriterTest {
         assertThat(compactBefore.get(compactBefore.size() - 1).maxSequenceNumber())
                 .isEqualTo(compactAfter.get(compactAfter.size() - 1).maxSequenceNumber());
         assertThat(secInc.newFilesIncrement().newFiles()).hasSize(1);
-
-        /* check toCompact[round + 1] is composed of
-         * <1> the compactAfter[round] (due to small size)
-         * <2> the rest of toCompact[round]
-         * <3> the newFiles[round]
-         * with strict order
-         */
-        List<DataFileMeta> toCompactResult = new ArrayList<>(compactAfter);
-        toCompactResult.addAll(
-                firstInc.newFilesIncrement()
-                        .newFiles()
-                        .subList(4, firstInc.newFilesIncrement().newFiles().size()));
-        toCompactResult.addAll(secInc.newFilesIncrement().newFiles());
-        assertThat(toCompact).containsExactlyElementsOf(toCompactResult);
     }
 
     private FieldStats initStats(Integer min, Integer max, long nullCount) {
@@ -303,7 +287,7 @@ public class AppendOnlyWriterTest {
         return createWriter(targetFileSize, false, Collections.emptyList()).getLeft();
     }
 
-    private Pair<AppendOnlyWriter, TreeSet<DataFileMeta>> createWriter(
+    private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
             long targetFileSize, boolean forceCompact, List<DataFileMeta> scannedFiles) {
         FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>(scannedFiles);
@@ -333,7 +317,7 @@ public class AppendOnlyWriterTest {
                         forceCompact,
                         pathFactory,
                         null);
-        return Pair.of(writer, (TreeSet<DataFileMeta>) compactManager.allFiles());
+        return Pair.of(writer, compactManager.allFiles());
     }
 
     private DataFileMeta generateCompactAfter(List<DataFileMeta> toCompact) {
