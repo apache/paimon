@@ -67,7 +67,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-shade</artifactId>
+            <artifactId>paimon-bundle</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
         </dependency>

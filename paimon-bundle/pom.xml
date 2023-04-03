@@ -28,8 +28,8 @@ under the License.
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <artifactId>paimon-shade</artifactId>
-    <name>Paimon : Shade</name>
+    <artifactId>paimon-bundle</artifactId>
+    <name>Paimon : Bundle</name>
 
     <packaging>jar</packaging>
 

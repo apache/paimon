@@ -42,7 +42,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-shade</artifactId>
+            <artifactId>paimon-bundle</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -554,7 +554,7 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>org.apache.paimon:paimon-hive-common</include>
-                                    <include>org.apache.paimon:paimon-shade</include>
+                                    <include>org.apache.paimon:paimon-bundle</include>
                                 </includes>
                             </artifactSet>
                         </configuration>

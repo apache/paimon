@@ -259,7 +259,7 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <!--
-                                    TODO change these to paimon-shade once we get rid of flink-shaded dependencies
+                                    TODO change these to paimon-bundle once we get rid of flink-shaded dependencies
                                     -->
                                     <include>org.apache.paimon:paimon-common</include>
                                     <include>org.apache.paimon:paimon-core</include>

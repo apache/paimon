@@ -43,7 +43,7 @@ under the License.
 
     <dependencies>
         <!--
-        TODO change these to paimon-shade once we get rid of flink-shaded dependencies
+        TODO change these to paimon-bundle once we get rid of flink-shaded dependencies
         -->
 
         <dependency>
