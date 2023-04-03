@@ -32,12 +32,11 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.io.DataFileTestUtils.fromMinMax;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link AppendOnlySplitGenerator} and {@link MergeTreeSplitGenerator}. */
 public class SplitGeneratorTest {
 
-    private static DataFileMeta newFileFromSequence(
+    public static DataFileMeta newFileFromSequence(
             String name, int rowCount, long minSequence, long maxSequence) {
         return new DataFileMeta(
                 name,
@@ -83,46 +82,6 @@ public class SplitGeneratorTest {
                         Collections.singletonList("4"),
                         Collections.singletonList("5"),
                         Collections.singletonList("6"));
-    }
-
-    @Test
-    public void testAppendOverlap() {
-        AppendOnlySplitGenerator generator = new AppendOnlySplitGenerator(40, 2);
-        assertThatThrownBy(
-                        () ->
-                                generator.split(
-                                        Arrays.asList(
-                                                newFileFromSequence("1", 11, 0, 20),
-                                                newFileFromSequence("2", 13, 20, 30))))
-                .hasMessageContaining(
-                        "There should no overlap in append files, there is a bug! Range1(20, 30), Range2(0, 20)");
-
-        assertThatThrownBy(
-                        () ->
-                                generator.split(
-                                        Arrays.asList(
-                                                newFileFromSequence("1", 11, 20, 30),
-                                                newFileFromSequence("2", 13, 0, 20))))
-                .hasMessageContaining(
-                        "There should no overlap in append files, there is a bug! Range1(0, 20), Range2(20, 30)");
-
-        assertThatThrownBy(
-                        () ->
-                                generator.split(
-                                        Arrays.asList(
-                                                newFileFromSequence("1", 11, 0, 30),
-                                                newFileFromSequence("2", 13, 10, 20))))
-                .hasMessageContaining(
-                        "There should no overlap in append files, there is a bug! Range1(10, 20), Range2(0, 30)");
-
-        assertThatThrownBy(
-                        () ->
-                                generator.split(
-                                        Arrays.asList(
-                                                newFileFromSequence("1", 11, 10, 20),
-                                                newFileFromSequence("2", 13, 0, 30))))
-                .hasMessageContaining(
-                        "There should no overlap in append files, there is a bug! Range1(0, 30), Range2(10, 20)");
     }
 
     @Test
