@@ -90,6 +90,10 @@ public class DataTypes {
         return new LocalZonedTimestampType();
     }
 
+    public static LocalZonedTimestampType TIMESTAMP_WITH_LOCAL_TIME_ZONE(int precision) {
+        return new LocalZonedTimestampType(precision);
+    }
+
     public static DecimalType DECIMAL(int precision, int scale) {
         return new DecimalType(precision, scale);
     }
