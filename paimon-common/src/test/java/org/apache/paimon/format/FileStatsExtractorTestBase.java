@@ -56,6 +56,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.paimon.types.DataTypeChecks.getPrecision;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link org.apache.paimon.format.FileStatsExtractor}. */
@@ -170,7 +171,7 @@ public abstract class FileStatsExtractorTestBase {
                 return random.nextInt(10000);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return randomTimestampData((TimestampType) type);
+                return randomTimestampData(getPrecision(type));
             case ARRAY:
                 return randomArray((ArrayType) type);
             case MAP:
@@ -207,10 +208,10 @@ public abstract class FileStatsExtractorTestBase {
         return Decimal.fromBigDecimal(new BigDecimal(builder.toString()), p, s);
     }
 
-    private Timestamp randomTimestampData(TimestampType type) {
+    private Timestamp randomTimestampData(int precision) {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         long p = 1;
-        for (int i = type.getPrecision(); i < TimestampType.MAX_PRECISION; i++) {
+        for (int i = precision; i < TimestampType.MAX_PRECISION; i++) {
             p *= 10;
         }
         long currentSecond = System.currentTimeMillis() / 1000;

@@ -24,7 +24,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -74,26 +73,13 @@ public class OrcFileFormatTest {
         dataFields.add(new DataField(index++, "binary_type", DataTypes.BINARY(20)));
         dataFields.add(new DataField(index++, "varbinary_type", DataTypes.VARBINARY(20)));
         dataFields.add(new DataField(index++, "timestamp_type", DataTypes.TIMESTAMP(3)));
-        dataFields.add(new DataField(index++, "date_type", DataTypes.DATE()));
-        dataFields.add(new DataField(index++, "decimal_type", DataTypes.DECIMAL(10, 3)));
-        orc.validateDataFields(new RowType(dataFields));
-    }
-
-    @Test
-    public void testUnSupportedDataTypes() {
-        OrcFileFormat orc =
-                new OrcFileFormatFactory().create(new FormatContext(new Options(), 1024));
-
-        int index = 0;
-        List<DataField> dataFields = new ArrayList<DataField>();
         dataFields.add(
                 new DataField(
                         index++,
-                        "timestamp_with_timezone",
-                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE()));
-        Assertions.assertThrows(
-                UnsupportedOperationException.class,
-                () -> orc.validateDataFields(new RowType(dataFields)));
-        dataFields.clear();
+                        "timestamp_ltz_type",
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3)));
+        dataFields.add(new DataField(index++, "date_type", DataTypes.DATE()));
+        dataFields.add(new DataField(index++, "decimal_type", DataTypes.DECIMAL(10, 3)));
+        orc.validateDataFields(new RowType(dataFields));
     }
 }
