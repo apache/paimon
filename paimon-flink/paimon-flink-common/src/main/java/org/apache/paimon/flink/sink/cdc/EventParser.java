@@ -23,34 +23,24 @@ import org.apache.paimon.schema.SchemaChange;
 import java.io.Serializable;
 import java.util.List;
 
-/** Testing CDC change event. */
-public class TestCdcEvent implements Serializable {
+/**
+ * Parse a CDC change event to a list of {@link SchemaChange} or {@link CdcRecord}.
+ *
+ * @param <T> CDC change event type
+ */
+public interface EventParser<T> {
 
-    private static final long serialVersionUID = 1L;
+    void setRawEvent(T rawEvent);
 
-    private final SchemaChange schemaChange;
-    private final List<CdcRecord> records;
+    boolean isSchemaChange();
 
-    public TestCdcEvent(SchemaChange schemaChange) {
-        this.schemaChange = schemaChange;
-        this.records = null;
-    }
+    List<SchemaChange> getSchemaChanges();
 
-    public TestCdcEvent(List<CdcRecord> records) {
-        this.schemaChange = null;
-        this.records = records;
-    }
+    List<CdcRecord> getRecords();
 
-    public SchemaChange schemaChange() {
-        return schemaChange;
-    }
+    /** Factory to create an {@link EventParser}. */
+    interface Factory<T> extends Serializable {
 
-    public List<CdcRecord> records() {
-        return records;
-    }
-
-    @Override
-    public String toString() {
-        return String.format("{schemChange = %s, records = %s}", schemaChange, records);
+        EventParser<T> create();
     }
 }

@@ -21,6 +21,8 @@ import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.StringUtils;
 
+import java.util.Arrays;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Utils for testing data formats. */
@@ -38,7 +40,12 @@ public class DataFormatTestUtil {
             } else {
                 InternalRow.FieldGetter fieldGetter =
                         InternalRow.createFieldGetter(type.getTypeAt(i), i);
-                build.append(fieldGetter.getFieldOrNull(row));
+                Object field = fieldGetter.getFieldOrNull(row);
+                if (field instanceof byte[]) {
+                    build.append(Arrays.toString((byte[]) field));
+                } else {
+                    build.append(field);
+                }
             }
         }
         return build.toString();

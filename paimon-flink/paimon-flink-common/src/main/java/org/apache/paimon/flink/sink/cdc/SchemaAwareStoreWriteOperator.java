@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.cdc.CdcRecord;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.sink.AbstractStoreWriteOperator;
 import org.apache.paimon.flink.sink.LogSinkFunction;
@@ -104,23 +103,38 @@ public class SchemaAwareStoreWriteOperator extends AbstractStoreWriteOperator<Cd
     private Map<String, Object> tryConvert(Map<String, String> fields) {
         Map<String, Object> converted = new HashMap<>();
         TableSchema schema = table.schema();
+
         for (Map.Entry<String, String> field : fields.entrySet()) {
             String key = field.getKey();
             String value = field.getValue();
+
             int idx = schema.fieldNames().indexOf(key);
             if (idx < 0) {
+                LOG.info("Field " + key + " not found. Waiting for schema update.");
                 return null;
             }
-            DataType type = schema.fields().get(idx).type();
-            // TODO TypeUtils.castFromString cannot deal with complex types like arrays and maps.
-            //  Change type of CdcRecord#field if needed.
-            try {
-                converted.put(key, TypeUtils.castFromString(value, type));
-            } catch (Exception e) {
-                LOG.debug("Failed to convert value " + value + " to type " + type, e);
-                return null;
+
+            if (value == null) {
+                converted.put(key, null);
+            } else {
+                DataType type = schema.fields().get(idx).type();
+                // TODO TypeUtils.castFromString cannot deal with complex types like arrays and
+                //  maps. Change type of CdcRecord#field if needed.
+                try {
+                    converted.put(key, TypeUtils.castFromString(value, type));
+                } catch (Exception e) {
+                    LOG.info(
+                            "Failed to convert value "
+                                    + value
+                                    + " to type "
+                                    + type
+                                    + ". Waiting for schema update.",
+                            e);
+                    return null;
+                }
             }
         }
+
         return converted;
     }
 }

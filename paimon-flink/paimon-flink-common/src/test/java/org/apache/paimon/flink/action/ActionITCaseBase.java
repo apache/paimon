@@ -47,7 +47,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /** {@link Action} test base. */
-public class ActionITCaseBase extends AbstractTestBase {
+public abstract class ActionITCaseBase extends AbstractTestBase {
 
     protected String warehouse;
     protected String database;
