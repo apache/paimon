@@ -95,14 +95,13 @@ public class CompactorSourceBuilder {
 
         if (isContinuous) {
             // set 'streaming-compact' and remove 'scan.bounded.watermark' if exists
-            Options options = bucketsTable.coreOptions().toConfiguration();
+            Options options = Options.fromMap(bucketsTable.options());
             options.set(CoreOptions.STREAMING_COMPACT, true);
+            Map<String, String> newOptions = options.toMap();
             if (options.contains(CoreOptions.SCAN_BOUNDED_WATERMARK)) {
-                Map<String, String> map = options.toMap();
-                map.remove(CoreOptions.SCAN_BOUNDED_WATERMARK.key());
-                options = Options.fromMap(map);
+                newOptions.remove(CoreOptions.SCAN_BOUNDED_WATERMARK.key());
             }
-            bucketsTable = bucketsTable.copy(options.toMap());
+            bucketsTable = bucketsTable.copy(newOptions);
             return new ContinuousFileStoreSource(
                     bucketsTable.newReadBuilder().withFilter(partitionPredicate),
                     bucketsTable.options(),
