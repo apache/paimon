@@ -21,13 +21,10 @@ package org.apache.paimon.casting;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.types.BinaryType;
-import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.types.VarBinaryType;
-import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.DecimalUtils;
 import org.apache.paimon.utils.StringUtils;
@@ -134,7 +131,7 @@ public class CastExecutors {
             case VARCHAR:
                 if (outputType.getTypeRoot() == CHAR || outputType.getTypeRoot() == VARCHAR) {
                     final boolean targetCharType = outputType.getTypeRoot() == CHAR;
-                    final int targetLength = getStringLength(outputType);
+                    final int targetLength = DataTypeChecks.getLength(outputType);
                     return value -> {
                         BinaryString result;
                         String strVal = value.toString();
@@ -158,7 +155,7 @@ public class CastExecutors {
                         return result;
                     };
                 } else if (outputType.getTypeRoot() == VARBINARY) {
-                    final int targetLength = getBinaryLength(outputType);
+                    final int targetLength = DataTypeChecks.getLength(outputType);
                     return value -> {
                         byte[] byteArrayTerm = ((BinaryString) value).toBytes();
                         if (byteArrayTerm.length <= targetLength) {
@@ -170,9 +167,10 @@ public class CastExecutors {
                 }
                 return null;
             case BINARY:
+            case VARBINARY:
                 if (outputType.getTypeRoot() == BINARY || outputType.getTypeRoot() == VARBINARY) {
                     boolean targetBinaryType = outputType.getTypeRoot() == BINARY;
-                    final int targetLength = getBinaryLength(outputType);
+                    final int targetLength = DataTypeChecks.getLength(outputType);
                     return value -> {
                         byte[] bytes = (byte[]) value;
                         if (((byte[]) value).length == targetLength) {
@@ -237,25 +235,5 @@ public class CastExecutors {
 
     public static CastExecutor<?, ?> identityCastExecutor() {
         return IDENTITY_CAST_EXECUTOR;
-    }
-
-    private static int getStringLength(DataType dataType) {
-        if (dataType instanceof CharType) {
-            return ((CharType) dataType).getLength();
-        } else if (dataType instanceof VarCharType) {
-            return ((VarCharType) dataType).getLength();
-        }
-
-        throw new IllegalArgumentException(String.format("Unsupported type %s", dataType));
-    }
-
-    private static int getBinaryLength(DataType dataType) {
-        if (dataType instanceof VarBinaryType) {
-            return ((VarBinaryType) dataType).getLength();
-        } else if (dataType instanceof BinaryType) {
-            return ((BinaryType) dataType).getLength();
-        }
-
-        throw new IllegalArgumentException(String.format("Unsupported type %s", dataType));
     }
 }

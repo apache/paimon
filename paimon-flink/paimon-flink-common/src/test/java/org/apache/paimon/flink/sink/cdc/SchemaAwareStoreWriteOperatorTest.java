@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
 import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
@@ -150,8 +149,14 @@ public class SchemaAwareStoreWriteOperatorTest {
     public void testUpdateColumnType() throws Exception {
         RowType rowType =
                 RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.FLOAT()},
-                        new String[] {"k", "v1", "v2"});
+                        new DataType[] {
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.FLOAT(),
+                            DataTypes.VARCHAR(5),
+                            DataTypes.VARBINARY(5)
+                        },
+                        new String[] {"k", "v1", "v2", "v3", "v4"});
 
         FileStoreTable table =
                 createFileStoreTable(
@@ -170,12 +175,16 @@ public class SchemaAwareStoreWriteOperatorTest {
         fields.put("k", "1");
         fields.put("v1", "10");
         fields.put("v2", "0.625");
+        fields.put("v3", "one");
+        fields.put("v4", "b_one");
         CdcRecord expected = new CdcRecord(RowKind.INSERT, fields);
         runner.offer(expected);
         CdcRecord actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
         // check that records with new fields should be processed after schema is updated
+
+        // int -> bigint
 
         fields = new HashMap<>();
         fields.put("k", "2");
@@ -191,6 +200,8 @@ public class SchemaAwareStoreWriteOperatorTest {
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
+        // float -> double
+
         fields = new HashMap<>();
         fields.put("k", "3");
         fields.put("v1", "100");
@@ -201,6 +212,36 @@ public class SchemaAwareStoreWriteOperatorTest {
         assertThat(actual).isNull();
 
         schemaManager.commitChanges(SchemaChange.updateColumnType("v2", DataTypes.DOUBLE()));
+        actual = runner.take();
+        assertThat(actual).isEqualTo(expected);
+
+        // varchar(5) -> varchar(10)
+
+        fields = new HashMap<>();
+        fields.put("k", "4");
+        fields.put("v1", "40");
+        fields.put("v3", "long four");
+        expected = new CdcRecord(RowKind.INSERT, fields);
+        runner.offer(expected);
+        actual = runner.poll(1);
+        assertThat(actual).isNull();
+
+        schemaManager.commitChanges(SchemaChange.updateColumnType("v3", DataTypes.VARCHAR(10)));
+        actual = runner.take();
+        assertThat(actual).isEqualTo(expected);
+
+        // varbinary(5) -> varbinary(10)
+
+        fields = new HashMap<>();
+        fields.put("k", "5");
+        fields.put("v1", "50");
+        fields.put("v4", "long five~");
+        expected = new CdcRecord(RowKind.INSERT, fields);
+        runner.offer(expected);
+        actual = runner.poll(1);
+        assertThat(actual).isNull();
+
+        schemaManager.commitChanges(SchemaChange.updateColumnType("v4", DataTypes.VARBINARY(10)));
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 

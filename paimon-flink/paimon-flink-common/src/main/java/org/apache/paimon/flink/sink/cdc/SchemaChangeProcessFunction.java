@@ -22,6 +22,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.Preconditions;
 
@@ -86,7 +87,7 @@ public class SchemaChangeProcessFunction extends ProcessFunction<SchemaChange, V
                             + " does not exist in table. This is unexpected.");
             DataType oldType = schema.fields().get(idx).type();
             DataType newType = updateColumnType.newDataType();
-            if (checkTypeConversion(oldType, newType)) {
+            if (canConvert(oldType, newType)) {
                 schemaManager.commitChanges(schemaChange);
             } else {
                 throw new UnsupportedOperationException(
@@ -109,6 +110,8 @@ public class SchemaChangeProcessFunction extends ProcessFunction<SchemaChange, V
 
     private static final List<DataTypeRoot> STRING_TYPES =
             Arrays.asList(DataTypeRoot.CHAR, DataTypeRoot.VARCHAR);
+    private static final List<DataTypeRoot> BINARY_TYPES =
+            Arrays.asList(DataTypeRoot.BINARY, DataTypeRoot.VARBINARY);
     private static final List<DataTypeRoot> INTEGER_TYPES =
             Arrays.asList(
                     DataTypeRoot.TINYINT,
@@ -118,11 +121,17 @@ public class SchemaChangeProcessFunction extends ProcessFunction<SchemaChange, V
     private static final List<DataTypeRoot> FLOATING_POINT_TYPES =
             Arrays.asList(DataTypeRoot.FLOAT, DataTypeRoot.DOUBLE);
 
-    private boolean checkTypeConversion(DataType oldType, DataType newType) {
+    public static boolean canConvert(DataType oldType, DataType newType) {
         int oldIdx = STRING_TYPES.indexOf(oldType.getTypeRoot());
         int newIdx = STRING_TYPES.indexOf(newType.getTypeRoot());
         if (oldIdx >= 0 && newIdx >= 0) {
-            return true;
+            return DataTypeChecks.getLength(oldType) <= DataTypeChecks.getLength(newType);
+        }
+
+        oldIdx = BINARY_TYPES.indexOf(oldType.getTypeRoot());
+        newIdx = BINARY_TYPES.indexOf(newType.getTypeRoot());
+        if (oldIdx >= 0 && newIdx >= 0) {
+            return DataTypeChecks.getLength(oldType) <= DataTypeChecks.getLength(newType);
         }
 
         oldIdx = INTEGER_TYPES.indexOf(oldType.getTypeRoot());

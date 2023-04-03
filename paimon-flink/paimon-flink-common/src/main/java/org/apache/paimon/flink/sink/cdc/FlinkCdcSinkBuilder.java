@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.cdc.CdcRecord;
-import org.apache.paimon.cdc.EventParser;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.LogSinkFunction;
 import org.apache.paimon.operation.Lock;

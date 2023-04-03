@@ -16,31 +16,33 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.cdc;
-
-import org.apache.paimon.schema.SchemaChange;
-
-import java.io.Serializable;
-import java.util.List;
+package org.apache.paimon.flink.action.cdc.mysql;
 
 /**
- * Parse a CDC change event to a list of {@link SchemaChange} or {@link CdcRecord}.
+ * MySql version enum.
  *
- * @param <T> CDC change event type
+ * <p>Copied from <a
+ * href="https://github.com/ververica/flink-cdc-connectors/blob/master/flink-connector-mysql-cdc/src/test/java/com/ververica/cdc/connectors/mysql/testutils/MySqlVersion.java">ververica
+ * / flink-cdc-connectors</a>.
  */
-public interface EventParser<T> {
+public enum MySqlVersion {
+    V5_5("5.5"),
+    V5_6("5.6"),
+    V5_7("5.7"),
+    V8_0("8.0");
 
-    void setRawEvent(T rawEvent);
+    private String version;
 
-    boolean isSchemaChange();
+    MySqlVersion(String version) {
+        this.version = version;
+    }
 
-    List<SchemaChange> getSchemaChanges();
+    public String getVersion() {
+        return version;
+    }
 
-    List<CdcRecord> getRecords();
-
-    /** Factory to create an {@link EventParser}. */
-    interface Factory<T> extends Serializable {
-
-        EventParser<T> create();
+    @Override
+    public String toString() {
+        return "MySqlVersion{" + "version='" + version + '\'' + '}';
     }
 }

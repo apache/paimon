@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.cdc;
+package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.types.RowKind;
 
