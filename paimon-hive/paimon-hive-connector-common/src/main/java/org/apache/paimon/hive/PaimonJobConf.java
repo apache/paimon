@@ -63,12 +63,15 @@ public class PaimonJobConf {
     /** Extract paimon catalog conf from Hive conf. */
     public static Options extractCatalogConfig(Configuration hiveConf) {
         Map<String, String> configMap = new HashMap<>();
-        for (Map.Entry<String, String> entry : hiveConf) {
-            String name = entry.getKey();
-            if (name.startsWith(PAIMON_PREFIX)) {
-                String value = hiveConf.get(name);
-                name = name.substring(PAIMON_PREFIX.length());
-                configMap.put(name, value);
+
+        if (hiveConf != null) {
+            for (Map.Entry<String, String> entry : hiveConf) {
+                String name = entry.getKey();
+                if (name.startsWith(PAIMON_PREFIX)) {
+                    String value = hiveConf.get(name);
+                    name = name.substring(PAIMON_PREFIX.length());
+                    configMap.put(name, value);
+                }
             }
         }
         return Options.fromMap(configMap);
