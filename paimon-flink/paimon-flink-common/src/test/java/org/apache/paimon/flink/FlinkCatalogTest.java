@@ -461,7 +461,8 @@ public class FlinkCatalogTest {
             Map<String, String> options = new HashMap<>();
             options.put("is_streaming", String.valueOf(isStreaming));
             options.put("scan.mode", mode.toString());
-            if (mode == CoreOptions.StartupMode.FROM_SNAPSHOT) {
+            if (mode == CoreOptions.StartupMode.FROM_SNAPSHOT
+                    || mode == CoreOptions.StartupMode.FROM_SNAPSHOT_FULL) {
                 options.put("scan.snapshot-id", "1");
             } else if (mode == CoreOptions.StartupMode.FROM_TIMESTAMP) {
                 options.put("scan.timestamp-millis", System.currentTimeMillis() + "");
