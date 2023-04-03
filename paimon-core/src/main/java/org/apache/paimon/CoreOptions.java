@@ -867,8 +867,8 @@ public class CoreOptions implements Serializable {
                 "For streaming sources, produces a snapshot after the latest compaction on the table "
                         + "upon first startup, and continue to read the latest changes. "
                         + "For batch sources, just produce a snapshot after the latest compaction "
-                        + "but does not read new changes. (Snapshots of full compaction are picked "
-                        + "when scheduled full-compaction is enabled)"),
+                        + "but does not read new changes. Snapshots of full compaction are picked "
+                        + "when scheduled full-compaction is enabled."),
 
         FROM_TIMESTAMP(
                 "from-timestamp",

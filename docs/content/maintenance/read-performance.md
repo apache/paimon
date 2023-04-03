@@ -29,7 +29,7 @@ under the License.
 ## Primary Key Table
 
 For Primary Key Table, it's a 'MergeOnRead' technology. When reading data, multiple layers of LSM data are merged,
-and the number of parallelism will be limited by the number of buckets. Although Paimon's merge will be very efficient,
+and the number of parallelism will be limited by the number of buckets. Although Paimon's merge will be efficient,
 it still cannot catch up with the ordinary AppendOnly table.
 
 If you want to query fast enough in certain scenarios, but can only find older data, you can:
