@@ -36,6 +36,7 @@ import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
 import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.BatchDataTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Projection;
@@ -223,7 +224,11 @@ public class DataTableSource extends FlinkTableSource
 
                 Preconditions.checkState(table instanceof DataTable);
                 DataTable dataTable = (DataTable) table;
-                splits = dataTable.newScan().plan().splits();
+                BatchDataTableScan tableScan = dataTable.newScan();
+                if (predicate != null) {
+                    tableScan = tableScan.withFilter(predicate);
+                }
+                splits = tableScan.plan().splits();
 
                 if (null != splits) {
                     parallelism = splits.size();

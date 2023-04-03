@@ -1218,6 +1218,18 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                             }
                                         })))
                 .isEqualTo(2);
+        assertThat(
+                        sourceParallelism(
+                                buildQueryWithTableOptions(
+                                        table,
+                                        "*",
+                                        "WHERE currency='Euro'",
+                                        new HashMap<String, String>() {
+                                            {
+                                                put(INFER_SCAN_PARALLELISM.key(), "true");
+                                            }
+                                        })))
+                .isEqualTo(1);
 
         // 2 splits and limit is 1, the parallelism is the limit value : 1
         assertThat(
