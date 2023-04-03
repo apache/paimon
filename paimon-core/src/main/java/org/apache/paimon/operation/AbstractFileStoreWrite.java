@@ -236,7 +236,7 @@ public abstract class AbstractFileStoreWrite<T>
                 }
                 // writer.allFiles() must be fetched after writer.prepareCommit(), because
                 // compaction result might be updated during prepareCommit
-                List<DataFileMeta> dataFiles = writerContainer.writer.dataFiles();
+                Collection<DataFileMeta> dataFiles = writerContainer.writer.dataFiles();
                 result.add(
                         new State(
                                 partition,
@@ -378,13 +378,13 @@ public abstract class AbstractFileStoreWrite<T>
                 int bucket,
                 long baseSnapshotId,
                 long lastModifiedCommitIdentifier,
-                List<DataFileMeta> dataFiles,
+                Collection<DataFileMeta> dataFiles,
                 CommitIncrement commitIncrement) {
             this.partition = partition;
             this.bucket = bucket;
             this.baseSnapshotId = baseSnapshotId;
             this.lastModifiedCommitIdentifier = lastModifiedCommitIdentifier;
-            this.dataFiles = dataFiles;
+            this.dataFiles = new ArrayList<>(dataFiles);
             this.commitIncrement = commitIncrement;
         }
 

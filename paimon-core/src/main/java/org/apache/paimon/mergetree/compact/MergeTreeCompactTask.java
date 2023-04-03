@@ -51,7 +51,6 @@ public class MergeTreeCompactTask extends CompactTask {
             CompactRewriter rewriter,
             CompactUnit unit,
             boolean dropDelete) {
-        super(unit.files());
         this.minFileSize = minFileSize;
         this.rewriter = rewriter;
         this.outputLevel = unit.outputLevel();
@@ -62,7 +61,7 @@ public class MergeTreeCompactTask extends CompactTask {
     }
 
     @Override
-    protected CompactResult doCompact(List<DataFileMeta> inputs) throws Exception {
+    protected CompactResult doCompact() throws Exception {
         List<List<SortedRun>> candidate = new ArrayList<>();
         CompactResult result = new CompactResult();
 

@@ -29,23 +29,39 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.io.DataFileTestUtils.fromMinMax;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link AppendOnlySplitGenerator} and {@link MergeTreeSplitGenerator}. */
 public class SplitGeneratorTest {
 
-    private final List<DataFileMeta> files =
-            Arrays.asList(
-                    fromMinMax("1", 0, 10),
-                    fromMinMax("2", 0, 12),
-                    fromMinMax("3", 15, 60),
-                    fromMinMax("4", 18, 40),
-                    fromMinMax("5", 82, 85),
-                    fromMinMax("6", 100, 200));
+    public static DataFileMeta newFileFromSequence(
+            String name, int rowCount, long minSequence, long maxSequence) {
+        return new DataFileMeta(
+                name,
+                rowCount,
+                1,
+                EMPTY_ROW,
+                EMPTY_ROW,
+                null,
+                null,
+                minSequence,
+                maxSequence,
+                0,
+                0);
+    }
 
     @Test
     public void testAppend() {
+        List<DataFileMeta> files =
+                Arrays.asList(
+                        newFileFromSequence("1", 11, 0, 20),
+                        newFileFromSequence("2", 13, 21, 30),
+                        newFileFromSequence("3", 46, 31, 40),
+                        newFileFromSequence("4", 23, 41, 50),
+                        newFileFromSequence("5", 4, 51, 60),
+                        newFileFromSequence("6", 101, 61, 100));
         assertThat(toNames(new AppendOnlySplitGenerator(40, 2).split(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2"),
@@ -70,6 +86,14 @@ public class SplitGeneratorTest {
 
     @Test
     public void testMergeTree() {
+        List<DataFileMeta> files =
+                Arrays.asList(
+                        fromMinMax("1", 0, 10),
+                        fromMinMax("2", 0, 12),
+                        fromMinMax("3", 15, 60),
+                        fromMinMax("4", 18, 40),
+                        fromMinMax("5", 82, 85),
+                        fromMinMax("6", 100, 200));
         Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
         assertThat(toNames(new MergeTreeSplitGenerator(comparator, 100, 2).split(files)))
                 .containsExactlyInAnyOrder(

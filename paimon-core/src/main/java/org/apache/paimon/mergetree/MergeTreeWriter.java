@@ -40,6 +40,7 @@ import org.apache.paimon.utils.RecordWriter;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -163,7 +164,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
-    public List<DataFileMeta> dataFiles() {
+    public Collection<DataFileMeta> dataFiles() {
         return compactManager.allFiles();
     }
 

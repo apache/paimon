@@ -49,6 +49,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 
@@ -235,10 +236,10 @@ public class AppendOnlyWriterTest {
 
         // increase target file size to test compaction
         long targetFileSize = 1024 * 1024L;
-        Pair<AppendOnlyWriter, LinkedList<DataFileMeta>> writerAndToCompact =
+        Pair<AppendOnlyWriter, TreeSet<DataFileMeta>> writerAndToCompact =
                 createWriter(targetFileSize, true, firstInc.newFilesIncrement().newFiles());
         writer = writerAndToCompact.getLeft();
-        LinkedList<DataFileMeta> toCompact = writerAndToCompact.getRight();
+        TreeSet<DataFileMeta> toCompact = writerAndToCompact.getRight();
         assertThat(toCompact).containsExactlyElementsOf(firstInc.newFilesIncrement().newFiles());
         writer.write(row(id, String.format("%03d", id), PART));
         writer.sync();
@@ -302,11 +303,27 @@ public class AppendOnlyWriterTest {
         return createWriter(targetFileSize, false, Collections.emptyList()).getLeft();
     }
 
-    private Pair<AppendOnlyWriter, LinkedList<DataFileMeta>> createWriter(
+    private Pair<AppendOnlyWriter, TreeSet<DataFileMeta>> createWriter(
             long targetFileSize, boolean forceCompact, List<DataFileMeta> scannedFiles) {
         FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>(scannedFiles);
-        return Pair.of(
+        AppendOnlyCompactManager compactManager =
+                new AppendOnlyCompactManager(
+                        LocalFileIO.create(),
+                        Executors.newSingleThreadScheduledExecutor(
+                                new ExecutorThreadFactory("compaction-thread")),
+                        toCompact,
+                        MIN_FILE_NUM,
+                        MAX_FILE_NUM,
+                        targetFileSize,
+                        compactBefore ->
+                                compactBefore.isEmpty()
+                                        ? Collections.emptyList()
+                                        : Collections.singletonList(
+                                                generateCompactAfter(compactBefore)),
+                        pathFactory,
+                        false);
+        AppendOnlyWriter writer =
                 new AppendOnlyWriter(
                         LocalFileIO.create(),
                         SCHEMA_ID,
@@ -314,24 +331,11 @@ public class AppendOnlyWriterTest {
                         targetFileSize,
                         AppendOnlyWriterTest.SCHEMA,
                         getMaxSequenceNumber(toCompact),
-                        new AppendOnlyCompactManager(
-                                LocalFileIO.create(),
-                                Executors.newSingleThreadScheduledExecutor(
-                                        new ExecutorThreadFactory("compaction-thread")),
-                                toCompact,
-                                MIN_FILE_NUM,
-                                MAX_FILE_NUM,
-                                targetFileSize,
-                                compactBefore ->
-                                        compactBefore.isEmpty()
-                                                ? Collections.emptyList()
-                                                : Collections.singletonList(
-                                                        generateCompactAfter(compactBefore)),
-                                pathFactory),
+                        compactManager,
                         forceCompact,
                         pathFactory,
-                        null),
-                toCompact);
+                        null);
+        return Pair.of(writer, (TreeSet<DataFileMeta>) compactManager.allFiles());
     }
 
     private DataFileMeta generateCompactAfter(List<DataFileMeta> toCompact) {

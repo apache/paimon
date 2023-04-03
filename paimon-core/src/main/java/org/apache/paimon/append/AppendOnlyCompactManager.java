@@ -30,12 +30,15 @@ import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 
@@ -44,25 +47,29 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
 
     private final FileIO fileIO;
     private final ExecutorService executor;
-    private final LinkedList<DataFileMeta> toCompact;
+    private final TreeSet<DataFileMeta> toCompact;
     private final int minFileNum;
     private final int maxFileNum;
     private final long targetFileSize;
     private final CompactRewriter rewriter;
     private final DataFilePathFactory pathFactory;
+    private final boolean assertDisorder;
 
     public AppendOnlyCompactManager(
             FileIO fileIO,
             ExecutorService executor,
-            LinkedList<DataFileMeta> toCompact,
+            List<DataFileMeta> restored,
             int minFileNum,
             int maxFileNum,
             long targetFileSize,
             CompactRewriter rewriter,
-            DataFilePathFactory pathFactory) {
+            DataFilePathFactory pathFactory,
+            boolean assertDisorder) {
         this.fileIO = fileIO;
         this.executor = executor;
-        this.toCompact = toCompact;
+        this.assertDisorder = assertDisorder;
+        this.toCompact = new TreeSet<>(fileComparator(assertDisorder));
+        this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
         this.maxFileNum = maxFileNum;
         this.targetFileSize = targetFileSize;
@@ -93,7 +100,8 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
                                 minFileNum,
                                 maxFileNum,
                                 rewriter,
-                                pathFactory));
+                                pathFactory,
+                                assertDisorder));
     }
 
     private void triggerCompactionWithBestEffort() {
@@ -118,7 +126,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     }
 
     @Override
-    public List<DataFileMeta> allFiles() {
+    public Collection<DataFileMeta> allFiles() {
         return toCompact;
     }
 
@@ -134,7 +142,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
                         // add it back to the head
                         DataFileMeta lastFile = r.after().get(r.after().size() - 1);
                         if (lastFile.fileSize() < targetFileSize) {
-                            toCompact.offerFirst(lastFile);
+                            toCompact.add(lastFile);
                         }
                     }
                 });
@@ -147,10 +155,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     }
 
     private static Optional<List<DataFileMeta>> pick(
-            LinkedList<DataFileMeta> toCompact,
-            long targetFileSize,
-            int minFileNum,
-            int maxFileNum) {
+            TreeSet<DataFileMeta> toCompact, long targetFileSize, int minFileNum, int maxFileNum) {
         if (toCompact.isEmpty()) {
             return Optional.empty();
         }
@@ -180,7 +185,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     }
 
     @VisibleForTesting
-    LinkedList<DataFileMeta> getToCompact() {
+    TreeSet<DataFileMeta> getToCompact() {
         return toCompact;
     }
 
@@ -197,32 +202,37 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     public static class IterativeCompactTask extends CompactTask {
 
         private final FileIO fileIO;
+        private final Collection<DataFileMeta> inputs;
         private final long targetFileSize;
         private final int minFileNum;
         private final int maxFileNum;
         private final CompactRewriter rewriter;
         private final DataFilePathFactory factory;
+        private final boolean assertDisorder;
 
         public IterativeCompactTask(
                 FileIO fileIO,
-                List<DataFileMeta> inputs,
+                Collection<DataFileMeta> inputs,
                 long targetFileSize,
                 int minFileNum,
                 int maxFileNum,
                 CompactRewriter rewriter,
-                DataFilePathFactory factory) {
-            super(inputs);
+                DataFilePathFactory factory,
+                boolean assertDisorder) {
             this.fileIO = fileIO;
+            this.inputs = inputs;
             this.targetFileSize = targetFileSize;
             this.minFileNum = minFileNum;
             this.maxFileNum = maxFileNum;
             this.rewriter = rewriter;
             this.factory = factory;
+            this.assertDisorder = assertDisorder;
         }
 
         @Override
-        protected CompactResult doCompact(List<DataFileMeta> inputs) throws Exception {
-            LinkedList<DataFileMeta> toCompact = new LinkedList<>(inputs);
+        protected CompactResult doCompact() throws Exception {
+            TreeSet<DataFileMeta> toCompact = new TreeSet<>(fileComparator(assertDisorder));
+            toCompact.addAll(inputs);
             Set<DataFileMeta> compactBefore = new LinkedHashSet<>();
             List<DataFileMeta> compactAfter = new ArrayList<>();
             while (!toCompact.isEmpty()) {
@@ -236,7 +246,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
                     compactAfter.addAll(after);
                     DataFileMeta lastFile = after.get(after.size() - 1);
                     if (lastFile.fileSize() < targetFileSize) {
-                        toCompact.offerFirst(lastFile);
+                        toCompact.add(lastFile);
                     }
                 } else {
                     break;
@@ -270,16 +280,17 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
      */
     public static class AutoCompactTask extends CompactTask {
 
+        private final List<DataFileMeta> toCompact;
         private final CompactRewriter rewriter;
 
         public AutoCompactTask(List<DataFileMeta> toCompact, CompactRewriter rewriter) {
-            super(toCompact);
+            this.toCompact = toCompact;
             this.rewriter = rewriter;
         }
 
         @Override
-        protected CompactResult doCompact(List<DataFileMeta> inputs) throws Exception {
-            return result(inputs, rewriter.rewrite(inputs));
+        protected CompactResult doCompact() throws Exception {
+            return result(toCompact, rewriter.rewrite(toCompact));
         }
     }
 
@@ -300,5 +311,36 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     /** Compact rewriter for append-only table. */
     public interface CompactRewriter {
         List<DataFileMeta> rewrite(List<DataFileMeta> compactBefore) throws Exception;
+    }
+
+    /**
+     * New files may be created during the compaction process, then the results of the compaction
+     * may be put after the new files, and this order will be disrupted. We need to ensure this
+     * order, so we force the order by sequence.
+     */
+    public static Comparator<DataFileMeta> fileComparator(boolean assertDisorder) {
+        return (o1, o2) -> {
+            if (o1 == o2) {
+                return 0;
+            }
+
+            if (assertDisorder && isOverlap(o1, o2)) {
+                throw new RuntimeException(
+                        String.format(
+                                "There should no overlap in append files, there is a bug!"
+                                        + " Range1(%s, %s), Range2(%s, %s)",
+                                o1.minSequenceNumber(),
+                                o1.maxSequenceNumber(),
+                                o2.minSequenceNumber(),
+                                o2.maxSequenceNumber()));
+            }
+
+            return Long.compare(o1.minSequenceNumber(), o2.minSequenceNumber());
+        };
+    }
+
+    private static boolean isOverlap(DataFileMeta o1, DataFileMeta o2) {
+        return o2.minSequenceNumber() <= o1.maxSequenceNumber()
+                && o2.maxSequenceNumber() >= o1.minSequenceNumber();
     }
 }
