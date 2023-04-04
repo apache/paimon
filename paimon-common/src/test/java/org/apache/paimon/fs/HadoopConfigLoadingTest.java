@@ -58,34 +58,6 @@ public class HadoopConfigLoadingTest {
     }
 
     @Test
-    public void loadFromLegacyConfigEntries() throws Exception {
-        final String k1 = "k1 prop";
-        final String v1 = "value1";
-
-        final String k2 = "k2 prop";
-        final String v2 = "value2";
-
-        final File file1 = tempDir.resolve("core-site.xml").toFile();
-        final File file2 = tempDir.resolve("hdfs-site.xml").toFile();
-
-        printConfig(file1, k1, v1);
-        printConfig(file2, k2, v2);
-
-        final Options options = new Options();
-        options.set(HadoopUtils.HDFS_DEFAULT_CONFIG, file1.getAbsolutePath());
-        options.set(HadoopUtils.HDFS_SITE_CONFIG, file2.getAbsolutePath());
-
-        Configuration hadoopConf = HadoopUtils.getHadoopConfiguration(options);
-
-        // contains extra entries
-        assertEquals(v1, hadoopConf.get(k1, null));
-        assertEquals(v2, hadoopConf.get(k2, null));
-
-        // also contains classpath defaults
-        assertEquals(IN_CP_CONFIG_VALUE, hadoopConf.get(IN_CP_CONFIG_KEY, null));
-    }
-
-    @Test
     public void loadFromHadoopConfEntry() throws Exception {
         final String k1 = "singing?";
         final String v1 = "rain!";
@@ -189,7 +161,6 @@ public class HadoopConfigLoadingTest {
 
         final String v1 = "from HADOOP_CONF_DIR";
         final String v2 = "from Paimon config `fs.hdfs.hadoopconf`";
-        final String v3 = "from Paimon config `fs.hdfs.hdfsdefault`";
         final String v4 = "from HADOOP_HOME/etc/hadoop";
         final String v5 = "from HADOOP_HOME/conf";
 
@@ -209,7 +180,6 @@ public class HadoopConfigLoadingTest {
 
         final File file1 = new File(hadoopConfDir, "core-site.xml");
         final File file2 = new File(hadoopConfEntryDir, "core-site.xml");
-        final File file3 = new File(legacyConfDir, "core-site.xml");
         final File file4 = new File(hadoopHomeEtc, "core-site.xml");
         final File file5 = new File(hadoopHomeConf, "core-site.xml");
 
@@ -219,12 +189,6 @@ public class HadoopConfigLoadingTest {
         properties2.put(k1, v2);
         properties2.put(k2, v2);
         printConfigs(file2, properties2);
-
-        Map<String, String> properties3 = new HashMap<>();
-        properties3.put(k1, v3);
-        properties3.put(k2, v3);
-        properties3.put(k3, v3);
-        printConfigs(file3, properties3);
 
         Map<String, String> properties4 = new HashMap<>();
         properties4.put(k1, v4);
@@ -243,7 +207,6 @@ public class HadoopConfigLoadingTest {
 
         final Options options = new Options();
         options.setString(HadoopUtils.PATH_HADOOP_CONFIG, hadoopConfEntryDir.getAbsolutePath());
-        options.setString(HadoopUtils.HDFS_DEFAULT_CONFIG, file3.getAbsolutePath());
 
         final Configuration hadoopConf;
 
@@ -261,7 +224,6 @@ public class HadoopConfigLoadingTest {
         // contains extra entries
         assertEquals(v1, hadoopConf.get(k1, null));
         assertEquals(v2, hadoopConf.get(k2, null));
-        assertEquals(v3, hadoopConf.get(k3, null));
         assertEquals(v4, hadoopConf.get(k4, null));
         assertEquals(v5, hadoopConf.get(k5, null));
 
