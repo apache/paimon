@@ -61,6 +61,12 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     public AbstractFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
         this.fileIO = fileIO;
         this.path = path;
+        if (!tableSchema.options().containsKey(PATH.key())) {
+            // make sure table is always available
+            Map<String, String> newOptions = new HashMap<>(tableSchema.options());
+            newOptions.put(PATH.key(), path.toString());
+            tableSchema = tableSchema.copy(newOptions);
+        }
         this.tableSchema = tableSchema;
     }
 
