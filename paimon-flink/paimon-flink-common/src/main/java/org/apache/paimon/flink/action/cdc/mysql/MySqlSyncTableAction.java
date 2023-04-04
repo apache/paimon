@@ -46,6 +46,7 @@ import com.ververica.cdc.debezium.table.DebeziumOptions;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 
@@ -53,7 +54,6 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
-import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -100,7 +100,7 @@ import java.util.stream.Collectors;
  */
 public class MySqlSyncTableAction implements Action {
 
-    private final Map<String, String> mySqlConfig;
+    private final Configuration mySqlConfig;
     private final String warehouse;
     private final String database;
     private final String table;
@@ -116,20 +116,13 @@ public class MySqlSyncTableAction implements Action {
             List<String> partitionKeys,
             List<String> primaryKeys,
             Map<String, String> paimonConfig) {
-        this.mySqlConfig = mySqlConfig;
+        this.mySqlConfig = Configuration.fromMap(mySqlConfig);
         this.warehouse = warehouse;
         this.database = database;
         this.table = table;
         this.partitionKeys = partitionKeys;
         this.primaryKeys = primaryKeys;
         this.paimonConfig = paimonConfig;
-
-        setDefaultMySqlConfig();
-    }
-
-    private void setDefaultMySqlConfig() {
-        // https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options
-        mySqlConfig.putIfAbsent("port", "3306");
     }
 
     public void build(StreamExecutionEnvironment env) throws Exception {
@@ -167,7 +160,7 @@ public class MySqlSyncTableAction implements Action {
         }
 
         EventParser.Factory<String> parserFactory;
-        String serverTimeZone = mySqlConfig.get("server-time-zone");
+        String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         if (serverTimeZone != null) {
             parserFactory = () -> new MySqlDebeziumJsonEventParser(ZoneId.of(serverTimeZone));
         } else {
@@ -191,32 +184,37 @@ public class MySqlSyncTableAction implements Action {
     private MySqlSource<String> buildSource() {
         MySqlSourceBuilder<String> sourceBuilder = MySqlSource.builder();
 
-        String databaseName = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME.key());
-        String tableName = mySqlConfig.get(MySqlSourceOptions.TABLE_NAME.key());
+        String databaseName = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME);
+        String tableName = mySqlConfig.get(MySqlSourceOptions.TABLE_NAME);
         sourceBuilder
-                .hostname(mySqlConfig.get(MySqlSourceOptions.HOSTNAME.key()))
-                .port(Integer.parseInt(mySqlConfig.get(MySqlSourceOptions.PORT.key())))
-                .username(mySqlConfig.get(MySqlSourceOptions.USERNAME.key()))
-                .password(mySqlConfig.get(MySqlSourceOptions.PASSWORD.key()))
+                .hostname(mySqlConfig.get(MySqlSourceOptions.HOSTNAME))
+                .port(mySqlConfig.get(MySqlSourceOptions.PORT))
+                .username(mySqlConfig.get(MySqlSourceOptions.USERNAME))
+                .password(mySqlConfig.get(MySqlSourceOptions.PASSWORD))
                 .databaseList(databaseName)
                 .tableList(databaseName + "." + tableName);
 
-        Optional.ofNullable(mySqlConfig.get(MySqlSourceOptions.SERVER_ID.key()))
-                .ifPresent(sourceBuilder::serverId);
-        Optional.ofNullable(mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE.key()))
+        mySqlConfig.getOptional(MySqlSourceOptions.SERVER_ID).ifPresent(sourceBuilder::serverId);
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.SERVER_TIME_ZONE)
                 .ifPresent(sourceBuilder::serverTimeZone);
-        Optional.ofNullable(mySqlConfig.get(MySqlSourceOptions.SCAN_SNAPSHOT_FETCH_SIZE.key()))
-                .ifPresent(size -> sourceBuilder.fetchSize(Integer.parseInt(size)));
-        Optional.ofNullable(mySqlConfig.get(MySqlSourceOptions.CONNECT_TIMEOUT.key()))
-                .ifPresent(timeout -> sourceBuilder.connectTimeout(Duration.parse(timeout)));
-        Optional.ofNullable(mySqlConfig.get(MySqlSourceOptions.CONNECT_MAX_RETRIES.key()))
-                .ifPresent(retries -> sourceBuilder.connectMaxRetries(Integer.parseInt(retries)));
-        Optional.ofNullable(mySqlConfig.get(MySqlSourceOptions.CONNECTION_POOL_SIZE.key()))
-                .ifPresent(size -> sourceBuilder.connectionPoolSize(Integer.parseInt(size)));
-        Optional.ofNullable(mySqlConfig.get(MySqlSourceOptions.HEARTBEAT_INTERVAL.key()))
-                .ifPresent(interval -> sourceBuilder.heartbeatInterval(Duration.parse(interval)));
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.SCAN_SNAPSHOT_FETCH_SIZE)
+                .ifPresent(sourceBuilder::fetchSize);
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.CONNECT_TIMEOUT)
+                .ifPresent(sourceBuilder::connectTimeout);
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.CONNECT_MAX_RETRIES)
+                .ifPresent(sourceBuilder::connectMaxRetries);
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.CONNECTION_POOL_SIZE)
+                .ifPresent(sourceBuilder::connectionPoolSize);
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.HEARTBEAT_INTERVAL)
+                .ifPresent(sourceBuilder::heartbeatInterval);
 
-        String startupMode = mySqlConfig.get(MySqlSourceOptions.SCAN_STARTUP_MODE.key());
+        String startupMode = mySqlConfig.get(MySqlSourceOptions.SCAN_STARTUP_MODE);
         // see
         // https://github.com/ververica/flink-cdc-connectors/blob/master/flink-connector-mysql-cdc/src/main/java/com/ververica/cdc/connectors/mysql/table/MySqlTableSourceFactory.java#L196
         if ("initial".equalsIgnoreCase(startupMode)) {
@@ -227,40 +225,30 @@ public class MySqlSyncTableAction implements Action {
             sourceBuilder.startupOptions(StartupOptions.latest());
         } else if ("specific-offset".equalsIgnoreCase(startupMode)) {
             BinlogOffsetBuilder offsetBuilder = BinlogOffset.builder();
-            String file =
-                    mySqlConfig.get(MySqlSourceOptions.SCAN_STARTUP_SPECIFIC_OFFSET_FILE.key());
-            String pos = mySqlConfig.get(MySqlSourceOptions.SCAN_STARTUP_SPECIFIC_OFFSET_POS.key());
+            String file = mySqlConfig.get(MySqlSourceOptions.SCAN_STARTUP_SPECIFIC_OFFSET_FILE);
+            Long pos = mySqlConfig.get(MySqlSourceOptions.SCAN_STARTUP_SPECIFIC_OFFSET_POS);
             if (file != null && pos != null) {
-                offsetBuilder.setBinlogFilePosition(file, Long.parseLong(pos));
+                offsetBuilder.setBinlogFilePosition(file, pos);
             }
-            Optional.ofNullable(
-                            mySqlConfig.get(
-                                    MySqlSourceOptions.SCAN_STARTUP_SPECIFIC_OFFSET_GTID_SET.key()))
+            mySqlConfig
+                    .getOptional(MySqlSourceOptions.SCAN_STARTUP_SPECIFIC_OFFSET_GTID_SET)
                     .ifPresent(offsetBuilder::setGtidSet);
-            Optional.ofNullable(
-                            mySqlConfig.get(
-                                    MySqlSourceOptions.SCAN_STARTUP_SPECIFIC_OFFSET_SKIP_EVENTS
-                                            .key()))
-                    .ifPresent(
-                            skipEvents -> offsetBuilder.setSkipEvents(Long.parseLong(skipEvents)));
-            Optional.ofNullable(
-                            mySqlConfig.get(
-                                    MySqlSourceOptions.SCAN_STARTUP_SPECIFIC_OFFSET_SKIP_ROWS
-                                            .key()))
-                    .ifPresent(skipRows -> offsetBuilder.setSkipRows(Long.parseLong(skipRows)));
+            mySqlConfig
+                    .getOptional(MySqlSourceOptions.SCAN_STARTUP_SPECIFIC_OFFSET_SKIP_EVENTS)
+                    .ifPresent(offsetBuilder::setSkipEvents);
+            mySqlConfig
+                    .getOptional(MySqlSourceOptions.SCAN_STARTUP_SPECIFIC_OFFSET_SKIP_ROWS)
+                    .ifPresent(offsetBuilder::setSkipRows);
             sourceBuilder.startupOptions(StartupOptions.specificOffset(offsetBuilder.build()));
         } else if ("timestamp".equalsIgnoreCase(startupMode)) {
             sourceBuilder.startupOptions(
                     StartupOptions.timestamp(
-                            Long.parseLong(
-                                    mySqlConfig.get(
-                                            MySqlSourceOptions.SCAN_STARTUP_TIMESTAMP_MILLIS
-                                                    .key()))));
+                            mySqlConfig.get(MySqlSourceOptions.SCAN_STARTUP_TIMESTAMP_MILLIS)));
         }
 
         Properties jdbcProperties = new Properties();
         Properties debeziumProperties = new Properties();
-        for (Map.Entry<String, String> entry : mySqlConfig.entrySet()) {
+        for (Map.Entry<String, String> entry : mySqlConfig.toMap().entrySet()) {
             String key = entry.getKey();
             String value = entry.getValue();
             if (key.startsWith(JdbcUrlUtils.PROPERTIES_PREFIX)) {
@@ -282,18 +270,17 @@ public class MySqlSyncTableAction implements Action {
 
     private List<MySqlSchema> getMySqlSchemaList() throws Exception {
         Pattern databasePattern =
-                Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME.key()));
-        Pattern tablePattern =
-                Pattern.compile(mySqlConfig.get(MySqlSourceOptions.TABLE_NAME.key()));
+                Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME));
+        Pattern tablePattern = Pattern.compile(mySqlConfig.get(MySqlSourceOptions.TABLE_NAME));
         List<MySqlSchema> mySqlSchemaList = new ArrayList<>();
         try (Connection conn =
                 DriverManager.getConnection(
                         String.format(
-                                "jdbc:mysql://%s:%s/",
-                                mySqlConfig.get(MySqlSourceOptions.HOSTNAME.key()),
-                                mySqlConfig.get(MySqlSourceOptions.PORT.key())),
-                        mySqlConfig.get(MySqlSourceOptions.USERNAME.key()),
-                        mySqlConfig.get(MySqlSourceOptions.PASSWORD.key()))) {
+                                "jdbc:mysql://%s:%d/",
+                                mySqlConfig.get(MySqlSourceOptions.HOSTNAME),
+                                mySqlConfig.get(MySqlSourceOptions.PORT)),
+                        mySqlConfig.get(MySqlSourceOptions.USERNAME),
+                        mySqlConfig.get(MySqlSourceOptions.PASSWORD))) {
             DatabaseMetaData metaData = conn.getMetaData();
             try (ResultSet schemas = metaData.getCatalogs()) {
                 while (schemas.next()) {
