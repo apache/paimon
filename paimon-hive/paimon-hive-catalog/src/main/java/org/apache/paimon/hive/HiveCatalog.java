@@ -570,15 +570,7 @@ public class HiveCatalog extends AbstractCatalog {
             }
             hiveConf.addResource(hiveSite);
         }
-        // else {
-        //    // user doesn't provide hive conf dir, we try to find it in classpath
-        //    URL hiveSite =
-        //            Thread.currentThread().getContextClassLoader().getResource(HIVE_SITE_FILE);
-        //    if (hiveSite != null) {
-        //        LOG.info("Found {} in classpath: {}", HIVE_SITE_FILE, hiveSite);
-        //        hiveConf.addResource(hiveSite);
-        //    }
-        // }
+
         return hiveConf;
     }
 
