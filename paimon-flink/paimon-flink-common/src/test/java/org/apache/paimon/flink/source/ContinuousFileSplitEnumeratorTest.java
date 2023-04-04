@@ -19,16 +19,11 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.operation.ScanKind;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.DataTableScan.DataFilePlan;
 import org.apache.paimon.table.source.EndOfScanException;
-import org.apache.paimon.table.source.StreamDataTableScan;
-import org.apache.paimon.table.source.snapshot.BoundedChecker;
-import org.apache.paimon.table.source.snapshot.FollowUpScanner;
-import org.apache.paimon.table.source.snapshot.StartingScanner;
-import org.apache.paimon.utils.Filter;
+import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableScan;
 
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
@@ -193,8 +188,8 @@ public class ContinuousFileSplitEnumeratorTest {
         context.registerReader(0, "test-host");
         context.registerReader(1, "test-host");
 
-        Queue<DataFilePlan> results = new LinkedBlockingQueue<>();
-        StreamDataTableScan scan = new MockScan(results);
+        Queue<TableScan.Plan> results = new LinkedBlockingQueue<>();
+        StreamTableScan scan = new MockScan(results);
         ContinuousFileSplitEnumerator enumerator =
                 new Builder()
                         .setSplitEnumeratorContext(context)
@@ -268,7 +263,7 @@ public class ContinuousFileSplitEnumeratorTest {
         private long discoveryInterval = Long.MAX_VALUE;
 
         private int splitBatchSize = 10;
-        private StreamDataTableScan scan;
+        private StreamTableScan scan;
 
         public Builder setSplitEnumeratorContext(
                 SplitEnumeratorContext<FileStoreSourceSplit> context) {
@@ -291,7 +286,7 @@ public class ContinuousFileSplitEnumeratorTest {
             return this;
         }
 
-        public Builder setScan(StreamDataTableScan scan) {
+        public Builder setScan(StreamTableScan scan) {
             this.scan = scan;
             return this;
         }
@@ -302,65 +297,20 @@ public class ContinuousFileSplitEnumeratorTest {
         }
     }
 
-    private static class MockScan implements StreamDataTableScan {
-        private final Queue<DataFilePlan> results;
+    private static class MockScan implements StreamTableScan {
+        private final Queue<Plan> results;
 
-        public MockScan(Queue<DataFilePlan> results) {
+        public MockScan(Queue<Plan> results) {
             this.results = results;
         }
 
         @Override
-        public StreamDataTableScan withKind(ScanKind kind) {
-            return null;
-        }
-
-        @Override
-        public StreamDataTableScan withSnapshot(long snapshotId) {
-            return null;
-        }
-
-        @Override
-        public StreamDataTableScan withLevelFilter(Filter<Integer> levelFilter) {
-            return null;
-        }
-
-        @Override
-        public StreamDataTableScan withFilter(Predicate predicate) {
-            return null;
-        }
-
-        @Override
-        public DataFilePlan plan() {
-            DataFilePlan plan = results.poll();
+        public Plan plan() {
+            Plan plan = results.poll();
             if (plan == null) {
                 throw new EndOfScanException();
             }
             return plan;
-        }
-
-        @Override
-        public boolean supportStreamingReadOverwrite() {
-            return false;
-        }
-
-        @Override
-        public StreamDataTableScan withStartingScanner(StartingScanner startingScanner) {
-            return null;
-        }
-
-        @Override
-        public StreamDataTableScan withFollowUpScanner(FollowUpScanner followUpScanner) {
-            return null;
-        }
-
-        @Override
-        public StreamDataTableScan withBoundedChecker(BoundedChecker boundedChecker) {
-            return null;
-        }
-
-        @Override
-        public StreamDataTableScan withSnapshotStarting() {
-            return null;
         }
 
         @Override

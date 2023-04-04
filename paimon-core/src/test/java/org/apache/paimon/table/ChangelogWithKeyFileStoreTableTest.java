@@ -44,11 +44,9 @@ import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.table.source.snapshot.FullStartingScanner;
-import org.apache.paimon.table.source.snapshot.InputChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.system.AuditLogTable;
 import org.apache.paimon.types.DataType;
@@ -423,10 +421,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 // partition 2
                                 Collections.singletonList("-D 2|10|301|binary|varbinary")));
 
-        StreamDataTableScan scan =
-                table.newStreamScan()
-                        .withStartingScanner(new FullStartingScanner())
-                        .withFollowUpScanner(new InputChangelogFollowUpScanner());
+        StreamTableScan scan = table.newStreamScan();
         scan.restore(1L);
 
         Function<Integer, Void> assertNextSnapshot =

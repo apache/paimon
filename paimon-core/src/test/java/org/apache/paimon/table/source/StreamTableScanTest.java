@@ -38,15 +38,15 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link StreamDataTableScan}. */
-public class StreamDataTableScanTest extends ScannerTestBase {
+/** Tests for {@link StreamTableScan}. */
+public class StreamTableScanTest extends ScannerTestBase {
 
     @Test
     public void testPlan() throws Exception {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
-        StreamDataTableScan scan = table.newStreamScan();
+        StreamTableScan scan = table.newStreamScan();
 
         // first call without any snapshot, should return empty plan
         assertThat(scan.plan().splits()).isEmpty();
@@ -63,7 +63,7 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         commit.commit(1, write.prepareCommit(true, 1));
 
         // first call with snapshot, should return complete records from 2nd commit
-        DataTableScan.DataFilePlan plan = scan.plan();
+        TableScan.Plan plan = scan.plan();
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
 
@@ -108,7 +108,7 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
-        StreamDataTableScan scan = table.newStreamScan();
+        StreamTableScan scan = table.newStreamScan();
 
         // first call without any snapshot, should return empty plan
         assertThat(scan.plan().splits()).isEmpty();
@@ -133,7 +133,7 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         commit.commit(2, write.prepareCommit(true, 2));
 
         // first call with snapshot, should return full compacted records from 3rd commit
-        DataTableScan.DataFilePlan plan = scan.plan();
+        TableScan.Plan plan = scan.plan();
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
 
@@ -178,14 +178,14 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         TableCommitImpl commit = table.newCommit(commitUser);
-        StreamDataTableScan scan = table.newStreamScan();
+        StreamTableScan scan = table.newStreamScan();
 
         write.write(rowData(1, 10, 100L));
         ManifestCommittable committable = new ManifestCommittable(0, 5L);
         write.prepareCommit(true, 0).forEach(committable::addFileCommittable);
         commit.commit(committable);
 
-        DataTableScan.DataFilePlan plan = scan.plan();
+        TableScan.Plan plan = scan.plan();
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Collections.singletonList("+I 1|10|100"));
 
@@ -203,14 +203,14 @@ public class StreamDataTableScanTest extends ScannerTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite(commitUser);
         TableCommitImpl commit = table.newCommit(commitUser);
-        StreamDataTableScan scan = table.newStreamScan();
+        StreamTableScan scan = table.newStreamScan();
 
         write.write(rowData(1, 10, 100L));
         ManifestCommittable committable = new ManifestCommittable(0, 5L);
         write.prepareCommit(true, 0).forEach(committable::addFileCommittable);
         commit.commit(committable);
 
-        DataTableScan.DataFilePlan plan = scan.plan();
+        TableScan.Plan plan = scan.plan();
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Collections.singletonList("+I 1|10|100"));
         assertThat(scan.plan().splits()).isEmpty();

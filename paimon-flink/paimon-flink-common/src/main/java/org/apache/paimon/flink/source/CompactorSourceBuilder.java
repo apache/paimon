@@ -18,9 +18,9 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
-import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
@@ -39,6 +39,7 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import javax.annotation.Nullable;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -92,14 +93,15 @@ public class CompactorSourceBuilder {
                                     .toArray(Predicate[]::new));
         }
 
-        ReadBuilder readBuilder = bucketsTable.newReadBuilder().withFilter(partitionPredicate);
         if (isContinuous) {
+            bucketsTable = bucketsTable.copy(streamingCompactOptions());
             return new ContinuousFileStoreSource(
-                    readBuilder,
+                    bucketsTable.newReadBuilder().withFilter(partitionPredicate),
                     bucketsTable.options(),
-                    null,
-                    TableScanUtils.compactStreamScanFactory());
+                    null);
         } else {
+            bucketsTable = bucketsTable.copy(batchCompactOptions());
+            ReadBuilder readBuilder = bucketsTable.newReadBuilder().withFilter(partitionPredicate);
             List<Split> splits = readBuilder.newScan().plan().splits();
             return new StaticFileStoreSource(
                     readBuilder,
@@ -108,8 +110,7 @@ public class CompactorSourceBuilder {
                             .coreOptions()
                             .toConfiguration()
                             .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
-                    splits,
-                    TableScanUtils.compactBatchScanFactory());
+                    splits);
         }
     }
 
@@ -125,5 +126,26 @@ public class CompactorSourceBuilder {
                 WatermarkStrategy.noWatermarks(),
                 tableIdentifier + "-compact-source",
                 InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(produceType)));
+    }
+
+    private Map<String, String> streamingCompactOptions() {
+        // set 'streaming-compact' and remove 'scan.bounded.watermark'
+        return new HashMap<String, String>() {
+            {
+                put(CoreOptions.STREAMING_COMPACT.key(), "true");
+                put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), null);
+            }
+        };
+    }
+
+    private Map<String, String> batchCompactOptions() {
+        // batch compactor source will compact all current files
+        return new HashMap<String, String>() {
+            {
+                put(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), null);
+                put(CoreOptions.SCAN_SNAPSHOT_ID.key(), null);
+                put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.LATEST_FULL.toString());
+            }
+        };
     }
 }

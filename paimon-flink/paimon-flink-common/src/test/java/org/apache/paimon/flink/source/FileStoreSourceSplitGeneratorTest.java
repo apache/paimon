@@ -23,9 +23,9 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.stats.StatsTestUtils;
+import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.DataTableScan;
-import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
+import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
 
 import org.junit.jupiter.api.Test;
 
@@ -74,13 +74,13 @@ public class FileStoreSourceSplitGeneratorTest {
                     }
                 };
         List<DataSplit> scanSplits =
-                SnapshotSplitReader.generateSplits(
+                SnapshotSplitReaderImpl.generateSplits(
                         1L,
                         false,
                         false,
                         Collections::singletonList,
                         FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.ADD)));
-        DataTableScan.DataFilePlan tableScanPlan = new DataTableScan.DataFilePlan(scanSplits);
+        DataFilePlan tableScanPlan = new DataFilePlan(scanSplits);
 
         List<FileStoreSourceSplit> splits =
                 new FileStoreSourceSplitGenerator().createSplits(tableScanPlan);

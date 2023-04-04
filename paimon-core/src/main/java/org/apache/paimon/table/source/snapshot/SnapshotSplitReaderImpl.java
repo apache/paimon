@@ -20,6 +20,7 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
@@ -43,7 +44,6 @@ import java.util.Optional;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
-import static org.apache.paimon.table.source.snapshot.SnapshotSplitReader.generateSplits;
 
 /** Implementation of {@link SnapshotSplitReader}. */
 public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
@@ -193,5 +193,47 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
                             "PartitionComparator");
         }
         return lazyPartitionComparator;
+    }
+
+    @VisibleForTesting
+    public static List<DataSplit> generateSplits(
+            long snapshotId,
+            boolean isIncremental,
+            boolean reverseRowKind,
+            SplitGenerator splitGenerator,
+            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
+        List<DataSplit> splits = new ArrayList<>();
+        for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> entry :
+                groupedDataFiles.entrySet()) {
+            BinaryRow partition = entry.getKey();
+            Map<Integer, List<DataFileMeta>> buckets = entry.getValue();
+            for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : buckets.entrySet()) {
+                int bucket = bucketEntry.getKey();
+                if (isIncremental) {
+                    // Don't split when incremental
+                    splits.add(
+                            new DataSplit(
+                                    snapshotId,
+                                    partition,
+                                    bucket,
+                                    bucketEntry.getValue(),
+                                    true,
+                                    reverseRowKind));
+                } else {
+                    splitGenerator.split(bucketEntry.getValue()).stream()
+                            .map(
+                                    files ->
+                                            new DataSplit(
+                                                    snapshotId,
+                                                    partition,
+                                                    bucket,
+                                                    files,
+                                                    false,
+                                                    reverseRowKind))
+                            .forEach(splits::add);
+                }
+            }
+        }
+        return splits;
     }
 }
