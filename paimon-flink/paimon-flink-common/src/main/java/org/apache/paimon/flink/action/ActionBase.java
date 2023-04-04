@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -146,5 +147,21 @@ public abstract class ActionBase implements Action {
         List<String> sinkIdentifierNames = Collections.singletonList(identifier.getFullName());
 
         TableEnvironmentUtils.executeInternal(tEnv, transformations, sinkIdentifierNames);
+    }
+
+    /**
+     * Currently, the {@link CoreOptions.MergeEngine#PARTIAL_UPDATE} merge engine cannot accept
+     * -U/-D records. This method is a workaround. Actions that may produce -U/-D records should
+     * call this before running.
+     */
+    protected void disablePartialUpdateMergeEngine() {
+        if (CoreOptions.fromMap(table.options()).mergeEngine()
+                == CoreOptions.MergeEngine.PARTIAL_UPDATE) {
+            table =
+                    table.copy(
+                            Collections.singletonMap(
+                                    CoreOptions.MERGE_ENGINE.key(),
+                                    CoreOptions.MergeEngine.DEDUPLICATE.toString()));
+        }
     }
 }
