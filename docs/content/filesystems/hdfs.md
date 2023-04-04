@@ -30,12 +30,29 @@ You don't need any additional dependencies to access HDFS because you have alrea
 
 ## HDFS Configuration
 
-For HDFS, the most important thing is to be able to read your HDFS configuration. Choose one of the following ways to configure your HDFS:
+For HDFS, the most important thing is to be able to read your HDFS configuration. 
 
-- Set environment variable `HADOOP_HOME` (if in a hadoop environment, it is already set up).
-- Configure `'fs.hdfs.hadoopconf'` in the catalog.
-- Set environment variable `HADOOP_CONF_DIR`.
-- Configure `'hadoop.'` prefix options in the catalog.
+{{< tabs "hdfs conf" >}}
+
+{{< tab "Flink/Trino/JavaAPI" >}}
+
+You may not have to do anything, if you are in a hadoop environment. Otherwise pick one of the following ways to
+configure your HDFS:
+
+1. Set environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR`.
+2. Configure `'fs.hdfs.hadoopconf'` in the paimon catalog.
+
+The first approach is recommended.
+
+{{< /tab >}}
+
+{{< tab "Hive/Spark" >}}
+
+HDFS Configuration is available directly through the computation cluster, see cluster configuration of Hive and Spark for details.
+
+{{< /tab >}}
+
+{{< /tabs >}}
 
 ## Hadoop-compatible file systems (HCFS)
 
