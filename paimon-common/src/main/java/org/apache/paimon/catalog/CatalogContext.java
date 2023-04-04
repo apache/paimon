@@ -23,7 +23,6 @@ import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.utils.HadoopUtils;
 
 import org.apache.hadoop.conf.Configuration;
 
@@ -31,6 +30,8 @@ import javax.annotation.Nullable;
 
 import static org.apache.paimon.options.CatalogOptions.FS_ALLOW_HADOOP_FALLBACK;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
+import static org.apache.paimon.utils.HadoopUtils.getHadoopConfiguration;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * Context of catalog.
@@ -46,8 +47,8 @@ public class CatalogContext {
 
     private CatalogContext(
             Options options, Configuration hadoopConf, @Nullable FileIOLoader fallbackIOLoader) {
-        this.options = options;
-        this.hadoopConf = hadoopConf;
+        this.options = checkNotNull(options);
+        this.hadoopConf = checkNotNull(hadoopConf);
         if (fallbackIOLoader == null && options.get(FS_ALLOW_HADOOP_FALLBACK)) {
             this.fallbackIOLoader = new HadoopFileIOLoader();
         } else {
@@ -62,15 +63,19 @@ public class CatalogContext {
     }
 
     public static CatalogContext create(Options options) {
-        return create(options, HadoopUtils.getHadoopConfiguration(options));
+        return create(options, getHadoopConfiguration(options));
     }
 
     public static CatalogContext create(Options options, Configuration hadoopConf) {
-        return create(options, hadoopConf, null);
+        return new CatalogContext(options, hadoopConf, null);
+    }
+
+    public static CatalogContext create(Options options, FileIOLoader fallbackIOLoader) {
+        return new CatalogContext(options, getHadoopConfiguration(options), fallbackIOLoader);
     }
 
     public static CatalogContext create(
-            Options options, Configuration hadoopConf, @Nullable FileIOLoader fallbackIOLoader) {
+            Options options, Configuration hadoopConf, FileIOLoader fallbackIOLoader) {
         return new CatalogContext(options, hadoopConf, fallbackIOLoader);
     }
 

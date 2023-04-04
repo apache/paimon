@@ -20,6 +20,7 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.fs.local.LocalFileIO;
 
 import org.slf4j.Logger;
@@ -38,6 +39,9 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.ServiceLoader;
 import java.util.UUID;
+
+import static org.apache.paimon.fs.FileIOUtils.checkAccess;
+import static org.apache.paimon.options.CatalogOptions.FS_ALLOW_HADOOP_FALLBACK;
 
 /**
  * File IO to read and write file.
@@ -245,7 +249,14 @@ public interface FileIO extends Serializable {
         Map<String, FileIOLoader> loaders = discoverLoaders();
         FileIOLoader loader = loaders.get(uri.getScheme());
         if (loader == null) {
-            loader = config.fallbackIO();
+            // load fallbackIO
+            loader = checkAccess(config.fallbackIO(), path);
+
+            // load hadoopIO
+            if (config.options().get(FS_ALLOW_HADOOP_FALLBACK)) {
+                loader = checkAccess(new HadoopFileIOLoader(), path);
+            }
+
             if (loader == null) {
                 throw new UnsupportedSchemeException(
                         String.format(

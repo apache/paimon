@@ -16,24 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink;
+package org.apache.paimon.fs;
 
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.options.Options;
+import java.io.IOException;
 
-import org.apache.flink.configuration.ReadableConfig;
+/** Utils for {@link FileIO}. */
+public class FileIOUtils {
 
-import java.util.Map;
+    public static FileIOLoader checkAccess(FileIOLoader fileIO, Path path) {
+        try {
+            if (fileIO == null) {
+                return null;
+            }
 
-/** Utils for Flink. */
-public class FlinkUtils {
-
-    public static CatalogContext createCatalogContext(
-            Map<String, String> options, ReadableConfig flinkConf) {
-        return CatalogContext.create(
-                Options.fromMap(options),
-                HadoopUtils.getHadoopConfiguration(
-                        TableConfigUtils.extractConfiguration(flinkConf)),
-                new FlinkFileIOLoader());
+            // check access
+            fileIO.load(path).getFileStatus(path);
+            return fileIO;
+        } catch (IOException ignore) {
+            return null;
+        }
     }
 }

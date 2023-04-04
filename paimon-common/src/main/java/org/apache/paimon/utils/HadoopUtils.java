@@ -38,26 +38,8 @@ public class HadoopUtils {
     public static final String HADOOP_HOME_ENV = "HADOOP_HOME";
     public static final String HADOOP_CONF_ENV = "HADOOP_CONF_DIR";
 
-    /**
-     * Path to hdfs-default.xml file.
-     *
-     * @deprecated Use environment variable HADOOP_CONF_DIR instead.
-     */
-    @Deprecated public static final String HDFS_DEFAULT_CONFIG = "fs.hdfs.hdfsdefault";
-
-    /**
-     * Path to hdfs-site.xml file.
-     *
-     * @deprecated Use environment variable HADOOP_CONF_DIR instead.
-     */
-    @Deprecated public static final String HDFS_SITE_CONFIG = "fs.hdfs.hdfssite";
-
-    /**
-     * Path to Hadoop configuration.
-     *
-     * @deprecated Use environment variable HADOOP_CONF_DIR instead.
-     */
-    @Deprecated public static final String PATH_HADOOP_CONFIG = "fs.hdfs.hadoopconf";
+    /** Path to Hadoop configuration. */
+    public static final String PATH_HADOOP_CONFIG = "fs.hdfs.hadoopconf";
 
     public static Configuration getHadoopConfiguration(Options options) {
 
@@ -90,23 +72,6 @@ public class HadoopUtils {
         }
 
         // Approach 2: Paimon configuration (deprecated)
-        final String hdfsDefaultPath = options.getString(HDFS_DEFAULT_CONFIG, null);
-        if (hdfsDefaultPath != null) {
-            result.addResource(new org.apache.hadoop.fs.Path(hdfsDefaultPath));
-            LOG.debug(
-                    "Using hdfs-default configuration-file path from Paimon config: {}",
-                    hdfsDefaultPath);
-            foundHadoopConfiguration = true;
-        }
-
-        final String hdfsSitePath = options.getString(HDFS_SITE_CONFIG, null);
-        if (hdfsSitePath != null) {
-            result.addResource(new org.apache.hadoop.fs.Path(hdfsSitePath));
-            LOG.debug(
-                    "Using hdfs-site configuration-file path from Paimon config: {}", hdfsSitePath);
-            foundHadoopConfiguration = true;
-        }
-
         final String hadoopConfigPath = options.getString(PATH_HADOOP_CONFIG, null);
         if (hadoopConfigPath != null) {
             LOG.debug(
