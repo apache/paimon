@@ -20,22 +20,11 @@ package org.apache.paimon.flink.utils;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.BatchDataTableScan;
-import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.StreamDataTableScan;
-import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.table.source.snapshot.BoundedChecker;
-import org.apache.paimon.table.source.snapshot.ContinuousCompactorFollowUpScanner;
-import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
-import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 
-import javax.annotation.Nullable;
-
-import java.io.Serializable;
 import java.util.HashMap;
 
-/** Utility methods for {@link TableScan}, such as validating and creating. */
+/** Utility methods for {@link TableScan}, such as validating. */
 public class TableScanUtils {
 
     public static void streamingReadingValidate(Table table) {
@@ -59,48 +48,5 @@ public class TableScanUtils {
                 default:
             }
         }
-    }
-
-    // ------------------------------------------------------------------------
-    // TableScan factories
-    // ------------------------------------------------------------------------
-
-    /** Factory to create batch {@link TableScan}. */
-    public interface TableScanFactory extends Serializable {
-        TableScan create(ReadBuilder readBuilder);
-    }
-
-    /** Factory to create {@link StreamTableScan}. */
-    public interface StreamTableScanFactory extends Serializable {
-
-        StreamTableScan create(ReadBuilder readBuilder, @Nullable Long nextSnapshotId);
-    }
-
-    public static StreamTableScanFactory defaultStreamScanFactory() {
-        return (builder, nextSnapshotId) -> {
-            StreamTableScan scan = builder.newStreamScan();
-            scan.restore(nextSnapshotId);
-            return scan;
-        };
-    }
-
-    public static TableScanFactory compactBatchScanFactory() {
-        return readBuilder -> {
-            BatchDataTableScan scan = (BatchDataTableScan) readBuilder.newScan();
-            // static compactor source will compact all current files
-            scan.withStartingScanner(new FullStartingScanner());
-            return scan;
-        };
-    }
-
-    public static StreamTableScanFactory compactStreamScanFactory() {
-        return (readBuilder, nextSnapshotId) -> {
-            StreamDataTableScan scan = (StreamDataTableScan) readBuilder.newStreamScan();
-            scan.withStartingScanner(new ContinuousCompactorStartingScanner())
-                    .withFollowUpScanner(new ContinuousCompactorFollowUpScanner())
-                    .withBoundedChecker(BoundedChecker.neverEnd());
-            scan.restore(nextSnapshotId);
-            return scan;
-        };
     }
 }

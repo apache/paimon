@@ -28,7 +28,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 
 import org.apache.hadoop.hive.ql.io.sarg.ConvertAstToSearchArg;
@@ -53,10 +54,10 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
     @Override
     public InputSplit[] getSplits(JobConf jobConf, int numSplits) {
         FileStoreTable table = createFileStoreTable(jobConf);
-        DataTableScan scan = table.newScan();
+        InnerTableScan scan = table.newScan();
         createPredicate(table.schema(), jobConf).ifPresent(scan::withFilter);
-        return scan.plan().splits.stream()
-                .map(split -> new PaimonInputSplit(table.location().toString(), split))
+        return scan.plan().splits().stream()
+                .map(split -> new PaimonInputSplit(table.location().toString(), (DataSplit) split))
                 .toArray(PaimonInputSplit[]::new);
     }
 

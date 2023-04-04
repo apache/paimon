@@ -21,8 +21,8 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -61,7 +61,7 @@ public class DeltaFollowUpScannerTest extends ScannerTestBase {
         Snapshot snapshot = snapshotManager.snapshot(1);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        DataTableScan.DataFilePlan plan = scanner.scan(1, snapshotSplitReader);
+        TableScan.Plan plan = scanner.scan(1, snapshotSplitReader);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|100", "+I 1|20|200", "+I 1|40|400"));
 

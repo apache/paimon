@@ -18,9 +18,8 @@
 
 package org.apache.paimon.table.source.snapshot;
 
-import org.apache.paimon.table.source.BatchDataTableScan;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -28,10 +27,7 @@ import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * Helper class for the first planning of {@link BatchDataTableScan} and {@link
- * StreamDataTableScan}.
- */
+/** Helper class for the first planning of {@link TableScan}. */
 public interface StartingScanner {
 
     @Nullable

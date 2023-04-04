@@ -18,25 +18,29 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.operation.ScanKind;
-import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
-import org.apache.paimon.utils.Filter;
 
-/** {@link DataTableScan} for batch planning. */
-public interface BatchDataTableScan extends DataTableScan {
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+/** Scanning plan containing snapshot ID and input splits. */
+public class DataFilePlan implements TableScan.Plan {
+
+    private final List<DataSplit> splits;
+
+    public DataFilePlan(List<DataSplit> splits) {
+        this.splits = splits;
+    }
 
     @Override
-    BatchDataTableScan withSnapshot(long snapshotId);
+    public List<Split> splits() {
+        return new ArrayList<>(splits);
+    }
 
-    @Override
-    BatchDataTableScan withFilter(Predicate predicate);
-
-    @Override
-    BatchDataTableScan withKind(ScanKind scanKind);
-
-    @Override
-    BatchDataTableScan withLevelFilter(Filter<Integer> levelFilter);
-
-    BatchDataTableScan withStartingScanner(StartingScanner startingScanner);
+    public static DataFilePlan fromResult(@Nullable StartingScanner.Result result) {
+        return new DataFilePlan(result == null ? Collections.emptyList() : result.splits());
+    }
 }

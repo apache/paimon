@@ -65,7 +65,7 @@ public abstract class CommitterOperatorTestBase {
         List<String> actual = new ArrayList<>();
         table.newScan()
                 .plan()
-                .splits
+                .splits()
                 .forEach(
                         s -> {
                             try {

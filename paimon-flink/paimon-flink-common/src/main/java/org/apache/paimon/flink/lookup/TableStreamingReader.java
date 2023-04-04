@@ -16,15 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source;
+package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateFilter;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.DataTableScan.DataFilePlan;
+import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
@@ -34,6 +40,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.function.IntUnaryOperator;
@@ -46,10 +53,20 @@ public class TableStreamingReader {
 
     private final ReadBuilder readBuilder;
     @Nullable private final PredicateFilter recordFilter;
-    private final StreamDataTableScan scan;
+    private final StreamTableScan scan;
 
     public TableStreamingReader(Table table, int[] projection, @Nullable Predicate predicate) {
+        if (CoreOptions.fromMap(table.options()).startupMode()
+                != CoreOptions.StartupMode.COMPACTED_FULL) {
+            table =
+                    table.copy(
+                            Collections.singletonMap(
+                                    CoreOptions.SCAN_MODE.key(),
+                                    CoreOptions.StartupMode.LATEST_FULL.toString()));
+        }
+
         this.readBuilder = table.newReadBuilder().withProjection(projection).withFilter(predicate);
+        scan = readBuilder.newStreamScan();
 
         if (predicate != null) {
             List<String> fieldNames = table.rowType().getFieldNames();
@@ -75,9 +92,6 @@ public class TableStreamingReader {
         } else {
             recordFilter = null;
         }
-
-        scan = (StreamDataTableScan) readBuilder.newStreamScan();
-        scan.withSnapshotStarting();
     }
 
     public Iterator<InternalRow> nextBatch() throws Exception {
@@ -89,11 +103,11 @@ public class TableStreamingReader {
         }
     }
 
-    private Iterator<InternalRow> read(DataFilePlan plan) throws IOException {
+    private Iterator<InternalRow> read(TableScan.Plan plan) throws IOException {
         TableRead read = readBuilder.newRead();
 
         List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
-        for (DataSplit split : plan.splits) {
+        for (Split split : plan.splits()) {
             readers.add(() -> read.createReader(split));
         }
         Iterator<InternalRow> iterator =
