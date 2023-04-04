@@ -85,6 +85,10 @@ cp paimon-flink-*.jar <FLINK_HOME>/lib/
 
 **Step 3: Copy Hadoop Bundled Jar**
 
+{{< hint info >}}
+If the machine is in a hadoop environment, please ensure the value of the environment variable `HADOOP_CLASSPATH`, you do not need to use the following pre-bundled Hadoop jar.
+{{< /hint >}}
+
 [Download](https://flink.apache.org/downloads.html) Pre-bundled Hadoop jar and copy the jar file to the `lib` directory of your Flink home.
 
 ```bash
