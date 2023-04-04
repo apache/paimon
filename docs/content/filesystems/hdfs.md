@@ -64,6 +64,10 @@ For Alluxio support add the following entry into the core-site.xml file:
 
 Ensure that `hdfs-site.xml` and `core-site.xml` contain the necessary [HA configuration](https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-hdfs/HDFSHighAvailabilityWithNFS.html).
 
+## HDFS ViewFS
+
+Ensure that `hdfs-site.xml` and `core-site.xml` contain the necessary [ViewFs configuration](https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-hdfs/ViewFs.html).
+
 ## Kerberos
 
 Ensure that `hdfs-site.xml` and `core-site.xml` contain the necessary [Kerberos configuration](https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-common/SecureMode.html).
