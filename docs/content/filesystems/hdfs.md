@@ -47,7 +47,8 @@ CREATE CATALOG my_catalog WITH (
     'type' = 'paimon',
     'warehouse' = 'hdfs://path/to/warehouse',
     'fs.defaultFS' = 'hdfs://master:9000',
-    'kerberos.principal' = 'HTTP/localhost@LOCALHOST'
+    'fs.alluxio.impl' = 'alluxio.hadoop.FileSystem',
+    'kerberos.principal' = 'HTTP/localhost@LOCALHOST',
     'kerberos.keytab' = '/tmp/auth.keytab'
 );
 ```
@@ -61,6 +62,7 @@ spark-sql \
   --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
   --conf spark.sql.catalog.paimon.warehouse=hdfs://<bucket-name>/ \
   --conf spark.sql.catalog.paimon.fs.defaultFS=hdfs://master:9000 \
+  --conf spark.sql.catalog.paimon.fs.alluxio.impl=alluxio.hadoop.FileSystem \
   --conf spark.sql.catalog.paimon.kerberos.principal=HTTP/localhost@LOCALHOST \
   --conf spark.sql.catalog.paimon.kerberos.keytab=/tmp/auth.keytab
 ```
@@ -71,6 +73,7 @@ spark-sql \
 
 ```sql
 SET paimon.fs.defaultFS=hdfs://master:9000;
+SET paimon.fs.alluxio.impl=alluxio.hadoop.FileSystem;
 SET paimon.kerberos.principal=HTTP/localhost@LOCALHOST;
 SET paimon.kerberos.keytab=/tmp/auth.keytab;
 ```
@@ -88,6 +91,7 @@ SELECT COUNT(1) FROM test_table;
 Add options in `etc/catalog/paimon.properties`.
 ```shell
 fs.defaultFS=hdfs://master:9000
+fs.alluxio.impl=alluxio.hadoop.FileSystem
 kerberos.principal=HTTP/localhost@LOCALHOST
 kerberos.keytab=/tmp/auth.keytab
 ```
