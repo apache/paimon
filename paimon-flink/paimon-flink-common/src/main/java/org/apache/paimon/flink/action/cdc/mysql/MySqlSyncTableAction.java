@@ -44,6 +44,8 @@ import com.ververica.cdc.connectors.mysql.table.StartupOptions;
 import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import com.ververica.cdc.debezium.table.DebeziumOptions;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.java.tuple.Tuple3;
+import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 
@@ -54,6 +56,8 @@ import java.sql.ResultSet;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -62,6 +66,7 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * An {@link Action} which synchronize one or multiple MySQL tables into one Paimon table.
@@ -118,13 +123,13 @@ public class MySqlSyncTableAction implements Action {
         this.partitionKeys = partitionKeys;
         this.primaryKeys = primaryKeys;
         this.paimonConfig = paimonConfig;
+
+        setDefaultMySqlConfig();
     }
 
-    @Override
-    public void run() throws Exception {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        build(env);
-        env.execute(String.format("MySQL CTAS: %s.%s", database, table));
+    private void setDefaultMySqlConfig() {
+        // https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options
+        mySqlConfig.putIfAbsent("port", "3306");
     }
 
     public void build(StreamExecutionEnvironment env) throws Exception {
@@ -426,5 +431,140 @@ public class MySqlSyncTableAction implements Action {
             }
             return this;
         }
+    }
+
+    // ------------------------------------------------------------------------
+    //  Flink run methods
+    // ------------------------------------------------------------------------
+
+    public static Optional<Action> create(String[] args) {
+        MultipleParameterTool params = MultipleParameterTool.fromArgs(args);
+
+        if (params.has("help")) {
+            printHelp();
+            return Optional.empty();
+        }
+
+        Tuple3<String, String, String> tablePath = Action.getTablePath(params);
+        if (tablePath == null) {
+            return Optional.empty();
+        }
+
+        List<String> partitionKeys = Collections.emptyList();
+        if (params.has("partition-keys")) {
+            partitionKeys =
+                    Arrays.stream(params.get("partition-keys").split(","))
+                            .collect(Collectors.toList());
+        }
+
+        List<String> primaryKeys = Collections.emptyList();
+        if (params.has("primary-keys")) {
+            primaryKeys =
+                    Arrays.stream(params.get("primary-keys").split(","))
+                            .collect(Collectors.toList());
+        }
+
+        Map<String, String> mySqlConfig = getConfigMap(params, "mysql-conf");
+        Map<String, String> paimonConfig = getConfigMap(params, "paimon-conf");
+        if (mySqlConfig == null || paimonConfig == null) {
+            return Optional.empty();
+        }
+
+        return Optional.of(
+                new MySqlSyncTableAction(
+                        mySqlConfig,
+                        tablePath.f0,
+                        tablePath.f1,
+                        tablePath.f2,
+                        partitionKeys,
+                        primaryKeys,
+                        paimonConfig));
+    }
+
+    private static Map<String, String> getConfigMap(MultipleParameterTool params, String key) {
+        Map<String, String> map = new HashMap<>();
+
+        for (String param : params.getMultiParameter(key)) {
+            String[] kv = param.split("=");
+            if (kv.length == 2) {
+                map.put(kv[0], kv[1]);
+                continue;
+            }
+
+            System.err.println(
+                    "Invalid " + key + " " + param + ".\nRun mysql-sync-table --help for help.");
+            return null;
+        }
+        return map;
+    }
+
+    private static void printHelp() {
+        System.out.println(
+                "Action \"mysql-sync-table\" creates a streaming job "
+                        + "with a Flink MySQL CDC source and a Paimon table sink to consume CDC events.");
+        System.out.println();
+
+        System.out.println("Syntax:");
+        System.out.println(
+                "  mysql-sync-table --warehouse <warehouse-path> --database <database-name> "
+                        + "--table <table-name> "
+                        + "[--partition-keys <partition-keys>] "
+                        + "[--primary-keys <primary-keys>] "
+                        + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
+                        + "[--paimon-conf <paimon-table-sink-conf> [--paimon-conf <paimon-table-sink-conf> ...]]");
+        System.out.println();
+
+        System.out.println("Partition keys syntax:");
+        System.out.println("  key1,key2,...");
+        System.out.println(
+                "If partition key is not defined and the specified Paimon table does not exist, "
+                        + "this action will automatically create an unpartitioned Paimon table.");
+        System.out.println();
+
+        System.out.println("Primary keys syntax:");
+        System.out.println("  key1,key2,...");
+        System.out.println("Primary keys will be derived from MySQL tables if not specified.");
+        System.out.println();
+
+        System.out.println("MySQL CDC source conf syntax:");
+        System.out.println("  key=value");
+        System.out.println(
+                "'hostname', 'username', 'password', 'database-name' and 'table-name' "
+                        + "are required configurations, others are optional.");
+        System.out.println(
+                "For a complete list of supported configurations, "
+                        + "see https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options");
+        System.out.println();
+
+        System.out.println("Paimon table sink conf syntax:");
+        System.out.println("  key=value");
+        System.out.println(
+                "For a complete list of supported configurations, "
+                        + "see https://paimon.apache.org/docs/master/maintenance/configurations/");
+        System.out.println();
+
+        System.out.println("Examples:");
+        System.out.println(
+                "  mysql-sync-table \\"
+                        + "    --warehouse hdfs:///path/to/warehouse \\"
+                        + "    --database test_db \\"
+                        + "    --table test_table \\"
+                        + "    --partition-keys pt \\"
+                        + "    --primary-keys pt,uid \\"
+                        + "    --mysql-conf hostname=127.0.0.1 \\"
+                        + "    --mysql-conf username=root \\"
+                        + "    --mysql-conf password=123456 \\"
+                        + "    --mysql-conf database-name=source_db \\"
+                        + "    --mysql-conf table-name='source_table_.*' \\"
+                        + "    --paimon-conf bucket=4 \\"
+                        + "    --paimon-conf changelog-producer=input \\"
+                        + "    --paimon-conf sink.parallelism=4 \\");
+    }
+
+    @Override
+    public void run() throws Exception {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        build(env);
+        env.execute(String.format("MySQL-Paimon Table Sync: %s.%s", database, table));
     }
 }

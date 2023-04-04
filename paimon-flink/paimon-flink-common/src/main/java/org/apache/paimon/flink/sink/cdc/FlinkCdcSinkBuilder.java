@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.LogSinkFunction;
+import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -89,7 +90,8 @@ public class FlinkCdcSinkBuilder<T> {
                         .setParallelism(input.getParallelism());
 
         DataStream<Void> schemaChangeProcessFunction =
-                parsed.getSideOutput(CdcParsingProcessFunction.SCHEMA_CHANGE_OUTPUT_TAG)
+                SingleOutputStreamOperatorUtils.getSideOutput(
+                                parsed, CdcParsingProcessFunction.SCHEMA_CHANGE_OUTPUT_TAG)
                         .process(
                                 new SchemaChangeProcessFunction(
                                         new SchemaManager(table.fileIO(), table.location())));

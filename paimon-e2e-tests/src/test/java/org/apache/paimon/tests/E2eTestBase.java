@@ -25,6 +25,7 @@ import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Container;
 import org.testcontainers.containers.ContainerState;
 import org.testcontainers.containers.DockerComposeContainer;
+import org.testcontainers.containers.Network;
 import org.testcontainers.containers.output.OutputFrame;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -39,6 +40,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -77,6 +80,7 @@ public abstract class E2eTestBase {
     private static final int CHECK_RESULT_RETRIES = 60;
     private final List<String> currentResults = new ArrayList<>();
 
+    protected Network network;
     protected DockerComposeContainer<?> environment;
     protected ContainerState jobManager;
 
@@ -85,6 +89,8 @@ public abstract class E2eTestBase {
         List<String> services = new ArrayList<>();
         services.add("jobmanager");
         services.add("taskmanager");
+
+        network = Network.newNetwork();
         environment =
                 new DockerComposeContainer<>(
                                 new File(
@@ -92,8 +98,10 @@ public abstract class E2eTestBase {
                                                 .getClassLoader()
                                                 .getResource("docker-compose.yaml")
                                                 .toURI()))
+                        .withEnv("NETWORK_ID", network.getId())
                         .withLogConsumer("jobmanager_1", new LogConsumer(LOG))
-                        .withLogConsumer("taskmanager_1", new LogConsumer(LOG));
+                        .withLogConsumer("taskmanager_1", new LogConsumer(LOG))
+                        .withLocalCompose(true);
         if (withKafka) {
             List<String> kafkaServices = Arrays.asList("zookeeper", "kafka");
             services.addAll(kafkaServices);
@@ -141,6 +149,9 @@ public abstract class E2eTestBase {
     public void after() {
         if (environment != null) {
             environment.stop();
+        }
+        if (network != null) {
+            network.close();
         }
     }
 
@@ -200,7 +211,11 @@ public abstract class E2eTestBase {
                         topicName, tmpDir, filename));
     }
 
-    protected void runSql(String sql) throws Exception {
+    private static final Pattern JOB_ID_PATTERN =
+            Pattern.compile(
+                    "SQL update statement has been successfully submitted to the cluster:\\s+Job ID: (\\S+)");
+
+    protected String runSql(String sql) throws Exception {
         String fileName = UUID.randomUUID() + ".sql";
         writeSharedFile(fileName, sql);
         Container.ExecResult execResult =
@@ -213,6 +228,13 @@ public abstract class E2eTestBase {
         LOG.info(execResult.getStderr());
         if (execResult.getExitCode() != 0) {
             throw new AssertionError("Failed when submitting the SQL job.");
+        }
+
+        Matcher matcher = JOB_ID_PATTERN.matcher(execResult.getStdout());
+        if (matcher.find()) {
+            return matcher.group(1);
+        } else {
+            return null;
         }
     }
 
