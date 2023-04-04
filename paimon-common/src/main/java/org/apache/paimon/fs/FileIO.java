@@ -41,7 +41,6 @@ import java.util.ServiceLoader;
 import java.util.UUID;
 
 import static org.apache.paimon.fs.FileIOUtils.checkAccess;
-import static org.apache.paimon.options.CatalogOptions.FS_ALLOW_HADOOP_FALLBACK;
 
 /**
  * File IO to read and write file.
@@ -248,21 +247,22 @@ public interface FileIO extends Serializable {
 
         Map<String, FileIOLoader> loaders = discoverLoaders();
         FileIOLoader loader = loaders.get(uri.getScheme());
+
+        // load fallbackIO
         if (loader == null) {
-            // load fallbackIO
             loader = checkAccess(config.fallbackIO(), path);
+        }
 
-            // load hadoopIO
-            if (config.options().get(FS_ALLOW_HADOOP_FALLBACK)) {
-                loader = checkAccess(new HadoopFileIOLoader(), path);
-            }
+        // load hadoopIO
+        if (loader == null) {
+            loader = checkAccess(new HadoopFileIOLoader(), path);
+        }
 
-            if (loader == null) {
-                throw new UnsupportedSchemeException(
-                        String.format(
-                                "Could not find a file io implementation for scheme '%s' in the classpath.",
-                                uri.getScheme()));
-            }
+        if (loader == null) {
+            throw new UnsupportedSchemeException(
+                    String.format(
+                            "Could not find a file io implementation for scheme '%s' in the classpath.",
+                            uri.getScheme()));
         }
 
         FileIO fileIO = loader.load(path);
