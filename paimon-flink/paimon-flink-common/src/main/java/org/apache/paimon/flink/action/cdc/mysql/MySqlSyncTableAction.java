@@ -532,20 +532,20 @@ public class MySqlSyncTableAction implements Action {
 
         System.out.println("Examples:");
         System.out.println(
-                "  mysql-sync-table \\"
-                        + "    --warehouse hdfs:///path/to/warehouse \\"
-                        + "    --database test_db \\"
-                        + "    --table test_table \\"
-                        + "    --partition-keys pt \\"
-                        + "    --primary-keys pt,uid \\"
-                        + "    --mysql-conf hostname=127.0.0.1 \\"
-                        + "    --mysql-conf username=root \\"
-                        + "    --mysql-conf password=123456 \\"
-                        + "    --mysql-conf database-name=source_db \\"
-                        + "    --mysql-conf table-name='source_table_.*' \\"
-                        + "    --paimon-conf bucket=4 \\"
-                        + "    --paimon-conf changelog-producer=input \\"
-                        + "    --paimon-conf sink.parallelism=4 \\");
+                "  mysql-sync-table \\\n"
+                        + "    --warehouse hdfs:///path/to/warehouse \\\n"
+                        + "    --database test_db \\\n"
+                        + "    --table test_table \\\n"
+                        + "    --partition-keys pt \\\n"
+                        + "    --primary-keys pt,uid \\\n"
+                        + "    --mysql-conf hostname=127.0.0.1 \\\n"
+                        + "    --mysql-conf username=root \\\n"
+                        + "    --mysql-conf password=123456 \\\n"
+                        + "    --mysql-conf database-name=source_db \\\n"
+                        + "    --mysql-conf table-name='source_table_.*' \\\n"
+                        + "    --paimon-conf bucket=4 \\\n"
+                        + "    --paimon-conf changelog-producer=input \\\n"
+                        + "    --paimon-conf sink.parallelism=4");
     }
 
     @Override
