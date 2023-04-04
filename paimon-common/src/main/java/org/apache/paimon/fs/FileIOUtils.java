@@ -30,7 +30,7 @@ public class FileIOUtils {
             }
 
             // check access
-            fileIO.load(path).getFileStatus(path);
+            fileIO.load(path).exists(path);
             return fileIO;
         } catch (IOException ignore) {
             return null;
