@@ -69,7 +69,7 @@ You can also manually build bundled jar from the source code.
 To build from source code, [clone the git repository]({{< github_repo >}}).
 
 Build bundled jar with the following command.
-`mvn clean install -Dmaven.test.skip=true`
+`mvn clean install -DskipTests`
 
 You can find Hive connector jar in `./paimon-hive/paimon-hive-connector-<hive-version>/target/paimon-hive-connector-<hive-version>-{{< version >}}.jar`.
 
