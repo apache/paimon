@@ -43,6 +43,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiConsumer;
 
@@ -105,9 +106,22 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     protected abstract FileStoreTable copy(TableSchema newTableSchema);
 
-    // sometimes we have to change some Immutable options to implement features, so don't check it
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
+        Map<String, String> options = tableSchema.options();
+        // check option is not immutable
+        dynamicOptions.forEach(
+                (k, v) -> {
+                    if (!Objects.equals(v, options.get(k))) {
+                        SchemaManager.checkAlterTableOption(k);
+                    }
+                });
+
+        return internalCopyWithoutCheck(dynamicOptions);
+    }
+
+    @Override
+    public FileStoreTable internalCopyWithoutCheck(Map<String, String> dynamicOptions) {
         Map<String, String> options = new HashMap<>(tableSchema.options());
 
         // merge non-null dynamic options into schema.options

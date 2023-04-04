@@ -131,7 +131,7 @@ public class MergeIntoAction extends ActionBase {
                             table.getClass().getName()));
         }
 
-        disablePartialUpdateMergeEngine();
+        forceSinking();
 
         // init primaryKeys of target table
         primaryKeys = ((FileStoreTable) table).schema().primaryKeys();

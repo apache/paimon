@@ -38,6 +38,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildSimpleQuery;
@@ -98,7 +99,9 @@ public class DeleteActionITCase extends ActionITCaseBase {
                         put(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE.key(), "true");
                         put(
                                 CoreOptions.CHANGELOG_PRODUCER.key(),
-                                CoreOptions.ChangelogProducer.FULL_COMPACTION.toString());
+                                ThreadLocalRandom.current().nextBoolean()
+                                        ? CoreOptions.ChangelogProducer.LOOKUP.toString()
+                                        : CoreOptions.ChangelogProducer.FULL_COMPACTION.toString());
                     }
                 });
 
@@ -122,11 +125,16 @@ public class DeleteActionITCase extends ActionITCaseBase {
         validateStreamingReadResult(
                 streamItr,
                 Arrays.asList(changelogRow("-D", 1, "Say", "A"), changelogRow("-D", 2, "Hi", "B")));
-        streamItr.close();
 
         // test partial update still works after action
         insertInto(
                 tableName, "(4, CAST (NULL AS STRING), '$')", "(4, 'Test', CAST (NULL AS STRING))");
+
+        validateStreamingReadResult(
+                streamItr,
+                Arrays.asList(
+                        changelogRow("-U", 4, "Paimon", "D"), changelogRow("+U", 4, "Test", "$")));
+        streamItr.close();
 
         testBatchRead(
                 buildSimpleQuery(tableName),

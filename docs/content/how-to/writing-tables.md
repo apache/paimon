@@ -263,7 +263,8 @@ filter_spec is equal to the 'WHERE' clause in SQL DELETE statement. Examples:
 ```
 
 {{< hint info >}}
-If you have set `merge-engine` = `partial-update`, it will be disabled temporarily. 
+If you have set `merge-engine` = `partial-update` or `aggregation`, it will be reset by dynamic options 
+(no affect to file system).
 {{< /hint >}}
 
 For more information of 'delete', see
@@ -288,7 +289,8 @@ Paimon supports "MERGE INTO" via submitting the 'merge-into' job through `flink 
 Important table properties setting:
 1. Only [primary key table]({{< ref "concepts/primary-key-table" >}}) supports this feature.
 2. The action won't produce UPDATE_BEFORE, so it's not recommended to set 'changelog-producer' = 'input'.
-3. If you have set `merge-engine` = `partial-update`, it will be disabled temporarily.
+3. If you have set `merge-engine` = `partial-update` or `aggregation`, it will be reset by dynamic options
+(no affect to file system).
 {{< /hint >}}
 
 The design referenced such syntax:
