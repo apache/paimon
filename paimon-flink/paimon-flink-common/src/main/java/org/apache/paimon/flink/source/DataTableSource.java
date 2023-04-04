@@ -34,10 +34,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
 import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
-import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Projection;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -220,11 +218,7 @@ public class DataTableSource extends FlinkTableSource
             if (streaming) {
                 parallelism = options.get(CoreOptions.BUCKET);
             } else {
-
-                Preconditions.checkState(table instanceof DataTable);
-                DataTable dataTable = (DataTable) table;
-                splits = dataTable.newScan().plan().splits();
-
+                splits = table.newReadBuilder().withFilter(predicate).newScan().plan().splits();
                 if (null != splits) {
                     parallelism = splits.size();
                 }
