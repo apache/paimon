@@ -249,8 +249,9 @@ public interface FileIO extends Serializable {
         FileIOLoader loader = loaders.get(uri.getScheme());
 
         // load fallbackIO
+        FileIOLoader fallbackIO = config.fallbackIO();
         if (loader == null) {
-            loader = checkAccess(config.fallbackIO(), path);
+            loader = checkAccess(fallbackIO, path);
         }
 
         // load hadoopIO
@@ -259,10 +260,18 @@ public interface FileIO extends Serializable {
         }
 
         if (loader == null) {
+            String fallbackMsg = "";
+            if (fallbackIO != null) {
+                fallbackMsg =
+                        " "
+                                + fallbackIO.getClass().getSimpleName()
+                                + " also cannot access this path.";
+            }
             throw new UnsupportedSchemeException(
                     String.format(
-                            "Could not find a file io implementation for scheme '%s' in the classpath.",
-                            uri.getScheme()));
+                            "Could not find a file io implementation for scheme '%s' in the classpath."
+                                    + "%s Hadoop FileSystem also cannot access this path '%s'.",
+                            uri.getScheme(), fallbackMsg, path));
         }
 
         FileIO fileIO = loader.load(path);
