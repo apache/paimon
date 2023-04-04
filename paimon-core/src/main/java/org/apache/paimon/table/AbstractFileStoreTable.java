@@ -41,6 +41,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -102,7 +103,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
         // check option is not immutable
-        Map<String, String> options = tableSchema.options();
+        Map<String, String> options = new HashMap<>(tableSchema.options());
         dynamicOptions.forEach(
                 (k, v) -> {
                     if (!Objects.equals(v, options.get(k))) {
@@ -110,10 +111,17 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                     }
                 });
 
-        Options newOptions = Options.fromMap(options);
+        // merge non-null dynamic options into schema.options
+        dynamicOptions.forEach(
+                (k, v) -> {
+                    if (v == null) {
+                        options.remove(k);
+                    } else {
+                        options.put(k, v);
+                    }
+                });
 
-        // merge dynamic options into schema.options
-        dynamicOptions.forEach(newOptions::setString);
+        Options newOptions = Options.fromMap(options);
 
         // set path always
         newOptions.set(PATH, path.toString());
