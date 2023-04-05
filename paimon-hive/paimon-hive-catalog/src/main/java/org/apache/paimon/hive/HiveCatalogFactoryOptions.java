@@ -21,16 +21,24 @@ package org.apache.paimon.hive;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 
-/** {@link ConfigOption}s for {@link HiveCatalog}. */
+/** Options for hive catalog. */
 public final class HiveCatalogFactoryOptions {
 
     public static final String IDENTIFIER = "hive";
 
     public static final ConfigOption<String> HIVE_CONF_DIR =
-            ConfigOptions.key("hive-conf-dir").stringType().noDefaultValue();
+            ConfigOptions.key("hive-conf-dir")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "File directory of the hive-site.xml , used to create HiveMetastoreClient and security authentication, such as Kerberos, LDAP, Ranger and so on");
 
     public static final ConfigOption<String> HADOOP_CONF_DIR =
-            ConfigOptions.key("hadoop-conf-dir").stringType().noDefaultValue();
+            ConfigOptions.key("hadoop-conf-dir")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "File directory of the core-site.xml、hdfs-site.xml、yarn-site.xml、mapred-site.xml. Currently, only local file system paths are supported. We recommend using the HADOOP_CONF_DIR environment variable to specify the Hadoop configuration. So consider using this parameter only if the environment variables don't meet your needs, such as when you want to set up the Hadoop configuration individually for each HiveCatalog");
 
     private HiveCatalogFactoryOptions() {}
 }

@@ -565,7 +565,6 @@ public class HiveCatalog extends AbstractCatalog {
             org.apache.hadoop.fs.Path hiveSite =
                     new org.apache.hadoop.fs.Path(hiveConfDir, HIVE_SITE_FILE);
             if (!hiveSite.toUri().isAbsolute()) {
-                // treat relative URI as local file to be compatible with previous behavior
                 hiveSite = new org.apache.hadoop.fs.Path(new File(hiveSite.toString()).toURI());
             }
             hiveConf.addResource(hiveSite);
