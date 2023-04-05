@@ -19,8 +19,7 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
-
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
 import javax.annotation.Nullable;
 

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
 import java.io.IOException;
 

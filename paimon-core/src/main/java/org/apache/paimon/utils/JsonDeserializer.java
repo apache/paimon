@@ -18,7 +18,7 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 /** Json deserializer for jackson. */
 public interface JsonDeserializer<T> {

@@ -42,37 +42,9 @@ under the License.
     </modules>
 
     <dependencies>
-        <!--
-        TODO change these to paimon-bundle once we get rid of flink-shaded dependencies
-        -->
-
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-codegen-loader</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-common</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-core</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-format</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-hive-catalog</artifactId>
+            <artifactId>paimon-bundle</artifactId>
             <version>${project.version}</version>
         </dependency>
 
