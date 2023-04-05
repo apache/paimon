@@ -20,8 +20,7 @@ package org.apache.paimon.security;
 
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
-
-import org.apache.commons.lang.StringUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import java.io.File;
 
