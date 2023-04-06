@@ -91,7 +91,7 @@ CREATE CATALOG my_hive WITH (
     'type' = 'paimon',
     'metastore' = 'hive',
     'uri' = 'thrift://<hive-metastore-host-name>:<port>',
-    'warehouse' = 'hdfs://path/to/warehouse',
+    'warehouse' = 'hdfs://path/to/warehouse'
 );
 
 USE CATALOG my_hive;
