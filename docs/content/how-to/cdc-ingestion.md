@@ -1,9 +1,9 @@
 ---
-title: "Change Data Capture"
+title: "CDC Ingestion"
 weight: 7
 type: docs
 aliases:
-- /how-to/change-data-capture.html
+- /how-to/cdc-ingestion.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,9 +24,9 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Change Data Capture
+# CDC Ingestion
 
-Paimon supports synchronizing changes from different databases using change data capture. This feature requires Flink and its [CDC connectors](https://ververica.github.io/flink-cdc-connectors/).
+Paimon supports synchronizing changes from different databases using change data capture (CDC). This feature requires Flink and its [CDC connectors](https://ververica.github.io/flink-cdc-connectors/).
 
 ## MySQL
 
