@@ -22,7 +22,7 @@ import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 
 /** Options for hive catalog. */
-public final class HiveCatalogFactoryOptions {
+public final class HiveCatalogOptions {
 
     public static final String IDENTIFIER = "hive";
 
@@ -40,5 +40,5 @@ public final class HiveCatalogFactoryOptions {
                     .withDescription(
                             "File directory of the core-site.xml、hdfs-site.xml、yarn-site.xml、mapred-site.xml. Currently, only local file system paths are supported. We recommend using the HADOOP_CONF_DIR environment variable to specify the Hadoop configuration. So consider using this parameter only if the environment variables don't meet your needs, such as when you want to set up the Hadoop configuration individually for each HiveCatalog");
 
-    private HiveCatalogFactoryOptions() {}
+    private HiveCatalogOptions() {}
 }

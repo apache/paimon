@@ -56,6 +56,8 @@ import javax.annotation.Nullable;
 
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -567,10 +569,22 @@ public class HiveCatalog extends AbstractCatalog {
             if (!hiveSite.toUri().isAbsolute()) {
                 hiveSite = new org.apache.hadoop.fs.Path(new File(hiveSite.toString()).toURI());
             }
+            try (InputStream inputStream = hiveSite.getFileSystem(hadoopConf).open(hiveSite)) {
+                hiveConf.addResource(inputStream, hiveSite.toString());
+                // trigger a read from the conf to avoid input stream is closed
+                isEmbeddedMetastore(hiveConf);
+            } catch (IOException e) {
+                throw new RuntimeException(
+                        "Failed to load hive-site.xml from specified path:" + hiveSite, e);
+            }
             hiveConf.addResource(hiveSite);
         }
 
         return hiveConf;
+    }
+
+    public static boolean isEmbeddedMetastore(HiveConf hiveConf) {
+        return isNullOrWhitespaceOnly(hiveConf.getVar(HiveConf.ConfVars.METASTOREURIS));
     }
 
     /**

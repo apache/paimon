@@ -31,9 +31,9 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.hadoop.hive.conf.HiveConf;
 
 import static org.apache.paimon.hive.HiveCatalog.createHiveConf;
-import static org.apache.paimon.hive.HiveCatalogFactoryOptions.HADOOP_CONF_DIR;
-import static org.apache.paimon.hive.HiveCatalogFactoryOptions.HIVE_CONF_DIR;
-import static org.apache.paimon.hive.HiveCatalogFactoryOptions.IDENTIFIER;
+import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
+import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
+import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 
 /** Factory to create {@link HiveCatalog}. */
 public class HiveCatalogFactory implements CatalogFactory {
