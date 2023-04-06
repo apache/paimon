@@ -1,0 +1,12 @@
+paimon-e2e-tests
+Copyright 2023-2023 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+This project bundles the following dependencies under the Apache Software License 2.0 (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+- org.apache.flink:flink-shaded-hadoop-2-uber:2.8.3-10.0
+- org.apache.flink:flink-sql-connector-kafka:1.17.0
+- org.apache.flink:flink-sql-connector-hive-2.3.9_2.12:1.17.0
+- com.ververica:flink-sql-connector-mysql-cdc:2.3.0
