@@ -23,6 +23,11 @@ import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 
 import java.util.Objects;
 
+/**
+ * A utility class to compute which downstream channel a given record should be sent to.
+ *
+ * @param <T> type of record
+ */
 public abstract class AbstractChannelComputer<T> {
 
     private final int numChannels;

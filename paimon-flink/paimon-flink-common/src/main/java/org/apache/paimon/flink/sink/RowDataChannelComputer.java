@@ -22,6 +22,7 @@ import org.apache.paimon.schema.TableSchema;
 
 import org.apache.flink.table.data.RowData;
 
+/** {@link AbstractChannelComputer} for {@link RowData}. */
 public class RowDataChannelComputer extends AbstractChannelComputer<RowData> {
 
     public RowDataChannelComputer(

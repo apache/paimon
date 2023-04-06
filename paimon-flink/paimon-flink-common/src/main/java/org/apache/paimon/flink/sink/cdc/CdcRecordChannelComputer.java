@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.flink.sink.AbstractChannelComputer;
 import org.apache.paimon.schema.TableSchema;
 
+/** {@link AbstractChannelComputer} for {@link CdcRecord}. */
 public class CdcRecordChannelComputer extends AbstractChannelComputer<CdcRecord> {
 
     public CdcRecordChannelComputer(

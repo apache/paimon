@@ -25,6 +25,12 @@ import org.apache.flink.runtime.plugable.SerializationDelegate;
 import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
+/**
+ * A {@link StreamPartitioner} which sends records from the same bucket to the same downstream
+ * channel.
+ *
+ * @param <T> type of record
+ */
 public class BucketingStreamPartitioner<T> extends StreamPartitioner<T> {
 
     private final SerializableFunction<Integer, AbstractChannelComputer<T>> channelComputerFactory;
