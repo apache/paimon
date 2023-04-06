@@ -32,9 +32,9 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 /**
- * Run length decoder for data and dictionary ids. See
- * https://github.com/apache/parquet-format/blob/master/Encodings.md See {@link
- * RunLengthBitPackingHybridDecoder}.
+ * Run length decoder for data and dictionary ids. See <a
+ * href="https://github.com/apache/parquet-format/blob/master/Encodings.md">Parquet Format
+ * Encodings</a> See {@link RunLengthBitPackingHybridDecoder}.
  */
 final class RunLengthDecoder {
 

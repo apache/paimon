@@ -19,8 +19,9 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.DataTableScan.DataFilePlan;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableScan;
 
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
@@ -41,7 +42,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.Callable;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -62,27 +62,32 @@ public class ContinuousFileSplitEnumerator
 
     private final FileStoreSourceSplitGenerator splitGenerator;
 
-    private final Callable<DataFilePlan> callable;
+    private final StreamTableScan scan;
 
-    private Long nextSnapshotId;
+    /** Default batch splits size to avoid exceed `akka.framesize`. */
+    private final int splitBatchSize;
+
+    @Nullable private Long nextSnapshotId;
 
     private boolean finished = false;
 
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> remainSplits,
-            Long nextSnapshotId,
+            @Nullable Long nextSnapshotId,
             long discoveryInterval,
-            Callable<DataFilePlan> callable) {
+            int splitBatchSize,
+            StreamTableScan scan) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.bucketSplits = new HashMap<>();
         addSplits(remainSplits);
         this.nextSnapshotId = nextSnapshotId;
         this.discoveryInterval = discoveryInterval;
+        this.splitBatchSize = splitBatchSize;
         this.readersAwaitingSplit = new HashSet<>();
         this.splitGenerator = new FileStoreSourceSplitGenerator();
-        this.callable = callable;
+        this.scan = scan;
     }
 
     private void addSplits(Collection<FileStoreSourceSplit> splits) {
@@ -107,7 +112,7 @@ public class ContinuousFileSplitEnumerator
 
     @Override
     public void start() {
-        context.callAsync(callable, this::processDiscoveredSplits, 0, discoveryInterval);
+        context.callAsync(scan::plan, this::processDiscoveredSplits, 0, discoveryInterval);
     }
 
     @Override
@@ -150,7 +155,7 @@ public class ContinuousFileSplitEnumerator
 
     // ------------------------------------------------------------------------
 
-    private void processDiscoveredSplits(DataFilePlan plan, Throwable error) {
+    private void processDiscoveredSplits(TableScan.Plan plan, Throwable error) {
         if (error != null) {
             if (error instanceof EndOfScanException) {
                 // finished
@@ -163,11 +168,12 @@ public class ContinuousFileSplitEnumerator
             return;
         }
 
-        if (plan == null) {
+        nextSnapshotId = scan.checkpoint();
+
+        if (plan.splits().isEmpty()) {
             return;
         }
 
-        nextSnapshotId = plan.snapshotId + 1;
         addSplits(splitGenerator.createSplits(plan));
         assignSplits();
     }
@@ -204,9 +210,11 @@ public class ContinuousFileSplitEnumerator
                                 readersAwaitingSplit.remove(task);
                                 return;
                             }
-                            assignment
-                                    .computeIfAbsent(task, i -> new ArrayList<>())
-                                    .add(splits.poll());
+                            List<FileStoreSourceSplit> taskAssignment =
+                                    assignment.computeIfAbsent(task, i -> new ArrayList<>());
+                            if (taskAssignment.size() < splitBatchSize) {
+                                taskAssignment.add(splits.poll());
+                            }
                         }
                     }
                 });

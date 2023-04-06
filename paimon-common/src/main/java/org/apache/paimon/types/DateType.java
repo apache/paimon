@@ -18,7 +18,7 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 /**
  * Data type of a date consisting of {@code year-month-day} with values ranging from {@code
@@ -29,7 +29,7 @@ import org.apache.paimon.annotation.Experimental;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public final class DateType extends DataType {
 
     private static final long serialVersionUID = 1L;

@@ -74,11 +74,11 @@ public class HiveSchema {
             throw new UnsupportedOperationException(
                     "Location property is missing for table "
                             + tableName
-                            + ". Currently Flink paimon only supports external table for Hive "
+                            + ". Currently Paimon only supports external table for Hive "
                             + "so location property must be set.");
         }
         Path path = new Path(location);
-        Options options = new Options();
+        Options options = PaimonJobConf.extractCatalogConfig(configuration);
         options.set(CoreOptions.PATH, path.toUri().toString());
         CatalogContext catalogContext = CatalogContext.create(options, configuration);
         TableSchema tableSchema = FileStoreTableFactory.create(catalogContext).schema();
@@ -152,7 +152,7 @@ public class HiveSchema {
             throw new IllegalArgumentException(
                     "Hive DDL and paimon schema mismatched! "
                             + "It is recommended not to write any column definition "
-                            + "as Flink paimon external table can read schema from the specified location.\n"
+                            + "as Paimon external table can read schema from the specified location.\n"
                             + "Mismatched fields are:\n"
                             + String.join("--------------------\n", mismatched));
         }

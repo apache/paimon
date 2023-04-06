@@ -38,30 +38,13 @@ under the License.
         <module>paimon-flink-1.14</module>
         <module>paimon-flink-1.15</module>
         <module>paimon-flink-1.16</module>
+        <module>paimon-flink-1.17</module>
     </modules>
 
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-codegen-loader</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-common</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-core</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-format</artifactId>
+            <artifactId>paimon-bundle</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -127,6 +110,7 @@ under the License.
             <groupId>org.apache.kafka</groupId>
             <artifactId>kafka-clients</artifactId>
             <version>${kafka.version}</version>
+            <scope>provided</scope>
         </dependency>
 
         <dependency>

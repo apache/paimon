@@ -36,8 +36,11 @@ public class ParquetFileFormatFactory implements FileFormatFactory {
     }
 
     @Override
-    public ParquetFileFormat create(Options formatOptions) {
-        return new ParquetFileFormat(supplyDefaultOptions(formatOptions));
+    public ParquetFileFormat create(FormatContext formatContext) {
+        return new ParquetFileFormat(
+                new FormatContext(
+                        supplyDefaultOptions(formatContext.formatOptions()),
+                        formatContext.readBatchSize()));
     }
 
     private Options supplyDefaultOptions(Options options) {

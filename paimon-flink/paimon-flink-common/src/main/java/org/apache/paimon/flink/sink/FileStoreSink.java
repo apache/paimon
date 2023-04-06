@@ -32,7 +32,7 @@ import javax.annotation.Nullable;
 import java.util.Map;
 
 /** {@link FlinkSink} for writing records into paimon. */
-public class FileStoreSink extends FlinkSink {
+public class FileStoreSink extends FlinkSink<RowData> {
 
     private static final long serialVersionUID = 1L;
 
@@ -54,7 +54,7 @@ public class FileStoreSink extends FlinkSink {
     @Override
     protected OneInputStreamOperator<RowData, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, boolean isStreaming) {
-        return new StoreWriteOperator(table, logSinkFunction, writeProvider);
+        return new RowDataStoreWriteOperator(table, logSinkFunction, writeProvider);
     }
 
     @Override

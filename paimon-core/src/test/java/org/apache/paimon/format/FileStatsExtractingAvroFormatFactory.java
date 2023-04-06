@@ -18,8 +18,6 @@
 
 package org.apache.paimon.format;
 
-import org.apache.paimon.options.Options;
-
 /** Factory to create {@link FileStatsExtractingAvroFormat}. */
 public class FileStatsExtractingAvroFormatFactory implements FileFormatFactory {
 
@@ -29,7 +27,7 @@ public class FileStatsExtractingAvroFormatFactory implements FileFormatFactory {
     }
 
     @Override
-    public FileFormat create(Options formatOptions) {
+    public FileFormat create(FormatContext formatContext) {
         return new FileStatsExtractingAvroFormat();
     }
 }

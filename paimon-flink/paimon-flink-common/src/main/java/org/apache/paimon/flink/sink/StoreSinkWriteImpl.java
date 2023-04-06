@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
@@ -36,25 +37,26 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 /** Default implementation of {@link StoreSinkWrite}. This writer does not have states. */
 public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     private static final Logger LOG = LoggerFactory.getLogger(StoreSinkWriteImpl.class);
 
-    protected final FileStoreTable table;
     protected final String commitUser;
-    protected final TableWriteImpl<?> write;
+    private final boolean waitCompaction;
+
+    protected TableWriteImpl<?> write;
 
     public StoreSinkWriteImpl(
             FileStoreTable table,
             StateInitializationContext context,
             String initialCommitUser,
             IOManager ioManager,
-            boolean isOverwrite)
+            boolean isOverwrite,
+            boolean waitCompaction)
             throws Exception {
-        this.table = table;
-
         // Each job can only have one user name and this name must be consistent across restarts.
         // We cannot use job id as commit user name here because user may change job id by creating
         // a savepoint, stop the job and then resume from savepoint.
@@ -77,6 +79,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                                     new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()))
                             .withOverwrite(isOverwrite);
         }
+
+        this.waitCompaction = waitCompaction;
     }
 
     @Override
@@ -109,12 +113,13 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     }
 
     @Override
-    public List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
+    public List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
         List<Committable> committables = new ArrayList<>();
         if (write != null) {
             try {
-                for (CommitMessage committable : write.prepareCommit(doCompaction, checkpointId)) {
+                for (CommitMessage committable :
+                        write.prepareCommit(this.waitCompaction || waitCompaction, checkpointId)) {
                     committables.add(
                             new Committable(checkpointId, Committable.Kind.FILE, committable));
                 }
@@ -135,5 +140,17 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         if (write != null) {
             write.close();
         }
+    }
+
+    @Override
+    public void replace(Function<String, TableWriteImpl<?>> newWriteProvider) throws Exception {
+        if (commitUser == null) {
+            return;
+        }
+
+        List<AbstractFileStoreWrite.State> states = write.checkpoint();
+        write.close();
+        write = newWriteProvider.apply(commitUser);
+        write.restore(states);
     }
 }

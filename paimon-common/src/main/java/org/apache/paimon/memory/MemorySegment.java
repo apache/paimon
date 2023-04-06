@@ -18,7 +18,7 @@
 
 package org.apache.paimon.memory;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 import javax.annotation.Nullable;
 
@@ -39,7 +39,7 @@ import static org.apache.paimon.memory.MemoryUtils.getByteBufferAddress;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public final class MemorySegment {
 
     public static final sun.misc.Unsafe UNSAFE = MemoryUtils.UNSAFE;

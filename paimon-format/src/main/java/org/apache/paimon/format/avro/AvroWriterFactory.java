@@ -25,8 +25,7 @@ import org.apache.avro.file.DataFileWriter;
 import java.io.IOException;
 
 /**
- * A factory that creates an {@link AvroBulkWriter}. The factory takes a user-supplied builder to
- * assemble Parquet's writer and then turns it into a Flink {@code BulkWriter}.
+ * A factory that creates an {@link AvroBulkWriter}.
  *
  * @param <T> The type of record to write.
  */

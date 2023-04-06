@@ -20,7 +20,6 @@ package org.apache.paimon.format.avro;
 
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
-import org.apache.paimon.options.Options;
 
 /** Factory to create {@link AvroFileFormat}. */
 public class AvroFileFormatFactory implements FileFormatFactory {
@@ -31,7 +30,7 @@ public class AvroFileFormatFactory implements FileFormatFactory {
     }
 
     @Override
-    public FileFormat create(Options formatOptions) {
-        return new AvroFileFormat(formatOptions);
+    public FileFormat create(FormatContext formatContext) {
+        return new AvroFileFormat(formatContext.formatOptions());
     }
 }

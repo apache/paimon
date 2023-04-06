@@ -80,6 +80,11 @@ Produces the snapshot after the latest compaction on the table upon first startu
 <td>Produces a snapshot specified by "scan.snapshot-id".</td>
 <td>Continuously reads changes starting from a snapshot specified by "scan.snapshot-id", without producing a snapshot at the beginning.</td>
 </tr>
+<tr>
+<td>from-snapshot-full</td>
+<td>Produces a snapshot specified by "scan.snapshot-id".</td>
+<td>Produces from snapshot specified by "scan.snapshot-id" on the table upon first startup, and continuously reads changes.</td>
+</tr>
 </tbody>
 </table>
 
@@ -87,9 +92,43 @@ Users can also adjust `changelog-producer` table property to specify the pattern
 
 {{< img src="/img/scan-mode.png">}}
 
-{{< hint info >}}
-Streaming Source can also be bounded, you can specify 'scan.bounded.watermark' to define the end condition for bounded streaming mode, stream reading will end until a larger watermark snapshot is encountered.
-{{< /hint >}}
+## Time Travel
+
+Currently, Paimon supports time travel for Flink and Spark 3 (requires Spark 3.3+).
+
+{{< tabs "time-travel-example" >}}
+
+{{< tab "Flink" >}}
+****
+you can use [dynamic table options](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql/queries/hints/#dynamic-table-options) to specify scan mode and from where to start:
+
+```sql
+-- travel to snapshot with id 1L
+SELECT * FROM t /*+ OPTIONS('scan.snapshot-id' = '1') */;
+
+-- travel to specified timestamp with a long value in milliseconds
+SELECT * FROM t /*+ OPTIONS('scan.timestamp-millis' = '1678883047356') */;
+```
+{{< /tab >}}
+
+{{< tab "Spark3" >}}
+
+you can use `VERSION AS OF` and `TIMESTAMP AS OF` in query to do time travel:
+
+```sql
+-- travel to snapshot with id 1L (use snapshot id as version)
+SELECT * FROM t VERSION AS OF 1;
+
+-- travel to specified timestamp 
+SELECT * FROM t TIMESTAMP AS OF '2023-06-01 00:00:00.123';
+
+-- you can also use a long value in seconds as timestamp
+SELECT * FROM t TIMESTAMP AS OF 1678883047;
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
 
 ## System Tables
 

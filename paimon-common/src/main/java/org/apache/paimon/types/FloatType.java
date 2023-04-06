@@ -18,7 +18,7 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 /**
  * Data type of a 4-byte single precision floating point number. Compared to the SQL standard, the
@@ -26,7 +26,7 @@ import org.apache.paimon.annotation.Experimental;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class FloatType extends DataType {
 
     private static final long serialVersionUID = 1L;

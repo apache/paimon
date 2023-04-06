@@ -18,14 +18,6 @@
 
 package org.apache.paimon.utils;
 
-import java.io.BufferedWriter;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.Map;
@@ -40,72 +32,6 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 /** This class contains reusable utility methods for unit tests. */
 public class CommonTestUtils {
-
-    /**
-     * Creates a copy of an object via Java Serialization.
-     *
-     * @param original The original object.
-     * @return The copied object.
-     */
-    public static <T extends java.io.Serializable> T createCopySerializable(T original)
-            throws IOException {
-        if (original == null) {
-            throw new IllegalArgumentException();
-        }
-
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        ObjectOutputStream oos = new ObjectOutputStream(baos);
-        oos.writeObject(original);
-        oos.close();
-        baos.close();
-
-        ByteArrayInputStream bais = new ByteArrayInputStream(baos.toByteArray());
-
-        try (ObjectInputStream ois = new ObjectInputStream(bais)) {
-            @SuppressWarnings("unchecked")
-            T copy = (T) ois.readObject();
-            return copy;
-        } catch (ClassNotFoundException e) {
-            throw new IOException(e);
-        }
-    }
-
-    /**
-     * Creates a temporary file that contains the given string. The file is written with the
-     * platform's default encoding.
-     *
-     * <p>The temp file is automatically deleted on JVM exit.
-     *
-     * @param contents The contents to be written to the file.
-     * @return The temp file URI.
-     */
-    public static String createTempFile(String contents) throws IOException {
-        File f = File.createTempFile("flink_test_", ".tmp");
-        f.deleteOnExit();
-
-        try (BufferedWriter out = new BufferedWriter(new FileWriter(f))) {
-            out.write(contents);
-        }
-        return f.toURI().toString();
-    }
-
-    /**
-     * Permanently blocks the current thread. The thread cannot be woken up via {@link
-     * Thread#interrupt()}.
-     */
-    public static void blockForeverNonInterruptibly() {
-        final Object lock = new Object();
-        //noinspection InfiniteLoopStatement
-        while (true) {
-            try {
-                //noinspection SynchronizationOnLocalVariableOrMethodParameter
-                synchronized (lock) {
-                    lock.wait();
-                }
-            } catch (InterruptedException ignored) {
-            }
-        }
-    }
 
     // ------------------------------------------------------------------------
     //  Manipulation of environment
@@ -133,6 +59,7 @@ public class CommonTestUtils {
             // only for Windows
             Class<?> processEnvironmentClass = Class.forName("java.lang.ProcessEnvironment");
             try {
+                @SuppressWarnings("JavaReflectionMemberAccess")
                 Field theCaseInsensitiveEnvironmentField =
                         processEnvironmentClass.getDeclaredField("theCaseInsensitiveEnvironment");
                 theCaseInsensitiveEnvironmentField.setAccessible(true);
@@ -148,28 +75,6 @@ public class CommonTestUtils {
         } catch (Exception e1) {
             throw new RuntimeException(e1);
         }
-    }
-
-    /**
-     * Checks whether the given throwable contains the given cause as a cause. The cause is not
-     * checked on equality but on type equality.
-     *
-     * @param throwable Throwable to check for the cause
-     * @param cause Cause to look for
-     * @return True if the given Throwable contains the given cause (type equality); otherwise false
-     */
-    public static boolean containsCause(Throwable throwable, Class<? extends Throwable> cause) {
-        Throwable current = throwable;
-
-        while (current != null) {
-            if (cause.isAssignableFrom(current.getClass())) {
-                return true;
-            }
-
-            current = current.getCause();
-        }
-
-        return false;
     }
 
     /** Checks whether an exception with a message occurs when running a piece of code. */
@@ -212,20 +117,5 @@ public class CommonTestUtils {
         if (!conditionResult) {
             throw new TimeoutException(errorMsg);
         }
-    }
-
-    /**
-     * Wait util the given condition is met or timeout.
-     *
-     * @param condition the condition to wait for.
-     * @param timeout the maximum time to wait for the condition to become true.
-     * @param errorMsg the error message to include in the <code>TimeoutException</code> if the
-     *     condition was not met before timeout.
-     * @throws TimeoutException if the condition is not met before timeout.
-     * @throws InterruptedException if the thread is interrupted.
-     */
-    public static void waitUtil(Supplier<Boolean> condition, Duration timeout, String errorMsg)
-            throws TimeoutException, InterruptedException {
-        waitUtil(condition, timeout, Duration.ofMillis(1), errorMsg);
     }
 }

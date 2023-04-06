@@ -18,8 +18,9 @@
 
 package org.apache.paimon.codegen;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+
 import org.codehaus.janino.SimpleCompiler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,7 +30,7 @@ import java.util.Objects;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Utilities to compile a generated code to a Class. Copied from Flink. */
+/** Utilities to compile a generated code to a Class. */
 public final class CompileUtils {
 
     // used for logging the generated codes to a same place

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 /**
  * Data type of an 8-byte signed integer with values from -9,223,372,036,854,775,808 to
@@ -26,7 +26,7 @@ import org.apache.paimon.annotation.Experimental;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public final class BigIntType extends DataType {
 
     private static final long serialVersionUID = 1L;

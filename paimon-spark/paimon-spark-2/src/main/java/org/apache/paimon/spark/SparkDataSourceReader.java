@@ -117,7 +117,7 @@ public class SparkDataSourceReader
     @Override
     public StructType readSchema() {
         RowType rowType = table.rowType();
-        return SparkTypeUtils.fromFlinkRowType(
+        return SparkTypeUtils.fromPaimonRowType(
                 projectedFields == null ? rowType : TypeUtils.project(rowType, projectedFields));
     }
 

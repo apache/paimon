@@ -55,7 +55,7 @@ public class SparkScan implements Scan, SupportsReportStatistics {
 
     @Override
     public StructType readSchema() {
-        return SparkTypeUtils.fromFlinkRowType(readBuilder.readType());
+        return SparkTypeUtils.fromPaimonRowType(readBuilder.readType());
     }
 
     @Override
@@ -77,7 +77,7 @@ public class SparkScan implements Scan, SupportsReportStatistics {
 
     protected List<Split> splits() {
         if (splits == null) {
-            this.splits = readBuilder.newScan().plan().splits();
+            splits = readBuilder.newScan().plan().splits();
         }
         return splits;
     }

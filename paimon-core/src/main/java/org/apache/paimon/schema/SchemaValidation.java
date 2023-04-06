@@ -20,7 +20,9 @@ package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -67,9 +69,9 @@ public class SchemaValidation {
             checkOptionExistInMode(
                     options, SCAN_TIMESTAMP_MILLIS, CoreOptions.StartupMode.FROM_TIMESTAMP);
             checkOptionsConflict(options, SCAN_SNAPSHOT_ID, SCAN_TIMESTAMP_MILLIS);
-        } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT) {
-            checkOptionExistInMode(
-                    options, SCAN_SNAPSHOT_ID, CoreOptions.StartupMode.FROM_SNAPSHOT);
+        } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT
+                || options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT_FULL) {
+            checkOptionExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
             checkOptionsConflict(options, SCAN_TIMESTAMP_MILLIS, SCAN_SNAPSHOT_ID);
         } else {
             checkOptionNotExistInMode(options, SCAN_TIMESTAMP_MILLIS, options.startupMode());
@@ -93,12 +95,21 @@ public class SchemaValidation {
                 case LOOKUP:
                     if (schema.primaryKeys().isEmpty()) {
                         throw new UnsupportedOperationException(
-                                "Changelog table with full compaction must have primary keys");
+                                "Changelog table with "
+                                        + options.changelogProducer()
+                                        + " must have primary keys");
                     }
                     break;
                 default:
             }
         }
+
+        // Get the format type here which will try to convert string value to {@Code
+        // FileFormatType}. If the string value is illegal, an exception will be thrown.
+        CoreOptions.FileFormatType fileFormatType = options.formatType();
+        FileFormat fileFormat =
+                FileFormat.fromIdentifier(fileFormatType.name(), new Options(schema.options()));
+        fileFormat.validateDataFields(new RowType(schema.fields()));
 
         // Check column names in schema
         schema.fieldNames()
@@ -107,7 +118,7 @@ public class SchemaValidation {
                             checkState(
                                     !SYSTEM_FIELD_NAMES.contains(f),
                                     String.format(
-                                            "Field name[%s] in schema cannot be exist in [%s]",
+                                            "Field name[%s] in schema cannot be exist in %s",
                                             f, SYSTEM_FIELD_NAMES));
                             checkState(
                                     !f.startsWith(KEY_FIELD_PREFIX),

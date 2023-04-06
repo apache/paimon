@@ -18,7 +18,7 @@
 
 package org.apache.paimon.options;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.options.description.Description;
 
 import java.util.Arrays;
@@ -39,7 +39,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * @param <T> The type of value associated with the configuration option.
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class ConfigOption<T> {
 
     private static final FallbackKey[] EMPTY = new FallbackKey[0];

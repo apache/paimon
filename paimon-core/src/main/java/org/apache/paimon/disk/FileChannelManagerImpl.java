@@ -66,7 +66,7 @@ public class FileChannelManagerImpl implements FileChannelManager {
         File[] files = new File[tempDirs.length];
         for (int i = 0; i < tempDirs.length; i++) {
             File baseDir = new File(tempDirs[i]);
-            String subfolder = String.format("flink-%s-%s", prefix, UUID.randomUUID());
+            String subfolder = String.format("paimon-%s-%s", prefix, UUID.randomUUID());
             File storageDir = new File(baseDir, subfolder);
 
             if (!storageDir.exists() && !storageDir.mkdirs()) {

@@ -30,29 +30,35 @@ This documentation is a guide for using Paimon in Flink.
 
 ## Preparing Paimon Jar File
 
-Paimon currently supports Flink 1.16, 1.15 and 1.14. We recommend the latest Flink version for a better experience.
-
-{{< stable >}}
+Paimon currently supports Flink 1.17, 1.16, 1.15 and 1.14. We recommend the latest Flink version for a better experience.
 
 Download the jar file with corresponding version.
 
-| Version | Jar                                                                                                                                                                                |
-|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+{{< stable >}}
+
+| Version    | Jar                                                                                                                                               |
+|------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 1.17 | [paimon-flink-1.17-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.17-{{< version >}}.jar) |
 | Flink 1.16 | [paimon-flink-1.16-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.16-{{< version >}}.jar) |
 | Flink 1.15 | [paimon-flink-1.15-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.15-{{< version >}}.jar) |
 | Flink 1.14 | [paimon-flink-1.14-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.14-{{< version >}}.jar) |
-
-You can also manually build bundled jar from the source code.
 
 {{< /stable >}}
 
 {{< unstable >}}
 
-You are using an unreleased version of Paimon so you need to manually build bundled jar from the source code.
+| Version    | Jar                                                                                                                                   |
+|------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 1.17 | [paimon-flink-1.17-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.17/{{< version >}}/) |
+| Flink 1.16 | [paimon-flink-1.16-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.16/{{< version >}}/) |
+| Flink 1.15 | [paimon-flink-1.15-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.15/{{< version >}}/) |
+| Flink 1.14 | [paimon-flink-1.14-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.14/{{< version >}}/) |
 
 {{< /unstable >}}
 
-To build from source code, either [download the source of a release](https://flink.apache.org/downloads.html) or [clone the git repository]({{< github_repo >}}).
+You can also manually build bundled jar from the source code.
+
+To build from source code, [clone the git repository]({{< github_repo >}}).
 
 Build bundled jar with the following command.
 - `mvn clean install -DskipTests`
@@ -78,6 +84,10 @@ cp paimon-flink-*.jar <FLINK_HOME>/lib/
 ```
 
 **Step 3: Copy Hadoop Bundled Jar**
+
+{{< hint info >}}
+If the machine is in a hadoop environment, please ensure the value of the environment variable `HADOOP_CLASSPATH`, you do not need to use the following pre-bundled Hadoop jar.
+{{< /hint >}}
 
 [Download](https://flink.apache.org/downloads.html) Pre-bundled Hadoop jar and copy the jar file to the `lib` directory of your Flink home.
 
@@ -115,7 +125,7 @@ You can now start Flink SQL client to execute SQL scripts.
 -- warehouse path should be set to a shared file system, such as HDFS or OSS
 CREATE CATALOG my_catalog WITH (
     'type'='paimon',
-    'warehouse'='file:/tmp/table_store'
+    'warehouse'='file:/tmp/paimon'
 );
 
 USE CATALOG my_catalog;

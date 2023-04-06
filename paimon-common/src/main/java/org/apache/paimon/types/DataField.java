@@ -18,9 +18,8 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
-
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
+import org.apache.paimon.annotation.Public;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
 import javax.annotation.Nullable;
 
@@ -36,7 +35,7 @@ import static org.apache.paimon.utils.EncodingUtils.escapeSingleQuotes;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public final class DataField implements Serializable {
 
     private static final long serialVersionUID = 1L;

@@ -59,7 +59,7 @@ public class Benchmark {
     public static void main(String[] args) throws Exception {
         if (args.length != 6) {
             throw new RuntimeException(
-                    "Usage: --location /path/to/benchmark --queries q1,q3 --sinks table_store,hudi_merge_on_read");
+                    "Usage: --location /path/to/benchmark --queries q1,q3 --sinks paimon,hudi_merge_on_read");
         }
 
         Options options = getOptions();
@@ -70,7 +70,7 @@ public class Benchmark {
 
         String queriesValue = line.getOptionValue(QUERIES.getOpt());
         List<Query> queries = Query.load(location);
-        if (!"all".equals(queriesValue.toLowerCase())) {
+        if (!"all".equalsIgnoreCase(queriesValue)) {
             List<String> wantedQueries =
                     Arrays.stream(queriesValue.split(","))
                             .map(String::trim)
@@ -80,7 +80,7 @@ public class Benchmark {
 
         String sinksValue = line.getOptionValue(SINKS.getOpt());
         List<Sink> sinks = Sink.load(location);
-        if (!"all".equals(sinksValue.toLowerCase())) {
+        if (!"all".equalsIgnoreCase(sinksValue)) {
             List<String> wantedSinks =
                     Arrays.stream(sinksValue.split(","))
                             .map(String::trim)

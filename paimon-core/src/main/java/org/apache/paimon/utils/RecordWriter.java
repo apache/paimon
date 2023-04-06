@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.io.DataFileMeta;
 
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -50,7 +51,7 @@ public interface RecordWriter<T> {
     void addNewFiles(List<DataFileMeta> files);
 
     /** Get all data files maintained by this writer. */
-    List<DataFileMeta> dataFiles();
+    Collection<DataFileMeta> dataFiles();
 
     /**
      * Prepare for a commit.

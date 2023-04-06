@@ -18,11 +18,10 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
-
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -43,7 +42,7 @@ import java.util.stream.Collectors;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public final class RowType extends DataType {
 
     private static final long serialVersionUID = 1L;

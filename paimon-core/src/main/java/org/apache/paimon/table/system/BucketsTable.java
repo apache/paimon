@@ -31,12 +31,11 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
-import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.BatchDataTableScan;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -105,23 +104,33 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public Map<String, String> options() {
+        return wrapped.options();
+    }
+
+    @Override
+    public List<String> primaryKeys() {
+        return Collections.emptyList();
+    }
+
+    @Override
     public SnapshotSplitReader newSnapshotSplitReader() {
         return wrapped.newSnapshotSplitReader();
     }
 
     @Override
-    public BatchDataTableScan newScan() {
+    public InnerTableScan newScan() {
         return wrapped.newScan();
     }
 
     @Override
-    public StreamDataTableScan newStreamScan() {
+    public InnerStreamTableScan newStreamScan() {
         return wrapped.newStreamScan();
     }
 
     @Override
-    public CoreOptions options() {
-        return wrapped.options();
+    public CoreOptions coreOptions() {
+        return wrapped.coreOptions();
     }
 
     @Override
@@ -130,7 +139,7 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public Table copy(Map<String, String> dynamicOptions) {
+    public BucketsTable copy(Map<String, String> dynamicOptions) {
         return new BucketsTable(wrapped.copy(dynamicOptions), isContinuous);
     }
 

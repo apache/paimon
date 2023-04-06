@@ -19,9 +19,10 @@
 package org.apache.paimon.sort;
 
 /**
- * This file is based on source code from the Hadoop Project (http://hadoop.apache.org/), licensed
- * by the Apache Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE
- * file distributed with this work for additional information regarding copyright ownership.
+ * This file is based on source code from the Hadoop Project (<a
+ * href="http://hadoop.apache.org/">Apache Hadoop</a>), licensed by the Apache Software Foundation
+ * (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
  */
 public final class HeapSort implements IndexedSorter {
     public HeapSort() {}

@@ -32,7 +32,6 @@ import org.apache.orc.TypeDescription;
 /** Util for orc types. */
 public class OrcSplitReaderUtil {
 
-    /** See {@code org.apache.flink.table.catalog.hive.util.HiveTypeUtil}. */
     public static TypeDescription toOrcType(DataType type) {
         type = type.copy(true);
         switch (type.getTypeRoot()) {
@@ -74,6 +73,7 @@ public class OrcSplitReaderUtil {
             case DATE:
                 return TypeDescription.createDate();
             case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 return TypeDescription.createTimestamp();
             case ARRAY:
                 ArrayType arrayType = (ArrayType) type;

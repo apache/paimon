@@ -38,26 +38,8 @@ public class HadoopUtils {
     public static final String HADOOP_HOME_ENV = "HADOOP_HOME";
     public static final String HADOOP_CONF_ENV = "HADOOP_CONF_DIR";
 
-    /**
-     * Path to hdfs-default.xml file.
-     *
-     * @deprecated Use environment variable HADOOP_CONF_DIR instead.
-     */
-    @Deprecated public static final String HDFS_DEFAULT_CONFIG = "fs.hdfs.hdfsdefault";
-
-    /**
-     * Path to hdfs-site.xml file.
-     *
-     * @deprecated Use environment variable HADOOP_CONF_DIR instead.
-     */
-    @Deprecated public static final String HDFS_SITE_CONFIG = "fs.hdfs.hdfssite";
-
-    /**
-     * Path to Hadoop configuration.
-     *
-     * @deprecated Use environment variable HADOOP_CONF_DIR instead.
-     */
-    @Deprecated public static final String PATH_HADOOP_CONFIG = "fs.hdfs.hadoopconf";
+    /** Path to Hadoop configuration. */
+    public static final String PATH_HADOOP_CONFIG = "fs.hdfs.hadoopconf";
 
     public static Configuration getHadoopConfiguration(Options options) {
 
@@ -89,27 +71,11 @@ public class HadoopUtils {
             }
         }
 
-        // Approach 2: Flink configuration (deprecated)
-        final String hdfsDefaultPath = options.getString(HDFS_DEFAULT_CONFIG, null);
-        if (hdfsDefaultPath != null) {
-            result.addResource(new org.apache.hadoop.fs.Path(hdfsDefaultPath));
-            LOG.debug(
-                    "Using hdfs-default configuration-file path from Flink config: {}",
-                    hdfsDefaultPath);
-            foundHadoopConfiguration = true;
-        }
-
-        final String hdfsSitePath = options.getString(HDFS_SITE_CONFIG, null);
-        if (hdfsSitePath != null) {
-            result.addResource(new org.apache.hadoop.fs.Path(hdfsSitePath));
-            LOG.debug(
-                    "Using hdfs-site configuration-file path from Flink config: {}", hdfsSitePath);
-            foundHadoopConfiguration = true;
-        }
-
+        // Approach 2: Paimon configuration (deprecated)
         final String hadoopConfigPath = options.getString(PATH_HADOOP_CONFIG, null);
         if (hadoopConfigPath != null) {
-            LOG.debug("Searching Hadoop configuration files in Flink config: {}", hadoopConfigPath);
+            LOG.debug(
+                    "Searching Hadoop configuration files in Paimon config: {}", hadoopConfigPath);
             foundHadoopConfiguration =
                     addHadoopConfIfFound(result, hadoopConfigPath) || foundHadoopConfiguration;
         }
@@ -122,8 +88,8 @@ public class HadoopUtils {
                     addHadoopConfIfFound(result, hadoopConfDir) || foundHadoopConfiguration;
         }
 
-        // Approach 4: Flink configuration
-        // add all configuration key with prefix 'hadoop.' in flink conf to hadoop conf
+        // Approach 4: Paimon configuration
+        // add all configuration key with prefix 'hadoop.' in Paimon conf to hadoop conf
         for (String key : options.keySet()) {
             for (String prefix : CONFIG_PREFIXES) {
                 if (key.startsWith(prefix)) {
@@ -131,7 +97,7 @@ public class HadoopUtils {
                     String value = options.getString(key, null);
                     result.set(newKey, value);
                     LOG.debug(
-                            "Adding Flink config entry for {} as {}={} to Hadoop config",
+                            "Adding Paimon config entry for {} as {}={} to Hadoop config",
                             key,
                             newKey,
                             value);

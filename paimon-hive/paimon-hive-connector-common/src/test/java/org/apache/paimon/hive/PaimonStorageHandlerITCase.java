@@ -26,10 +26,13 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.hive.mapred.PaimonInputFormat;
 import org.apache.paimon.hive.objectinspector.PaimonObjectInspectorFactory;
+import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -37,7 +40,6 @@ import org.apache.paimon.types.RowType;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
-import org.apache.flink.connectors.hive.FlinkEmbeddedHiveRunner;
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.serde2.objectinspector.ListObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.MapObjectInspector;
@@ -63,7 +65,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 /** IT cases for {@link PaimonStorageHandler} and {@link PaimonInputFormat}. */
-@RunWith(FlinkEmbeddedHiveRunner.class)
+@RunWith(PaimonEmbeddedHiveRunner.class)
 public class PaimonStorageHandlerITCase {
 
     @ClassRule public static TemporaryFolder folder = new TemporaryFolder();
@@ -92,6 +94,10 @@ public class PaimonStorageHandlerITCase {
             hiveShell.execute("SET tez.local.mode=true");
             hiveShell.execute("SET hive.jar.directory=" + folder.getRoot().getAbsolutePath());
             hiveShell.execute("SET tez.staging-dir=" + folder.getRoot().getAbsolutePath());
+            // JVM will crash if we do not set this and include paimon-flink-common as dependency
+            // not sure why
+            // in real use case there won't be any Flink dependency in Hive's classpath, so it's OK
+            hiveShell.execute("SET hive.tez.exec.inplace.progress=false");
         } else {
             throw new UnsupportedOperationException("Unsupported engine " + engine);
         }
@@ -597,35 +603,37 @@ public class PaimonStorageHandlerITCase {
             List<InternalRow> data)
             throws Exception {
         String path = folder.newFolder().toURI().toString();
+        String tablePath = String.format("%s/default.db/hive_test_table", path);
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, path);
+        conf.set(CatalogOptions.WAREHOUSE, path);
         conf.set(CoreOptions.BUCKET, 2);
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
-        FileStoreTable table =
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        Table table =
                 FileStoreTestUtils.createFileStoreTable(conf, rowType, partitionKeys, primaryKeys);
 
-        return writeData(table, path, data);
+        return writeData(table, tablePath, data);
     }
 
     private String createAppendOnlyExternalTable(
             RowType rowType, List<String> partitionKeys, List<InternalRow> data) throws Exception {
         String path = folder.newFolder().toURI().toString();
+        String tablePath = String.format("%s/default.db/hive_test_table", path);
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, path);
+        conf.set(CatalogOptions.WAREHOUSE, path);
         conf.set(CoreOptions.BUCKET, 2);
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
         conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
-        FileStoreTable table =
+        Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf, rowType, partitionKeys, Collections.emptyList());
 
-        return writeData(table, path, data);
+        return writeData(table, tablePath, data);
     }
 
-    private String writeData(FileStoreTable table, String path, List<InternalRow> data)
-            throws Exception {
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+    private String writeData(Table table, String path, List<InternalRow> data) throws Exception {
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
         for (InternalRow rowData : data) {
             write.write(rowData);
             if (ThreadLocalRandom.current().nextInt(5) == 0) {
@@ -651,10 +659,11 @@ public class PaimonStorageHandlerITCase {
     @Test
     public void testReadAllSupportedTypes() throws Exception {
         String root = folder.newFolder().toString();
+        String tablePath = String.format("%s/default.db/hive_test_table", root);
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, root);
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
-        FileStoreTable table =
+        conf.set(CatalogOptions.WAREHOUSE, root);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RandomGenericRowDataGenerator.ROW_TYPE,
@@ -674,8 +683,9 @@ public class PaimonStorageHandlerITCase {
             }
         }
 
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
         for (GenericRow rowData : input) {
             write.write(rowData);
         }
@@ -688,7 +698,7 @@ public class PaimonStorageHandlerITCase {
                         Arrays.asList(
                                 "CREATE EXTERNAL TABLE test_table",
                                 "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
-                                "LOCATION '" + root + "'")));
+                                "LOCATION '" + tablePath + "'")));
         List<Object[]> actual =
                 hiveShell.executeStatement("SELECT * FROM test_table WHERE f_int > 0");
 
@@ -767,20 +777,22 @@ public class PaimonStorageHandlerITCase {
     @Test
     public void testPredicatePushDown() throws Exception {
         String path = folder.newFolder().toURI().toString();
+        String tablePath = String.format("%s/default.db/hive_test_table", path);
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, path);
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
-        FileStoreTable table =
+        conf.set(CatalogOptions.WAREHOUSE, path);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"a"}),
                         Collections.emptyList(),
                         Collections.emptyList());
 
-        // TODO add NaN related tests after FLINK-27627 and FLINK-27628 are fixed
+        // TODO add NaN related tests
 
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
         write.write(GenericRow.of(1));
         commit.commit(0, write.prepareCommit(true, 0));
         write.write(GenericRow.of((Object) null));
@@ -801,7 +813,7 @@ public class PaimonStorageHandlerITCase {
                         Arrays.asList(
                                 "CREATE EXTERNAL TABLE test_table",
                                 "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
-                                "LOCATION '" + path + "'")));
+                                "LOCATION '" + tablePath + "'")));
         Assert.assertEquals(
                 Arrays.asList("1", "5"),
                 hiveShell.executeQuery("SELECT * FROM test_table WHERE a = 1 OR a = 5"));
@@ -856,10 +868,11 @@ public class PaimonStorageHandlerITCase {
     @Test
     public void testDateAndTimestamp() throws Exception {
         String path = folder.newFolder().toURI().toString();
+        String tablePath = String.format("%s/default.db/hive_test_table", path);
         Options conf = new Options();
-        conf.set(CoreOptions.PATH, path);
-        conf.set(CoreOptions.FILE_FORMAT, "avro");
-        FileStoreTable table =
+        conf.set(CatalogOptions.WAREHOUSE, path);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(
@@ -868,8 +881,9 @@ public class PaimonStorageHandlerITCase {
                         Collections.emptyList(),
                         Collections.emptyList());
 
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
         write.write(
                 GenericRow.of(
                         375, /* 1971-01-11 */
@@ -893,7 +907,7 @@ public class PaimonStorageHandlerITCase {
                         Arrays.asList(
                                 "CREATE EXTERNAL TABLE test_table",
                                 "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
-                                "LOCATION '" + path + "'")));
+                                "LOCATION '" + tablePath + "'")));
         Assert.assertEquals(
                 Collections.singletonList("1971-01-11\t2022-05-17 17:29:20.1"),
                 hiveShell.executeQuery("SELECT * FROM test_table WHERE dt = '1971-01-11'"));

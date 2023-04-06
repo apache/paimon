@@ -33,7 +33,8 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -116,15 +117,16 @@ public class CompactorSinkITCase extends AbstractTestBase {
         assertEquals(3, snapshot.id());
         assertEquals(Snapshot.CommitKind.COMPACT, snapshot.commitKind());
 
-        DataTableScan.DataFilePlan plan = table.newScan().plan();
+        TableScan.Plan plan = table.newScan().plan();
         assertEquals(3, plan.splits().size());
-        for (DataSplit split : plan.splits) {
-            if (split.partition().getInt(1) == 15) {
+        for (Split split : plan.splits()) {
+            DataSplit dataSplit = (DataSplit) split;
+            if (dataSplit.partition().getInt(1) == 15) {
                 // compacted
-                assertEquals(1, split.files().size());
+                assertEquals(1, dataSplit.files().size());
             } else {
                 // not compacted
-                assertEquals(2, split.files().size());
+                assertEquals(2, dataSplit.files().size());
             }
         }
     }

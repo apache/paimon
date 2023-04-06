@@ -54,11 +54,14 @@ import java.util.TreeSet;
 /**
  * {@link StoreSinkWrite} for {@link CoreOptions.ChangelogProducer#FULL_COMPACTION} changelog
  * producer. This writer will perform full compaction once in a while.
+ *
+ * @deprecated use {@link GlobalFullCompactionSinkWrite}.
  */
 public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
 
     private static final Logger LOG = LoggerFactory.getLogger(FullChangelogStoreSinkWrite.class);
 
+    private final SnapshotManager snapshotManager;
     private final long fullCompactionThresholdMs;
 
     private final Set<Tuple2<BinaryRow, Integer>> currentWrittenBuckets;
@@ -79,8 +82,9 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
             boolean isOverwrite,
             long fullCompactionThresholdMs)
             throws Exception {
-        super(table, context, initialCommitUser, ioManager, isOverwrite);
+        super(table, context, initialCommitUser, ioManager, isOverwrite, false);
 
+        this.snapshotManager = table.snapshotManager();
         this.fullCompactionThresholdMs = fullCompactionThresholdMs;
 
         currentWrittenBuckets = new HashSet<>();
@@ -97,8 +101,7 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
                 context.getOperatorStateStore()
                         .getListState(
                                 new ListStateDescriptor<>(
-                                        "table_store_written_buckets",
-                                        writtenBucketStateSerializer));
+                                        "paimon_written_buckets", writtenBucketStateSerializer));
         writtenBuckets = new TreeMap<>();
         writtenBucketState
                 .get()
@@ -198,7 +201,6 @@ public class FullChangelogStoreSinkWrite extends StoreSinkWriteImpl {
     }
 
     private void checkSuccessfulFullCompaction() {
-        SnapshotManager snapshotManager = table.snapshotManager();
         Long latestId = snapshotManager.latestSnapshotId();
         if (latestId == null) {
             return;

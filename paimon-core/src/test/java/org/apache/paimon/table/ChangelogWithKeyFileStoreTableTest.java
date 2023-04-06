@@ -40,14 +40,13 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.table.source.snapshot.FullStartingScanner;
-import org.apache.paimon.table.source.snapshot.InputChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.system.AuditLogTable;
 import org.apache.paimon.types.DataType;
@@ -66,7 +65,8 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-import static org.apache.paimon.data.DataFormatTestUtil.rowDataToString;
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -421,10 +421,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 // partition 2
                                 Collections.singletonList("-D 2|10|301|binary|varbinary")));
 
-        StreamDataTableScan scan =
-                table.newStreamScan()
-                        .withStartingScanner(new FullStartingScanner())
-                        .withFollowUpScanner(new InputChangelogFollowUpScanner());
+        StreamTableScan scan = table.newStreamScan();
         scan.restore(1L);
 
         Function<Integer, Void> assertNextSnapshot =
@@ -457,7 +454,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         }
 
         // no more changelog
-        assertThat(scan.plan()).isNull();
+        assertThat(scan.plan().splits()).isEmpty();
 
         // write another commit
         StreamTableWrite write = table.newWrite(commitUser);
@@ -472,7 +469,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertNextSnapshot.apply(2);
 
         // no more changelog
-        assertThat(scan.plan()).isNull();
+        assertThat(scan.plan().splits()).isEmpty();
     }
 
     private void writeData() throws Exception {
@@ -504,7 +501,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testReadFilter() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        if (table.options().fileFormat().getFormatIdentifier().equals("parquet")) {
+        if (table.coreOptions().fileFormat().getFormatIdentifier().equals("parquet")) {
             // TODO support parquet reader filter push down
             return;
         }
@@ -692,7 +689,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         AuditLogTable auditLogTable = new AuditLogTable(table);
         Function<InternalRow, String> rowDataToString =
                 row ->
-                        rowDataToString(
+                        internalRowToString(
                                 row,
                                 DataTypes.ROW(
                                         DataTypes.STRING(),
@@ -731,7 +728,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         read = auditLogTable.newRead().withProjection(new int[] {2, 0, 1});
         Function<InternalRow, String> projectToString1 =
                 row ->
-                        rowDataToString(
+                        internalRowToString(
                                 row,
                                 DataTypes.ROW(
                                         DataTypes.INT(), DataTypes.STRING(), DataTypes.INT()));
@@ -743,7 +740,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         snapshotSplitReader = auditLogTable.newSnapshotSplitReader();
         read = auditLogTable.newRead().withProjection(new int[] {2, 1});
         Function<InternalRow, String> projectToString2 =
-                row -> rowDataToString(row, DataTypes.ROW(DataTypes.INT(), DataTypes.INT()));
+                row -> internalRowToString(row, DataTypes.ROW(DataTypes.INT(), DataTypes.INT()));
         result = getResult(read, toSplits(snapshotSplitReader.splits()), projectToString2);
         assertThat(result).containsExactlyInAnyOrder("+I[20, 2]", "+I[30, 1]", "+I[10, 1]");
     }
@@ -765,7 +762,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                             options.set("fields.c.ignore-retract", "true");
                         },
                         rowType);
-        Function<InternalRow, String> rowToString = row -> rowDataToString(row, rowType);
+        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
         SnapshotSplitReader snapshotSplitReader = table.newSnapshotSplitReader();
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite("");
@@ -816,9 +813,62 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 + " you can configure 'fields.${field_name}.ignore-retract'='true'");
     }
 
+    @Test
+    public void testFullCompactedRead() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "2");
+        options.put(CoreOptions.SCAN_MODE.key(), "compacted-full");
+        options.put(BUCKET.key(), "1");
+        FileStoreTable table = createFileStoreTable().copy(options);
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = writeBuilder.newWrite();
+        StreamTableCommit commit = writeBuilder.newCommit();
+
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 10, 200L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.compact(binaryRow(1), 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        write.write(rowData(1, 10, 300L));
+        write.compact(binaryRow(1), 0, true);
+        commit.commit(3, write.prepareCommit(true, 3));
+
+        write.close();
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        assertThat(
+                        getResult(
+                                readBuilder.newRead(),
+                                readBuilder.newScan().plan().splits(),
+                                BATCH_ROW_TO_STRING))
+                .containsExactly("1|10|200|binary|varbinary|mapKey:mapVal|multiset");
+    }
+
     @Override
     protected FileStoreTable createFileStoreTable(Consumer<Options> configure) throws Exception {
         return createFileStoreTable(configure, ROW_TYPE);
+    }
+
+    @Override
+    protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                OVERWRITE_TEST_ROW_TYPE.getFields(),
+                                Arrays.asList("pt0", "pt1"),
+                                Arrays.asList("pk", "pt0", "pt1"),
+                                conf.toMap(),
+                                ""));
+        return new ChangelogWithKeyFileStoreTable(LocalFileIO.create(), tablePath, tableSchema);
     }
 
     private FileStoreTable createFileStoreTable(Consumer<Options> configure, RowType rowType)

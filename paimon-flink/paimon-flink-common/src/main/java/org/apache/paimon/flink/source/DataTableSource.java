@@ -18,10 +18,12 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.FlinkConnectorOptions.WatermarkEmitStrategy;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
@@ -32,10 +34,13 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
 import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Projection;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.DynamicTableSource;
@@ -46,25 +51,32 @@ import org.apache.flink.table.factories.DynamicTableFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
+import java.util.List;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.paimon.CoreOptions.LOG_SCAN_REMOVE_NORMALIZE;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_GROUP;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_EMIT_STRATEGY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
 
 /**
  * Table source to create {@link StaticFileStoreSource} or {@link ContinuousFileStoreSource} under
  * batch mode or change-tracking is disabled. For streaming mode with change-tracking enabled and
  * FULL scan mode, it will create a {@link
- * org.apache.flink.connector.base.source.hybrid.HybridSource} of {@link StaticFileStoreSource} and
- * kafka log source created by {@link LogSourceProvider}.
+ * org.apache.flink.connector.base.source.hybrid.HybridSource} of {@code
+ * LogHybridSourceFactory.FlinkHybridFirstSource} and kafka log source created by {@link
+ * LogSourceProvider}.
  */
 public class DataTableSource extends FlinkTableSource
         implements LookupTableSource, SupportsWatermarkPushDown {
 
     private final ObjectIdentifier tableIdentifier;
-    private final FileStoreTable table;
     private final boolean streaming;
     private final DynamicTableFactory.Context context;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
@@ -73,7 +85,7 @@ public class DataTableSource extends FlinkTableSource
 
     public DataTableSource(
             ObjectIdentifier tableIdentifier,
-            FileStoreTable table,
+            Table table,
             boolean streaming,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
@@ -91,7 +103,7 @@ public class DataTableSource extends FlinkTableSource
 
     private DataTableSource(
             ObjectIdentifier tableIdentifier,
-            FileStoreTable table,
+            Table table,
             boolean streaming,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory,
@@ -101,7 +113,6 @@ public class DataTableSource extends FlinkTableSource
             @Nullable WatermarkStrategy<RowData> watermarkStrategy) {
         super(table, predicate, projectFields, limit);
         this.tableIdentifier = tableIdentifier;
-        this.table = table;
         this.streaming = streaming;
         this.context = context;
         this.logStoreTableFactory = logStoreTableFactory;
@@ -123,7 +134,7 @@ public class DataTableSource extends FlinkTableSource
         } else if (table instanceof ChangelogValueCountFileStoreTable) {
             return ChangelogMode.all();
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
-            Options options = Options.fromMap(table.schema().options());
+            Options options = Options.fromMap(table.options());
 
             if (options.get(LOG_SCAN_REMOVE_NORMALIZE)) {
                 return ChangelogMode.all();
@@ -156,6 +167,34 @@ public class DataTableSource extends FlinkTableSource
                     logStoreTableFactory.createSourceProvider(context, scanContext, projectFields);
         }
 
+        WatermarkStrategy<RowData> watermarkStrategy = this.watermarkStrategy;
+        Options options = Options.fromMap(table.options());
+        if (watermarkStrategy != null) {
+            WatermarkEmitStrategy emitStrategy = options.get(SCAN_WATERMARK_EMIT_STRATEGY);
+            if (emitStrategy == WatermarkEmitStrategy.ON_EVENT) {
+                watermarkStrategy = new OnEventWatermarkStrategy(watermarkStrategy);
+            }
+            Duration idleTimeout = options.get(SCAN_WATERMARK_IDLE_TIMEOUT);
+            if (idleTimeout != null) {
+                watermarkStrategy = watermarkStrategy.withIdleness(idleTimeout);
+            }
+            String watermarkAlignGroup = options.get(SCAN_WATERMARK_ALIGNMENT_GROUP);
+            if (watermarkAlignGroup != null) {
+                try {
+                    watermarkStrategy =
+                            WatermarkAlignUtils.withWatermarkAlignment(
+                                    watermarkStrategy,
+                                    watermarkAlignGroup,
+                                    options.get(SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT),
+                                    options.get(SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL));
+                } catch (NoSuchMethodError error) {
+                    throw new RuntimeException(
+                            "Flink 1.14 dose not support watermark alignment, please check your Flink version.",
+                            error);
+                }
+            }
+        }
+
         FlinkSourceBuilder sourceBuilder =
                 new FlinkSourceBuilder(tableIdentifier, table)
                         .withContinuousMode(streaming)
@@ -163,13 +202,37 @@ public class DataTableSource extends FlinkTableSource
                         .withProjection(projectFields)
                         .withPredicate(predicate)
                         .withLimit(limit)
-                        .withParallelism(
-                                Options.fromMap(table.schema().options())
-                                        .get(FlinkConnectorOptions.SCAN_PARALLELISM))
                         .withWatermarkStrategy(watermarkStrategy);
 
         return new PaimonDataStreamScanProvider(
-                !streaming, env -> sourceBuilder.withEnv(env).build());
+                !streaming, env -> configureSource(sourceBuilder, env));
+    }
+
+    private DataStreamSource<RowData> configureSource(
+            FlinkSourceBuilder sourceBuilder, StreamExecutionEnvironment env) {
+        Options options = Options.fromMap(this.table.options());
+        Integer parallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);
+        List<Split> splits = null;
+        if (options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
+            // for streaming mode, set the default parallelism to the bucket number.
+            if (streaming) {
+                parallelism = options.get(CoreOptions.BUCKET);
+            } else {
+                splits = table.newReadBuilder().withFilter(predicate).newScan().plan().splits();
+                if (null != splits) {
+                    parallelism = splits.size();
+                }
+                if (null != limit && limit > 0) {
+                    int limitCount =
+                            limit >= Integer.MAX_VALUE ? Integer.MAX_VALUE : limit.intValue();
+                    parallelism = Math.min(parallelism, limitCount);
+                }
+
+                parallelism = null == parallelism ? 1 : Math.max(1, parallelism);
+            }
+        }
+
+        return sourceBuilder.withParallelism(parallelism).withSplits(splits).withEnv(env).build();
     }
 
     @Override
@@ -204,7 +267,7 @@ public class DataTableSource extends FlinkTableSource
         }
         int[] projection =
                 projectFields == null
-                        ? IntStream.range(0, table.schema().fields().size()).toArray()
+                        ? IntStream.range(0, table.rowType().getFieldCount()).toArray()
                         : Projection.of(projectFields).toTopLevelIndexes();
         int[] joinKey = Projection.of(context.getKeys()).toTopLevelIndexes();
         return LookupRuntimeProviderFactory.create(

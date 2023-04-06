@@ -18,9 +18,13 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.table.connector.ChangelogMode;
@@ -30,16 +34,20 @@ import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
+
 /** A {@link FlinkTableSource} for system table. */
 public class SystemTableSource extends FlinkTableSource {
 
-    private final Table table;
     private final boolean isStreamingMode;
+    private final int splitBatchSize;
 
     public SystemTableSource(Table table, boolean isStreamingMode) {
         super(table);
-        this.table = table;
         this.isStreamingMode = isStreamingMode;
+        this.splitBatchSize =
+                Options.fromMap(table.options())
+                        .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE);
     }
 
     public SystemTableSource(
@@ -47,10 +55,11 @@ public class SystemTableSource extends FlinkTableSource {
             boolean isStreamingMode,
             @Nullable Predicate predicate,
             @Nullable int[][] projectFields,
-            @Nullable Long limit) {
+            @Nullable Long limit,
+            int splitBatchSize) {
         super(table, predicate, projectFields, limit);
-        this.table = table;
         this.isStreamingMode = isStreamingMode;
+        this.splitBatchSize = splitBatchSize;
     }
 
     @Override
@@ -61,27 +70,22 @@ public class SystemTableSource extends FlinkTableSource {
     @Override
     public ScanRuntimeProvider getScanRuntimeProvider(ScanContext scanContext) {
         Source<RowData, ?, ?> source;
-        if (table instanceof DataTable) {
-            DataTable dataTable = (DataTable) table;
-            source =
-                    isStreamingMode
-                            ? new ContinuousFileStoreSource(
-                                    dataTable, projectFields, predicate, limit)
-                            : new StaticFileStoreSource(dataTable, projectFields, predicate, limit);
+        ReadBuilder readBuilder =
+                table.newReadBuilder().withProjection(projectFields).withFilter(predicate);
+
+        if (isStreamingMode && table instanceof DataTable) {
+            source = new ContinuousFileStoreSource(readBuilder, table.options(), limit);
         } else {
-            source =
-                    new SimpleSystemSource(
-                            table.newReadBuilder()
-                                    .withFilter(predicate)
-                                    .withProjection(projectFields),
-                            limit);
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            source = new StaticFileStoreSource(readBuilder, limit, splitBatchSize, splits);
         }
         return SourceProvider.of(source);
     }
 
     @Override
     public DynamicTableSource copy() {
-        return new SystemTableSource(table, isStreamingMode, predicate, projectFields, limit);
+        return new SystemTableSource(
+                table, isStreamingMode, predicate, projectFields, limit, splitBatchSize);
     }
 
     @Override

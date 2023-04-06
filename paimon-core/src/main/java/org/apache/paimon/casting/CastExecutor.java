@@ -20,7 +20,6 @@ package org.apache.paimon.casting;
 
 /**
  * Interface to model a function that performs the casting of a value from one type to another.
- * Copied from flink.
  *
  * @param <IN> Input internal type
  * @param <OUT> Output internal type

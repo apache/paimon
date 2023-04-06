@@ -21,7 +21,7 @@ package org.apache.paimon.format.orc.reader;
 import org.apache.hadoop.hive.ql.exec.vector.LongColumnVector;
 
 /**
- * This column vector is used to adapt hive's LongColumnVector to Flink's boolean, byte, short, int
+ * This column vector is used to adapt hive's LongColumnVector to Paimon's boolean, byte, short, int
  * and long ColumnVector.
  */
 public class OrcLongColumnVector extends AbstractOrcColumnVector

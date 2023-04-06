@@ -18,7 +18,7 @@
 
 package org.apache.paimon.data;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.types.RowKind;
 
 import javax.annotation.Nullable;
@@ -32,7 +32,7 @@ import java.util.Objects;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class JoinedRow implements InternalRow {
 
     private RowKind rowKind = RowKind.INSERT;

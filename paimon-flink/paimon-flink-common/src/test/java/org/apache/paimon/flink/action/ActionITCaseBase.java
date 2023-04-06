@@ -47,7 +47,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /** {@link Action} test base. */
-public class ActionITCaseBase extends AbstractTestBase {
+public abstract class ActionITCaseBase extends AbstractTestBase {
 
     protected String warehouse;
     protected String database;
@@ -112,7 +112,7 @@ public class ActionITCaseBase extends AbstractTestBase {
         RecordReader<InternalRow> recordReader = read.createReader(splits);
         List<String> result = new ArrayList<>();
         recordReader.forEachRemaining(
-                row -> result.add(DataFormatTestUtil.rowDataToString(row, rowType)));
+                row -> result.add(DataFormatTestUtil.internalRowToString(row, rowType)));
         return result;
     }
 }

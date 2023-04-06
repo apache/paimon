@@ -18,7 +18,7 @@
 
 package org.apache.paimon.data;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 
@@ -40,7 +40,7 @@ import java.util.Objects;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public final class GenericMap implements InternalMap, Serializable {
 
     private static final long serialVersionUID = 1L;

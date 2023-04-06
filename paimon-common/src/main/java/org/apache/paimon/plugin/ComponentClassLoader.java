@@ -18,9 +18,8 @@
 package org.apache.paimon.plugin;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import org.apache.paimon.utils.FunctionWithException;
-
-import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
 
 import java.io.IOException;
 import java.net.URL;
@@ -51,8 +50,6 @@ import java.util.Iterator;
  *   <li>component-first: component -> bootstrap -> owner; opt-in.
  *   <li>owner-first: owner -> component -> bootstrap; opt-in.
  * </ul>
- *
- * <p>NOTE: Copied from Flink.
  */
 public class ComponentClassLoader extends URLClassLoader {
     private static final ClassLoader PLATFORM_OR_BOOTSTRAP_LOADER;

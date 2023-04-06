@@ -28,9 +28,8 @@ import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.flink.source.SystemTableSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -74,7 +73,7 @@ public abstract class AbstractFlinkTableFactory
         } else {
             return new DataTableSource(
                     context.getObjectIdentifier(),
-                    buildFileStoreTable(context),
+                    buildPaimonTable(context),
                     isStreamingMode,
                     context,
                     createOptionalLogStoreFactory(context).orElse(null));
@@ -85,7 +84,7 @@ public abstract class AbstractFlinkTableFactory
     public DynamicTableSink createDynamicTableSink(Context context) {
         return new FlinkTableSink(
                 context.getObjectIdentifier(),
-                buildFileStoreTable(context),
+                buildPaimonTable(context),
                 context,
                 createOptionalLogStoreFactory(context).orElse(null));
     }
@@ -136,20 +135,19 @@ public abstract class AbstractFlinkTableFactory
     }
 
     static CatalogContext createCatalogContext(DynamicTableFactory.Context context) {
-        return FlinkUtils.createCatalogContext(
-                context.getCatalogTable().getOptions(), context.getConfiguration());
+        return CatalogContext.create(
+                Options.fromMap(context.getCatalogTable().getOptions()), new FlinkFileIOLoader());
     }
 
-    static FileStoreTable buildFileStoreTable(DynamicTableFactory.Context context) {
+    static Table buildPaimonTable(DynamicTableFactory.Context context) {
         CatalogTable origin = context.getCatalogTable().getOrigin();
-        FileStoreTable table;
+        Table table;
         if (origin instanceof DataCatalogTable) {
             table = ((DataCatalogTable) origin).table().copy(origin.getOptions());
         } else {
             table = FileStoreTableFactory.create(createCatalogContext(context));
         }
 
-        TableSchema tableSchema = table.schema();
         Schema schema = FlinkCatalog.fromCatalogTable(context.getCatalogTable());
 
         RowType rowType = toLogicalType(schema.rowType());
@@ -158,24 +156,24 @@ public abstract class AbstractFlinkTableFactory
 
         // compare fields to ignore the outside nullability and nested fields' comments
         Preconditions.checkArgument(
-                schemaEquals(toLogicalType(tableSchema.logicalRowType()), rowType),
+                schemaEquals(toLogicalType(table.rowType()), rowType),
                 "Flink schema and store schema are not the same, "
                         + "store schema is %s, Flink schema is %s",
-                tableSchema.logicalRowType(),
+                table.rowType(),
                 rowType);
 
         Preconditions.checkArgument(
-                tableSchema.partitionKeys().equals(partitionKeys),
+                table.partitionKeys().equals(partitionKeys),
                 "Flink partitionKeys and store partitionKeys are not the same, "
                         + "store partitionKeys is %s, Flink partitionKeys is %s",
-                tableSchema.partitionKeys(),
+                table.partitionKeys(),
                 partitionKeys);
 
         Preconditions.checkArgument(
-                tableSchema.primaryKeys().equals(primaryKeys),
+                table.primaryKeys().equals(primaryKeys),
                 "Flink primaryKeys and store primaryKeys are not the same, "
                         + "store primaryKeys is %s, Flink primaryKeys is %s",
-                tableSchema.primaryKeys(),
+                table.primaryKeys(),
                 primaryKeys);
 
         return table;

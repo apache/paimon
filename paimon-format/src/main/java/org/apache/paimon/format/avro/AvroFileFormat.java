@@ -49,7 +49,7 @@ import java.util.function.Function;
 
 import static org.apache.avro.file.DataFileConstants.SNAPPY_CODEC;
 
-/** Avro {@link FileFormat}. The main code is copied from Flink {@code AvroFileFormatFactory}. */
+/** Avro {@link FileFormat}. */
 public class AvroFileFormat extends FileFormat {
 
     public static final String IDENTIFIER = "avro";
@@ -74,8 +74,6 @@ public class AvroFileFormat extends FileFormat {
         // if the schema given to the reader is not equal to the schema in header,
         // reader will automatically map the fields and give back records with our desired
         // schema
-        //
-        // for detailed discussion see comments in https://github.com/apache/flink/pull/18657
         DataType producedType = Projection.of(projection).project(type);
         return new AvroGenericRecordBulkFormat((RowType) producedType.copy(false));
     }
@@ -83,6 +81,14 @@ public class AvroFileFormat extends FileFormat {
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
         return new RowDataAvroWriterFactory(type, formatOptions.get(AVRO_OUTPUT_CODEC));
+    }
+
+    @Override
+    public void validateDataFields(RowType rowType) {
+        List<DataType> fieldTypes = rowType.getFieldTypes();
+        for (DataType dataType : fieldTypes) {
+            AvroSchemaConverter.convertToSchema(dataType);
+        }
     }
 
     private static class AvroGenericRecordBulkFormat extends AbstractAvroBulkFormat<GenericRecord> {

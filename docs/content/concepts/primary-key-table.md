@@ -196,7 +196,7 @@ which can decouple data writing and changelog generation, and is more suitable f
 
 By specifying `'changelog-producer' = 'full-compaction'`, Paimon will compare the results between full compactions and produce the differences as changelog. The latency of changelog is affected by the frequency of full compactions.
 
-By specifying `changelog-producer.compaction-interval` table property (default value `0s`), users can define the maximum interval between two full compactions to ensure latency. This is set to 0 by default, so each checkpoint will have a full compression and generate a change log.
+By specifying `full-compaction.delta-commits` table property, full compaction will be constantly triggered after delta commits (checkpoints). This is set to 1 by default, so each checkpoint will have a full compression and generate a change log.
 
 {{< img src="/img/changelog-producer-full-compaction.png">}}
 

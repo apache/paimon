@@ -35,6 +35,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 
@@ -263,6 +264,57 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 .collect(Collectors.toList()));
     }
 
+    @Test
+    public void testBatchOrderWithCompaction() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        int number = 61;
+        List<Integer> expected = new ArrayList<>();
+
+        {
+            StreamTableWrite write = table.newWrite(commitUser);
+            StreamTableCommit commit = table.newCommit(commitUser);
+
+            for (int i = 0; i < number; i++) {
+                write.write(rowData(1, i, (long) i));
+                commit.commit(i, write.prepareCommit(false, i));
+                expected.add(i);
+            }
+            write.close();
+
+            ReadBuilder readBuilder = table.newReadBuilder();
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            List<Integer> result = new ArrayList<>();
+            readBuilder
+                    .newRead()
+                    .createReader(splits)
+                    .forEachRemaining(r -> result.add(r.getInt(1)));
+            assertThat(result).containsExactlyElementsOf(expected);
+        }
+
+        // restore
+        {
+            StreamTableWrite write = table.newWrite(commitUser);
+            StreamTableCommit commit = table.newCommit(commitUser);
+
+            for (int i = number; i < number + 51; i++) {
+                write.write(rowData(1, i, (long) i));
+                commit.commit(i, write.prepareCommit(false, i));
+                expected.add(i);
+            }
+            write.close();
+
+            ReadBuilder readBuilder = table.newReadBuilder();
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            List<Integer> result = new ArrayList<>();
+            readBuilder
+                    .newRead()
+                    .createReader(splits)
+                    .forEachRemaining(r -> result.add(r.getInt(1)));
+            assertThat(result).containsExactlyElementsOf(expected);
+        }
+    }
+
     private void writeData() throws Exception {
         FileStoreTable table = createFileStoreTable();
         StreamTableWrite write = table.newWrite(commitUser);
@@ -298,6 +350,23 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.singletonList("pt"),
+                                Collections.emptyList(),
+                                conf.toMap(),
+                                ""));
+        return new AppendOnlyFileStoreTable(LocalFileIO.create(), tablePath, tableSchema);
+    }
+
+    @Override
+    protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                OVERWRITE_TEST_ROW_TYPE.getFields(),
+                                Arrays.asList("pt0", "pt1"),
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));

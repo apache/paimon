@@ -19,9 +19,11 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.DataTableScan.DataFilePlan;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableScan;
 
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
@@ -34,7 +36,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.UUID;
-import java.util.concurrent.Callable;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.stream.Collectors;
 
@@ -99,6 +100,45 @@ public class ContinuousFileSplitEnumeratorTest {
     }
 
     @Test
+    public void testSplitWithBatch() {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingSplitEnumeratorContext<>(1);
+        context.registerReader(0, "test-host");
+
+        List<FileStoreSourceSplit> initialSplits = new ArrayList<>();
+        for (int i = 1; i <= 18; i++) {
+            initialSplits.add(createSnapshotSplit(i, i, Collections.emptyList()));
+        }
+        final ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(initialSplits)
+                        .setDiscoveryInterval(3)
+                        .setSplitBatchSize(10)
+                        .build();
+
+        // The first time split is allocated, split1 and split2 should be allocated
+        enumerator.handleSplitRequest(0, "test-host");
+        Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
+                context.getSplitAssignments();
+        // Only subtask-0 is allocated.
+        assertThat(assignments).containsOnlyKeys(0);
+        assertThat(assignments.get(0).getAssignedSplits()).hasSize(10);
+
+        // test second batch assign
+        enumerator.handleSplitRequest(0, "test-host");
+
+        assertThat(assignments).containsOnlyKeys(0);
+        assertThat(assignments.get(0).getAssignedSplits()).hasSize(18);
+
+        // test third batch assign
+        enumerator.handleSplitRequest(0, "test-host");
+
+        assertThat(assignments).containsOnlyKeys(0);
+        assertThat(assignments.get(0).getAssignedSplits()).hasSize(18);
+    }
+
+    @Test
     public void testSplitAllocationIsFair() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 new TestingSplitEnumeratorContext<>(1);
@@ -148,22 +188,14 @@ public class ContinuousFileSplitEnumeratorTest {
         context.registerReader(0, "test-host");
         context.registerReader(1, "test-host");
 
-        Queue<DataFilePlan> results = new LinkedBlockingQueue<>();
-        Callable<DataFilePlan> callable =
-                () -> {
-                    DataFilePlan plan = results.poll();
-                    if (plan == null) {
-                        throw new EndOfScanException();
-                    }
-                    return plan;
-                };
-
+        Queue<TableScan.Plan> results = new LinkedBlockingQueue<>();
+        StreamTableScan scan = new MockScan(results);
         ContinuousFileSplitEnumerator enumerator =
                 new Builder()
                         .setSplitEnumeratorContext(context)
                         .setInitialSplits(Collections.emptyList())
                         .setDiscoveryInterval(1)
-                        .setCallable(callable)
+                        .setScan(scan)
                         .build();
         enumerator.start();
 
@@ -172,7 +204,7 @@ public class ContinuousFileSplitEnumeratorTest {
         for (int i = 0; i < 4; i++) {
             splits.add(createDataSplit(snapshot, i, Collections.emptyList()));
         }
-        results.add(new DataFilePlan(snapshot, splits));
+        results.add(new DataFilePlan(splits));
         context.triggerAllActions();
 
         // assign to task 0
@@ -228,9 +260,10 @@ public class ContinuousFileSplitEnumeratorTest {
     private static class Builder {
         private SplitEnumeratorContext<FileStoreSourceSplit> context;
         private Collection<FileStoreSourceSplit> initialSplits = Collections.emptyList();
-        private Long nextSnapshotId;
         private long discoveryInterval = Long.MAX_VALUE;
-        private Callable<DataFilePlan> callable;
+
+        private int splitBatchSize = 10;
+        private StreamTableScan scan;
 
         public Builder setSplitEnumeratorContext(
                 SplitEnumeratorContext<FileStoreSourceSplit> context) {
@@ -243,24 +276,49 @@ public class ContinuousFileSplitEnumeratorTest {
             return this;
         }
 
-        public Builder setNextSnapshotId(Long nextSnapshotId) {
-            this.nextSnapshotId = nextSnapshotId;
-            return this;
-        }
-
         public Builder setDiscoveryInterval(long discoveryInterval) {
             this.discoveryInterval = discoveryInterval;
             return this;
         }
 
-        public Builder setCallable(Callable<DataFilePlan> callable) {
-            this.callable = callable;
+        public Builder setSplitBatchSize(int splitBatchSize) {
+            this.splitBatchSize = splitBatchSize;
+            return this;
+        }
+
+        public Builder setScan(StreamTableScan scan) {
+            this.scan = scan;
             return this;
         }
 
         public ContinuousFileSplitEnumerator build() {
             return new ContinuousFileSplitEnumerator(
-                    context, initialSplits, nextSnapshotId, discoveryInterval, callable);
+                    context, initialSplits, null, discoveryInterval, splitBatchSize, scan);
         }
+    }
+
+    private static class MockScan implements StreamTableScan {
+        private final Queue<Plan> results;
+
+        public MockScan(Queue<Plan> results) {
+            this.results = results;
+        }
+
+        @Override
+        public Plan plan() {
+            Plan plan = results.poll();
+            if (plan == null) {
+                throw new EndOfScanException();
+            }
+            return plan;
+        }
+
+        @Override
+        public Long checkpoint() {
+            return null;
+        }
+
+        @Override
+        public void restore(Long state) {}
     }
 }

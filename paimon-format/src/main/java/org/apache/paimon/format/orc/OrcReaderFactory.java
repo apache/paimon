@@ -48,7 +48,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.List;
 
-import static org.apache.paimon.format.orc.reader.AbstractOrcColumnVector.createFlinkVector;
+import static org.apache.paimon.format.orc.reader.AbstractOrcColumnVector.createPaimonVector;
 import static org.apache.paimon.format.orc.reader.OrcSplitReaderUtil.toOrcType;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -123,10 +123,9 @@ public class OrcReaderFactory implements FormatReaderFactory {
         for (int i = 0; i < vectors.length; i++) {
             String name = tableFieldNames.get(selectedFields[i]);
             DataType type = tableFieldTypes.get(selectedFields[i]);
-            vectors[i] = createFlinkVector(orcBatch.cols[tableFieldNames.indexOf(name)], type);
+            vectors[i] = createPaimonVector(orcBatch.cols[tableFieldNames.indexOf(name)], type);
         }
-        VectorizedColumnBatch flinkColumnBatch = new VectorizedColumnBatch(vectors);
-        return new OrcReaderBatch(orcBatch, flinkColumnBatch, recycler);
+        return new OrcReaderBatch(orcBatch, new VectorizedColumnBatch(vectors), recycler);
     }
 
     // ------------------------------------------------------------------------
@@ -150,17 +149,18 @@ public class OrcReaderFactory implements FormatReaderFactory {
         private final VectorizedRowBatch orcVectorizedRowBatch;
         private final Pool.Recycler<OrcReaderBatch> recycler;
 
-        private final VectorizedColumnBatch flinkColumnBatch;
+        private final VectorizedColumnBatch paimonColumnBatch;
         private final ColumnarRowIterator result;
 
         protected OrcReaderBatch(
                 final VectorizedRowBatch orcVectorizedRowBatch,
-                final VectorizedColumnBatch flinkColumnBatch,
+                final VectorizedColumnBatch paimonColumnBatch,
                 final Pool.Recycler<OrcReaderBatch> recycler) {
             this.orcVectorizedRowBatch = checkNotNull(orcVectorizedRowBatch);
             this.recycler = checkNotNull(recycler);
-            this.flinkColumnBatch = flinkColumnBatch;
-            this.result = new ColumnarRowIterator(new ColumnarRow(flinkColumnBatch), this::recycle);
+            this.paimonColumnBatch = paimonColumnBatch;
+            this.result =
+                    new ColumnarRowIterator(new ColumnarRow(paimonColumnBatch), this::recycle);
         }
 
         /**
@@ -177,10 +177,10 @@ public class OrcReaderFactory implements FormatReaderFactory {
         }
 
         private RecordIterator<InternalRow> convertAndGetIterator(VectorizedRowBatch orcBatch) {
-            // no copying from the ORC column vectors to the Flink columns vectors necessary,
+            // no copying from the ORC column vectors to the Paimon columns vectors necessary,
             // because they point to the same data arrays internally design
             int batchSize = orcBatch.size;
-            flinkColumnBatch.setNumRows(batchSize);
+            paimonColumnBatch.setNumRows(batchSize);
             result.set(batchSize);
             return result;
         }
@@ -350,7 +350,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
 
         OrcFile.ReaderOptions readerOptions = OrcFile.readerOptions(conf);
 
-        // configure filesystem from Flink filesystem
+        // configure filesystem from Paimon FileIO
         readerOptions.filesystem(new HadoopReadOnlyFileSystem(fileIO));
 
         return OrcFile.createReader(hPath, readerOptions);

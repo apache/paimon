@@ -33,6 +33,7 @@ import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
 import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -56,7 +57,7 @@ import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 public class FlinkTableSink implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning {
 
     private final ObjectIdentifier tableIdentifier;
-    private final FileStoreTable table;
+    private final Table table;
     private final DynamicTableFactory.Context context;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
@@ -66,7 +67,7 @@ public class FlinkTableSink implements DynamicTableSink, SupportsOverwrite, Supp
 
     public FlinkTableSink(
             ObjectIdentifier tableIdentifier,
-            FileStoreTable table,
+            Table table,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
         this.tableIdentifier = tableIdentifier;
@@ -85,7 +86,7 @@ public class FlinkTableSink implements DynamicTableSink, SupportsOverwrite, Supp
             // no primary key, sink all changelogs
             return requestedMode;
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
-            Options options = Options.fromMap(table.schema().options());
+            Options options = Options.fromMap(table.options());
             if (options.get(CHANGELOG_PRODUCER) == ChangelogProducer.INPUT) {
                 return requestedMode;
             }
@@ -124,13 +125,13 @@ public class FlinkTableSink implements DynamicTableSink, SupportsOverwrite, Supp
             logSinkProvider = logStoreTableFactory.createSinkProvider(this.context, context);
         }
 
-        Options conf = Options.fromMap(table.schema().options());
+        Options conf = Options.fromMap(table.options());
         // Do not sink to log store when overwrite mode
         final LogSinkFunction logSinkFunction =
                 overwrite ? null : (logSinkProvider == null ? null : logSinkProvider.createSink());
         return new PaimonDataStreamSinkProvider(
                 (dataStream) ->
-                        new FlinkSinkBuilder(table)
+                        new FlinkSinkBuilder((FileStoreTable) table)
                                 .withInput(
                                         new DataStream<>(
                                                 dataStream.getExecutionEnvironment(),
@@ -163,8 +164,7 @@ public class FlinkTableSink implements DynamicTableSink, SupportsOverwrite, Supp
 
     @Override
     public void applyStaticPartition(Map<String, String> partition) {
-        table.schema()
-                .partitionKeys()
+        table.partitionKeys()
                 .forEach(
                         partitionKey -> {
                             if (partition.containsKey(partitionKey)) {

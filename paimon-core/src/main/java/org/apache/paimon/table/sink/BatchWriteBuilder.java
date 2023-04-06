@@ -18,13 +18,12 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 
 import javax.annotation.Nullable;
 
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -51,7 +50,7 @@ import java.util.Map;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface BatchWriteBuilder extends WriteBuilder {
 
     long COMMIT_IDENTIFIER = Long.MAX_VALUE;
@@ -63,15 +62,7 @@ public interface BatchWriteBuilder extends WriteBuilder {
     }
 
     /** Overwrite writing, same as the 'INSERT OVERWRITE T PARTITION (...)' semantics of SQL. */
-    default BatchWriteBuilder withOverwrite(@Nullable Map<String, String> staticPartition) {
-        if (staticPartition != null) {
-            withOverwrite(Collections.singletonList(staticPartition));
-        }
-        return this;
-    }
-
-    /** Overwrite writing, multiple static partitions can be specified. */
-    BatchWriteBuilder withOverwrite(@Nullable List<Map<String, String>> staticPartitions);
+    BatchWriteBuilder withOverwrite(@Nullable Map<String, String> staticPartition);
 
     /** Create a {@link TableWrite} to write {@link InternalRow}s. */
     @Override

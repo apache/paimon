@@ -23,6 +23,10 @@ on:
     # At the end of every day
     - cron: '0 0 * * *'
   workflow_dispatch:
+
+env:
+  JDK_VERSION: 8
+
 jobs:
   publish-snapshot:
     if: github.repository == 'apache/incubator-paimon'
@@ -30,10 +34,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
-      - name: Set up JDK 1.8
-        uses: actions/setup-java@v1
+      # temporarily publish the jdk8 version to maven
+      # lately when jdk is deprecated, we need update it to jdk11
+      - name: Set up JDK ${{ env.JDK_VERSION }}
+        uses: actions/setup-java@v2
         with:
-          java-version: 1.8
+          java-version: ${{ env.JDK_VERSION }}
+          distribution: 'adopt'
       - name: Cache local Maven repository
         uses: actions/cache@v3
         with:
@@ -41,6 +48,8 @@ jobs:
           key: snapshot-maven-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
             snapshot-maven-
+      - name: Clone Paimon-shade repo
+        run: git clone https://github.com/apache/incubator-paimon-shade.git /tmp/paimon-shade
       - name: Publish snapshot
         env:
           ASF_USERNAME: ${{ secrets.NEXUS_USER }}
@@ -52,6 +61,10 @@ jobs:
           echo "<password>$ASF_PASSWORD</password>" >> $tmp_settings
           echo "</server></servers></settings>" >> $tmp_settings
           
+          ./mvnw --settings $tmp_settings clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release
+
+          mv $tmp_settings /tmp/paimon-shade
+          cd /tmp/paimon-shade
           ./mvnw --settings $tmp_settings clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release
           
           rm $tmp_settings

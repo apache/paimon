@@ -37,7 +37,7 @@ public class PaimonDateObjectInspector extends AbstractPrimitiveJavaObjectInspec
 
     @Override
     public Date getPrimitiveJavaObject(Object o) {
-        // Flink stores date as an integer (epoch day, 1970-01-01 = day 0)
+        // Paimon stores date as an integer (epoch day, 1970-01-01 = day 0)
         // while constructor of Date accepts epoch millis
         return o == null ? null : DateTimeUtils.toSQLDate((Integer) o);
     }

@@ -20,12 +20,13 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.operation.ScanKind;
-import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
 /**
- * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_SNAPSHOT} startup mode of a
- * batch read.
+ * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_SNAPSHOT} or {@link
+ * CoreOptions.StartupMode#FROM_SNAPSHOT_FULL} startup mode of a batch read.
  */
 public class StaticFromSnapshotStartingScanner implements StartingScanner {
     private final long snapshotId;
@@ -35,13 +36,13 @@ public class StaticFromSnapshotStartingScanner implements StartingScanner {
     }
 
     @Override
-    public DataTableScan.DataFilePlan getPlan(
-            SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
+    @Nullable
+    public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
         if (snapshotManager.earliestSnapshotId() == null
                 || snapshotId < snapshotManager.earliestSnapshotId()) {
             return null;
         }
-        return new DataTableScan.DataFilePlan(
+        return new Result(
                 snapshotId,
                 snapshotSplitReader.withKind(ScanKind.ALL).withSnapshot(snapshotId).splits());
     }

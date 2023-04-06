@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 
@@ -26,10 +27,12 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
+import java.util.function.Predicate;
 
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 
@@ -97,6 +100,10 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Long latestCompactedSnapshotId() {
+        return pickSnapshot(s -> s.commitKind() == CommitKind.COMPACT);
+    }
+
+    public @Nullable Long pickSnapshot(Predicate<Snapshot> predicate) {
         Long latestId = latestSnapshotId();
         Long earliestId = earliestSnapshotId();
         if (latestId == null || earliestId == null) {
@@ -106,7 +113,7 @@ public class SnapshotManager implements Serializable {
         for (long snapshotId = latestId; snapshotId >= earliestId; snapshotId--) {
             if (snapshotExists(snapshotId)) {
                 Snapshot snapshot = snapshot(snapshotId);
-                if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
+                if (predicate.test(snapshot)) {
                     return snapshot.id();
                 }
             }
@@ -135,8 +142,11 @@ public class SnapshotManager implements Serializable {
         return earliest - 1;
     }
 
-    /** Returns a snapshot earlier than or equals to the timestamp mills. */
-    public @Nullable Long earlierOrEqualTimeMills(long timestampMills) {
+    /**
+     * Returns a {@link Snapshot} whoes commit time is earlier than or equal to given timestamp
+     * mills. If there is no such a snapshot, returns null.
+     */
+    public @Nullable Snapshot earlierOrEqualTimeMills(long timestampMills) {
         Long earliest = earliestSnapshotId();
         Long latest = latestSnapshotId();
         if (earliest == null || latest == null) {
@@ -144,9 +154,10 @@ public class SnapshotManager implements Serializable {
         }
 
         for (long i = latest; i >= earliest; i--) {
-            long commitTime = snapshot(i).timeMillis();
+            Snapshot snapshot = snapshot(i);
+            long commitTime = snapshot.timeMillis();
             if (commitTime <= timestampMills) {
-                return i;
+                return snapshot;
             }
         }
         return null;
@@ -159,6 +170,7 @@ public class SnapshotManager implements Serializable {
     public Iterator<Snapshot> snapshots() throws IOException {
         return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
                 .map(this::snapshot)
+                .sorted(Comparator.comparingLong(Snapshot::id))
                 .iterator();
     }
 

@@ -18,9 +18,16 @@
 
 package org.apache.paimon.format.orc;
 
+import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.apache.paimon.format.orc.OrcFileFormatFactory.IDENTIFIER;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,7 +39,7 @@ public class OrcFileFormatTest {
     public void testAbsent() {
         Options options = new Options();
         options.setString("haha", "1");
-        OrcFileFormat orc = new OrcFileFormatFactory().create(options);
+        OrcFileFormat orc = new OrcFileFormatFactory().create(new FormatContext(options, 1024));
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", "")).isEqualTo("lz4");
     }
@@ -42,8 +49,37 @@ public class OrcFileFormatTest {
         Options options = new Options();
         options.setString("haha", "1");
         options.setString("compress", "zlib");
-        OrcFileFormat orc = new OrcFileFormatFactory().create(options);
+        OrcFileFormat orc = new OrcFileFormatFactory().create(new FormatContext(options, 1024));
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", "")).isEqualTo("zlib");
+    }
+
+    @Test
+    public void testSupportedDataTypes() {
+        OrcFileFormat orc =
+                new OrcFileFormatFactory().create(new FormatContext(new Options(), 1024));
+
+        int index = 0;
+        List<DataField> dataFields = new ArrayList<DataField>();
+        dataFields.add(new DataField(index++, "boolean_type", DataTypes.BOOLEAN()));
+        dataFields.add(new DataField(index++, "tinyint_type", DataTypes.TINYINT()));
+        dataFields.add(new DataField(index++, "smallint_type", DataTypes.SMALLINT()));
+        dataFields.add(new DataField(index++, "int_type", DataTypes.INT()));
+        dataFields.add(new DataField(index++, "bigint_type", DataTypes.BIGINT()));
+        dataFields.add(new DataField(index++, "float_type", DataTypes.FLOAT()));
+        dataFields.add(new DataField(index++, "double_type", DataTypes.DOUBLE()));
+        dataFields.add(new DataField(index++, "char_type", DataTypes.CHAR(10)));
+        dataFields.add(new DataField(index++, "varchar_type", DataTypes.VARCHAR(20)));
+        dataFields.add(new DataField(index++, "binary_type", DataTypes.BINARY(20)));
+        dataFields.add(new DataField(index++, "varbinary_type", DataTypes.VARBINARY(20)));
+        dataFields.add(new DataField(index++, "timestamp_type", DataTypes.TIMESTAMP(3)));
+        dataFields.add(
+                new DataField(
+                        index++,
+                        "timestamp_ltz_type",
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3)));
+        dataFields.add(new DataField(index++, "date_type", DataTypes.DATE()));
+        dataFields.add(new DataField(index++, "decimal_type", DataTypes.DECIMAL(10, 3)));
+        orc.validateDataFields(new RowType(dataFields));
     }
 }

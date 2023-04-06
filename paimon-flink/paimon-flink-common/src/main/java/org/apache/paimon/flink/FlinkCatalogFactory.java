@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.Options;
 
 import java.util.Collections;
 import java.util.Set;
@@ -56,7 +57,8 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
     public FlinkCatalog createCatalog(Context context) {
         return createCatalog(
                 context.getName(),
-                FlinkUtils.createCatalogContext(context.getOptions(), context.getConfiguration()),
+                CatalogContext.create(
+                        Options.fromMap(context.getOptions()), new FlinkFileIOLoader()),
                 context.getClassLoader());
     }
 

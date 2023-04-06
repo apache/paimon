@@ -18,10 +18,9 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 import org.apache.paimon.utils.Preconditions;
-
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
 import javax.annotation.Nonnull;
 
@@ -37,7 +36,7 @@ import java.util.Set;
  * @see DataTypes
  * @since 0.4.0
  */
-@Experimental
+@Public
 public abstract class DataType implements Serializable {
 
     private static final long serialVersionUID = 1L;

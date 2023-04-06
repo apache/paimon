@@ -27,7 +27,7 @@ import java.util.concurrent.ExecutionException;
  * A collection of static utility methods to validate input.
  *
  * <p>This class is modelled after Google Guava's Preconditions class, and partly takes code from
- * that class. We add this code to the Flink code base in order to reduce external dependencies.
+ * that class. We add this code to the Paimon code base in order to reduce external dependencies.
  */
 public final class Preconditions {
 
@@ -280,7 +280,7 @@ public final class Preconditions {
             if (placeholderStart == -1) {
                 break;
             }
-            builder.append(template.substring(templateStart, placeholderStart));
+            builder.append(template, templateStart, placeholderStart);
             builder.append(args[i++]);
             templateStart = placeholderStart + 2;
         }

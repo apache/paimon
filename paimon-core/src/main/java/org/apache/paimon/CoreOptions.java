@@ -20,7 +20,9 @@ package org.apache.paimon;
 
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.MemorySize;
@@ -28,11 +30,13 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
+import org.apache.paimon.utils.StringUtils;
 
 import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -78,11 +82,12 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The file path of this table in the filesystem.");
 
-    public static final ConfigOption<String> FILE_FORMAT =
+    public static final ConfigOption<FileFormatType> FILE_FORMAT =
             key("file.format")
-                    .stringType()
-                    .defaultValue("orc")
-                    .withDescription("Specify the message format of data files.");
+                    .enumType(FileFormatType.class)
+                    .defaultValue(FileFormatType.ORC)
+                    .withDescription(
+                            "Specify the message format of data files, currently orc, parquet and avro are supported.");
 
     public static final ConfigOption<String> ORC_BLOOM_FILTER_COLUMNS =
             key("orc.bloom.filter.columns")
@@ -108,10 +113,10 @@ public class CoreOptions implements Serializable {
                                     + "could be NONE, ZLIB, SNAPPY, LZO, LZ4, for parquet file format, the compression value could be "
                                     + "UNCOMPRESSED, SNAPPY, GZIP, LZO, BROTLI, LZ4, ZSTD.");
 
-    public static final ConfigOption<String> MANIFEST_FORMAT =
+    public static final ConfigOption<FileFormatType> MANIFEST_FORMAT =
             key("manifest.format")
-                    .stringType()
-                    .defaultValue("avro")
+                    .enumType(FileFormatType.class)
+                    .defaultValue(FileFormatType.AVRO)
                     .withDescription("Specify the message format of manifest files.");
 
     public static final ConfigOption<MemorySize> MANIFEST_TARGET_FILE_SIZE =
@@ -295,9 +300,10 @@ public class CoreOptions implements Serializable {
                                     + "which is not cost-effective.");
 
     public static final ConfigOption<Integer> COMPACTION_MAX_FILE_NUM =
-            key("compaction.early-max.file-num")
+            key("compaction.max.file-num")
                     .intType()
                     .defaultValue(50)
+                    .withDeprecatedKeys("compaction.early-max.file-num")
                     .withDescription(
                             "For file set [f_0,...,f_N], the maximum file number to trigger a compaction "
                                     + "for append-only table, even if sum(size(f_i)) < targetFileSize. This value "
@@ -350,7 +356,7 @@ public class CoreOptions implements Serializable {
                     .longType()
                     .noDefaultValue()
                     .withDescription(
-                            "Optional snapshot id used in case of \"from-snapshot\" scan mode");
+                            "Optional snapshot id used in case of \"from-snapshot\" or \"from-snapshot-full\" scan mode");
 
     public static final ConfigOption<Long> SCAN_BOUNDED_WATERMARK =
             key("scan.bounded.watermark")
@@ -407,6 +413,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to read the changes from overwrite in streaming mode.");
+
+    public static final ConfigOption<Boolean> DYNAMIC_PARTITION_OVERWRITE =
+            key("dynamic-partition-overwrite")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether only overwrite dynamic partition when overwriting a partitioned table with "
+                                    + "dynamic partition columns. Works only when the table has partition keys.");
 
     public static final ConfigOption<Duration> PARTITION_EXPIRATION_TIME =
             key("partition.expiration-time")
@@ -523,6 +537,37 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("256 mb"))
                     .withDescription("Max memory size for lookup cache.");
 
+    public static final ConfigOption<Integer> READ_BATCH_SIZE =
+            key("read.batch-size")
+                    .intType()
+                    .defaultValue(1024)
+                    .withDescription("Read batch size for orc and parquet.");
+
+    @Deprecated
+    @ExcludeFromDocumentation("For compatibility with older versions")
+    public static final ConfigOption<Boolean> APPEND_ONLY_ASSERT_DISORDER =
+            key("append-only.assert-disorder")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Should assert disorder files, this just for compatibility with older versions.");
+
+    public static final ConfigOption<Integer> FULL_COMPACTION_DELTA_COMMITS =
+            key("full-compaction.delta-commits")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Full compaction will be constantly triggered after delta commits.");
+
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<Boolean> STREAMING_COMPACT =
+            key("streaming-compact")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Only used to force TableScan to construct 'ContinuousCompactorStartingScanner' and "
+                                    + "'ContinuousCompactorFollowUpScanner' for dedicated streaming compaction job.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -531,6 +576,10 @@ public class CoreOptions implements Serializable {
 
     public CoreOptions(Options options) {
         this.options = options;
+    }
+
+    public static CoreOptions fromMap(Map<String, String> options) {
+        return new CoreOptions(options);
     }
 
     public Options toConfiguration() {
@@ -557,12 +606,16 @@ public class CoreOptions implements Serializable {
         return new Path(options.get(PATH));
     }
 
+    public FileFormatType formatType() {
+        return options.get(FILE_FORMAT);
+    }
+
     public FileFormat fileFormat() {
-        return FileFormat.fromTableOptions(options, FILE_FORMAT);
+        return createFileFormat(options, FILE_FORMAT);
     }
 
     public FileFormat manifestFormat() {
-        return FileFormat.fromTableOptions(options, MANIFEST_FORMAT);
+        return createFileFormat(options, MANIFEST_FORMAT);
     }
 
     public MemorySize manifestTargetSize() {
@@ -571,6 +624,15 @@ public class CoreOptions implements Serializable {
 
     public String partitionDefaultName() {
         return options.get(PARTITION_DEFAULT_NAME);
+    }
+
+    public static FileFormat createFileFormat(
+            Options options, ConfigOption<FileFormatType> formatOption) {
+        FileFormatType formatIdentifier = options.get(formatOption);
+        int readBatchSize = options.get(READ_BATCH_SIZE);
+        return FileFormat.fromIdentifier(
+                formatIdentifier.toString(),
+                new FormatContext(options.removePrefix(formatIdentifier + "."), readBatchSize));
     }
 
     public Map<Integer, String> fileCompressionPerLevel() {
@@ -736,6 +798,10 @@ public class CoreOptions implements Serializable {
         return options.get(STREAMING_READ_OVERWRITE);
     }
 
+    public boolean dynamicPartitionOverwrite() {
+        return options.get(DYNAMIC_PARTITION_OVERWRITE);
+    }
+
     public Duration partitionExpireTime() {
         return options.get(PARTITION_EXPIRATION_TIME);
     }
@@ -750,6 +816,10 @@ public class CoreOptions implements Serializable {
 
     public String partitionTimestampPattern() {
         return options.get(PARTITION_TIMESTAMP_PATTERN);
+    }
+
+    public int readBatchSize() {
+        return options.get(READ_BATCH_SIZE);
     }
 
     /** Specifies the merge engine for table with primary key. */
@@ -807,7 +877,8 @@ public class CoreOptions implements Serializable {
                 "For streaming sources, produces a snapshot after the latest compaction on the table "
                         + "upon first startup, and continue to read the latest changes. "
                         + "For batch sources, just produce a snapshot after the latest compaction "
-                        + "but does not read new changes."),
+                        + "but does not read new changes. Snapshots of full compaction are picked "
+                        + "when scheduled full-compaction is enabled."),
 
         FROM_TIMESTAMP(
                 "from-timestamp",
@@ -822,6 +893,12 @@ public class CoreOptions implements Serializable {
                 "For streaming sources, continuously reads changes "
                         + "starting from snapshot specified by \"scan.snapshot-id\", "
                         + "without producing a snapshot at the beginning. For batch sources, "
+                        + "produces a snapshot specified by \"scan.snapshot-id\" but does not read new changes."),
+
+        FROM_SNAPSHOT_FULL(
+                "from-snapshot-full",
+                "For streaming sources, produces from snapshot specified by \"scan.snapshot-id\" "
+                        + "on the table upon first startup, and continuously reads changes. For batch sources, "
                         + "produces a snapshot specified by \"scan.snapshot-id\" but does not read new changes.");
 
         private final String value;
@@ -937,6 +1014,46 @@ public class CoreOptions implements Serializable {
         }
     }
 
+    /** Specifies the file format type for store. */
+    public enum FileFormatType implements DescribedEnum {
+        ORC("orc", "ORC file format."),
+        PARQUET("parquet", "Parquet file format."),
+        AVRO("avro", "Avro file format.");
+
+        private final String value;
+        private final String description;
+
+        FileFormatType(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+
+        @VisibleForTesting
+        public static FileFormatType fromValue(String value) {
+            for (FileFormatType formatType : FileFormatType.values()) {
+                if (formatType.value.equals(value)) {
+                    return formatType;
+                }
+            }
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid format type %s, only support [%s]",
+                            value,
+                            StringUtils.join(
+                                    Arrays.stream(FileFormatType.values()).iterator(), ",")));
+        }
+    }
+
     /**
      * Set the default values of the {@link CoreOptions} via the given {@link Options}.
      *
@@ -945,6 +1062,10 @@ public class CoreOptions implements Serializable {
     public static void setDefaultValues(Options options) {
         if (options.contains(SCAN_TIMESTAMP_MILLIS) && !options.contains(SCAN_MODE)) {
             options.set(SCAN_MODE, StartupMode.FROM_TIMESTAMP);
+        }
+
+        if (options.contains(SCAN_SNAPSHOT_ID) && !options.contains(SCAN_MODE)) {
+            options.set(SCAN_MODE, StartupMode.FROM_SNAPSHOT);
         }
     }
 

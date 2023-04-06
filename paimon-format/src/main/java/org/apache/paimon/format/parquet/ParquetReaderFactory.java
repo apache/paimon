@@ -73,17 +73,11 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     private static final String ALLOCATION_SIZE = "parquet.read.allocation.size";
 
-    private static final int BATCH_SIZE = 2048;
-
     private final Options conf;
     private final String[] projectedFields;
     private final DataType[] projectedTypes;
     private final int batchSize;
     private final Set<Integer> unknownFieldsIndices = new HashSet<>();
-
-    public ParquetReaderFactory(Options formatConfig, RowType projectedType) {
-        this(formatConfig, projectedType, BATCH_SIZE);
-    }
 
     public ParquetReaderFactory(Options conf, RowType projectedType, int batchSize) {
         this.conf = conf;
@@ -151,7 +145,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             }
         }
 
-        return Types.buildMessage().addFields(types).named("flink-parquet");
+        return Types.buildMessage().addFields(types).named("paimon-parquet");
     }
 
     private void checkSchema(MessageType fileSchema, MessageType requestedSchema)

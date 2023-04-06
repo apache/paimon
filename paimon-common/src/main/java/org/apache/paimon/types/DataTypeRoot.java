@@ -18,7 +18,7 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 import java.util.Collections;
 import java.util.EnumSet;
@@ -45,7 +45,7 @@ import java.util.Set;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public enum DataTypeRoot {
     CHAR(DataTypeFamily.PREDEFINED, DataTypeFamily.CHARACTER_STRING),
 

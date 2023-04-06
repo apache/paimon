@@ -21,9 +21,9 @@ package org.apache.paimon.flink;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
@@ -61,8 +61,8 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
     @Before
     public void before() throws IOException {
         tEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
-        String catalog = "TABLE_STORE";
-        path = getTempDirPath("table_store");
+        String catalog = "PAIMON";
+        path = getTempDirPath("paimon");
         tEnv.executeSql(
                 String.format(
                         "CREATE CATALOG %s WITH (" + "'type'='paimon', 'warehouse'='%s')",

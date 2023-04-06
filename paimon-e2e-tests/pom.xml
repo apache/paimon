@@ -33,7 +33,9 @@ under the License.
 
     <properties>
         <flink.shaded.hadoop.version>2.8.3-10.0</flink.shaded.hadoop.version>
+        <flink.cdc.version>2.3.0</flink.cdc.version>
         <flink.sql.connector.kafka>flink-sql-connector-kafka</flink.sql.connector.kafka>
+        <flink.sql.connector.hive>flink-sql-connector-hive-2.3.9_${scala.binary.version}</flink.sql.connector.hive>
     </properties>
 
     <dependencies>
@@ -42,13 +44,6 @@ under the License.
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-flink-${test.flink.main.version}</artifactId>
-            <version>${project.version}</version>
-            <scope>runtime</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-hive-catalog</artifactId>
             <version>${project.version}</version>
             <scope>runtime</scope>
         </dependency>
@@ -67,6 +62,21 @@ under the License.
             <scope>runtime</scope>
         </dependency>
 
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-flink-common</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+            <type>test-jar</type>
+        </dependency>
+
+        <dependency>
+            <groupId>com.ververica</groupId>
+            <artifactId>flink-connector-mysql-cdc</artifactId>
+            <version>${flink.cdc.version}</version>
+            <scope>test</scope>
+        </dependency>
+
         <!-- testcontainers -->
 
         <dependency>
@@ -79,6 +89,13 @@ under the License.
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>kafka</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mysql</artifactId>
             <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
@@ -105,16 +122,6 @@ under the License.
                             <artifactId>paimon-flink-${test.flink.main.version}</artifactId>
                             <version>${project.version}</version>
                             <destFileName>paimon-flink.jar</destFileName>
-                            <type>jar</type>
-                            <overWrite>true</overWrite>
-                            <outputDirectory>/tmp/paimon-e2e-tests-jars
-                            </outputDirectory>
-                        </artifactItem>
-                        <artifactItem>
-                            <groupId>org.apache.paimon</groupId>
-                            <artifactId>paimon-hive-catalog</artifactId>
-                            <version>${project.version}</version>
-                            <destFileName>paimon-hive-catalog.jar</destFileName>
                             <type>jar</type>
                             <overWrite>true</overWrite>
                             <outputDirectory>/tmp/paimon-e2e-tests-jars
@@ -150,6 +157,16 @@ under the License.
                             <outputDirectory>/tmp/paimon-e2e-tests-jars
                             </outputDirectory>
                         </artifactItem>
+                        <artifactItem>
+                            <groupId>com.ververica</groupId>
+                            <artifactId>flink-sql-connector-mysql-cdc</artifactId>
+                            <version>${flink.cdc.version}</version>
+                            <destFileName>mysql-cdc.jar</destFileName>
+                            <type>jar</type>
+                            <overWrite>true</overWrite>
+                            <outputDirectory>/tmp/paimon-e2e-tests-jars
+                            </outputDirectory>
+                        </artifactItem>
                         <!-- test paimon with kafka sql jar -->
                         <artifactItem>
                             <groupId>org.apache.flink</groupId>
@@ -161,10 +178,50 @@ under the License.
                             <outputDirectory>/tmp/paimon-e2e-tests-jars
                             </outputDirectory>
                         </artifactItem>
+                        <!-- flink hive catalog needs flink hive sql jar -->
+                        <artifactItem>
+                            <groupId>org.apache.flink</groupId>
+                            <artifactId>${flink.sql.connector.hive}</artifactId>
+                            <version>${test.flink.version}</version>
+                            <destFileName>flink-sql-connector-hive.jar</destFileName>
+                            <type>jar</type>
+                            <overWrite>true</overWrite>
+                            <outputDirectory>/tmp/paimon-e2e-tests-jars
+                            </outputDirectory>
+                        </artifactItem>
                     </artifactItems>
                 </configuration>
             </plugin>
+
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>FLINK-31695</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <!--
+                    Due to FLINK-31695, we need to delete conflicting classes from jar file.
+                    Remove this work-around after we make our own e2e docker image,
+                    with both Flink and Hadoop in the same docker.
+                    -->
+                    <executable>zip</executable>
+                    <arguments>
+                        <argument>-d</argument>
+                        <argument>/tmp/paimon-e2e-tests-jars/bundled-hadoop.jar</argument>
+                        <argument>org/apache/commons/cli/CommandLine.class</argument>
+                    </arguments>
+                </configuration>
+            </plugin>
         </plugins>
+
         <resources>
             <resource>
                 <directory>src/test/resources</directory>
@@ -180,11 +237,10 @@ under the License.
     <profiles>
         <!-- Activate these profiles with -Pflink-x.xx to build and test against different Flink versions -->
         <profile>
-            <id>flink-1.14</id>
+            <id>flink-1.16</id>
             <properties>
-                <test.flink.main.version>1.14</test.flink.main.version>
-                <test.flink.version>1.14.6</test.flink.version>
-                <flink.sql.connector.kafka>flink-sql-connector-kafka_${scala.binary.version}</flink.sql.connector.kafka>
+                <test.flink.main.version>1.16</test.flink.main.version>
+                <test.flink.version>1.16.1</test.flink.version>
             </properties>
         </profile>
 
@@ -194,6 +250,17 @@ under the License.
                 <test.flink.main.version>1.15</test.flink.main.version>
                 <test.flink.version>1.15.3</test.flink.version>
                 <flink.sql.connector.kafka>flink-sql-connector-kafka</flink.sql.connector.kafka>
+                <flink.sql.connector.hive>flink-sql-connector-hive-2.3.6_${scala.binary.version}</flink.sql.connector.hive>
+            </properties>
+        </profile>
+
+        <profile>
+            <id>flink-1.14</id>
+            <properties>
+                <test.flink.main.version>1.14</test.flink.main.version>
+                <test.flink.version>1.14.6</test.flink.version>
+                <flink.sql.connector.kafka>flink-sql-connector-kafka_${scala.binary.version}</flink.sql.connector.kafka>
+                <flink.sql.connector.hive>flink-sql-connector-hive-2.3.6_${scala.binary.version}</flink.sql.connector.hive>
             </properties>
         </profile>
     </profiles>

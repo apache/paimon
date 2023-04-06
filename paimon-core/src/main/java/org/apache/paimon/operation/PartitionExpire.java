@@ -20,7 +20,6 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.types.RowType;
@@ -30,7 +29,6 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -101,9 +99,7 @@ public class PartitionExpire {
         }
 
         if (expired.size() > 0) {
-            // identifier is MAX_VALUE to avoid conflict.
-            ManifestCommittable committable = new ManifestCommittable(Long.MAX_VALUE);
-            commit.overwrite(expired, committable, Collections.emptyMap());
+            commit.dropPartitions(expired);
         }
     }
 

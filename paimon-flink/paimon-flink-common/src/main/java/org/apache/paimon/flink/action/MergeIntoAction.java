@@ -91,9 +91,10 @@ public class MergeIntoAction extends ActionBase {
     @Nullable private String targetAlias;
 
     // source table
-    @Nullable private String sourceTable;
+    private String sourceTable;
+
+    // sqls to config environment and create source table
     @Nullable private String[] sourceSqls;
-    @Nullable private String sourceAlias;
 
     // merge condition
     private String mergeCondition;
@@ -157,14 +158,12 @@ public class MergeIntoAction extends ActionBase {
         return this;
     }
 
-    public MergeIntoAction withSourceTable(@Nullable String sourceAlias, String sourceTable) {
-        this.sourceAlias = sourceAlias;
+    public MergeIntoAction withSourceTable(String sourceTable) {
         this.sourceTable = sourceTable;
         return this;
     }
 
-    public MergeIntoAction withSourceSqls(String sourceAlias, String... sourceSqls) {
-        this.sourceAlias = sourceAlias;
+    public MergeIntoAction withSourceSqls(String... sourceSqls) {
         this.sourceSqls = sourceSqls;
         return this;
     }
@@ -233,9 +232,15 @@ public class MergeIntoAction extends ActionBase {
             action.withTargetAlias(params.get("target-as"));
         }
 
-        if (!initSource(params, action)) {
+        if (params.has("source-sql")) {
+            Collection<String> sourceSqls = params.getMultiParameter("source-sql");
+            action.withSourceSqls(sourceSqls.toArray(new String[0]));
+        }
+
+        if (argumentAbsent(params, "source-table")) {
             return Optional.empty();
         }
+        action.withSourceTable(params.get("source-table"));
 
         if (argumentAbsent(params, "on")) {
             return Optional.empty();
@@ -282,38 +287,6 @@ public class MergeIntoAction extends ActionBase {
         }
 
         return Optional.of(action);
-    }
-
-    private static boolean initSource(MultipleParameterTool params, MergeIntoAction action) {
-        String sourceTable = params.get("source-table");
-        Collection<String> sourceSqls = params.getMultiParameter("source-sql");
-        String sourceAlias = params.get("source-as");
-
-        int count = 0;
-        if (sourceTable != null) {
-            action.withSourceTable(sourceAlias, sourceTable);
-            count++;
-        }
-
-        if (sourceSqls != null) {
-            if (sourceAlias == null) {
-                System.err.println(
-                        "--source-sql and --source-as must be specified together.\n"
-                                + "Run <action> --help for help.");
-                return false;
-            }
-            action.withSourceSqls(sourceAlias, sourceSqls.toArray(new String[0]));
-            count++;
-        }
-
-        if (count != 1) {
-            System.err.println(
-                    "Please specify source as either \"source-table\" or \"source-sql\".\n"
-                            + "Run <action> --help for help.");
-            return false;
-        }
-
-        return true;
     }
 
     private static boolean argumentAbsent(MultipleParameterTool params, String key) {
@@ -373,8 +346,8 @@ public class MergeIntoAction extends ActionBase {
                         + "             --database <database-name>\n"
                         + "             --table <target-table-name>\n"
                         + "             [--target-as <target-table-alias>]\n"
-                        + "             --source-table <source-table>\n"
-                        + "             [--source-as <source-table-alias>]\n"
+                        + "             [--source-sql <sql> ...]\n"
+                        + "             --source-table <source-table-name>\n"
                         + "             --on <merge-condition>\n"
                         + "             --merge-actions <matched-upsert,matched-delete,not-matched-insert,not-matched-by-source-upsert,not-matched-by-source-delete>\n"
                         + "             --matched-upsert-condition <matched-condition>\n"
@@ -408,8 +381,6 @@ public class MergeIntoAction extends ActionBase {
 
         System.out.println("  alternative arguments:");
         System.out.println("    --path <table-path> to represent the table path.");
-        System.out.println(
-                "    --source-sql <sql>[, --source-sql <sql> ...] can create a new table as source table at runtime.");
         System.out.println();
 
         System.out.println("Note: ");
@@ -417,13 +388,13 @@ public class MergeIntoAction extends ActionBase {
         System.out.println(
                 "  2. All conditions, set changes and values should use Flink SQL syntax. Please quote them with \" to escape special characters.");
         System.out.println(
-                "  3. source-alias cannot be duplicated with existed table name. "
-                        + "If you use --source-sql, source-alias must be specified and equal to the table name in \"CREATE\" statement.");
+                "  3. You can pass sqls by --source-sql to config environment and create source table at runtime");
+        System.out.println("  4. Target alias cannot be duplicated with existed table name.");
         System.out.println(
-                "  4. If the source table is not in the same place as target table, "
-                        + "the source-table-name or the source-alias should be qualified (database.table or catalog.database.table if in different catalog).");
-        System.out.println("  5. At least one merge action must be specified.");
-        System.out.println("  6. How to determine the changed rows with different \"matched\":");
+                "  5. If the source table is not in the current catalog and current database, "
+                        + "the source-table-name must be qualified (database.table or catalog.database.table if in different catalog).");
+        System.out.println("  6. At least one merge action must be specified.");
+        System.out.println("  7. How to determine the changed rows with different \"matched\":");
         System.out.println(
                 "    matched: changed rows are from target table and each can match a source table row "
                         + "based on merge-condition and optional matched-condition.");
@@ -434,7 +405,7 @@ public class MergeIntoAction extends ActionBase {
                 "    not-matched-by-source: changed rows are from target table and all row cannot match any source table row "
                         + "based on merge-condition and optional not-matched-by-source-condition.");
         System.out.println(
-                "  7. If both matched-upsert and matched-delete actions are present, their conditions must both be present too "
+                "  8. If both matched-upsert and matched-delete actions are present, their conditions must both be present too "
                         + "(same to not-matched-by-source-upsert and not-matched-by-source-delete). Otherwise, all conditions are optional.");
         System.out.println();
 
@@ -452,26 +423,13 @@ public class MergeIntoAction extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        // handle target alias
-        if (targetAlias != null) {
-            tEnv.registerTable(targetAlias, tEnv.from(identifier.getObjectName()));
-        }
+        // handle aliases
+        handleTargetAlias();
 
-        // prepare source table
-        if (sourceTable != null) {
-            sourceAlias = sourceTable;
-        } else {
-            // NOTE: sql may change current catalog and database
-            try {
-                for (String sql : sourceSqls) {
-                    tEnv.executeSql(sql).await();
-                }
-            } catch (Throwable t) {
-                LOG.error("Error occurs when executing sql in --source-sql.", t);
-                throw new RuntimeException("Error occurs when executing sql in --source-sql.", t);
-            }
-        }
+        // handle sqls
+        handleSqls();
 
+        // get data streams for all actions
         List<DataStream<RowData>> dataStreams =
                 Stream.of(
                                 getMatchedUpsertDataStream(),
@@ -483,8 +441,32 @@ public class MergeIntoAction extends ActionBase {
                         .map(Optional::get)
                         .collect(Collectors.toList());
 
+        // sink to target table
         DataStream<RowData> firstDs = dataStreams.get(0);
         batchSink(firstDs.union(dataStreams.stream().skip(1).toArray(DataStream[]::new)));
+    }
+
+    private void handleTargetAlias() {
+        if (targetAlias != null) {
+            // create a view 'targetAlias' in the path of target table, then we can find it with the
+            // qualified name
+            tEnv.createTemporaryView(escapedTargetName(), tEnv.from(identifier.getFullName()));
+        }
+    }
+
+    private void handleSqls() {
+        // NOTE: sql may change current catalog and database
+        if (sourceSqls != null) {
+            for (String sql : sourceSqls) {
+                try {
+                    tEnv.executeSql(sql).await();
+                } catch (Throwable t) {
+                    String errMsg = "Error occurs when executing sql:\n%s";
+                    LOG.error(String.format(errMsg, sql), t);
+                    throw new RuntimeException(String.format(errMsg, sql), t);
+                }
+            }
+        }
     }
 
     private Optional<DataStream<RowData>> getMatchedUpsertDataStream() {
@@ -495,7 +477,9 @@ public class MergeIntoAction extends ActionBase {
         List<String> project;
         // extract project
         if (matchedUpsertSet.equals("*")) {
-            project = Collections.singletonList(sourceAlias + "." + "*");
+            // if sourceName is qualified like 'default.S', we should build a project like S.*
+            String[] splits = sourceTable.split("\\.");
+            project = Collections.singletonList(splits[splits.length - 1] + ".*");
         } else {
             // validate upsert changes
             // no need to check primary keys changes because merge condition must contain all pks
@@ -711,7 +695,7 @@ public class MergeIntoAction extends ActionBase {
     }
 
     private String escapedSourceName() {
-        return Arrays.stream(sourceAlias.split("\\."))
+        return Arrays.stream(sourceTable.split("\\."))
                 .map(s -> String.format("`%s`", s))
                 .collect(Collectors.joining("."));
     }

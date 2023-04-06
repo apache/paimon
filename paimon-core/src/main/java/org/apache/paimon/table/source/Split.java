@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 import java.io.Serializable;
 
@@ -27,7 +27,7 @@ import java.io.Serializable;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface Split extends Serializable {
 
     long rowCount();

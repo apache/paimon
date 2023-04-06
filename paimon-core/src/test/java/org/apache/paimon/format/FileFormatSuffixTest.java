@@ -69,14 +69,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         SCHEMA,
                         0,
                         new AppendOnlyCompactManager(
-                                LocalFileIO.create(),
-                                null,
-                                toCompact,
-                                4,
-                                10,
-                                10,
-                                null,
-                                dataFilePathFactory), // not used
+                                null, toCompact, 4, 10, 10, null, false), // not used
                         false,
                         dataFilePathFactory,
                         null);

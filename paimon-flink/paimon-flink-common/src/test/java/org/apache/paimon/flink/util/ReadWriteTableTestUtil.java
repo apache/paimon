@@ -91,7 +91,7 @@ public class ReadWriteTableTestUtil {
         bEnv = StreamTableEnvironment.create(bExeEnv, EnvironmentSettings.inBatchMode());
 
         ReadWriteTableTestUtil.warehouse = warehouse;
-        String catalog = "TABLE_STORE";
+        String catalog = "PAIMON";
         sEnv.executeSql(
                 String.format(
                         "CREATE CATALOG %s WITH ('type'='paimon', 'warehouse'='%s');",
@@ -148,6 +148,7 @@ public class ReadWriteTableTestUtil {
                                 put(LOG_SYSTEM.key(), "kafka");
                                 put(BOOTSTRAP_SERVERS.key(), getBootstrapServers());
                                 put(TOPIC.key(), topic);
+                                put(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false");
                             }
                         });
 
@@ -235,10 +236,28 @@ public class ReadWriteTableTestUtil {
     }
 
     public static String buildQueryWithTableOptions(
+            String table,
+            String projection,
+            String filter,
+            Long limit,
+            Map<String, String> options) {
+        List<Object> params = new ArrayList<>();
+        params.add(projection);
+        params.add(table);
+        params.add(buildTableOptionsSpec(options));
+        params.add(filter);
+        StringBuilder queryFormat = new StringBuilder("SELECT %s FROM `%s` %s %s");
+        if (null != limit) {
+            queryFormat.append(" limit %s");
+            params.add(limit);
+        }
+
+        return String.format(queryFormat.toString(), params.toArray());
+    }
+
+    public static String buildQueryWithTableOptions(
             String table, String projection, String filter, Map<String, String> options) {
-        String queryFormat = "SELECT %s FROM `%s` %s %s;";
-        return String.format(
-                queryFormat, projection, table, buildTableOptionsSpec(options), filter);
+        return buildQueryWithTableOptions(table, projection, filter, null, options);
     }
 
     public static void checkFileStorePath(String table, List<String> partitionSpec) {

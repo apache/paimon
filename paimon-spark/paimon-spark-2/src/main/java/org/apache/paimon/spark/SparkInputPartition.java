@@ -54,31 +54,7 @@ public class SparkInputPartition
         }
         RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(recordReader);
         SparkInternalRow row = new SparkInternalRow(readBuilder.readType());
-        return new InputPartitionReader<org.apache.spark.sql.catalyst.InternalRow>() {
-
-            @Override
-            public boolean next() {
-                if (iterator.hasNext()) {
-                    row.replace(iterator.next());
-                    return true;
-                }
-                return false;
-            }
-
-            @Override
-            public org.apache.spark.sql.catalyst.InternalRow get() {
-                return row;
-            }
-
-            @Override
-            public void close() throws IOException {
-                try {
-                    iterator.close();
-                } catch (Exception e) {
-                    throw new IOException(e);
-                }
-            }
-        };
+        return new SparkInputPartitionReader(iterator, row);
     }
 
     @Override

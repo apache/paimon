@@ -36,13 +36,13 @@ import org.apache.paimon.utils.StringUtils;
 import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.metastore.HiveMetaHookLoader;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.RetryingMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
-import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
@@ -53,6 +53,8 @@ import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -470,17 +472,53 @@ public class HiveCatalog extends AbstractCatalog {
         return Lock.fromCatalog(lock, identifier);
     }
 
+    private static final List<Class<?>[]> GET_PROXY_PARAMS =
+            Arrays.asList(
+                    // for hive 2.x
+                    new Class<?>[] {
+                        HiveConf.class,
+                        HiveMetaHookLoader.class,
+                        ConcurrentHashMap.class,
+                        String.class,
+                        Boolean.TYPE
+                    },
+                    // for hive 3.x
+                    new Class<?>[] {
+                        Configuration.class,
+                        HiveMetaHookLoader.class,
+                        ConcurrentHashMap.class,
+                        String.class,
+                        Boolean.TYPE
+                    });
+
     static IMetaStoreClient createClient(HiveConf hiveConf, String clientClassName) {
+        Method getProxy = null;
+        RuntimeException methodNotFound =
+                new RuntimeException(
+                        "Failed to find desired getProxy method from RetryingMetaStoreClient");
+        for (Class<?>[] classes : GET_PROXY_PARAMS) {
+            try {
+                getProxy = RetryingMetaStoreClient.class.getMethod("getProxy", classes);
+            } catch (NoSuchMethodException e) {
+                methodNotFound.addSuppressed(e);
+            }
+        }
+        if (getProxy == null) {
+            throw methodNotFound;
+        }
+
         IMetaStoreClient client;
         try {
             client =
-                    RetryingMetaStoreClient.getProxy(
-                            hiveConf,
-                            tbl -> null,
-                            new ConcurrentHashMap<>(),
-                            clientClassName,
-                            true);
-        } catch (MetaException e) {
+                    (IMetaStoreClient)
+                            getProxy.invoke(
+                                    null,
+                                    hiveConf,
+                                    (HiveMetaHookLoader) (tbl -> null),
+                                    new ConcurrentHashMap<>(),
+                                    clientClassName,
+                                    true);
+        } catch (Exception e) {
             throw new RuntimeException(e);
         }
         return StringUtils.isNullOrWhitespaceOnly(

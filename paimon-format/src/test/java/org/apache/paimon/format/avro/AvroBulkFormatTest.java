@@ -56,7 +56,7 @@ class AvroBulkFormatTest {
                             BinaryString.fromString("AvroBulk"),
                             BinaryString.fromString("FormatTest")),
                     GenericRow.of(
-                            BinaryString.fromString("Apache"), BinaryString.fromString("Flink")),
+                            BinaryString.fromString("Apache"), BinaryString.fromString("Paimon")),
                     GenericRow.of(
                             BinaryString.fromString(
                                     "永和九年，岁在癸丑，暮春之初，会于会稽山阴之兰亭，修禊事也。群贤毕至，少"
@@ -77,7 +77,7 @@ class AvroBulkFormatTest {
                             BinaryString.fromString("only one record"))
                     // -------- file length 752 --------
                     );
-    private static final List<Long> BLOCK_STARTS = Arrays.asList(232L, 593L, 705L);
+    private static final List<Long> BLOCK_STARTS = Arrays.asList(233L, 595L, 707L);
 
     private File tmpFile;
 

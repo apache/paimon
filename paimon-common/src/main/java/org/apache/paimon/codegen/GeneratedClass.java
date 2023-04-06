@@ -29,7 +29,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * A wrapper for generated class, defines a {@link #newInstance(ClassLoader)} method to get an
- * instance by reference objects easily. Copied from Flink.
+ * instance by reference objects easily.
  */
 public final class GeneratedClass<T> implements Serializable {
 

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 import java.util.Arrays;
 
@@ -27,7 +27,7 @@ import java.util.Arrays;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class DataTypes {
 
     public static IntType INT() {
@@ -88,6 +88,10 @@ public class DataTypes {
 
     public static LocalZonedTimestampType TIMESTAMP_WITH_LOCAL_TIME_ZONE() {
         return new LocalZonedTimestampType();
+    }
+
+    public static LocalZonedTimestampType TIMESTAMP_WITH_LOCAL_TIME_ZONE(int precision) {
+        return new LocalZonedTimestampType(precision);
     }
 
     public static DecimalType DECIMAL(int precision, int scale) {

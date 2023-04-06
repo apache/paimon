@@ -152,9 +152,7 @@ public class TestFileStore extends KeyValueFileStore {
                 false,
                 null,
                 watermark,
-                (commit, committable) -> {
-                    commit.commit(committable, Collections.emptyMap());
-                });
+                (commit, committable) -> commit.commit(committable, Collections.emptyMap()));
     }
 
     public List<Snapshot> commitData(
@@ -191,6 +189,23 @@ public class TestFileStore extends KeyValueFileStore {
                 null,
                 (commit, committable) ->
                         commit.overwrite(partition, committable, Collections.emptyMap()));
+    }
+
+    public Snapshot dropPartitions(List<Map<String, String>> partitions) {
+        FileStoreCommit commit = newCommit(commitUser);
+
+        SnapshotManager snapshotManager = snapshotManager();
+        Long snapshotIdBeforeCommit = snapshotManager.latestSnapshotId();
+        if (snapshotIdBeforeCommit == null) {
+            snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
+        }
+        commit.dropPartitions(partitions);
+
+        Long snapshotIdAfterCommit = snapshotManager.latestSnapshotId();
+        assertThat(snapshotIdAfterCommit).isNotNull();
+        assertThat(snapshotIdBeforeCommit + 1).isEqualTo(snapshotIdAfterCommit);
+
+        return snapshotManager.snapshot(snapshotIdAfterCommit);
     }
 
     public List<Snapshot> commitDataImpl(
@@ -534,12 +549,15 @@ public class TestFileStore extends KeyValueFileStore {
                     CoreOptions.MANIFEST_TARGET_FILE_SIZE,
                     MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
 
-            conf.set(CoreOptions.FILE_FORMAT, format);
-            conf.set(CoreOptions.MANIFEST_FORMAT, format);
+            conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.fromValue(format));
+            conf.set(CoreOptions.MANIFEST_FORMAT, CoreOptions.FileFormatType.fromValue(format));
             conf.set(CoreOptions.PATH, root);
             conf.set(CoreOptions.BUCKET, numBuckets);
 
             conf.set(CoreOptions.CHANGELOG_PRODUCER, changelogProducer);
+
+            // disable dynamic-partition-overwrite in FileStoreCommit layer test
+            conf.set(CoreOptions.DYNAMIC_PARTITION_OVERWRITE, false);
 
             return new TestFileStore(
                     root,

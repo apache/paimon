@@ -18,7 +18,7 @@
 
 package org.apache.paimon.types;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 
 /**
  * The visitor definition of {@link DataType}. The visitor transforms a data type into instances of
@@ -27,7 +27,7 @@ import org.apache.paimon.annotation.Experimental;
  * @param <R> result type
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface DataTypeVisitor<R> {
 
     R visit(CharType charType);

@@ -57,21 +57,21 @@ public class SparkTypeUtils {
 
     private SparkTypeUtils() {}
 
-    public static StructType fromFlinkRowType(RowType type) {
-        return (StructType) fromFlinkType(type);
+    public static StructType fromPaimonRowType(RowType type) {
+        return (StructType) fromPaimonType(type);
     }
 
-    public static DataType fromFlinkType(org.apache.paimon.types.DataType type) {
-        return type.accept(FlinkToSparkTypeVisitor.INSTANCE);
+    public static DataType fromPaimonType(org.apache.paimon.types.DataType type) {
+        return type.accept(PaimonToSparkTypeVisitor.INSTANCE);
     }
 
-    public static org.apache.paimon.types.DataType toFlinkType(DataType dataType) {
-        return SparkToFlinkTypeVisitor.visit(dataType);
+    public static org.apache.paimon.types.DataType toPaimonType(DataType dataType) {
+        return SparkToPaimonTypeVisitor.visit(dataType);
     }
 
-    private static class FlinkToSparkTypeVisitor extends DataTypeDefaultVisitor<DataType> {
+    private static class PaimonToSparkTypeVisitor extends DataTypeDefaultVisitor<DataType> {
 
-        private static final FlinkToSparkTypeVisitor INSTANCE = new FlinkToSparkTypeVisitor();
+        private static final PaimonToSparkTypeVisitor INSTANCE = new PaimonToSparkTypeVisitor();
 
         @Override
         public DataType visit(CharType charType) {
@@ -190,16 +190,16 @@ public class SparkTypeUtils {
         }
     }
 
-    private static class SparkToFlinkTypeVisitor {
+    private static class SparkToPaimonTypeVisitor {
 
         private final AtomicInteger currentIndex = new AtomicInteger(0);
 
         static org.apache.paimon.types.DataType visit(DataType type) {
-            return visit(type, new SparkToFlinkTypeVisitor());
+            return visit(type, new SparkToPaimonTypeVisitor());
         }
 
         static org.apache.paimon.types.DataType visit(
-                DataType type, SparkToFlinkTypeVisitor visitor) {
+                DataType type, SparkToPaimonTypeVisitor visitor) {
             if (type instanceof StructType) {
                 StructField[] fields = ((StructType) type).fields();
                 List<org.apache.paimon.types.DataType> fieldResults =

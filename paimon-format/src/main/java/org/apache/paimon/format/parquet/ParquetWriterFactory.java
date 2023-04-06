@@ -31,10 +31,7 @@ import org.apache.parquet.io.OutputFile;
 
 import java.io.IOException;
 
-/**
- * A factory that creates a Parquet {@link FormatWriter}. The factory takes a user-supplied builder
- * to assemble Parquet's writer and then turns it into a Flink {@code BulkWriter}.
- */
+/** A factory that creates a Parquet {@link FormatWriter}. */
 public class ParquetWriterFactory implements FormatWriterFactory {
 
     /** The builder to construct the ParquetWriter. */

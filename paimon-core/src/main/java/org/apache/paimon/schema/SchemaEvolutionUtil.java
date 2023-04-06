@@ -33,8 +33,8 @@ import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.RowDataUtils;
 
 import javax.annotation.Nullable;
 
@@ -436,7 +436,8 @@ public class SchemaEvolutionUtil {
                     // data
                     converterMapping[i] =
                             new CastFieldGetter(
-                                    RowDataUtils.createNullCheckingFieldGetter(dataField.type(), i),
+                                    InternalRowUtils.createNullCheckingFieldGetter(
+                                            dataField.type(), i),
                                     CastExecutors.identityCastExecutor());
                 } else {
                     // TODO support column type evolution in nested type
@@ -450,7 +451,8 @@ public class SchemaEvolutionUtil {
                     // data
                     converterMapping[i] =
                             new CastFieldGetter(
-                                    RowDataUtils.createNullCheckingFieldGetter(dataField.type(), i),
+                                    InternalRowUtils.createNullCheckingFieldGetter(
+                                            dataField.type(), i),
                                     checkNotNull(
                                             CastExecutors.resolve(
                                                     dataField.type(), tableField.type())));

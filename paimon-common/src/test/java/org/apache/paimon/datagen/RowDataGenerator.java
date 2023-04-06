@@ -21,7 +21,7 @@ package org.apache.paimon.datagen;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 
-/** Data generator for Flink's internal {@link InternalRow} type. */
+/** Data generator for Paimon's internal {@link InternalRow} type. */
 public class RowDataGenerator implements DataGenerator<InternalRow> {
 
     private final DataGenerator<?>[] fieldGenerators;

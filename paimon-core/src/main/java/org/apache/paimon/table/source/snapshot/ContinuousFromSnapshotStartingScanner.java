@@ -19,10 +19,9 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.utils.SnapshotManager;
 
-import java.util.Collections;
+import javax.annotation.Nullable;
 
 /**
  * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_SNAPSHOT} startup mode of a
@@ -37,16 +36,15 @@ public class ContinuousFromSnapshotStartingScanner implements StartingScanner {
     }
 
     @Override
-    public DataTableScan.DataFilePlan getPlan(
-            SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
+    @Nullable
+    public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
         Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
         if (earliestSnapshotId == null) {
             return null;
         }
         // We should use `snapshotId - 1` here to start to scan delta data from specific snapshot
         // id. If the snapshotId < earliestSnapshotId, start to scan from the earliest.
-        return new DataTableScan.DataFilePlan(
-                snapshotId >= earliestSnapshotId ? snapshotId - 1 : earliestSnapshotId - 1,
-                Collections.emptyList());
+        return new Result(
+                snapshotId >= earliestSnapshotId ? snapshotId - 1 : earliestSnapshotId - 1);
     }
 }

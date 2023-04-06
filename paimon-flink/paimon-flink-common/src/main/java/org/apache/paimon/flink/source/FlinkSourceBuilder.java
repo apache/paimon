@@ -20,12 +20,14 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.StartupMode;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.Projection;
 import org.apache.paimon.flink.log.LogSourceProvider;
+import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -41,6 +43,7 @@ import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
@@ -52,7 +55,7 @@ import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 public class FlinkSourceBuilder {
 
     private final ObjectIdentifier tableIdentifier;
-    private final FileStoreTable table;
+    private final Table table;
     private final Options conf;
 
     private boolean isContinuous = false;
@@ -63,11 +66,12 @@ public class FlinkSourceBuilder {
     @Nullable private Integer parallelism;
     @Nullable private Long limit;
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
+    @Nullable private List<Split> splits;
 
-    public FlinkSourceBuilder(ObjectIdentifier tableIdentifier, FileStoreTable table) {
+    public FlinkSourceBuilder(ObjectIdentifier tableIdentifier, Table table) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
-        this.conf = Options.fromMap(table.schema().options());
+        this.conf = Options.fromMap(table.options());
     }
 
     public FlinkSourceBuilder withContinuousMode(boolean isContinuous) {
@@ -111,17 +115,30 @@ public class FlinkSourceBuilder {
         return this;
     }
 
+    public FlinkSourceBuilder withSplits(List<Split> splits) {
+        this.splits = splits;
+        return this;
+    }
+
     private StaticFileStoreSource buildStaticFileSource() {
-        return new StaticFileStoreSource(table, projectedFields, predicate, limit);
+        return new StaticFileStoreSource(
+                table.newReadBuilder().withProjection(projectedFields).withFilter(predicate),
+                limit,
+                Options.fromMap(table.options())
+                        .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
+                splits);
     }
 
     private ContinuousFileStoreSource buildContinuousFileSource() {
-        return new ContinuousFileStoreSource(table, projectedFields, predicate, limit);
+        return new ContinuousFileStoreSource(
+                table.newReadBuilder().withProjection(projectedFields).withFilter(predicate),
+                table.options(),
+                limit);
     }
 
     public Source<RowData, ?, ?> buildSource() {
         if (isContinuous) {
-            StreamDataTableScan.validate(table.schema());
+            TableScanUtils.streamingReadingValidate(table);
 
             // TODO visit all options through CoreOptions
             StartupMode startupMode = CoreOptions.startupMode(conf);
@@ -132,7 +149,8 @@ public class FlinkSourceBuilder {
                     return logSourceProvider.createSource(null);
                 }
                 return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
-                                buildStaticFileSource())
+                                LogHybridSourceFactory.buildHybridFirstSource(
+                                        table, projectedFields, predicate))
                         .addSource(
                                 new LogHybridSourceFactory(logSourceProvider),
                                 Boundedness.CONTINUOUS_UNBOUNDED)
@@ -148,7 +166,7 @@ public class FlinkSourceBuilder {
             throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
         }
 
-        RowType rowType = toLogicalType(table.schema().logicalRowType());
+        RowType rowType = toLogicalType(table.rowType());
         LogicalType produceType =
                 Optional.ofNullable(projectedFields)
                         .map(Projection::of)

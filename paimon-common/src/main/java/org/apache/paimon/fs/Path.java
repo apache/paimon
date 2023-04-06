@@ -22,7 +22,7 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.Serializable;
@@ -35,7 +35,7 @@ import java.util.regex.Pattern;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public class Path implements Comparable<Path>, Serializable {
 
     private static final long serialVersionUID = 1L;

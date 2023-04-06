@@ -18,12 +18,16 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.annotation.Public;
+
 /**
  * Operations implementing this interface can checkpoint and restore their states between different
  * instances.
  *
  * @param <S> type of state
+ * @since 0.4.0
  */
+@Public
 public interface Restorable<S> {
 
     /** Extract state of the current operation instance. */

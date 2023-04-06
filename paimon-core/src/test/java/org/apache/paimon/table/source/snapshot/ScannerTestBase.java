@@ -34,6 +34,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataType;
@@ -63,7 +64,7 @@ public abstract class ScannerTestBase {
                     new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
                     new String[] {"pt", "a", "b"});
 
-    @TempDir java.nio.file.Path tempDir;
+    protected @TempDir java.nio.file.Path tempDir;
 
     protected Path tablePath;
     protected FileIO fileIO;
@@ -136,5 +137,9 @@ public abstract class ScannerTestBase {
                                 conf.toMap(),
                                 ""));
         return FileStoreTableFactory.create(fileIO, tablePath, tableSchema, conf);
+    }
+
+    protected List<Split> toSplits(List<DataSplit> dataSplits) {
+        return new ArrayList<>(dataSplits);
     }
 }

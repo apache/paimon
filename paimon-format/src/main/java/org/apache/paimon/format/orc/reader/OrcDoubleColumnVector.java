@@ -21,7 +21,7 @@ package org.apache.paimon.format.orc.reader;
 import org.apache.hadoop.hive.ql.exec.vector.DoubleColumnVector;
 
 /**
- * This column vector is used to adapt hive's DoubleColumnVector to Flink's float and double
+ * This column vector is used to adapt hive's DoubleColumnVector to Paimon's float and double
  * ColumnVector.
  */
 public class OrcDoubleColumnVector extends AbstractOrcColumnVector

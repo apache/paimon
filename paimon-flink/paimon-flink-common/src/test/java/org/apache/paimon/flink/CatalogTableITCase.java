@@ -53,8 +53,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO T VALUES (3, 4)");
 
         List<Row> result = sql("SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots");
-        assertThat(result)
-                .containsExactlyInAnyOrder(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
+
+        // check correctness and sequence snapshots.
+        assertThat(result).containsExactly(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
     }
 
     @Test
@@ -99,7 +100,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         assertThat(sql("SHOW CREATE TABLE T$schemas").toString())
                 .isEqualTo(
-                        "[+I[CREATE TABLE `TABLE_STORE`.`default`.`T$schemas` (\n"
+                        "[+I[CREATE TABLE `PAIMON`.`default`.`T$schemas` (\n"
                                 + "  `schema_id` BIGINT NOT NULL,\n"
                                 + "  `fields` VARCHAR(2147483647) NOT NULL,\n"
                                 + "  `partition_keys` VARCHAR(2147483647) NOT NULL,\n"

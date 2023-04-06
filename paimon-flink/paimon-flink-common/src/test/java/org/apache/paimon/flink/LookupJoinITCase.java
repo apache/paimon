@@ -457,7 +457,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookupPartialUpdateIllegal() throws Exception {
+    public void testLookupPartialUpdateIllegal() {
         sql(
                 "CREATE TABLE DIM2 (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
                         + " ('merge-engine'='partial-update','continuous.discovery-interval'='1 ms')");
@@ -465,7 +465,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM2 for system_time as of T.proctime AS D ON T.i = D.i";
         assertThatThrownBy(() -> sEnv.executeSql(query))
                 .hasRootCauseMessage(
-                        "Partial update continuous reading is not supported. "
+                        "Partial update streaming"
+                                + " reading is not supported. "
                                 + "You can use 'lookup' or 'full-compaction' changelog producer to support streaming reading.");
     }
 
@@ -497,7 +498,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
-                "SELECT /*+ LOOKUP('table'='DIM', 'retry-predicate'='lookup_miss',"
+                "SELECT /*+ LOOKUP('table'='D', 'retry-predicate'='lookup_miss',"
                         + " 'retry-strategy'='fixed_delay', 'fixed-delay'='1s','max-attempts'='60') */"
                         + " T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());

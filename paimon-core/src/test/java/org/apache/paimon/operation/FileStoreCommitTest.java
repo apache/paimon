@@ -28,11 +28,14 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
+import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -52,6 +55,7 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
@@ -59,6 +63,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for {@link FileStoreCommitImpl}. */
@@ -79,7 +84,7 @@ public class FileStoreCommitTest {
     }
 
     @AfterEach
-    public void afterEach() throws Exception {
+    public void afterEach() {
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
         assertThat(FailingFileIO.openInputStreams(pathPredicate)).isEmpty();
         assertThat(FailingFileIO.openOutputStreams(pathPredicate)).isEmpty();
@@ -581,6 +586,97 @@ public class FileStoreCommitTest {
         // bigger watermark, the watermark should be updated
         snapshot = store.commitDataWatermark(generateDataList(10), gen::getPartition, 2048L).get(0);
         assertThat(snapshot.watermark()).isEqualTo(2048);
+    }
+
+    @Test
+    public void testDropPartitions() throws Exception {
+        // generate and commit initial data
+        Map<BinaryRow, List<KeyValue>> data =
+                generateData(ThreadLocalRandom.current().nextInt(50, 1000));
+        logData(
+                () ->
+                        data.values().stream()
+                                .flatMap(Collection::stream)
+                                .collect(Collectors.toList()),
+                "data");
+
+        TestFileStore store = createStore(false);
+        store.commitData(
+                data.values().stream().flatMap(Collection::stream).collect(Collectors.toList()),
+                gen::getPartition,
+                kv -> 0);
+
+        // generate partitions to be dropped
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        int partitionsToDrop = random.nextInt(data.size()) + 1;
+        boolean specifyHr = random.nextBoolean();
+        int index = random.nextInt(data.size() - partitionsToDrop + 1);
+        List<Map<String, String>> partitions = new ArrayList<>();
+        for (int i = 0; i < partitionsToDrop; i++) {
+            Map<String, String> partition = new HashMap<>();
+            // partition 'dt'
+            partition.put("dt", new ArrayList<>(data.keySet()).get(index).getString(0).toString());
+            // partition 'hr'
+            if (specifyHr && random.nextBoolean()) {
+                partition.put(
+                        "hr", String.valueOf(new ArrayList<>(data.keySet()).get(index).getInt(1)));
+            }
+            index++;
+
+            partitions.add(partition);
+        }
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "partitionsToDrop "
+                            + partitions.stream()
+                                    .map(Objects::toString)
+                                    .collect(Collectors.joining(",")));
+        }
+
+        Snapshot snapshot = store.dropPartitions(partitions);
+
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+
+        // check data
+        RowDataToObjectArrayConverter partitionConverter =
+                new RowDataToObjectArrayConverter(TestKeyValueGenerator.DEFAULT_PART_TYPE);
+        org.apache.paimon.predicate.Predicate partitionFilter =
+                partitions.stream()
+                        .map(
+                                partition ->
+                                        PredicateBuilder.partition(
+                                                partition, TestKeyValueGenerator.DEFAULT_PART_TYPE))
+                        .reduce(PredicateBuilder::or)
+                        .get();
+
+        List<KeyValue> expectedKvs = new ArrayList<>();
+        for (Map.Entry<BinaryRow, List<KeyValue>> entry : data.entrySet()) {
+            if (partitionFilter.test(partitionConverter.convert(entry.getKey()))) {
+                continue;
+            }
+            expectedKvs.addAll(entry.getValue());
+        }
+        gen.sort(expectedKvs);
+        Map<BinaryRow, BinaryRow> expected = store.toKvMap(expectedKvs);
+
+        List<KeyValue> actualKvs =
+                store.readKvsFromSnapshot(store.snapshotManager().latestSnapshotId());
+        gen.sort(actualKvs);
+        Map<BinaryRow, BinaryRow> actual = store.toKvMap(actualKvs);
+
+        logData(() -> kvMapToKvList(expected), "expected");
+        logData(() -> kvMapToKvList(actual), "actual");
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    @Test
+    public void testDropEmptyPartition() throws Exception {
+        TestFileStore store = createStore(false);
+        assertThatThrownBy(() -> store.dropPartitions(Collections.emptyList()))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Partitions list cannot be empty."));
     }
 
     private TestFileStore createStore(boolean failing) throws Exception {

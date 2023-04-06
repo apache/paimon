@@ -18,7 +18,8 @@
 
 package org.apache.paimon.flink.util;
 
-import org.apache.flink.annotation.Experimental;
+import org.apache.paimon.annotation.Experimental;
+
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.client.program.MiniClusterClient;
 import org.apache.flink.client.program.rest.RestClusterClient;

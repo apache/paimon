@@ -18,7 +18,7 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.Identifier;
 
@@ -32,7 +32,7 @@ import java.util.concurrent.Callable;
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface Lock extends AutoCloseable {
 
     /** Run with lock. */

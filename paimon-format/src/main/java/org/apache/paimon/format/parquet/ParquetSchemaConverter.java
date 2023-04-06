@@ -44,7 +44,7 @@ import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.FIXED_LE
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT32;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
 
-/** Schema converter converts Parquet schema to and from Flink internal types. */
+/** Schema converter converts Parquet schema to and from Paimon internal types. */
 public class ParquetSchemaConverter {
 
     static final String MAP_REPEATED_NAME = "key_value";

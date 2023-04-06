@@ -166,7 +166,7 @@ public class FlinkCatalog extends AbstractCatalog {
         }
 
         if (table instanceof FileStoreTable) {
-            return toCatalogTable((FileStoreTable) table);
+            return toCatalogTable(table);
         } else {
             return new SystemCatalogTable(table);
         }
@@ -314,9 +314,9 @@ public class FlinkCatalog extends AbstractCatalog {
         }
     }
 
-    private CatalogTableImpl toCatalogTable(FileStoreTable table) {
+    private CatalogTableImpl toCatalogTable(Table table) {
         TableSchema schema;
-        Map<String, String> newOptions = new HashMap<>(table.schema().options());
+        Map<String, String> newOptions = new HashMap<>(table.options());
 
         // try to read schema from options
         // in the case of virtual columns and watermark
@@ -334,23 +334,18 @@ public class FlinkCatalog extends AbstractCatalog {
             removeProperties.asMap().keySet().forEach(newOptions::remove);
         } else {
             TableSchema.Builder builder = TableSchema.builder();
-            for (RowType.RowField field :
-                    toLogicalType(table.schema().logicalRowType()).getFields()) {
+            for (RowType.RowField field : toLogicalType(table.rowType()).getFields()) {
                 builder.field(field.getName(), fromLogicalToDataType(field.getType()));
             }
-            if (table.schema().primaryKeys().size() > 0) {
-                builder.primaryKey(table.schema().primaryKeys().toArray(new String[0]));
+            if (table.primaryKeys().size() > 0) {
+                builder.primaryKey(table.primaryKeys().toArray(new String[0]));
             }
 
             schema = builder.build();
         }
 
         return new DataCatalogTable(
-                table,
-                schema,
-                table.schema().partitionKeys(),
-                newOptions,
-                table.schema().comment());
+                table, schema, table.partitionKeys(), newOptions, table.comment().orElse(""));
     }
 
     public static Schema fromCatalogTable(CatalogTable catalogTable) {

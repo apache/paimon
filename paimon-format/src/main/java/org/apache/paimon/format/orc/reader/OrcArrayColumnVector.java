@@ -25,23 +25,23 @@ import org.apache.paimon.types.ArrayType;
 
 import org.apache.hadoop.hive.ql.exec.vector.ListColumnVector;
 
-/** This column vector is used to adapt hive's ListColumnVector to Flink's ArrayColumnVector. */
+/** This column vector is used to adapt hive's ListColumnVector to Paimon's ArrayColumnVector. */
 public class OrcArrayColumnVector extends AbstractOrcColumnVector
         implements org.apache.paimon.data.columnar.ArrayColumnVector {
 
     private final ListColumnVector hiveVector;
-    private final ColumnVector flinkVector;
+    private final ColumnVector paimonVector;
 
     public OrcArrayColumnVector(ListColumnVector hiveVector, ArrayType type) {
         super(hiveVector);
         this.hiveVector = hiveVector;
-        this.flinkVector = createFlinkVector(hiveVector.child, type.getElementType());
+        this.paimonVector = createPaimonVector(hiveVector.child, type.getElementType());
     }
 
     @Override
     public InternalArray getArray(int i) {
         long offset = hiveVector.offsets[i];
         long length = hiveVector.lengths[i];
-        return new ColumnarArray(flinkVector, (int) offset, (int) length);
+        return new ColumnarArray(paimonVector, (int) offset, (int) length);
     }
 }

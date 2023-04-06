@@ -18,8 +18,9 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.fs.local.LocalFileIO;
 
 import org.slf4j.Logger;
@@ -39,12 +40,14 @@ import java.util.Map;
 import java.util.ServiceLoader;
 import java.util.UUID;
 
+import static org.apache.paimon.fs.FileIOUtils.checkAccess;
+
 /**
  * File IO to read and write file.
  *
  * @since 0.4.0
  */
-@Experimental
+@Public
 public interface FileIO extends Serializable {
 
     Logger LOG = LoggerFactory.getLogger(FileIO.class);
@@ -244,14 +247,31 @@ public interface FileIO extends Serializable {
 
         Map<String, FileIOLoader> loaders = discoverLoaders();
         FileIOLoader loader = loaders.get(uri.getScheme());
+
+        // load fallbackIO
+        FileIOLoader fallbackIO = config.fallbackIO();
         if (loader == null) {
-            loader = config.fallbackIO();
-            if (loader == null) {
-                throw new UnsupportedSchemeException(
-                        String.format(
-                                "Could not find a file io implementation for scheme '%s' in the classpath.",
-                                uri.getScheme()));
+            loader = checkAccess(fallbackIO, path);
+        }
+
+        // load hadoopIO
+        if (loader == null) {
+            loader = checkAccess(new HadoopFileIOLoader(), path);
+        }
+
+        if (loader == null) {
+            String fallbackMsg = "";
+            if (fallbackIO != null) {
+                fallbackMsg =
+                        " "
+                                + fallbackIO.getClass().getSimpleName()
+                                + " also cannot access this path.";
             }
+            throw new UnsupportedSchemeException(
+                    String.format(
+                            "Could not find a file io implementation for scheme '%s' in the classpath."
+                                    + "%s Hadoop FileSystem also cannot access this path '%s'.",
+                            uri.getScheme(), fallbackMsg, path));
         }
 
         FileIO fileIO = loader.load(path);

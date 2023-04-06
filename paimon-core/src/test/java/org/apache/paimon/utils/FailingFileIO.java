@@ -84,7 +84,7 @@ public class FailingFileIO extends TraceableFileIO {
             throw new FileNotFoundException(
                     "File "
                             + path
-                            + " does not exist or the user running Flink ('"
+                            + " does not exist or the user running Paimon ('"
                             + System.getProperty("user.name")
                             + "') has insufficient permissions to access it.");
         }

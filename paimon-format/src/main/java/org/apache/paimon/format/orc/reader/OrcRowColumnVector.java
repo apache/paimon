@@ -34,11 +34,11 @@ public class OrcRowColumnVector extends AbstractOrcColumnVector
     public OrcRowColumnVector(StructColumnVector hiveVector, RowType type) {
         super(hiveVector);
         int len = hiveVector.fields.length;
-        ColumnVector[] flinkVectors = new ColumnVector[len];
+        ColumnVector[] paimonVectors = new ColumnVector[len];
         for (int i = 0; i < len; i++) {
-            flinkVectors[i] = createFlinkVector(hiveVector.fields[i], type.getTypeAt(i));
+            paimonVectors[i] = createPaimonVector(hiveVector.fields[i], type.getTypeAt(i));
         }
-        this.columnarRow = new ColumnarRow(new VectorizedColumnBatch(flinkVectors));
+        this.columnarRow = new ColumnarRow(new VectorizedColumnBatch(paimonVectors));
     }
 
     @Override

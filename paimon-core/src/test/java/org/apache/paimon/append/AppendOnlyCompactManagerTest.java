@@ -18,19 +18,20 @@
 
 package org.apache.paimon.append;
 
-import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.LinkedList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
 import static org.apache.paimon.io.DataFileTestUtils.newFile;
+import static org.apache.paimon.table.source.SplitGeneratorTest.newFileFromSequence;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link AppendOnlyCompactManager}. */
 public class AppendOnlyCompactManagerTest {
@@ -62,10 +63,10 @@ public class AppendOnlyCompactManagerTest {
                         newFile(1L, 1024L),
                         newFile(1025L, 2049L),
                         newFile(2050L, 2100L),
-                        newFile(2100L, 2110L)),
+                        newFile(2101L, 2110L)),
                 false,
                 Collections.emptyList(),
-                Arrays.asList(newFile(2050L, 2100L), newFile(2100L, 2110L)));
+                Arrays.asList(newFile(2050L, 2100L), newFile(2101L, 2110L)));
         innerTest(
                 Arrays.asList(newFile(1L, 1024L), newFile(1025L, 2049L), newFile(2050L, 2500L)),
                 false,
@@ -193,6 +194,42 @@ public class AppendOnlyCompactManagerTest {
                 Collections.singletonList(newFile(2621L, 2630L)));
     }
 
+    @Test
+    public void testAppendOverlap() {
+        Comparator<DataFileMeta> comparator = AppendOnlyCompactManager.fileComparator(true);
+        assertThatThrownBy(
+                        () ->
+                                comparator.compare(
+                                        newFileFromSequence("1", 11, 0, 20),
+                                        newFileFromSequence("2", 13, 20, 30)))
+                .hasMessageContaining(
+                        "There should no overlap in append files, but Range1(0, 20), Range2(20, 30)");
+
+        assertThatThrownBy(
+                        () ->
+                                comparator.compare(
+                                        newFileFromSequence("1", 11, 20, 30),
+                                        newFileFromSequence("2", 13, 0, 20)))
+                .hasMessageContaining(
+                        "There should no overlap in append files, but Range1(20, 30), Range2(0, 20)");
+
+        assertThatThrownBy(
+                        () ->
+                                comparator.compare(
+                                        newFileFromSequence("1", 11, 0, 30),
+                                        newFileFromSequence("2", 13, 10, 20)))
+                .hasMessageContaining(
+                        "There should no overlap in append files, but Range1(0, 30), Range2(10, 20)");
+
+        assertThatThrownBy(
+                        () ->
+                                comparator.compare(
+                                        newFileFromSequence("1", 11, 10, 20),
+                                        newFileFromSequence("2", 13, 0, 30)))
+                .hasMessageContaining(
+                        "There should no overlap in append files, but Range1(10, 20), Range2(0, 30)");
+    }
+
     private void innerTest(
             List<DataFileMeta> toCompactBeforePick,
             boolean expectedPresent,
@@ -203,15 +240,13 @@ public class AppendOnlyCompactManagerTest {
         long targetFileSize = 1024;
         AppendOnlyCompactManager manager =
                 new AppendOnlyCompactManager(
-                        LocalFileIO.create(),
                         null, // not used
-                        new LinkedList<>(toCompactBeforePick),
+                        toCompactBeforePick,
                         minFileNum,
                         maxFileNum,
                         targetFileSize,
                         null, // not used
-                        null // not used
-                        );
+                        false);
         Optional<List<DataFileMeta>> actual = manager.pickCompactBefore();
         assertThat(actual.isPresent()).isEqualTo(expectedPresent);
         if (expectedPresent) {
