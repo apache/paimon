@@ -38,7 +38,7 @@ public final class HiveCatalogOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "File directory of the core-site.xml、hdfs-site.xml、yarn-site.xml、mapred-site.xml. Currently, only local file system paths are supported. We recommend using the HADOOP_CONF_DIR environment variable to specify the Hadoop configuration. So consider using this parameter only if the environment variables don't meet your needs, such as when you want to set up the Hadoop configuration individually for each HiveCatalog");
+                            "File directory of the core-site.xml、hdfs-site.xml、yarn-site.xml、mapred-site.xml. Currently, only local file system paths are supported.");
 
     private HiveCatalogOptions() {}
 }

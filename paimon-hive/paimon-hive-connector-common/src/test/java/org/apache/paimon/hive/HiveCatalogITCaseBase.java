@@ -69,9 +69,6 @@ public abstract class HiveCatalogITCaseBase {
 
     public static final String HIVE_CONF = "/hive-conf";
 
-    public static final String HADOOP_CONF_DIR =
-            Thread.currentThread().getContextClassLoader().getResource("hadoop-conf-dir").getPath();
-
     @Before
     public void before() throws Exception {
         hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
@@ -94,7 +91,6 @@ public abstract class HiveCatalogITCaseBase {
                                         + hiveShell.getBaseDir().getRoot().getPath()
                                         + HIVE_CONF
                                         + "',",
-                                "  'hadoop-conf-dir' = '" + HADOOP_CONF_DIR + "',",
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true'",
                                 ")"))
