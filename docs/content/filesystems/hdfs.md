@@ -40,7 +40,7 @@ You may not have to do anything, if you are in a hadoop environment. Otherwise p
 configure your HDFS:
 
 1. Set environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR`.
-2. Configure `'fs.hdfs.hadoopconf'` in the paimon catalog.
+2. Configure `'hadoop-conf-dir'` in the paimon catalog.
 
 The first approach is recommended.
 

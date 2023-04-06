@@ -26,12 +26,12 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
-import org.apache.paimon.utils.HadoopUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 
 import static org.apache.paimon.hive.HiveCatalog.createHiveConf;
+import static org.apache.paimon.hive.HiveCatalogFactoryOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogFactoryOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogFactoryOptions.IDENTIFIER;
 
@@ -63,7 +63,7 @@ public class HiveCatalogFactory implements CatalogFactory {
                                 + " catalog");
 
         String hiveConfDir = context.options().get(HIVE_CONF_DIR);
-        String hadoopConfDir = context.options().get(HadoopUtils.PATH_HADOOP_CONFIG);
+        String hadoopConfDir = context.options().get(HADOOP_CONF_DIR);
         HiveConf hiveConf = createHiveConf(hiveConfDir, hadoopConfDir);
 
         // always using user-set parameters overwrite hive-site.xml parameters

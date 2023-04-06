@@ -67,7 +67,7 @@ public abstract class HiveCatalogITCaseBase {
     @HiveSQL(files = {})
     protected static HiveShell hiveShell;
 
-    public static String HIVE_CONF = "/hive-conf";
+    public static final String HIVE_CONF = "/hive-conf";
 
     public static final String HADOOP_CONF_DIR =
             Thread.currentThread().getContextClassLoader().getResource("hadoop-conf-dir").getPath();
