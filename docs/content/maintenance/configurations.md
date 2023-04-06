@@ -38,6 +38,12 @@ Options for paimon catalog.
 
 {{< generated/catalog_configuration >}}
 
+### HiveCatalogOptions
+
+Options for Hive catalog.
+
+{{< generated/hive_catalog_configuration >}}
+
 ### FlinkConnectorOptions
 
 Flink connector options for paimon.
