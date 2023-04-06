@@ -364,6 +364,7 @@
                                         <exclude>mime.types</exclude>
                                         <exclude>mozilla/**</exclude>
                                         <exclude>META-INF/maven/**</exclude>
+                                        <exclude>META-INF/versions/11/META-INF/maven/**</exclude>
                                         <exclude>META-INF/LICENSE.txt</exclude>
                                     </excludes>
                                 </filter>
@@ -378,7 +379,7 @@
                                 </filter>
                                 <filter>
                                     <artifact>com.amazonaws:aws-java-sdk-s3</artifact>
-                                    <!-- Make sure we are using the overridden XmlResponsesSaxParser of flink-s3-fs-base.
+                                    <!-- Make sure we are using the overridden XmlResponsesSaxParser.
                                         Filter must be removed as soon as XmlResponsesSaxParser of this module is
                                         dropped, for example when discontinuing support for Java 8. -->
                                     <excludes>
