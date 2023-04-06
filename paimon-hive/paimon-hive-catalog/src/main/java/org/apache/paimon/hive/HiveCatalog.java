@@ -206,10 +206,9 @@ public class HiveCatalog extends AbstractCatalog {
         try {
             client.dropTable(
                     identifier.getDatabaseName(), identifier.getObjectName(), true, false, true);
-        } catch (TException e) {
-            throw new RuntimeException("Failed to drop table " + identifier.getFullName(), e);
-        } finally {
-            // Deletes table directory to avoid schema in filesystem exists.
+            // Deletes table directory to avoid schema in filesystem exists after dropping hive
+            // table successfully to keep the table consistency between which in filesystem and
+            // which in Hive metastore.
             Path path = getDataTableLocation(identifier);
             try {
                 if (fileIO.exists(path)) {
@@ -218,6 +217,8 @@ public class HiveCatalog extends AbstractCatalog {
             } catch (Exception ee) {
                 LOG.error("Delete directory[{}] fail for table {}", path, identifier, ee);
             }
+        } catch (TException e) {
+            throw new RuntimeException("Failed to drop table " + identifier.getFullName(), e);
         }
     }
 
