@@ -51,7 +51,7 @@ A manifest file is a file containing changes about LSM data files and changelog 
 
 Data files are grouped by partitions and buckets. Each bucket directory contains an [LSM tree]({{< ref "concepts/file-layouts#lsm-trees" >}}) and its [changelog files]({{< ref "concepts/primary-key-table#changelog-producers" >}}).
 
-Currently, Paimon supports using orc, parquet and avro as data file's format.
+Currently, Paimon supports using orc(default), parquet and avro as data file's format.
 
 ## LSM Trees
 
