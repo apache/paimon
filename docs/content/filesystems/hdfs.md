@@ -77,6 +77,46 @@ For Alluxio support add the following entry into the core-site.xml file:
 </property>
 ```
 
+## Kerberos
+
+{{< tabs "Kerberos" >}}
+
+{{< tab "Flink" >}}
+
+It is recommented to use [Flink Kerberos Keytab](https://nightlies.apache.org/flink/flink-docs-release-1.17/docs/deployment/security/security-kerberos/).
+
+{{< /tab >}}
+
+{{< tab "Spark" >}}
+
+It is recommented to use [Spark Kerberos Keytab](https://spark.apache.org/docs/latest/security.html#using-a-keytab).
+
+{{< /tab >}}
+
+{{< tab "Hive" >}}
+
+An intuitive approach is to configure Hive's kerberos authentication.
+
+{{< /tab >}}
+
+{{< tab "Trino/JavaAPI" >}}
+
+Configure the following three options in your catalog configuration:
+
+- security.kerberos.login.keytabs: Absolute path to a Kerberos keytab file that contains the user credentials.
+  Please make sure it is copied to each machine.
+- security.kerberos.login.principal: Kerberos principal name associated with the keytab.
+- security.kerberos.login.use-ticket-cache: True or false, indicates whether to read from your Kerberos ticket cache.
+
+For JavaAPI:
+```
+SecurityContext.install(catalogOptions);
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 ## HDFS HA
 
 Ensure that `hdfs-site.xml` and `core-site.xml` contain the necessary [HA configuration](https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-hdfs/HDFSHighAvailabilityWithNFS.html).
@@ -84,7 +124,3 @@ Ensure that `hdfs-site.xml` and `core-site.xml` contain the necessary [HA config
 ## HDFS ViewFS
 
 Ensure that `hdfs-site.xml` and `core-site.xml` contain the necessary [ViewFs configuration](https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-hdfs/ViewFs.html).
-
-## Kerberos
-
-Ensure that `hdfs-site.xml` and `core-site.xml` contain the necessary [Kerberos configuration](https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-common/SecureMode.html).
