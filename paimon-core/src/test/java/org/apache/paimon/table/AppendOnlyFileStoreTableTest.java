@@ -51,8 +51,8 @@ import java.util.Random;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.table.sink.BucketComputer.bucket;
-import static org.apache.paimon.table.sink.BucketComputer.hashcode;
+import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucket;
+import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucketKeyHashCode;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link AppendOnlyFileStoreTable}. */
@@ -226,7 +226,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         serializer
                                 .toBinaryRow(rowData(i, random.nextInt(), random.nextLong()))
                                 .copy();
-                int bucket = bucket(hashcode(data), numOfBucket);
+                int bucket = bucket(bucketKeyHashCode(data), numOfBucket);
                 dataPerBucket.compute(
                         bucket,
                         (k, v) -> {

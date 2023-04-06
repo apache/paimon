@@ -31,7 +31,7 @@ import org.apache.paimon.operation.ReverseReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.sink.SinkRecordConverter;
+import org.apache.paimon.table.sink.InternalRowKeyAndBucketExtractor;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;
 import org.apache.paimon.table.source.DataSplit;
@@ -125,7 +125,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     public TableWriteImpl<InternalRow> newWrite(String commitUser) {
         return new TableWriteImpl<>(
                 store().newWrite(commitUser),
-                new SinkRecordConverter(tableSchema),
+                new InternalRowKeyAndBucketExtractor(tableSchema),
                 record -> {
                     Preconditions.checkState(
                             record.row().getRowKind() == RowKind.INSERT,

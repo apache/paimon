@@ -19,10 +19,12 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.sink.BucketingStreamPartitioner;
 import org.apache.paimon.flink.sink.LogSinkFunction;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
@@ -97,12 +99,16 @@ public class FlinkCdcSinkBuilder<T> {
                                         new SchemaManager(table.fileIO(), table.location())));
         schemaChangeProcessFunction.getTransformation().setParallelism(1);
 
-        CdcBucketStreamPartitioner partitioner =
-                new CdcBucketStreamPartitioner(
-                        table.schema(),
-                        table.coreOptions()
-                                .toConfiguration()
-                                .get(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION));
+        TableSchema schema = table.schema();
+        boolean shuffleByPartitionEnable =
+                table.coreOptions()
+                        .toConfiguration()
+                        .get(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION);
+        BucketingStreamPartitioner<CdcRecord> partitioner =
+                new BucketingStreamPartitioner<>(
+                        numChannels ->
+                                new CdcRecordChannelComputer(
+                                        numChannels, schema, shuffleByPartitionEnable));
         PartitionTransformation<CdcRecord> partitioned =
                 new PartitionTransformation<>(parsed.getTransformation(), partitioner);
         if (parallelism != null) {

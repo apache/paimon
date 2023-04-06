@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -84,12 +85,16 @@ public class FlinkSinkBuilder {
     }
 
     public DataStreamSink<?> build() {
-        BucketStreamPartitioner partitioner =
-                new BucketStreamPartitioner(
-                        table.schema(),
-                        table.coreOptions()
-                                .toConfiguration()
-                                .get(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION));
+        TableSchema schema = table.schema();
+        boolean shuffleByPartitionEnable =
+                table.coreOptions()
+                        .toConfiguration()
+                        .get(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION);
+        BucketingStreamPartitioner<RowData> partitioner =
+                new BucketingStreamPartitioner<>(
+                        numChannels ->
+                                new RowDataChannelComputer(
+                                        numChannels, schema, shuffleByPartitionEnable));
         PartitionTransformation<RowData> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
         if (parallelism != null) {

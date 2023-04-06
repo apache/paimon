@@ -38,8 +38,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.InternalRowKeyAndBucketExtractor;
 import org.apache.paimon.table.sink.SequenceGenerator;
-import org.apache.paimon.table.sink.SinkRecordConverter;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.KeyValueTableRead;
@@ -222,7 +222,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store().newWrite(commitUser),
-                new SinkRecordConverter(tableSchema),
+                new InternalRowKeyAndBucketExtractor(tableSchema),
                 record -> {
                     long sequenceNumber =
                             sequenceGenerator == null

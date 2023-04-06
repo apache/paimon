@@ -38,45 +38,43 @@ import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
-/** Test for {@link SinkRecordConverter}. */
-public class SinkRecordConverterTest {
+/** Test for {@link InternalRowKeyAndBucketExtractor}. */
+public class InternalRowKeyAndBucketExtractorTest {
 
     @Test
     public void testInvalidBucket() {
-        assertThatThrownBy(() -> converter("n", "b"))
+        assertThatThrownBy(() -> extractor("n", "b"))
                 .hasMessageContaining("Field names [a, b, c] should contains all bucket keys [n].");
 
-        assertThatThrownBy(() -> converter("a", "b"))
+        assertThatThrownBy(() -> extractor("a", "b"))
                 .hasMessageContaining("Primary keys [b] should contains all bucket keys [a].");
 
-        assertThatThrownBy(() -> converter("a", "a", "a,b"))
+        assertThatThrownBy(() -> extractor("a", "a", "a,b"))
                 .hasMessageContaining("Bucket keys [a] should not in partition keys [a].");
     }
 
     @Test
     public void testBucket() {
         GenericRow row = GenericRow.of(5, 6, 7);
-        assertThat(bucket(converter("a", "a,b"), row)).isEqualTo(96);
-        assertThat(bucket(converter("", "a"), row)).isEqualTo(96);
-        assertThat(bucket(converter("", "a,b"), row)).isEqualTo(27);
-        assertThat(bucket(converter("a,b", "a,b"), row)).isEqualTo(27);
-        assertThat(bucket(converter("", ""), row)).isEqualTo(40);
-        assertThat(bucket(converter("a,b,c", ""), row)).isEqualTo(40);
-        assertThat(bucket(converter("", "a,b,c"), row)).isEqualTo(40);
+        assertThat(bucket(extractor("a", "a,b"), row)).isEqualTo(96);
+        assertThat(bucket(extractor("", "a"), row)).isEqualTo(96);
+        assertThat(bucket(extractor("", "a,b"), row)).isEqualTo(27);
+        assertThat(bucket(extractor("a,b", "a,b"), row)).isEqualTo(27);
+        assertThat(bucket(extractor("", ""), row)).isEqualTo(40);
+        assertThat(bucket(extractor("a,b,c", ""), row)).isEqualTo(40);
+        assertThat(bucket(extractor("", "a,b,c"), row)).isEqualTo(40);
     }
 
-    private int bucket(SinkRecordConverter converter, InternalRow row) {
-        int bucket1 = converter.bucket(row);
-        int bucket2 = converter.convert(row).bucket();
-        assertThat(bucket1).isEqualTo(bucket2);
-        return bucket1;
+    private int bucket(InternalRowKeyAndBucketExtractor extractor, InternalRow row) {
+        extractor.setRecord(row);
+        return extractor.bucket();
     }
 
-    private SinkRecordConverter converter(String bk, String pk) {
-        return converter("", bk, pk);
+    private InternalRowKeyAndBucketExtractor extractor(String bk, String pk) {
+        return extractor("", bk, pk);
     }
 
-    private SinkRecordConverter converter(String partK, String bk, String pk) {
+    private InternalRowKeyAndBucketExtractor extractor(String partK, String bk, String pk) {
         RowType rowType =
                 new RowType(
                         Arrays.asList(
@@ -98,6 +96,6 @@ public class SinkRecordConverterTest {
                         "".equals(pk) ? Collections.emptyList() : Arrays.asList(pk.split(",")),
                         options,
                         "");
-        return new SinkRecordConverter(schema);
+        return new InternalRowKeyAndBucketExtractor(schema);
     }
 }

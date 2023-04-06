@@ -18,26 +18,34 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.codegen.CodeGenUtils;
-import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.RowKind;
 
-/** A {@link PartitionComputer} to compute partition by partition keys. */
-public class PartitionComputer {
-    private final Projection partitionProjection;
+/**
+ * Utility interface to extract partition keys, bucket id, primary keys for file store ({@code
+ * trimmedPrimaryKey}) and primary keys for external log system ({@code logPrimaryKey}) from the
+ * given record.
+ *
+ * @param <T> type of record
+ */
+public interface KeyAndBucketExtractor<T> {
 
-    public PartitionComputer(TableSchema tableSchema) {
-        this(tableSchema.logicalRowType(), tableSchema.projection(tableSchema.partitionKeys()));
+    void setRecord(T record);
+
+    BinaryRow partition();
+
+    int bucket();
+
+    BinaryRow trimmedPrimaryKey();
+
+    BinaryRow logPrimaryKey();
+
+    static int bucketKeyHashCode(BinaryRow bucketKey) {
+        assert bucketKey.getRowKind() == RowKind.INSERT;
+        return bucketKey.hashCode();
     }
 
-    public PartitionComputer(RowType rowType, int[] partitionKeys) {
-        this.partitionProjection = CodeGenUtils.newProjection(rowType, partitionKeys);
-    }
-
-    public BinaryRow partition(InternalRow row) {
-        return this.partitionProjection.apply(row);
+    static int bucket(int hashcode, int numBuckets) {
+        return Math.abs(hashcode % numBuckets);
     }
 }
