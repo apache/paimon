@@ -51,6 +51,8 @@ A manifest file is a file containing changes about LSM data files and changelog 
 
 Data files are grouped by partitions and buckets. Each bucket directory contains an [LSM tree]({{< ref "concepts/file-layouts#lsm-trees" >}}) and its [changelog files]({{< ref "concepts/primary-key-table#changelog-producers" >}}).
 
+Currently, Paimon supports using orc, parquet and avro as data file's format.
+
 ## LSM Trees
 
 Paimon adapts the LSM tree (log-structured merge-tree) as the data structure for file storage. This documentation briefly introduces the concepts about LSM trees.
@@ -76,7 +78,3 @@ To limit the number of sorted runs, we have to merge several sorted runs into on
 However, compaction is a resource intensive procedure which consumes a certain amount of CPU time and disk IO, so too frequent compaction may in turn result in slower writes. It is a trade-off between query and write performance. Paimon currently adapts a compaction strategy similar to Rocksdb's [universal compaction](https://github.com/facebook/rocksdb/wiki/Universal-Compaction).
 
 By default, when Paimon writers append records to the LSM tree, they'll also perform compactions as needed. Users can also choose to perform all compactions in a dedicated compaction job. See [dedicated compaction job]({{< ref "maintenance/write-performance#dedicated-compaction-job" >}}) for more info.
-
-## Data file format
-
-Currently, Paimon supports using orc, parquet and avro as data file's format.
