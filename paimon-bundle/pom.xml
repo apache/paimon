@@ -92,21 +92,21 @@ under the License.
         <!-- other runtime dependencies -->
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-shaded-jackson</artifactId>
-            <version>${flink.shaded.jackson.version}-${flink.shaded.version}</version>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-shade-jackson-2</artifactId>
+            <version>${paimon.shade.jackson.version}-${project.version}</version>
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-shaded-guava</artifactId>
-            <version>${flink.shaded.guava.version}-${flink.shaded.version}</version>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-shade-guava-30</artifactId>
+            <version>${paimon.shade.guava.version}-${project.version}</version>
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-shaded-asm-9</artifactId>
-            <version>${flink.shaded.asm.version}-${flink.shaded.version}</version>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-shade-caffeine-2</artifactId>
+            <version>${paimon.shade.caffeine.version}-${project.version}</version>
         </dependency>
     </dependencies>
 
@@ -125,10 +125,10 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <!-- Flink -->
-                                    <include>org.apache.flink:flink-shaded-jackson</include>
-                                    <include>org.apache.flink:flink-shaded-guava</include>
-                                    <include>org.apache.flink:flink-shaded-asm-9</include>
+                                    <!-- Paimon-shade -->
+                                    <include>org.apache.paimon:paimon-shade-jackson-2</include>
+                                    <include>org.apache.paimon:paimon-shade-guava-30</include>
+                                    <include>org.apache.paimon:paimon-shade-caffeine-2</include>
 
                                     <!-- Paimon -->
                                     <include>org.apache.paimon:paimon-common</include>
