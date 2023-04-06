@@ -76,8 +76,9 @@ public class DeleteActionITCase extends ActionITCaseBase {
         action.run();
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
-        assertThat(snapshot.id()).isEqualTo(2);
-        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+        // due to force compaction
+        assertThat(snapshot.id()).isEqualTo(3);
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
 
         validateStreamingReadResult(iterator, expected);
         iterator.close();
