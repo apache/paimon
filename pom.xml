@@ -829,7 +829,7 @@ under the License.
                         </execution>
                     </executions>
                     <configuration>
-                        <mainClass>org.apache.flink.tools.ci.licensecheck.LicenseChecker</mainClass>
+                        <mainClass>org.apache.paimon.tools.ci.licensecheck.LicenseChecker</mainClass>
                         <includePluginDependencies>true</includePluginDependencies>
                         <includeProjectDependencies>false</includeProjectDependencies>
                     </configuration>
