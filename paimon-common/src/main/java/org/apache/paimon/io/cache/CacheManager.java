@@ -21,10 +21,9 @@ package org.apache.paimon.io.cache;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
-
-import org.apache.flink.shaded.guava30.com.google.common.cache.Cache;
-import org.apache.flink.shaded.guava30.com.google.common.cache.CacheBuilder;
-import org.apache.flink.shaded.guava30.com.google.common.cache.RemovalNotification;
+import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;
+import org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder;
+import org.apache.paimon.shade.guava30.com.google.common.cache.RemovalNotification;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
