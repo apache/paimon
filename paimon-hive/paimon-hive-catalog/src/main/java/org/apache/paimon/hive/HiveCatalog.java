@@ -65,6 +65,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -99,6 +100,17 @@ public class HiveCatalog extends AbstractCatalog {
     public HiveCatalog(FileIO fileIO, HiveConf hiveConf, String clientClassName) {
         super(fileIO);
         this.hiveConf = hiveConf;
+        this.clientClassName = clientClassName;
+        this.client = createClient(hiveConf, clientClassName);
+    }
+
+    public HiveCatalog(
+            FileIO fileIO,
+            Configuration hadoopConfig,
+            String clientClassName,
+            Map<String, String> options) {
+        super(fileIO, options);
+        this.hiveConf = new HiveConf(hadoopConfig, HiveConf.class);
         this.clientClassName = clientClassName;
         this.client = createClient(hiveConf, clientClassName);
     }
@@ -250,6 +262,9 @@ public class HiveCatalog extends AbstractCatalog {
         checkFieldNamesUpperCase(schema.rowType().getFieldNames());
         // first commit changes to underlying files
         // if changes on Hive fails there is no harm to perform the same changes to files again
+
+        copyTableDefaultOptions(schema.options());
+
         TableSchema tableSchema;
         try {
             tableSchema = schemaManager(identifier).createTable(schema);
