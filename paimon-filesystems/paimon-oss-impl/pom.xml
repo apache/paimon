@@ -38,15 +38,15 @@
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-common</artifactId>
+            <artifactId>paimon-hadoop-shaded</artifactId>
             <version>${project.version}</version>
-            <scope>provided</scope>
         </dependency>
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-hadoop-shaded</artifactId>
+            <artifactId>paimon-common</artifactId>
             <version>${project.version}</version>
+            <scope>provided</scope>
         </dependency>
 
         <dependency>
@@ -59,7 +59,7 @@
                     <artifactId>aliyun-oss-sdk</artifactId>
                 </exclusion>
                 <exclusion>
-                    <!-- provided by flink-fs-hadoop-shaded -->
+                    <!-- provided by paimon-hadoop-shaded -->
                     <groupId>org.apache.hadoop</groupId>
                     <artifactId>hadoop-common</artifactId>
                 </exclusion>
@@ -119,7 +119,7 @@
                             <relocations>
                                 <relocation>
                                     <pattern>org.apache.hadoop</pattern>
-                                    <shadedPattern>org.apache.flink.fs.shaded.hadoop3.org.apache.hadoop</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shaded.hadoop3.org.apache.hadoop</shadedPattern>
                                 </relocation>
                                 <!-- relocate the OSS dependencies -->
                                 <relocation>
