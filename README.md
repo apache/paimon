@@ -57,6 +57,7 @@ JDK 8/11 is required for building the project.
 
 - Run the `mvn clean package -DskipTests` command to build the project.
 - Run the `mvn spotless:apply` to format the project (both Java and Scala).
+- IDE: Mark `paimon-common/target/generated-sources/antlr4` as Sources Root.
 
 ## License
 
