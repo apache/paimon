@@ -108,14 +108,21 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
+        Map<String, String> options = tableSchema.options();
         // check option is not immutable
-        Map<String, String> options = new HashMap<>(tableSchema.options());
         dynamicOptions.forEach(
                 (k, v) -> {
                     if (!Objects.equals(v, options.get(k))) {
                         SchemaManager.checkAlterTableOption(k);
                     }
                 });
+
+        return internalCopyWithoutCheck(dynamicOptions);
+    }
+
+    @Override
+    public FileStoreTable internalCopyWithoutCheck(Map<String, String> dynamicOptions) {
+        Map<String, String> options = new HashMap<>(tableSchema.options());
 
         // merge non-null dynamic options into schema.options
         dynamicOptions.forEach(

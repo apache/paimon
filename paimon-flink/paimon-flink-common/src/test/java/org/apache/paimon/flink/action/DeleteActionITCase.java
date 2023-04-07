@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.table.FileStoreTable;
@@ -28,6 +29,7 @@ import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -36,10 +38,13 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildSimpleQuery;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
+import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.insertInto;
+import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testStreamingRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.validateStreamingReadResult;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -76,6 +81,65 @@ public class DeleteActionITCase extends ActionITCaseBase {
 
         validateStreamingReadResult(iterator, expected);
         iterator.close();
+    }
+
+    @Test
+    public void testWorkWithPartialUpdateTable() throws Exception {
+        createFileStoreTable(
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"k", "a", "b"}),
+                Collections.emptyList(),
+                Collections.singletonList("k"),
+                new HashMap<String, String>() {
+                    {
+                        put(
+                                CoreOptions.MERGE_ENGINE.key(),
+                                CoreOptions.MergeEngine.PARTIAL_UPDATE.toString());
+                        put(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE.key(), "true");
+                        put(
+                                CoreOptions.CHANGELOG_PRODUCER.key(),
+                                ThreadLocalRandom.current().nextBoolean()
+                                        ? CoreOptions.ChangelogProducer.LOOKUP.toString()
+                                        : CoreOptions.ChangelogProducer.FULL_COMPACTION.toString());
+                    }
+                });
+
+        DeleteAction action = new DeleteAction(warehouse, database, tableName, "k < 3");
+
+        insertInto(
+                tableName, "(1, 'Say', 'A'), (2, 'Hi', 'B'), (3, 'To', 'C'), (4, 'Paimon', 'D')");
+
+        BlockingIterator<Row, Row> streamItr =
+                testStreamingRead(
+                        buildSimpleQuery(tableName),
+                        Arrays.asList(
+                                changelogRow("+I", 1, "Say", "A"),
+                                changelogRow("+I", 2, "Hi", "B"),
+                                changelogRow("+I", 3, "To", "C"),
+                                changelogRow("+I", 4, "Paimon", "D")));
+
+        action.run();
+
+        // test delete records hasn't been thrown
+        validateStreamingReadResult(
+                streamItr,
+                Arrays.asList(changelogRow("-D", 1, "Say", "A"), changelogRow("-D", 2, "Hi", "B")));
+
+        // test partial update still works after action
+        insertInto(
+                tableName, "(4, CAST (NULL AS STRING), '$')", "(4, 'Test', CAST (NULL AS STRING))");
+
+        validateStreamingReadResult(
+                streamItr,
+                Arrays.asList(
+                        changelogRow("-U", 4, "Paimon", "D"), changelogRow("+U", 4, "Test", "$")));
+        streamItr.close();
+
+        testBatchRead(
+                buildSimpleQuery(tableName),
+                Arrays.asList(
+                        changelogRow("+I", 3, "To", "C"), changelogRow("+I", 4, "Test", "$")));
     }
 
     private void prepareTable(boolean hasPk) throws Exception {
