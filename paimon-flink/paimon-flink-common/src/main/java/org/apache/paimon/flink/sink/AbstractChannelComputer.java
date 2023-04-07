@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 
+import java.io.Serializable;
 import java.util.Objects;
 
 /**
@@ -54,5 +55,12 @@ public abstract class AbstractChannelComputer<T> {
         } else {
             return Math.abs(Objects.hash(bucket, otherChannelKeysHash)) % numChannels;
         }
+    }
+
+    public interface Provider<T> extends Serializable {
+
+        AbstractChannelComputer<T> provide(int numChannels);
+
+        String toString();
     }
 }

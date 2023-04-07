@@ -33,13 +33,4 @@ public class CdcRecordChannelComputer extends AbstractChannelComputer<CdcRecord>
     public int channel(CdcRecord record) {
         return channelImpl(record);
     }
-
-    @Override
-    public String toString() {
-        if (shuffleByPartitionEnable) {
-            return "HASH[bucket, partition]";
-        } else {
-            return "HASH[bucket]";
-        }
-    }
 }

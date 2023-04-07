@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.utils.SerializableFunction;
-
 import org.apache.flink.runtime.io.network.api.writer.SubtaskStateMapper;
 import org.apache.flink.runtime.plugable.SerializationDelegate;
 import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
@@ -33,19 +31,18 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
  */
 public class BucketingStreamPartitioner<T> extends StreamPartitioner<T> {
 
-    private final SerializableFunction<Integer, AbstractChannelComputer<T>> channelComputerFactory;
+    private final AbstractChannelComputer.Provider<T> channelComputerProvider;
 
     private transient AbstractChannelComputer<T> channelComputer;
 
-    public BucketingStreamPartitioner(
-            SerializableFunction<Integer, AbstractChannelComputer<T>> channelComputerFactory) {
-        this.channelComputerFactory = channelComputerFactory;
+    public BucketingStreamPartitioner(AbstractChannelComputer.Provider<T> channelComputerProvider) {
+        this.channelComputerProvider = channelComputerProvider;
     }
 
     @Override
     public void setup(int numberOfChannels) {
         super.setup(numberOfChannels);
-        channelComputer = channelComputerFactory.apply(numberOfChannels);
+        channelComputer = channelComputerProvider.provide(numberOfChannels);
     }
 
     @Override
@@ -70,6 +67,6 @@ public class BucketingStreamPartitioner<T> extends StreamPartitioner<T> {
 
     @Override
     public String toString() {
-        return channelComputer.toString();
+        return channelComputerProvider.toString();
     }
 }

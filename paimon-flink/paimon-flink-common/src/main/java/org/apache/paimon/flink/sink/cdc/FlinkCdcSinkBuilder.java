@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.sink.AbstractChannelComputer;
 import org.apache.paimon.flink.sink.BucketingStreamPartitioner;
 import org.apache.paimon.flink.sink.LogSinkFunction;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
@@ -106,9 +107,7 @@ public class FlinkCdcSinkBuilder<T> {
                         .get(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION);
         BucketingStreamPartitioner<CdcRecord> partitioner =
                 new BucketingStreamPartitioner<>(
-                        numChannels ->
-                                new CdcRecordChannelComputer(
-                                        numChannels, schema, shuffleByPartitionEnable));
+                        new ChannelComputerProvider(schema, shuffleByPartitionEnable));
         PartitionTransformation<CdcRecord> partitioned =
                 new PartitionTransformation<>(parsed.getTransformation(), partitioner);
         if (parallelism != null) {
@@ -118,5 +117,33 @@ public class FlinkCdcSinkBuilder<T> {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         FlinkCdcSink sink = new FlinkCdcSink(table, lockFactory, logSinkFunction);
         return sink.sinkFrom(new DataStream<>(env, partitioned));
+    }
+
+    private static class ChannelComputerProvider
+            implements AbstractChannelComputer.Provider<CdcRecord> {
+
+        private static final long serialVersionUID = 1L;
+
+        private final TableSchema schema;
+        private final boolean shuffleByPartitionEnable;
+
+        private ChannelComputerProvider(TableSchema schema, boolean shuffleByPartitionEnable) {
+            this.schema = schema;
+            this.shuffleByPartitionEnable = shuffleByPartitionEnable;
+        }
+
+        @Override
+        public AbstractChannelComputer<CdcRecord> provide(int numChannels) {
+            return new CdcRecordChannelComputer(numChannels, schema, shuffleByPartitionEnable);
+        }
+
+        @Override
+        public String toString() {
+            if (shuffleByPartitionEnable) {
+                return "HASH[bucket, partition]";
+            } else {
+                return "HASH[bucket]";
+            }
+        }
     }
 }
