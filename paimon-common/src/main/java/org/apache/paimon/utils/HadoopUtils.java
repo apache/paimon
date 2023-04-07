@@ -39,7 +39,7 @@ public class HadoopUtils {
     public static final String HADOOP_CONF_ENV = "HADOOP_CONF_DIR";
 
     /** Path to Hadoop configuration. */
-    public static final String PATH_HADOOP_CONFIG = "fs.hdfs.hadoopconf";
+    public static final String PATH_HADOOP_CONFIG = "hadoop-conf-dir";
 
     public static Configuration getHadoopConfiguration(Options options) {
 
