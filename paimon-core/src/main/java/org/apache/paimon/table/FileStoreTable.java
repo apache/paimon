@@ -72,6 +72,9 @@ public interface FileStoreTable extends DataTable {
     @Override
     FileStoreTable copy(Map<String, String> dynamicOptions);
 
+    /** Sometimes we have to change some Immutable options to implement features. */
+    FileStoreTable internalCopyWithoutCheck(Map<String, String> dynamicOptions);
+
     FileStoreTable copyWithLatestSchema();
 
     @Override
