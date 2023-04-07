@@ -28,13 +28,15 @@ import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
+
+import static org.apache.paimon.hive.HiveCatalog.createHiveConf;
+import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
+import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
+import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 
 /** Factory to create {@link HiveCatalog}. */
 public class HiveCatalogFactory implements CatalogFactory {
-
-    private static final String IDENTIFIER = "hive";
 
     private static final ConfigOption<String> METASTORE_CLIENT_CLASS =
             ConfigOptions.key("metastore.client.class")
@@ -60,12 +62,17 @@ public class HiveCatalogFactory implements CatalogFactory {
                                 + IDENTIFIER
                                 + " catalog");
 
-        Configuration hadoopConfig = new Configuration();
-        context.options().toMap().forEach(hadoopConfig::set);
-        hadoopConfig.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
-        hadoopConfig.set(
-                HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouse.toUri().toString());
+        String hiveConfDir = context.options().get(HIVE_CONF_DIR);
+        String hadoopConfDir = context.options().get(HADOOP_CONF_DIR);
+        HiveConf hiveConf = createHiveConf(hiveConfDir, hadoopConfDir);
 
-        return new HiveCatalog(fileIO, hadoopConfig, context.options().get(METASTORE_CLIENT_CLASS));
+        // always using user-set parameters overwrite hive-site.xml parameters
+        context.options().toMap().forEach(hiveConf::set);
+        hiveConf.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
+        hiveConf.set(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouse.toUri().toString());
+
+        String clientClassName = context.options().get(METASTORE_CLIENT_CLASS);
+
+        return new HiveCatalog(fileIO, hiveConf, clientClassName);
     }
 }
