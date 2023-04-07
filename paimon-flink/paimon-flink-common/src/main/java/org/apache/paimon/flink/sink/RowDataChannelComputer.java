@@ -16,28 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.sink;
+package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.codegen.CodeGenUtils;
-import org.apache.paimon.codegen.Projection;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.types.RowType;
 
-/** A {@link PartitionComputer} to compute partition by partition keys. */
-public class PartitionComputer {
-    private final Projection partitionProjection;
+import org.apache.flink.table.data.RowData;
 
-    public PartitionComputer(TableSchema tableSchema) {
-        this(tableSchema.logicalRowType(), tableSchema.projection(tableSchema.partitionKeys()));
+/** {@link AbstractChannelComputer} for {@link RowData}. */
+public class RowDataChannelComputer extends AbstractChannelComputer<RowData> {
+
+    public RowDataChannelComputer(
+            int numChannels, TableSchema schema, boolean shuffleByPartitionEnable) {
+        super(numChannels, new RowDataKeyAndBucketExtractor(schema), shuffleByPartitionEnable);
     }
 
-    public PartitionComputer(RowType rowType, int[] partitionKeys) {
-        this.partitionProjection = CodeGenUtils.newProjection(rowType, partitionKeys);
-    }
-
-    public BinaryRow partition(InternalRow row) {
-        return this.partitionProjection.apply(row);
+    @Override
+    public int channel(RowData record) {
+        return channelImpl(record);
     }
 }
