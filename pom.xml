@@ -34,7 +34,7 @@ under the License.
     <version>0.4-SNAPSHOT</version>
     <packaging>pom</packaging>
 
-    <url>http://paimon.apache.org</url>
+    <url>https://paimon.apache.org</url>
     <inceptionYear>2023</inceptionYear>
 
     <licenses>
@@ -632,7 +632,8 @@ under the License.
                                 <!-- The ApacheNoticeResourceTransformer collects and aggregates NOTICE files -->
                                 <transformer
                                         implementation="org.apache.maven.plugins.shade.resource.ApacheNoticeResourceTransformer">
-                                    <projectName>Apache Flink</projectName>
+                                    <projectName>Apache Paimon (incubating)</projectName>
+                                    <inceptionYear>${project.inceptionYear}</inceptionYear>
                                     <encoding>UTF-8</encoding>
                                 </transformer>
                             </transformers>
