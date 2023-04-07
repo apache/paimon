@@ -23,7 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableSet;
-import org.apache.paimon.table.sink.BucketComputer;
+import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.concurrent.ThreadSafe;
@@ -71,7 +71,7 @@ public class BucketSelector implements Serializable {
     Set<Integer> createBucketSet(int numBucket) {
         ImmutableSet.Builder<Integer> builder = new ImmutableSet.Builder<>();
         for (int hash : hashCodes) {
-            builder.add(BucketComputer.bucket(hash, numBucket));
+            builder.add(KeyAndBucketExtractor.bucket(hash, numBucket));
         }
         return builder.build();
     }
@@ -139,7 +139,7 @@ public class BucketSelector implements Serializable {
 
     private static int hash(List<Object> columns, InternalRowSerializer serializer) {
         BinaryRow binaryRow = serializer.toBinaryRow(GenericRow.of(columns.toArray()));
-        return BucketComputer.hashcode(binaryRow);
+        return KeyAndBucketExtractor.bucketKeyHashCode(binaryRow);
     }
 
     private static void assembleRows(
