@@ -157,14 +157,17 @@ public abstract class ActionBase implements Action {
      * want these records to be sunk directly. This method is a workaround. Actions that may produce
      * -U/-D records can call this to disable merge engine settings and force compaction.
      */
-    protected void forceSinking() {
-        Map<String, String> dynamicOptions = new HashMap<>();
-        dynamicOptions.put(
-                CoreOptions.MERGE_ENGINE.key(), CoreOptions.MergeEngine.DEDUPLICATE.toString());
-        // force compaction
-        dynamicOptions.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
-        Preconditions.checkArgument(
-                table instanceof FileStoreTable, "Only supports FileStoreTable.");
-        table = ((FileStoreTable) table).internalCopyWithoutCheck(dynamicOptions);
+    protected void changeIgnoreMergeEngine() {
+        if (CoreOptions.fromMap(table.options()).mergeEngine()
+                != CoreOptions.MergeEngine.DEDUPLICATE) {
+            Map<String, String> dynamicOptions = new HashMap<>();
+            dynamicOptions.put(
+                    CoreOptions.MERGE_ENGINE.key(), CoreOptions.MergeEngine.DEDUPLICATE.toString());
+            // force compaction
+            dynamicOptions.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
+            Preconditions.checkArgument(
+                    table instanceof FileStoreTable, "Only supports FileStoreTable.");
+            table = ((FileStoreTable) table).internalCopyWithoutCheck(dynamicOptions);
+        }
     }
 }
