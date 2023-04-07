@@ -105,12 +105,9 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     public HiveCatalog(
-            FileIO fileIO,
-            Configuration hadoopConfig,
-            String clientClassName,
-            Map<String, String> options) {
+            FileIO fileIO, HiveConf hiveConf, String clientClassName, Map<String, String> options) {
         super(fileIO, options);
-        this.hiveConf = new HiveConf(hadoopConfig, HiveConf.class);
+        this.hiveConf = hiveConf;
         this.clientClassName = clientClassName;
         this.client = createClient(hiveConf, clientClassName);
     }
