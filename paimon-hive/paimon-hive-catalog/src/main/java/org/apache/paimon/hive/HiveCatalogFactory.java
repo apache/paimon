@@ -73,10 +73,6 @@ public class HiveCatalogFactory implements CatalogFactory {
 
         String clientClassName = context.options().get(METASTORE_CLIENT_CLASS);
 
-        return new HiveCatalog(
-                fileIO,
-                hiveConf,
-                clientClassName,
-                context.options().toMap());
+        return new HiveCatalog(fileIO, hiveConf, clientClassName, context.options().toMap());
     }
 }
