@@ -57,6 +57,11 @@ public abstract class AbstractChannelComputer<T> {
         }
     }
 
+    /**
+     * Provider of {@link AbstractChannelComputer}.
+     *
+     * @param <T> type of record
+     */
     public interface Provider<T> extends Serializable {
 
         AbstractChannelComputer<T> provide(int numChannels);
