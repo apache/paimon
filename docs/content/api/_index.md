@@ -1,9 +1,9 @@
 ---
-title: "Configurations"
-weight: 10
-type: docs
-aliases:
-- /maintenance/configurations.html
+title: Api
+icon: <i class="fa fa-briefcase title maindish" aria-hidden="true"></i>
+bold: true
+bookCollapseSection: true
+weight: 7
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -23,29 +23,3 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 -->
-
-# Configuration
-
-### CoreOptions
-
-Core options for paimon.
-
-{{< generated/core_configuration >}}
-
-### CatalogOptions
-
-Options for paimon catalog.
-
-{{< generated/catalog_configuration >}}
-
-### HiveCatalogOptions
-
-Options for Hive catalog.
-
-{{< generated/hive_catalog_configuration >}}
-
-### FlinkConnectorOptions
-
-Flink connector options for paimon.
-
-{{< generated/flink_connector_configuration >}}
