@@ -34,4 +34,13 @@ public class RowDataChannelComputer extends AbstractChannelComputer<RowData> {
     public int channel(RowData record) {
         return channelImpl(record);
     }
+
+    @Override
+    public String toString() {
+        if (shuffleByPartitionEnable) {
+            return "HASH[bucket, partition]";
+        } else {
+            return "HASH[bucket]";
+        }
+    }
 }

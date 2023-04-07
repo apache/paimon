@@ -70,6 +70,6 @@ public class BucketingStreamPartitioner<T> extends StreamPartitioner<T> {
 
     @Override
     public String toString() {
-        return "bucketing-stream-partitioner";
+        return channelComputer.toString();
     }
 }

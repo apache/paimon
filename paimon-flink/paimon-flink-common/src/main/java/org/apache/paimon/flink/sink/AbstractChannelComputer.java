@@ -32,7 +32,7 @@ public abstract class AbstractChannelComputer<T> {
 
     private final int numChannels;
     private final KeyAndBucketExtractor<T> extractor;
-    private final boolean shuffleByPartitionEnable;
+    protected final boolean shuffleByPartitionEnable;
 
     public AbstractChannelComputer(
             int numChannels, KeyAndBucketExtractor<T> extractor, boolean shuffleByPartitionEnable) {
