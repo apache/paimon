@@ -117,9 +117,9 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected void copyTableDefaultOptions(Map<String, String> options) {
-        tableDefaultOptions.keySet().stream()
-                .filter(key -> !options.containsKey(key))
-                .forEach(key -> options.put(key, tableDefaultOptions.get(key)));
+        tableDefaultOptions
+                .keySet()
+                .forEach(key -> options.putIfAbsent(key, tableDefaultOptions.get(key)));
     }
 
     private String[] tableAndSystemName(Identifier identifier) {
