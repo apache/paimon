@@ -527,12 +527,15 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'type' = 'paimon',",
                                 "  'metastore' = 'hive',",
                                 "  'uri' = '',",
+                                "  'hive-conf-dir' = '"
+                                        + hiveShell.getBaseDir().getRoot().getPath()
+                                        + HIVE_CONF
+                                        + "',",
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true',",
                                 "  'table-default.opt1' = 'value1',",
                                 "  'table-default.opt2' = 'value2',",
-                                "  'table-default.opt3' = 'value3',",
-                                "  'lock.enabled' = 'true'",
+                                "  'table-default.opt3' = 'value3'",
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG my_hive_options").await();
