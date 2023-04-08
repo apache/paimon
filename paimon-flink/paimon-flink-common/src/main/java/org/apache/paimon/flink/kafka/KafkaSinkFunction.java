@@ -18,6 +18,18 @@
 
 package org.apache.paimon.flink.kafka;
 
+import java.util.Collection;
+import java.util.Collections;
+import org.apache.flink.table.api.TableException;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.common.config.ConfigResource;
+import org.apache.kafka.common.config.ConfigResource.Type;
+import org.apache.kafka.common.config.TopicConfig;
+import org.apache.kafka.common.errors.TopicExistsException;
+import org.apache.kafka.connect.util.TopicAdmin;
+import org.apache.kafka.connect.util.TopicAdmin.NewTopicBuilder;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.sink.LogSinkFunction;
 import org.apache.paimon.table.sink.SinkRecord;
 
@@ -40,6 +52,10 @@ public class KafkaSinkFunction extends FlinkKafkaProducer<SinkRecord> implements
 
     private WriteCallback writeCallback;
 
+    public static final int DEFAULT_NUM_PARTITIONS = 3;
+
+    public static final int DEFAULT_REPLICATION_FACTOR = 2;
+
     /**
      * Creates a {@link KafkaSinkFunction} for a given topic. The sink produces its input to the
      * topic. It accepts a {@link KafkaSerializationSchema} for serializing records to a {@link
@@ -59,6 +75,7 @@ public class KafkaSinkFunction extends FlinkKafkaProducer<SinkRecord> implements
             Properties producerConfig,
             KafkaSinkFunction.Semantic semantic) {
         super(defaultTopic, serializationSchema, producerConfig, semantic);
+        // createTopicIfNotExists(defaultTopic, producerConfig);
     }
 
     public void setWriteCallback(WriteCallback writeCallback) {
@@ -76,6 +93,28 @@ public class KafkaSinkFunction extends FlinkKafkaProducer<SinkRecord> implements
                     }
                     baseCallback.onCompletion(metadata, exception);
                 };
+    }
+
+    @VisibleForTesting
+    void createTopicIfNotExists(String topicName, Properties props) {
+        try(final AdminClient adminClient = AdminClient.create(props)) {
+            if (!adminClient.listTopics().names().get().contains(topicName)) {
+                int numBrokers = adminClient.describeCluster().nodes().get().size();
+                int replicationFactor = DEFAULT_REPLICATION_FACTOR > numBrokers? numBrokers:DEFAULT_REPLICATION_FACTOR;
+
+                NewTopic newTopic = new NewTopic(topicName, DEFAULT_NUM_PARTITIONS, (short)replicationFactor);
+
+                adminClient.createTopics(
+                    Collections.singleton(newTopic)
+                ).all().get();
+            }
+        } catch (Exception e) {
+            if (e.getCause() instanceof TopicExistsException) {
+                throw new TableException(
+                    String.format("Failed to create kafka topic. Reason: topic %s exists for table . ", topicName));
+            }
+            throw new TableException("Error in createTopic", e);
+        }
     }
 
     @Override

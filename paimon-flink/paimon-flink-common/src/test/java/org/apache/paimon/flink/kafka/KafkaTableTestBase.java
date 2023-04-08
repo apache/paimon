@@ -88,7 +88,8 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
                                     String.valueOf(Duration.ofHours(2).toMillis()))
                             // Disable log deletion to prevent records from being deleted during
                             // test run
-                            .withEnv("KAFKA_LOG_RETENTION_MS", "-1");
+                            .withEnv("KAFKA_LOG_RETENTION_MS", "-1")
+                            .withEnv("KAFKA_AUTO_CREATE_TOPICS_ENABLE","false");
 
     protected StreamExecutionEnvironment env;
     protected StreamTableEnvironment tEnv;

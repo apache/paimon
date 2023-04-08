@@ -18,7 +18,14 @@
 
 package org.apache.paimon.flink.kafka;
 
+import java.util.Collections;
+import org.apache.flink.table.api.TableException;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.common.TopicCollection.TopicNameCollection;
+import org.apache.kafka.common.errors.TopicExistsException;
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.factories.FlinkFactoryUtil.FlinkTableFactoryHelper;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
@@ -41,8 +48,10 @@ import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import org.apache.zookeeper.Op;
 
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
+import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.paimon.CoreOptions.LogConsistency;
@@ -56,6 +65,8 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
     public static final String IDENTIFIER = "kafka";
 
     public static final String KAFKA_PREFIX = IDENTIFIER + ".";
+
+    public static final int DEFAULT_REPLICATION_FACTOR = 2;
 
     @Override
     public String factoryIdentifier() {
@@ -118,6 +129,9 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 LogStoreTableFactory.getValueEncodingFormat(helper)
                         .createRuntimeEncoder(sinkContext, physicalType);
         Options options = toOptions(helper.getOptions());
+
+        createTopicIfNotExists(context, options);
+
         return new KafkaLogSinkProvider(
                 topic(context),
                 toKafkaProperties(options),
@@ -157,5 +171,38 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
         Options options = new Options();
         ((Configuration) config).toMap().forEach(options::setString);
         return options;
+    }
+
+
+    private void createTopicIfNotExists(Context context, Options options) {
+        String topicName = topic(context);
+        Properties props = toKafkaProperties(options);
+        int numBuckets = options.getInteger(BUCKET.key(), BUCKET.defaultValue());
+
+        try(final AdminClient adminClient = AdminClient.create(props)) {
+            if (!adminClient.listTopics().names().get().contains(topicName)) {
+                int numBrokers = adminClient.describeCluster().nodes().get().size();
+                int replicationFactor = DEFAULT_REPLICATION_FACTOR > numBrokers? numBrokers:DEFAULT_REPLICATION_FACTOR;
+
+                NewTopic newTopic = new NewTopic(topicName, numBuckets, (short)replicationFactor);
+
+                adminClient.createTopics(
+                    Collections.singleton(newTopic)
+                ).all().get();
+            }
+        } catch (Exception e) {
+            if (e.getCause() instanceof TopicExistsException) {
+                throw new TableException(
+                    String.format(
+                        "Failed to create kafka topic. "
+                            + "Reason: topic %s exists for table %s. "
+                            + "Suggestion: please try `DESCRIBE TABLE %s` to "
+                            + "check whether table exists in current catalog. ",
+                        topic(context),
+                        context.getObjectIdentifier().asSerializableString(),
+                        context.getObjectIdentifier().asSerializableString()));
+            }
+            throw new TableException("Error in createTopic", e);
+        }
     }
 }
