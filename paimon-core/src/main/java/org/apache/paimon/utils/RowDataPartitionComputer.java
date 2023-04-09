@@ -19,23 +19,28 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
+import java.time.LocalTime;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
 
 /** PartitionComputer for {@link InternalRow}. */
 public class RowDataPartitionComputer {
 
     protected final String defaultPartValue;
     protected final String[] partitionColumns;
+    protected final List<DataType> fieldTypes;
     protected final InternalRow.FieldGetter[] partitionFieldGetters;
 
     public RowDataPartitionComputer(
             String defaultPartValue, RowType rowType, String[] partitionColumns) {
         this.defaultPartValue = defaultPartValue;
         this.partitionColumns = partitionColumns;
+        this.fieldTypes = rowType.getFieldTypes();
         List<String> columnList = rowType.getFieldNames();
         this.partitionFieldGetters =
                 Arrays.stream(partitionColumns)
@@ -52,12 +57,35 @@ public class RowDataPartitionComputer {
 
         for (int i = 0; i < partitionFieldGetters.length; i++) {
             Object field = partitionFieldGetters[i].getFieldOrNull(in);
-            String partitionValue = field != null ? field.toString() : null;
+            String partitionValue;
+
+            if (Objects.nonNull(field)) {
+                switch (fieldTypes.get(i).getTypeRoot()) {
+                    case DATE:
+                        partitionValue = DateTimeUtils.toLocalDate((int) field).toString();
+                        break;
+                    case TIME_WITHOUT_TIME_ZONE:
+                        partitionValue = formatTimeTypePart((int) field);
+                        break;
+                    default:
+                        partitionValue = field.toString();
+                }
+            } else {
+                partitionValue = null;
+            }
+
             if (StringUtils.isNullOrWhitespaceOnly(partitionValue)) {
                 partitionValue = defaultPartValue;
             }
             partSpec.put(partitionColumns[i], partitionValue);
         }
         return partSpec;
+    }
+
+    public String formatTimeTypePart(int field) {
+        // retain only second-level precision
+        int time = field - (field % 1000);
+        LocalTime localTime = DateTimeUtils.toLocalTime(time);
+        return localTime.toString();
     }
 }
