@@ -66,6 +66,13 @@ under the License.
             <artifactId>paimon-s3</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-s3-impl</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
             <type>test-jar</type>
         </dependency>
 

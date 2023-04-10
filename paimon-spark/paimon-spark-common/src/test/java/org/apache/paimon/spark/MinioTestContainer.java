@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.s3;
+package org.apache.paimon.spark;
 
 import org.apache.paimon.testutils.junit.DockerImageVersions;
 import org.apache.paimon.utils.Preconditions;

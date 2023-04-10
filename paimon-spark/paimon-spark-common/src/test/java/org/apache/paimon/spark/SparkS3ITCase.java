@@ -19,7 +19,6 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.s3.MinioTestContainer;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
 

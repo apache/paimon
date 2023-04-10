@@ -32,6 +32,7 @@
     <packaging>jar</packaging>
 
     <properties>
+        <fs.s3.aws.version>1.12.319</fs.s3.aws.version>
         <japicmp.skip>true</japicmp.skip>
     </properties>
 
@@ -265,6 +266,13 @@
             <!-- packaged as an optional dependency that is only accessible on Java 11+ -->
             <scope>provided</scope>
         </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-test-utils</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -275,7 +283,7 @@
                 <executions>
                     <execution>
                         <goals>
-                            <goal>jar</goal>
+                            <goal>test-jar</goal>
                         </goals>
                     </execution>
                 </executions>
