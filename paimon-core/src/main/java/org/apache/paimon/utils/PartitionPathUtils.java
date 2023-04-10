@@ -90,16 +90,15 @@ public class PartitionPathUtils {
      * will return a list (start from index 0):
      *
      * <ul>
-     *   <li>[root]/pt1=0601
-     *   <li>[root]/pt1=0601/pt2=12
-     *   <li>[root]/pt1=0601/pt2=12/pt3=30
+     *   <li>pt1=0601
+     *   <li>pt1=0601/pt2=12
+     *   <li>pt1=0601/pt2=12/pt3=30
      * </ul>
      */
     public static List<String> generateHierarchicalPartitionPaths(
             LinkedHashMap<String, String> partitionSpec) {
         List<String> paths = new ArrayList<>();
         if (partitionSpec.isEmpty()) {
-            paths.add("");
             return paths;
         }
         StringBuilder suffixBuf = new StringBuilder();

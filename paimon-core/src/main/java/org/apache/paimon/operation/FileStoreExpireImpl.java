@@ -23,6 +23,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -163,17 +164,17 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
         // id should be (beginInclusiveId, endExclusiveId]
-        Map<BinaryRow, Set<Integer>> changedPartitions = new HashMap<>();
+        Map<BinaryRow, Set<Integer>> changedBuckets = new HashMap<>();
         for (long id = beginInclusiveId + 1; id <= endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete merge tree files not used by snapshot #" + id);
             }
             Snapshot snapshot = snapshotManager.snapshot(id);
-            // expire merge tree files and collect partitions of which data files have been deleted
+            // expire merge tree files and collect buckets of which data files have been deleted
             expireMergeTreeFiles(snapshot.deltaManifestList())
                     .forEach(
                             (partition, buckets) ->
-                                    changedPartitions
+                                    changedBuckets
                                             .computeIfAbsent(partition, p -> new HashSet<>())
                                             .addAll(buckets));
         }
@@ -189,9 +190,9 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
         }
 
-        // data files and changelog files in partition directories has been deleted
-        // then delete changed partition directories if they are empty
-        tryDeletePartitionDirectories(changedPartitions);
+        // data files and changelog files in bucket directories has been deleted
+        // then delete changed bucket directories if they are empty
+        tryDeleteDirectories(changedBuckets);
 
         // delete manifests
         Snapshot exclusiveSnapshot = snapshotManager.snapshot(endExclusiveId);
@@ -248,43 +249,61 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     Map<BinaryRow, Set<Integer>> expireMergeTreeFiles(Iterable<ManifestEntry> dataFileLog) {
         // we cannot delete a data file directly when we meet a DELETE entry, because that
         // file might be upgraded
-        Map<Path, List<Path>> dataFileToDelete = new HashMap<>();
-        Map<BinaryRow, Set<Integer>> changedPartitions = new HashMap<>();
+        // partition -> bucket -> DataFileMeta
+        Map<BinaryRow, Map<Integer, Set<DataFileMeta>>> dataFileToDelete = new HashMap<>();
+
         for (ManifestEntry entry : dataFileLog) {
-            Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
-            Path dataFilePath = new Path(bucketPath, entry.file().fileName());
             switch (entry.kind()) {
                 case ADD:
-                    dataFileToDelete.remove(dataFilePath);
-                    changedPartitions.computeIfPresent(
+                    dataFileToDelete.computeIfPresent(
                             entry.partition(),
-                            (p, buckets) -> {
-                                buckets.remove(entry.bucket());
-                                return buckets.isEmpty() ? null : buckets;
+                            (partition, bucketMap) -> {
+                                bucketMap.computeIfPresent(
+                                        entry.bucket(),
+                                        (bucket, files) -> {
+                                            files.remove(entry.file());
+                                            return files.isEmpty() ? null : files;
+                                        });
+                                return bucketMap.isEmpty() ? null : bucketMap;
                             });
                     break;
                 case DELETE:
-                    List<Path> extraFiles = new ArrayList<>(entry.file().extraFiles().size());
-                    for (String file : entry.file().extraFiles()) {
-                        extraFiles.add(new Path(bucketPath, file));
-                    }
-                    dataFileToDelete.put(dataFilePath, extraFiles);
-                    changedPartitions
-                            .computeIfAbsent(entry.partition(), p -> new HashSet<>())
-                            .add(entry.bucket());
+                    dataFileToDelete
+                            .computeIfAbsent(entry.partition(), partition -> new HashMap<>())
+                            .computeIfAbsent(entry.bucket(), bucket -> new HashSet<>())
+                            .add(entry.file());
                     break;
                 default:
                     throw new UnsupportedOperationException(
                             "Unknown value kind " + entry.kind().name());
             }
         }
-        dataFileToDelete.forEach(
-                (path, extraFiles) -> {
-                    fileIO.deleteQuietly(path);
-                    extraFiles.forEach(fileIO::deleteQuietly);
-                });
 
-        return changedPartitions;
+        Map<BinaryRow, Set<Integer>> changedBuckets = new HashMap<>();
+        for (Map.Entry<BinaryRow, Map<Integer, Set<DataFileMeta>>> entry :
+                dataFileToDelete.entrySet()) {
+            BinaryRow partition = entry.getKey();
+            Map<Integer, Set<DataFileMeta>> bucketMap = entry.getValue();
+            bucketMap.forEach(
+                    (bucket, dataFileMetas) -> {
+                        deleteDataFiles(pathFactory.bucketPath(partition, bucket), dataFileMetas);
+                        // record changed buckets
+                        changedBuckets.computeIfAbsent(partition, p -> new HashSet<>()).add(bucket);
+                    });
+        }
+
+        return changedBuckets;
+    }
+
+    private void deleteDataFiles(Path bucketPath, Set<DataFileMeta> dataFileMetas) {
+        dataFileMetas.forEach(
+                dataFileMeta -> {
+                    fileIO.deleteQuietly(new Path(bucketPath, dataFileMeta.fileName()));
+                    // delete extra files
+                    dataFileMeta
+                            .extraFiles()
+                            .forEach(extra -> fileIO.deleteQuietly(new Path(bucketPath, extra)));
+                });
     }
 
     private void expireChangelogFiles(String manifestListName) {
@@ -354,38 +373,61 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         }
     }
 
-    private void tryDeletePartitionDirectories(Map<BinaryRow, Set<Integer>> changedPartitions) {
+    private void tryDeleteDirectories(Map<BinaryRow, Set<Integer>> changedBuckets) {
+        // All directory paths are deduplicated and sorted by hierarchy level
         Map<Integer, Set<Path>> deduplicate = new HashMap<>();
-        for (Map.Entry<BinaryRow, Set<Integer>> entry : changedPartitions.entrySet()) {
+        // help to deduplicate
+        Set<Path> uncheck = new HashSet<>();
+        for (Map.Entry<BinaryRow, Set<Integer>> entry : changedBuckets.entrySet()) {
+            // try to delete bucket directories
+            boolean allAttemptsSuccessful = true;
             for (Integer bucket : entry.getValue()) {
-                // try to delete bucket directories
-                tryDeleteDirectory(pathFactory.bucketPath(entry.getKey(), bucket));
+                allAttemptsSuccessful =
+                        allAttemptsSuccessful
+                                && tryDeleteEmptyDirectory(
+                                        pathFactory.bucketPath(entry.getKey(), bucket));
             }
+
             List<Path> hierarchicalPaths = pathFactory.getHierarchicalPartitionPath(entry.getKey());
-            int pathNum = hierarchicalPaths.size();
-            if (pathNum > 0) {
-                // try to delete the deepest partition directory
-                tryDeleteDirectory(hierarchicalPaths.get(pathNum - 1));
+            int hierarchies = hierarchicalPaths.size();
+            if (hierarchies == 0) {
+                continue;
+            }
+
+            if (allAttemptsSuccessful
+                    && tryDeleteEmptyDirectory(hierarchicalPaths.get(hierarchies - 1))) {
                 // deduplicate high level partition directories
-                for (int hierarchy = 0; hierarchy < pathNum - 1; hierarchy++) {
-                    deduplicate
-                            .computeIfAbsent(hierarchy, i -> new HashSet<>())
-                            .add(hierarchicalPaths.get(hierarchy));
+                for (int hierarchy = 0; hierarchy < hierarchies - 1; hierarchy++) {
+                    Path path = hierarchicalPaths.get(hierarchy);
+                    if (!uncheck.contains(path)) {
+                        deduplicate.computeIfAbsent(hierarchy, i -> new HashSet<>()).add(path);
+                    }
+                }
+            } else {
+                // if there has left bucket directories or the deepest partition directory, give up
+                // to check this partition and add high level paths to uncheck list
+                if (hierarchies > 1) {
+                    uncheck.addAll(hierarchicalPaths.subList(1, hierarchies));
                 }
             }
         }
 
         // from deepest to shallowest
         for (int hierarchy = deduplicate.size() - 1; hierarchy >= 0; hierarchy--) {
-            deduplicate.get(hierarchy).forEach(this::tryDeleteDirectory);
+            Set<Path> paths = deduplicate.get(hierarchy);
+            if (paths != null) {
+                paths.forEach(this::tryDeleteEmptyDirectory);
+            }
         }
     }
 
-    private void tryDeleteDirectory(Path path) {
+    private boolean tryDeleteEmptyDirectory(Path path) {
         try {
             fileIO.delete(path, false);
+            return true;
         } catch (IOException e) {
             LOG.debug("Failed to delete directory '{}'. Check whether it is empty.", path);
+            return false;
         }
     }
 }
