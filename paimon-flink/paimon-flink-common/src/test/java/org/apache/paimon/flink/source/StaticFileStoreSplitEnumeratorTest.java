@@ -127,9 +127,9 @@ public class StaticFileStoreSplitEnumeratorTest {
         Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
                 context.getSplitAssignments();
         assertThat(assignments).containsOnlyKeys(0, 1);
-        assertThat(assignments.get(0).getAssignedSplits())
+        assertThat(assignments.get(1).getAssignedSplits())
                 .containsExactly(splits.get(0), splits.get(2));
-        assertThat(assignments.get(1).getAssignedSplits()).containsExactly(splits.get(1));
+        assertThat(assignments.get(0).getAssignedSplits()).containsExactly(splits.get(1));
     }
 
     @Test

@@ -20,10 +20,10 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.ImmutableList;
 import org.apache.flink.types.Row;
 import org.junit.Test;
 
@@ -469,7 +469,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 () ->
                         streamSqlIter(
                                 "SELECT * FROM T1 /*+ OPTIONS('log.changelog-mode'='upsert') */"),
-                "File store continuous reading dose not support upsert changelog mode");
+                "File store continuous reading does not support upsert changelog mode");
     }
 
     @Test
@@ -479,7 +479,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 () ->
                         streamSqlIter(
                                 "SELECT * FROM T1 /*+ OPTIONS('log.changelog-mode'='upsert') */"),
-                "File store continuous reading dose not support upsert changelog mode");
+                "File store continuous reading does not support upsert changelog mode");
     }
 
     @Test
@@ -489,7 +489,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 () ->
                         streamSqlIter(
                                 "SELECT * FROM T1 /*+ OPTIONS('log.consistency'='eventual') */"),
-                "File store continuous reading dose not support eventual consistency mode");
+                "File store continuous reading does not support eventual consistency mode");
     }
 
     @Test
@@ -499,6 +499,6 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 () ->
                         streamSqlIter(
                                 "SELECT * FROM T1 /*+ OPTIONS('log.consistency'='eventual') */"),
-                "File store continuous reading dose not support eventual consistency mode");
+                "File store continuous reading does not support eventual consistency mode");
     }
 }

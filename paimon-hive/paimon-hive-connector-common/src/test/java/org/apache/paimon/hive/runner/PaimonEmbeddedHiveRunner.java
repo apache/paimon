@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive.runner;
 
+import org.apache.paimon.shade.guava30.com.google.common.io.Resources;
 import org.apache.paimon.utils.Preconditions;
 
 import com.klarna.hiverunner.HiveServerContainer;
@@ -32,7 +33,6 @@ import com.klarna.hiverunner.annotations.HiveSetupScript;
 import com.klarna.hiverunner.builder.HiveShellBuilder;
 import com.klarna.hiverunner.config.HiveRunnerConfig;
 import com.klarna.reflection.ReflectionUtils;
-import org.apache.flink.shaded.guava30.com.google.common.io.Resources;
 import org.junit.Ignore;
 import org.junit.internal.AssumptionViolatedException;
 import org.junit.internal.runners.model.EachTestNotifier;

@@ -37,14 +37,14 @@ import java.util.Map;
  * WriteBuilder builder = table.newWriteBuilder();
  *
  * // 2. Write records in distributed tasks
- * TableWrite write = builder.newWrite();
+ * BatchTableWrite write = builder.newWrite();
  * write.write(...);
  * write.write(...);
  * write.write(...);
  * List<CommitMessage> messages = write.prepareCommit();
  *
  * // 3. Collect all CommitMessages to a global node and commit
- * TableCommit commit = builder.newCommit();
+ * BatchTableCommit commit = builder.newCommit();
  * commit.commit(allCommitMessages());
  * }</pre>
  *

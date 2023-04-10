@@ -76,7 +76,9 @@ public class ConfigOptionsDocGenerator {
                 new OptionsClassLocation(
                         "paimon-flink/paimon-flink-common", "org.apache.paimon.flink"),
                 new OptionsClassLocation(
-                        "paimon-flink/paimon-flink-common", "org.apache.paimon.flink.kafka")
+                        "paimon-flink/paimon-flink-common", "org.apache.paimon.flink.kafka"),
+                new OptionsClassLocation(
+                        "paimon-hive/paimon-hive-catalog", "org.apache.paimon.hive")
             };
     static final String DEFAULT_PATH_PREFIX = "src/main/java";
 

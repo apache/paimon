@@ -67,12 +67,15 @@ public abstract class HiveCatalogITCaseBase {
     @HiveSQL(files = {})
     protected static HiveShell hiveShell;
 
+    public static final String HIVE_CONF = "/hive-conf";
+
     @Before
     public void before() throws Exception {
         hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
         hiveShell.execute("USE test_db");
         hiveShell.execute("CREATE TABLE hive_table ( a INT, b STRING )");
         hiveShell.execute("INSERT INTO hive_table VALUES (100, 'Hive'), (200, 'Table')");
+        hiveShell.executeQuery("SHOW TABLES");
 
         path = folder.newFolder().toURI().toString();
         EnvironmentSettings settings = EnvironmentSettings.newInstance().inBatchMode().build();
@@ -84,6 +87,10 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'type' = 'paimon',",
                                 "  'metastore' = 'hive',",
                                 "  'uri' = '',",
+                                "  'hive-conf-dir' = '"
+                                        + hiveShell.getBaseDir().getRoot().getPath()
+                                        + HIVE_CONF
+                                        + "',",
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true'",
                                 ")"))
@@ -227,6 +234,10 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'metastore' = 'hive',",
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",
+                                "  'hive-conf-dir' = '"
+                                        + hiveShell.getBaseDir().getRoot().getPath()
+                                        + HIVE_CONF
+                                        + "',",
                                 "  'lock.enabled' = 'true',",
                                 "  'table.type' = 'EXTERNAL'",
                                 ")"))
@@ -241,7 +252,7 @@ public abstract class HiveCatalogITCaseBase {
                         .contains("Table Type:         \tEXTERNAL_TABLE      \tNULL"));
         tEnv.executeSql("DROP TABLE t").await();
         Path tablePath = new Path(path, "test_db.db/t");
-        Assert.assertTrue(tablePath.getFileSystem().exists(tablePath));
+        Assert.assertFalse(tablePath.getFileSystem().exists(tablePath));
     }
 
     @Test

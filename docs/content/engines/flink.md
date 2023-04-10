@@ -132,8 +132,8 @@ USE CATALOG my_catalog;
 
 -- create a word count table
 CREATE TABLE word_count (
-    word STRING PRIMARY KEY NOT ENFORCED,
-    cnt BIGINT
+                            word STRING PRIMARY KEY NOT ENFORCED,
+                            cnt BIGINT
 );
 ```
 
@@ -179,7 +179,7 @@ SET 'execution.runtime-mode' = 'streaming';
 
 -- track the changes of table and calculate the count interval statistics
 SELECT `interval`, COUNT(*) AS interval_cnt FROM
-    (SELECT cnt / 10000 AS `interval` FROM word_count) GROUP BY `interval`;
+        (SELECT cnt / 10000 AS `interval` FROM word_count) GROUP BY `interval`;
 ```
 
 **Step 9: Exit**

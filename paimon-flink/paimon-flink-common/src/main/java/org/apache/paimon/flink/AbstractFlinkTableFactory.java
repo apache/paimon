@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
+import org.apache.paimon.CoreOptions.StreamingReadMode;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
@@ -53,6 +54,7 @@ import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
+import static org.apache.paimon.CoreOptions.STREAMING_READ_MODE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.NONE;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
@@ -113,9 +115,15 @@ public abstract class AbstractFlinkTableFactory
         options.forEach(configOptions::setString);
 
         if (configOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE)) {
-            // Use file store continuous reading
+            // Use file store continuous reading and set streaming-read-mode
+            options.put(STREAMING_READ_MODE.key(), StreamingReadMode.FILE.getValue());
             validateFileStoreContinuous(configOptions);
             return Optional.empty();
+        } else {
+            // user does not set streaming-read-mode, making default value log
+            if (!options.containsKey(STREAMING_READ_MODE.key())) {
+                options.put(STREAMING_READ_MODE.key(), StreamingReadMode.LOG.getValue());
+            }
         }
 
         return Optional.of(discoverLogStoreFactory(classLoader, configOptions.get(LOG_SYSTEM)));
@@ -123,14 +131,19 @@ public abstract class AbstractFlinkTableFactory
 
     private static void validateFileStoreContinuous(Options options) {
         LogChangelogMode changelogMode = options.get(LOG_CHANGELOG_MODE);
+        StreamingReadMode streamingReadMode = options.get(STREAMING_READ_MODE);
         if (changelogMode == LogChangelogMode.UPSERT) {
             throw new ValidationException(
-                    "File store continuous reading dose not support upsert changelog mode.");
+                    "File store continuous reading does not support upsert changelog mode.");
         }
         LogConsistency consistency = options.get(LOG_CONSISTENCY);
         if (consistency == LogConsistency.EVENTUAL) {
             throw new ValidationException(
-                    "File store continuous reading dose not support eventual consistency mode.");
+                    "File store continuous reading does not support eventual consistency mode.");
+        }
+        if (streamingReadMode == StreamingReadMode.LOG) {
+            throw new ValidationException(
+                    "File store continuous reading does not support the log streaming read mode.");
         }
     }
 

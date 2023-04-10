@@ -86,7 +86,9 @@ public class CompactedStartingScannerTest extends ScannerTestBase {
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(1);
 
         CompactedStartingScanner scanner = new CompactedStartingScanner();
-        assertThat(scanner.scan(snapshotManager, snapshotSplitReader)).isNull();
+
+        // No compact snapshot found, reading from the latest snapshot
+        assertThat(scanner.scan(snapshotManager, snapshotSplitReader).snapshotId()).isEqualTo(1);
 
         write.close();
         commit.close();
