@@ -27,7 +27,6 @@ import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.catalog.UniqueConstraint;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
@@ -36,13 +35,9 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory.Context;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.utils.DataTypeUtils;
-import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.NewTopic;
-import org.apache.kafka.common.errors.TopicExistsException;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -62,8 +57,6 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
     public static final String IDENTIFIER = "kafka";
 
     public static final String KAFKA_PREFIX = IDENTIFIER + ".";
-
-    public static final int DEFAULT_REPLICATION_FACTOR = 2;
 
     @Override
     public String factoryIdentifier() {
@@ -127,7 +120,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                         .createRuntimeEncoder(sinkContext, physicalType);
         Options options = toOptions(helper.getOptions());
 
-        createTopicIfNotExists(context, options);
+        // createTopicIfNotExists(context, options);
 
         return new KafkaLogSinkProvider(
                 topic(context),
@@ -135,7 +128,8 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 primaryKeySerializer,
                 valueSerializer,
                 options.get(LOG_CONSISTENCY),
-                options.get(LOG_CHANGELOG_MODE));
+                options.get(LOG_CHANGELOG_MODE),
+                options.getInteger(BUCKET.key(), BUCKET.defaultValue()));
     }
 
     private int[] getPrimaryKeyIndexes(ResolvedSchema schema) {
@@ -168,38 +162,5 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
         Options options = new Options();
         ((Configuration) config).toMap().forEach(options::setString);
         return options;
-    }
-
-    private void createTopicIfNotExists(Context context, Options options) {
-        String topicName = topic(context);
-        Properties props = toKafkaProperties(options);
-        int numBuckets = options.getInteger(BUCKET.key(), BUCKET.defaultValue());
-
-        try (final AdminClient adminClient = AdminClient.create(props)) {
-            if (!adminClient.listTopics().names().get().contains(topicName)) {
-                int numBrokers = adminClient.describeCluster().nodes().get().size();
-                int replicationFactor =
-                        DEFAULT_REPLICATION_FACTOR > numBrokers
-                                ? numBrokers
-                                : DEFAULT_REPLICATION_FACTOR;
-
-                NewTopic newTopic = new NewTopic(topicName, numBuckets, (short) replicationFactor);
-
-                adminClient.createTopics(Collections.singleton(newTopic)).all().get();
-            }
-        } catch (Exception e) {
-            if (e.getCause() instanceof TopicExistsException) {
-                throw new TableException(
-                        String.format(
-                                "Failed to create kafka topic. "
-                                        + "Reason: topic %s exists for table %s. "
-                                        + "Suggestion: please try `DESCRIBE TABLE %s` to "
-                                        + "check whether table exists in current catalog. ",
-                                topic(context),
-                                context.getObjectIdentifier().asSerializableString(),
-                                context.getObjectIdentifier().asSerializableString()));
-            }
-            throw new TableException("Error in createTopic", e);
-        }
     }
 }
