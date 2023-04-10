@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.kafka;
 
 import java.util.Collections;
+import java.util.Optional;
 import org.apache.flink.table.api.TableException;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -173,7 +174,6 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
         return options;
     }
 
-
     private void createTopicIfNotExists(Context context, Options options) {
         String topicName = topic(context);
         Properties props = toKafkaProperties(options);
@@ -186,9 +186,11 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
 
                 NewTopic newTopic = new NewTopic(topicName, numBuckets, (short)replicationFactor);
 
-                adminClient.createTopics(
-                    Collections.singleton(newTopic)
-                ).all().get();
+                adminClient
+                    .createTopics(
+                        Collections.singleton(newTopic))
+                    .all()
+                    .get();
             }
         } catch (Exception e) {
             if (e.getCause() instanceof TopicExistsException) {

@@ -21,13 +21,16 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.kafka.KafkaTableTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
+import org.junit.After;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
@@ -36,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
+import org.junit.runner.OrderWith;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
@@ -95,43 +99,16 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
     @Test
     public void testLogWriteRead() throws Exception {
         String topic = UUID.randomUUID().toString();
-        createTopicIfNotExists(topic, 1);
-
-        try {
-            tEnv.executeSql(
-                    String.format(
-                            "CREATE TABLE T (a STRING, b STRING, c STRING) WITH ("
-                                    + "'log.system'='kafka', "
-                                    + "'kafka.bootstrap.servers'='%s',"
-                                    + "'kafka.topic'='%s'"
-                                    + ")",
-                            getBootstrapServers(), topic));
-            innerTestWriteRead();
-        } finally {
-            deleteTopicIfExists(topic);
-        }
-    }
-
-    @Test
-    public void testLogWriteReadForAutoCreateTopic() throws Exception {
-        String topic = UUID.randomUUID().toString();
-
-        try {
-            tEnv.executeSql(
+        tEnv.executeSql(
                 String.format(
-                    "CREATE TABLE T (a STRING, b STRING, c STRING) WITH ("
-                        + "'log.system'='kafka', "
-                        + "'kafka.bootstrap.servers'='%s',"
-                        + "'kafka.topic'='%s'"
-                        + ")",
-                    getBootstrapServers(), topic));
-            BlockingIterator<Row, Row> iterator = BlockingIterator.of(tEnv.from("T").execute().collect());
-            tEnv.executeSql("INSERT INTO T VALUES ('1', '2', '3'), ('4', '5', '6')").await();
-            List<Row> result = iterator.collectAndClose(2);
-            assertThat(result).containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
-        } finally {
-            deleteTopicIfExists(topic);
-        }
+                        "CREATE TABLE T (a STRING, b STRING, c STRING) WITH ("
+                                + "'log.system'='kafka', "
+                                + "'kafka.bootstrap.servers'='%s',"
+                                + "'kafka.topic'='%s'"
+                                + ")",
+                        getBootstrapServers(), topic));
+
+        innerTestWriteRead();
     }
 
     @Test
@@ -153,9 +130,10 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
                                     + "'kafka.topic'='%s'"
                                     + ")",
                             getBootstrapServers(), topic));
-            BlockingIterator<Row, Row> iterator =
-                    BlockingIterator.of(tEnv.from("T").execute().collect());
+
             tEnv.executeSql("INSERT INTO T VALUES ('1', '2', '3'), ('4', '5', '6')").await();
+            BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(tEnv.from("T").execute().collect());
             List<Row> result = iterator.collectAndClose(2);
             assertThat(result)
                     .containsExactlyInAnyOrder(Row.of("1", "2", "3", 4), Row.of("4", "5", "6", 7));
@@ -165,9 +143,9 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
     }
 
     private void innerTestWriteRead() throws Exception {
-        BlockingIterator<Row, Row> iterator =
-                BlockingIterator.of(tEnv.from("T").execute().collect());
         tEnv.executeSql("INSERT INTO T VALUES ('1', '2', '3'), ('4', '5', '6')").await();
+        BlockingIterator<Row, Row> iterator =
+            BlockingIterator.of(tEnv.from("T").execute().collect());
         List<Row> result = iterator.collectAndClose(2);
         assertThat(result).containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
     }
