@@ -27,6 +27,10 @@ import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.SortMergeReader;
+import org.apache.paimon.mergetree.region.RecordReaderRegion;
+import org.apache.paimon.mergetree.region.RecordReaderRegionManager;
+import org.apache.paimon.mergetree.region.RecordReaderSubRegion;
+import org.apache.paimon.mergetree.region.SortedRegionDataRecordReader;
 import org.apache.paimon.reader.RecordReader;
 
 import java.io.IOException;
@@ -69,15 +73,23 @@ public class MergeTreeReaders {
             Comparator<InternalRow> userKeyComparator,
             MergeFunctionWrapper<KeyValue> mergeFunctionWrapper)
             throws IOException {
-        List<RecordReader<KeyValue>> readers = new ArrayList<>();
+        List<RecordReaderSubRegion<KeyValue>> readerSubRegions = new ArrayList<>();
+        int index = 0;
         for (SortedRun run : section) {
-            readers.add(readerForRun(run, readerFactory));
+            readerSubRegions.add(readerSubRegionForRun(index++, run, readerFactory));
         }
-        if (readers.size() == 1) {
-            return readers.get(0);
-        } else {
-            return new SortMergeReader<>(readers, userKeyComparator, mergeFunctionWrapper);
+        RecordReaderRegionManager<KeyValue> regionManager =
+                new RecordReaderRegionManager<>(readerSubRegions, userKeyComparator);
+        List<RecordReaderRegion<KeyValue>> regions = regionManager.getRegionList();
+        List<ConcatRecordReader.ReaderSupplier<KeyValue>> supplierList = new ArrayList<>();
+        for (RecordReaderRegion<KeyValue> region : regions) {
+            List<RecordReader<KeyValue>> readerList = region.getReaders();
+            supplierList.add(
+                    () ->
+                            readerList.size() == 1 ? readerList.get(0) : new SortMergeReader<>(
+                                    readerList, userKeyComparator, mergeFunctionWrapper));
         }
+        return ConcatRecordReader.create(supplierList);
     }
 
     public static RecordReader<KeyValue> readerForRun(
@@ -85,10 +97,21 @@ public class MergeTreeReaders {
         List<ConcatRecordReader.ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (DataFileMeta file : run.files()) {
             readers.add(
-                    () ->
-                            readerFactory.createRecordReader(
-                                    file.schemaId(), file.fileName(), file.level()));
+                    () -> readerFactory.createRecordReader(file.schemaId(), file.fileName(), file.level()));
         }
         return ConcatRecordReader.create(readers);
+    }
+
+    public static RecordReaderSubRegion<KeyValue> readerSubRegionForRun(
+            int index, SortedRun run, KeyValueFileReaderFactory readerFactory) {
+        List<SortedRegionDataRecordReader<KeyValue>> readers = new ArrayList<>();
+        for (DataFileMeta file : run.files()) {
+            readers.add(
+                    new SortedRegionDataRecordReader<>(
+                            () -> readerFactory.createRecordReader(file.schemaId(), file.fileName(), file.level()),
+                            file.minKey(),
+                            file.maxKey()));
+        }
+        return new RecordReaderSubRegion<>(index, readers);
     }
 }

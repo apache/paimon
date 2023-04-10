@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.Preconditions;
 
@@ -74,6 +75,11 @@ public class ConcatRecordReader<T> implements RecordReader<T> {
         if (current != null) {
             current.close();
         }
+    }
+
+    @VisibleForTesting
+    public int getReaderCount() {
+        return queue.size();
     }
 
     /** Supplier to get {@link RecordReader}. */
