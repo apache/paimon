@@ -76,6 +76,7 @@ public class MetricReporter {
             try {
                 Thread.sleep(100L);
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 throw new RuntimeException(e);
             }
             if (error != null) {
@@ -84,7 +85,7 @@ public class MetricReporter {
         }
     }
 
-    public JobBenchmarkMetric reportMetric(String name, String jobId) {
+    public JobBenchmarkMetric reportMetric(String name, String jobId) throws InterruptedException {
         System.out.printf("Monitor metrics after %s seconds.%n", monitorDelay.getSeconds());
         waitFor(monitorDelay);
 

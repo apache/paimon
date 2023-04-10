@@ -239,6 +239,7 @@ public class SnapshotManager implements Serializable {
             try {
                 TimeUnit.MILLISECONDS.sleep(READ_HINT_RETRY_INTERVAL);
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 throw new RuntimeException(e);
             }
         }
