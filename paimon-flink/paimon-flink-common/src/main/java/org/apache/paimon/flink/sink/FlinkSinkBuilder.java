@@ -92,7 +92,7 @@ public class FlinkSinkBuilder {
                         .get(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION);
         BucketingStreamPartitioner<RowData> partitioner =
                 new BucketingStreamPartitioner<>(
-                        new ChannelComputerProvider(schema, shuffleByPartitionEnable));
+                        new RowDataChannelComputer(schema, shuffleByPartitionEnable));
         PartitionTransformation<RowData> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
         if (parallelism != null) {
@@ -105,33 +105,5 @@ public class FlinkSinkBuilder {
         return commitUser != null && sinkProvider != null
                 ? sink.sinkFrom(new DataStream<>(env, partitioned), commitUser, sinkProvider)
                 : sink.sinkFrom(new DataStream<>(env, partitioned));
-    }
-
-    private static class ChannelComputerProvider
-            implements AbstractChannelComputer.Provider<RowData> {
-
-        private static final long serialVersionUID = 1L;
-
-        private final TableSchema schema;
-        private final boolean shuffleByPartitionEnable;
-
-        private ChannelComputerProvider(TableSchema schema, boolean shuffleByPartitionEnable) {
-            this.schema = schema;
-            this.shuffleByPartitionEnable = shuffleByPartitionEnable;
-        }
-
-        @Override
-        public AbstractChannelComputer<RowData> provide(int numChannels) {
-            return new RowDataChannelComputer(numChannels, schema, shuffleByPartitionEnable);
-        }
-
-        @Override
-        public String toString() {
-            if (shuffleByPartitionEnable) {
-                return "HASH[bucket, partition]";
-            } else {
-                return "HASH[bucket]";
-            }
-        }
     }
 }

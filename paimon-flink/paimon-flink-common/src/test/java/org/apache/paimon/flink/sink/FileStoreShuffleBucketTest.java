@@ -30,7 +30,6 @@ import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.GenericRowData;
@@ -107,7 +106,7 @@ public class FileStoreShuffleBucketTest extends CatalogITCaseBase {
                 .withSinkProvider(
                         "testUser",
                         (StoreSinkWrite.Provider)
-                                (table1, context, ioManager) ->
+                                (table1, commitUser, state, ioManager) ->
                                         (StoreSinkWrite) new CollectStoreSinkWrite())
                 .build();
         env.execute();
@@ -157,7 +156,7 @@ public class FileStoreShuffleBucketTest extends CatalogITCaseBase {
         }
 
         @Override
-        public void snapshotState(StateSnapshotContext context) throws Exception {}
+        public void snapshotState() throws Exception {}
 
         @Override
         public void close() throws Exception {}

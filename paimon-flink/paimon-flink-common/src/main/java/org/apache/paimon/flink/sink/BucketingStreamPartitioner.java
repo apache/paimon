@@ -31,18 +31,16 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
  */
 public class BucketingStreamPartitioner<T> extends StreamPartitioner<T> {
 
-    private final AbstractChannelComputer.Provider<T> channelComputerProvider;
+    private final ChannelComputer<T> channelComputer;
 
-    private transient AbstractChannelComputer<T> channelComputer;
-
-    public BucketingStreamPartitioner(AbstractChannelComputer.Provider<T> channelComputerProvider) {
-        this.channelComputerProvider = channelComputerProvider;
+    public BucketingStreamPartitioner(ChannelComputer<T> channelComputer) {
+        this.channelComputer = channelComputer;
     }
 
     @Override
     public void setup(int numberOfChannels) {
         super.setup(numberOfChannels);
-        channelComputer = channelComputerProvider.provide(numberOfChannels);
+        channelComputer.setup(numberOfChannels);
     }
 
     @Override
@@ -67,6 +65,6 @@ public class BucketingStreamPartitioner<T> extends StreamPartitioner<T> {
 
     @Override
     public String toString() {
-        return channelComputerProvider.toString();
+        return channelComputer.toString();
     }
 }

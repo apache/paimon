@@ -18,19 +18,53 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.flink.sink.AbstractChannelComputer;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.flink.sink.ChannelComputer;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 
-/** {@link AbstractChannelComputer} for {@link CdcRecord}. */
-public class CdcRecordChannelComputer extends AbstractChannelComputer<CdcRecord> {
+/** {@link ChannelComputer} for {@link CdcRecord}. */
+public class CdcRecordChannelComputer implements ChannelComputer<CdcRecord> {
 
-    public CdcRecordChannelComputer(
-            int numChannels, TableSchema schema, boolean shuffleByPartitionEnable) {
-        super(numChannels, new CdcRecordKeyAndBucketExtractor(schema), shuffleByPartitionEnable);
+    private static final long serialVersionUID = 1L;
+
+    private final TableSchema schema;
+    private final boolean shuffleByPartitionEnable;
+
+    private transient int numChannels;
+    private transient KeyAndBucketExtractor<CdcRecord> extractor;
+
+    public CdcRecordChannelComputer(TableSchema schema, boolean shuffleByPartitionEnable) {
+        this.schema = schema;
+        this.shuffleByPartitionEnable = shuffleByPartitionEnable;
+    }
+
+    @Override
+    public void setup(int numChannels) {
+        this.numChannels = numChannels;
+        this.extractor = new CdcRecordKeyAndBucketExtractor(schema);
     }
 
     @Override
     public int channel(CdcRecord record) {
-        return channelImpl(record);
+        extractor.setRecord(record);
+        return channel(extractor.partition(), extractor.bucket());
+    }
+
+    public int channel(BinaryRow partition, int bucket) {
+        if (shuffleByPartitionEnable) {
+            return ChannelComputer.channel(numChannels, bucket, partition);
+        } else {
+            return ChannelComputer.channel(numChannels, bucket);
+        }
+    }
+
+    @Override
+    public String toString() {
+        if (shuffleByPartitionEnable) {
+            return "HASH[bucket, partition]";
+        } else {
+            return "HASH[bucket]";
+        }
     }
 }

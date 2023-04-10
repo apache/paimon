@@ -23,7 +23,6 @@ import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableStateManager;
 import org.apache.paimon.flink.sink.Committer;
 import org.apache.paimon.flink.sink.FlinkSink;
-import org.apache.paimon.flink.sink.LogSinkFunction;
 import org.apache.paimon.flink.sink.RestoreAndFailCommittableStateManager;
 import org.apache.paimon.flink.sink.StoreCommitter;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
@@ -34,8 +33,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.util.function.SerializableFunction;
 
-import javax.annotation.Nullable;
-
 /**
  * A {@link FlinkSink} which accepts {@link CdcRecord} and waits for a schema change if necessary.
  */
@@ -44,21 +41,16 @@ public class FlinkCdcSink extends FlinkSink<CdcRecord> {
     private static final long serialVersionUID = 1L;
 
     private final Lock.Factory lockFactory;
-    @Nullable private final LogSinkFunction logSinkFunction;
 
-    public FlinkCdcSink(
-            FileStoreTable table,
-            Lock.Factory lockFactory,
-            @Nullable LogSinkFunction logSinkFunction) {
+    public FlinkCdcSink(FileStoreTable table, Lock.Factory lockFactory) {
         super(table, false);
         this.lockFactory = lockFactory;
-        this.logSinkFunction = logSinkFunction;
     }
 
     @Override
     protected OneInputStreamOperator<CdcRecord, Committable> createWriteOperator(
-            StoreSinkWrite.Provider writeProvider, boolean isStreaming) {
-        return new SchemaAwareStoreWriteOperator(table, logSinkFunction, writeProvider);
+            StoreSinkWrite.Provider writeProvider, boolean isStreaming, String commitUser) {
+        return new CdcRecordStoreWriteOperator(table, writeProvider, commitUser);
     }
 
     @Override
