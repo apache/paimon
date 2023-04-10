@@ -24,6 +24,7 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -43,6 +44,7 @@ public class CacheManager {
                         .weigher(this::weigh)
                         .maximumWeight(maxMemorySize.getBytes())
                         .removalListener(this::onRemoval)
+                        .executor(MoreExecutors.directExecutor())
                         .build();
     }
 
