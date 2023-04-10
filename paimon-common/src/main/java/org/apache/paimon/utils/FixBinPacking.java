@@ -23,22 +23,30 @@ import java.util.List;
 import java.util.PriorityQueue;
 import java.util.function.Function;
 
+import static java.util.Comparator.comparingLong;
+
 /** A bin packing implementation for fixed bin number. */
 public class FixBinPacking {
     private FixBinPacking() {}
 
     public static <T> List<List<T>> pack(
             Iterable<T> items, Function<T, Long> weightFunc, int binNumber) {
+        // 1. sort items first
+        List<T> sorted = new ArrayList<>();
+        items.forEach(sorted::add);
+        sorted.sort(comparingLong(weightFunc::apply));
+
+        // 2. packing
         List<List<T>> packed = new ArrayList<>();
         PriorityQueue<Bin<T>> bins = new PriorityQueue<>();
-
-        for (T item : items) {
+        for (T item : sorted) {
             long weight = weightFunc.apply(item);
             Bin<T> bin = bins.size() < binNumber ? new Bin<>() : bins.poll();
             bin.add(item, weight);
             bins.add(bin);
         }
 
+        // 3. output
         bins.forEach(bin -> packed.add(bin.items));
         return packed;
     }
