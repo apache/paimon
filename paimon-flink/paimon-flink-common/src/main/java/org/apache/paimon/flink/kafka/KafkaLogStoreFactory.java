@@ -18,15 +18,7 @@
 
 package org.apache.paimon.flink.kafka;
 
-import java.util.Collections;
-import java.util.Optional;
-import org.apache.flink.table.api.TableException;
-import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.NewTopic;
-import org.apache.kafka.common.TopicCollection.TopicNameCollection;
-import org.apache.kafka.common.errors.TopicExistsException;
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.factories.FlinkFactoryUtil.FlinkTableFactoryHelper;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
@@ -35,6 +27,7 @@ import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.catalog.UniqueConstraint;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
@@ -43,13 +36,16 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory.Context;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.utils.DataTypeUtils;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.common.errors.TopicExistsException;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import org.apache.zookeeper.Op;
 
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
 import static org.apache.paimon.CoreOptions.BUCKET;
@@ -179,30 +175,29 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
         Properties props = toKafkaProperties(options);
         int numBuckets = options.getInteger(BUCKET.key(), BUCKET.defaultValue());
 
-        try(final AdminClient adminClient = AdminClient.create(props)) {
+        try (final AdminClient adminClient = AdminClient.create(props)) {
             if (!adminClient.listTopics().names().get().contains(topicName)) {
                 int numBrokers = adminClient.describeCluster().nodes().get().size();
-                int replicationFactor = DEFAULT_REPLICATION_FACTOR > numBrokers? numBrokers:DEFAULT_REPLICATION_FACTOR;
+                int replicationFactor =
+                        DEFAULT_REPLICATION_FACTOR > numBrokers
+                                ? numBrokers
+                                : DEFAULT_REPLICATION_FACTOR;
 
-                NewTopic newTopic = new NewTopic(topicName, numBuckets, (short)replicationFactor);
+                NewTopic newTopic = new NewTopic(topicName, numBuckets, (short) replicationFactor);
 
-                adminClient
-                    .createTopics(
-                        Collections.singleton(newTopic))
-                    .all()
-                    .get();
+                adminClient.createTopics(Collections.singleton(newTopic)).all().get();
             }
         } catch (Exception e) {
             if (e.getCause() instanceof TopicExistsException) {
                 throw new TableException(
-                    String.format(
-                        "Failed to create kafka topic. "
-                            + "Reason: topic %s exists for table %s. "
-                            + "Suggestion: please try `DESCRIBE TABLE %s` to "
-                            + "check whether table exists in current catalog. ",
-                        topic(context),
-                        context.getObjectIdentifier().asSerializableString(),
-                        context.getObjectIdentifier().asSerializableString()));
+                        String.format(
+                                "Failed to create kafka topic. "
+                                        + "Reason: topic %s exists for table %s. "
+                                        + "Suggestion: please try `DESCRIBE TABLE %s` to "
+                                        + "check whether table exists in current catalog. ",
+                                topic(context),
+                                context.getObjectIdentifier().asSerializableString(),
+                                context.getObjectIdentifier().asSerializableString()));
             }
             throw new TableException("Error in createTopic", e);
         }
