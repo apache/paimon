@@ -112,8 +112,7 @@ public class SortMergeReader<T> implements RecordReader<T> {
             Preconditions.checkState(
                     !released, "SortMergeIterator#nextImpl is called after release");
 
-            while (loserTree.peekWinner() != null
-                    && userKeyComparator.compare(winner.key(), loserTree.peekWinner().key()) == 0) {
+            while (loserTree.peekWinner() != null) {
                 mergeFunctionWrapper.add(loserTree.popWinner());
             }
             return mergeFunctionWrapper.getResult();
