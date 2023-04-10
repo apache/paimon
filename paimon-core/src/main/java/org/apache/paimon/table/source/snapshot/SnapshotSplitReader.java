@@ -19,17 +19,12 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.utils.Filter;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /** Read splits from specified {@link Snapshot} with given configuration. */
 public interface SnapshotSplitReader {
@@ -49,45 +44,4 @@ public interface SnapshotSplitReader {
 
     /** Get splits from an overwrite snapshot. */
     List<DataSplit> overwriteSplits();
-
-    static List<DataSplit> generateSplits(
-            long snapshotId,
-            boolean isIncremental,
-            boolean reverseRowKind,
-            SplitGenerator splitGenerator,
-            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
-        List<DataSplit> splits = new ArrayList<>();
-        for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> entry :
-                groupedDataFiles.entrySet()) {
-            BinaryRow partition = entry.getKey();
-            Map<Integer, List<DataFileMeta>> buckets = entry.getValue();
-            for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : buckets.entrySet()) {
-                int bucket = bucketEntry.getKey();
-                if (isIncremental) {
-                    // Don't split when incremental
-                    splits.add(
-                            new DataSplit(
-                                    snapshotId,
-                                    partition,
-                                    bucket,
-                                    bucketEntry.getValue(),
-                                    true,
-                                    reverseRowKind));
-                } else {
-                    splitGenerator.split(bucketEntry.getValue()).stream()
-                            .map(
-                                    files ->
-                                            new DataSplit(
-                                                    snapshotId,
-                                                    partition,
-                                                    bucket,
-                                                    files,
-                                                    false,
-                                                    reverseRowKind))
-                            .forEach(splits::add);
-                }
-            }
-        }
-        return splits;
-    }
 }

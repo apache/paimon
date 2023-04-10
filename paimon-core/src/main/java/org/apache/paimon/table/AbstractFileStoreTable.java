@@ -31,16 +31,17 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.TableCommitImpl;
-import org.apache.paimon.table.source.BatchDataTableScan;
-import org.apache.paimon.table.source.BatchDataTableScanImpl;
+import org.apache.paimon.table.source.InnerStreamTableScan;
+import org.apache.paimon.table.source.InnerStreamTableScanImpl;
+import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.InnerTableScanImpl;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.table.source.StreamDataTableScan;
-import org.apache.paimon.table.source.StreamDataTableScanImpl;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -60,6 +61,12 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     public AbstractFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
         this.fileIO = fileIO;
         this.path = path;
+        if (!tableSchema.options().containsKey(PATH.key())) {
+            // make sure table is always available
+            Map<String, String> newOptions = new HashMap<>(tableSchema.options());
+            newOptions.put(PATH.key(), path.toString());
+            tableSchema = tableSchema.copy(newOptions);
+        }
         this.tableSchema = tableSchema;
     }
 
@@ -78,14 +85,13 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public BatchDataTableScan newScan() {
-        return new BatchDataTableScanImpl(
-                coreOptions(), newSnapshotSplitReader(), snapshotManager());
+    public InnerTableScan newScan() {
+        return new InnerTableScanImpl(coreOptions(), newSnapshotSplitReader(), snapshotManager());
     }
 
     @Override
-    public StreamDataTableScan newStreamScan() {
-        return new StreamDataTableScanImpl(
+    public InnerStreamTableScan newStreamScan() {
+        return new InnerStreamTableScanImpl(
                 coreOptions(),
                 newSnapshotSplitReader(),
                 snapshotManager(),
@@ -102,8 +108,8 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
-        // check option is not immutable
         Map<String, String> options = tableSchema.options();
+        // check option is not immutable
         dynamicOptions.forEach(
                 (k, v) -> {
                     if (!Objects.equals(v, options.get(k))) {
@@ -111,10 +117,24 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                     }
                 });
 
-        Options newOptions = Options.fromMap(options);
+        return internalCopyWithoutCheck(dynamicOptions);
+    }
 
-        // merge dynamic options into schema.options
-        dynamicOptions.forEach(newOptions::setString);
+    @Override
+    public FileStoreTable internalCopyWithoutCheck(Map<String, String> dynamicOptions) {
+        Map<String, String> options = new HashMap<>(tableSchema.options());
+
+        // merge non-null dynamic options into schema.options
+        dynamicOptions.forEach(
+                (k, v) -> {
+                    if (v == null) {
+                        options.remove(k);
+                    } else {
+                        options.put(k, v);
+                    }
+                });
+
+        Options newOptions = Options.fromMap(options);
 
         // set path always
         newOptions.set(PATH, path.toString());

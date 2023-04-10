@@ -42,4 +42,19 @@ FileSystem pluggable jars for user to query tables from Spark/Hive side.
 | Aliyun OSS        | oss://           | Y         |  |
 | S3                | s3://            | Y         |  |
 
-[Download Link]({{< ref "project/download#filesystem-jars" >}})
+## Dependency
+
+We recommend you to download the jar directly: [Download Link]({{< ref "project/download#filesystem-jars" >}}).
+
+You can also manually build bundled jar from the source code.
+
+To build from source code, [clone the git repository]({{< github_repo >}}).
+
+Build shaded jar with the following command.
+
+```bash
+mvn clean install -DskipTests
+```
+
+You can find the shaded jars under
+`./paimon-filesystems/paimon-${fs}/target/paimon-${fs}-{{< version >}}.jar`.

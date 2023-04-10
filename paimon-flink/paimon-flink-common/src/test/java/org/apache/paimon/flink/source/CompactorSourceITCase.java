@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
@@ -43,6 +44,8 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -77,9 +80,14 @@ public class CompactorSourceITCase extends AbstractTestBase {
         commitUser = UUID.randomUUID().toString();
     }
 
-    @Test
-    public void testBatchRead() throws Exception {
+    @ParameterizedTest(name = "defaultOptions = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testBatchRead(boolean defaultOptions) throws Exception {
         FileStoreTable table = createFileStoreTable();
+        if (!defaultOptions) {
+            // change options to test whether CompactorSourceBuilder work normally
+            table = table.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2"));
+        }
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 
@@ -115,9 +123,20 @@ public class CompactorSourceITCase extends AbstractTestBase {
         it.close();
     }
 
-    @Test
-    public void testStreamingRead() throws Exception {
+    @ParameterizedTest(name = "defaultOptions = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testStreamingRead(boolean defaultOptions) throws Exception {
         FileStoreTable table = createFileStoreTable();
+        if (!defaultOptions) {
+            // change options to test whether CompactorSourceBuilder work normally
+            Map<String, String> dynamicOptions = new HashMap<>();
+            dynamicOptions.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2");
+            dynamicOptions.put(
+                    CoreOptions.CHANGELOG_PRODUCER.key(),
+                    CoreOptions.ChangelogProducer.NONE.toString());
+            dynamicOptions.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "0");
+            table = table.copy(dynamicOptions);
+        }
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 

@@ -18,8 +18,9 @@
 
 package org.apache.paimon.benchmark.utils;
 
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+
 import org.slf4j.Logger;
 
 import java.text.DecimalFormat;

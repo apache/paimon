@@ -3,7 +3,7 @@ title: "Configurations"
 weight: 10
 type: docs
 aliases:
-- /development/configurations.html
+- /maintenance/configurations.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -37,6 +37,12 @@ Core options for paimon.
 Options for paimon catalog.
 
 {{< generated/catalog_configuration >}}
+
+### HiveCatalogOptions
+
+Options for Hive catalog.
+
+{{< generated/hive_catalog_configuration >}}
 
 ### FlinkConnectorOptions
 

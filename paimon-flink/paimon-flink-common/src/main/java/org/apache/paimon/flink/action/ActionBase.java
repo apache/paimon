@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -33,6 +34,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -45,7 +47,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -146,5 +150,24 @@ public abstract class ActionBase implements Action {
         List<String> sinkIdentifierNames = Collections.singletonList(identifier.getFullName());
 
         TableEnvironmentUtils.executeInternal(tEnv, transformations, sinkIdentifierNames);
+    }
+
+    /**
+     * The {@link CoreOptions.MergeEngine}s will process -U/-D records in different ways, but we
+     * want these records to be sunk directly. This method is a workaround. Actions that may produce
+     * -U/-D records can call this to disable merge engine settings and force compaction.
+     */
+    protected void changeIgnoreMergeEngine() {
+        if (CoreOptions.fromMap(table.options()).mergeEngine()
+                != CoreOptions.MergeEngine.DEDUPLICATE) {
+            Map<String, String> dynamicOptions = new HashMap<>();
+            dynamicOptions.put(
+                    CoreOptions.MERGE_ENGINE.key(), CoreOptions.MergeEngine.DEDUPLICATE.toString());
+            // force compaction
+            dynamicOptions.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
+            Preconditions.checkArgument(
+                    table instanceof FileStoreTable, "Only supports FileStoreTable.");
+            table = ((FileStoreTable) table).internalCopyWithoutCheck(dynamicOptions);
+        }
     }
 }

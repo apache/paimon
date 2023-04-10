@@ -94,7 +94,7 @@ public class CachedRandomInputViewTest {
         }
 
         view.close();
-        assertThat(cacheManager.cache().size()).isEqualTo(0);
+        assertThat(cacheManager.cache().asMap().size()).isEqualTo(0);
     }
 
     private File writeFile(byte[] bytes) throws IOException {

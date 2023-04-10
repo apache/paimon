@@ -21,7 +21,7 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -62,7 +62,7 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
         assertThat(snapshot.id()).isEqualTo(5);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
 
-        DataTableScan.DataFilePlan plan = table.newScan().plan();
+        TableScan.Plan plan = table.newScan().plan();
         assertThat(plan.splits().size()).isEqualTo(2);
         List<String> actual = getResult(table.newRead(), plan.splits(), ROW_TYPE);
 
@@ -109,7 +109,7 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
         assertThat(snapshot.id()).isEqualTo(5);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
 
-        DataTableScan.DataFilePlan plan = table.newScan().plan();
+        TableScan.Plan plan = table.newScan().plan();
         assertThat(plan.splits().size()).isEqualTo(2);
         List<String> actual = getResult(table.newRead(), plan.splits(), ROW_TYPE);
 

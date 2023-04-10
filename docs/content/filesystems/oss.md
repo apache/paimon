@@ -1,6 +1,6 @@
 ---
 title: "OSS"
-weight: 2
+weight: 3
 type: docs
 aliases:
 - /filesystems/oss.html
@@ -37,19 +37,6 @@ Download [paimon-oss-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/
 Download [paimon-oss-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-oss/{{< version >}}/).
 
 {{< /unstable >}}
-
-You can also manually build bundled jar from the source code.
-
-To build from source code, [clone the git repository]({{< github_repo >}}).
-
-Build shaded jar with the following command.
-
-```bash
-mvn clean install -DskipTests
-```
-
-You can find the shaded jars under
-`./paimon-filesystems/paimon-oss/target/paimon-oss-{{< version >}}.jar`.
 
 {{< tabs "oss" >}}
 

@@ -19,15 +19,13 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
-import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
 
-/** {@link DataTableScan} for batch planning. */
-public class BatchDataTableScanImpl extends AbstractDataTableScan implements BatchDataTableScan {
+/** {@link TableScan} implementation for batch planning. */
+public class InnerTableScanImpl extends AbstractInnerTableScan {
 
     private final SnapshotManager snapshotManager;
 
@@ -35,7 +33,7 @@ public class BatchDataTableScanImpl extends AbstractDataTableScan implements Bat
 
     private boolean hasNext;
 
-    public BatchDataTableScanImpl(
+    public InnerTableScanImpl(
             CoreOptions options,
             SnapshotSplitReader snapshotSplitReader,
             SnapshotManager snapshotManager) {
@@ -45,32 +43,8 @@ public class BatchDataTableScanImpl extends AbstractDataTableScan implements Bat
     }
 
     @Override
-    public BatchDataTableScan withSnapshot(long snapshotId) {
-        snapshotSplitReader.withSnapshot(snapshotId);
-        return this;
-    }
-
-    @Override
-    public BatchDataTableScan withFilter(Predicate predicate) {
+    public InnerTableScan withFilter(Predicate predicate) {
         snapshotSplitReader.withFilter(predicate);
-        return this;
-    }
-
-    @Override
-    public BatchDataTableScan withKind(ScanKind scanKind) {
-        snapshotSplitReader.withKind(scanKind);
-        return this;
-    }
-
-    @Override
-    public BatchDataTableScan withLevelFilter(Filter<Integer> levelFilter) {
-        snapshotSplitReader.withLevelFilter(levelFilter);
-        return this;
-    }
-
-    @Override
-    public BatchDataTableScan withStartingScanner(StartingScanner startingScanner) {
-        this.startingScanner = startingScanner;
         return this;
     }
 

@@ -273,14 +273,7 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <!--
-                                    TODO change these to paimon-bundle once we get rid of flink-shaded dependencies
-                                    -->
-                                    <include>org.apache.paimon:paimon-common</include>
-                                    <include>org.apache.paimon:paimon-core</include>
-                                    <include>org.apache.paimon:paimon-format</include>
-                                    <include>org.apache.paimon:paimon-codegen-loader</include>
-                                    <include>org.apache.paimon:paimon-hive-catalog</include>
+                                    <include>org.apache.paimon:paimon-bundle</include>
                                 </includes>
                             </artifactSet>
                             <relocations>
@@ -291,6 +284,18 @@ under the License.
                                 </relocation>
                             </relocations>
                         </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
                     </execution>
                 </executions>
             </plugin>

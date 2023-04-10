@@ -123,7 +123,8 @@ public class QueryRunner {
                             + BenchmarkUtils.formatLongValue((long) scanRps));
 
             return new Result(writeMetric, scanRps);
-        } catch (IOException e) {
+        } catch (IOException | InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new RuntimeException(e);
         }
     }

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 
@@ -37,7 +36,6 @@ public class StaticFileStoreSource extends FlinkSource {
     private static final long serialVersionUID = 3L;
 
     private final int splitBatchSize;
-    private final TableScanUtils.TableScanFactory scanFactory;
     private final List<Split> splitList;
 
     public StaticFileStoreSource(
@@ -45,19 +43,9 @@ public class StaticFileStoreSource extends FlinkSource {
             @Nullable Long limit,
             int splitBatchSize,
             List<Split> splitList) {
-        this(readBuilder, limit, splitBatchSize, splitList, ReadBuilder::newScan);
-    }
-
-    public StaticFileStoreSource(
-            ReadBuilder readBuilder,
-            @Nullable Long limit,
-            int splitBatchSize,
-            List<Split> splitList,
-            TableScanUtils.TableScanFactory scanFactory) {
         super(readBuilder, limit);
         this.splitBatchSize = splitBatchSize;
         this.splitList = splitList;
-        this.scanFactory = scanFactory;
     }
 
     @Override
@@ -79,7 +67,7 @@ public class StaticFileStoreSource extends FlinkSource {
         if (null != splitList) {
             return splitGenerator.createSplits(splitList);
         } else {
-            return splitGenerator.createSplits(scanFactory.create(readBuilder).plan());
+            return splitGenerator.createSplits(readBuilder.newScan().plan());
         }
     }
 }

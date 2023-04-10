@@ -30,7 +30,7 @@ This documentation is a guide for using Paimon in Flink.
 
 ## Preparing Paimon Jar File
 
-Paimon currently supports Flink 1.16, 1.15 and 1.14. We recommend the latest Flink version for a better experience.
+Paimon currently supports Flink 1.17, 1.16, 1.15 and 1.14. We recommend the latest Flink version for a better experience.
 
 Download the jar file with corresponding version.
 
@@ -84,6 +84,10 @@ cp paimon-flink-*.jar <FLINK_HOME>/lib/
 ```
 
 **Step 3: Copy Hadoop Bundled Jar**
+
+{{< hint info >}}
+If the machine is in a hadoop environment, please ensure the value of the environment variable `HADOOP_CLASSPATH`, you do not need to use the following pre-bundled Hadoop jar.
+{{< /hint >}}
 
 [Download](https://flink.apache.org/downloads.html) Pre-bundled Hadoop jar and copy the jar file to the `lib` directory of your Flink home.
 

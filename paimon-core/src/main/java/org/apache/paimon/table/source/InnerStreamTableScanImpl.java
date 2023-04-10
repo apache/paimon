@@ -20,18 +20,15 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
-import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
+import org.apache.paimon.table.source.snapshot.ContinuousCompactorFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.DeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.FollowUpScanner;
-import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.InputChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
-import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -41,10 +38,11 @@ import javax.annotation.Nullable;
 
 import java.util.Collections;
 
-/** {@link DataTableScan} for streaming planning. */
-public class StreamDataTableScanImpl extends AbstractDataTableScan implements StreamDataTableScan {
+/** {@link StreamTableScan} implementation for streaming planning. */
+public class InnerStreamTableScanImpl extends AbstractInnerTableScan
+        implements InnerStreamTableScan {
 
-    private static final Logger LOG = LoggerFactory.getLogger(StreamDataTableScan.class);
+    private static final Logger LOG = LoggerFactory.getLogger(InnerStreamTableScanImpl.class);
 
     private final CoreOptions options;
     private final SnapshotManager snapshotManager;
@@ -56,7 +54,7 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
     private boolean isEnd = false;
     @Nullable private Long nextSnapshotId;
 
-    public StreamDataTableScanImpl(
+    public InnerStreamTableScanImpl(
             CoreOptions options,
             SnapshotSplitReader snapshotSplitReader,
             SnapshotManager snapshotManager,
@@ -68,63 +66,13 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
     }
 
     @Override
-    public StreamDataTableScanImpl withSnapshot(long snapshotId) {
-        snapshotSplitReader.withSnapshot(snapshotId);
-        return this;
-    }
-
-    @Override
-    public StreamDataTableScanImpl withFilter(Predicate predicate) {
+    public InnerStreamTableScanImpl withFilter(Predicate predicate) {
         snapshotSplitReader.withFilter(predicate);
         return this;
     }
 
     @Override
-    public StreamDataTableScanImpl withKind(ScanKind scanKind) {
-        snapshotSplitReader.withKind(scanKind);
-        return this;
-    }
-
-    @Override
-    public StreamDataTableScanImpl withLevelFilter(Filter<Integer> levelFilter) {
-        snapshotSplitReader.withLevelFilter(levelFilter);
-        return this;
-    }
-
-    @Override
-    public boolean supportStreamingReadOverwrite() {
-        return supportStreamingReadOverwrite;
-    }
-
-    @Override
-    public StreamDataTableScan withStartingScanner(StartingScanner startingScanner) {
-        this.startingScanner = startingScanner;
-        return this;
-    }
-
-    @Override
-    public StreamDataTableScan withFollowUpScanner(FollowUpScanner followUpScanner) {
-        this.followUpScanner = followUpScanner;
-        return this;
-    }
-
-    @Override
-    public StreamDataTableScan withBoundedChecker(BoundedChecker boundedChecker) {
-        this.boundedChecker = boundedChecker;
-        return this;
-    }
-
-    @Override
-    public StreamDataTableScan withSnapshotStarting() {
-        startingScanner =
-                options.startupMode() == CoreOptions.StartupMode.COMPACTED_FULL
-                        ? new CompactedStartingScanner()
-                        : new FullStartingScanner();
-        return this;
-    }
-
-    @Override
-    public DataFilePlan plan() {
+    public Plan plan() {
         if (startingScanner == null) {
             startingScanner = createStartingScanner(true);
         }
@@ -142,7 +90,7 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
         }
     }
 
-    private DataFilePlan tryFirstPlan() {
+    private Plan tryFirstPlan() {
         StartingScanner.Result result = startingScanner.scan(snapshotManager, snapshotSplitReader);
         if (result != null) {
             long snapshotId = result.snapshotId();
@@ -154,7 +102,7 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
         return DataFilePlan.fromResult(result);
     }
 
-    private DataFilePlan nextPlan() {
+    private Plan nextPlan() {
         while (true) {
             if (isEnd) {
                 throw new EndOfScanException();
@@ -175,17 +123,16 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
 
             // first check changes of overwrite
             if (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE
-                    && supportStreamingReadOverwrite()) {
+                    && supportStreamingReadOverwrite) {
                 LOG.debug("Find overwrite snapshot id {}.", nextSnapshotId);
-                DataTableScan.DataFilePlan overwritePlan =
+                Plan overwritePlan =
                         followUpScanner.getOverwriteChangesPlan(
                                 nextSnapshotId, snapshotSplitReader);
                 nextSnapshotId++;
                 return overwritePlan;
             } else if (followUpScanner.shouldScanSnapshot(snapshot)) {
                 LOG.debug("Find snapshot id {}.", nextSnapshotId);
-                DataTableScan.DataFilePlan plan =
-                        followUpScanner.scan(nextSnapshotId, snapshotSplitReader);
+                Plan plan = followUpScanner.scan(nextSnapshotId, snapshotSplitReader);
                 nextSnapshotId++;
                 return plan;
             } else {
@@ -195,6 +142,10 @@ public class StreamDataTableScanImpl extends AbstractDataTableScan implements St
     }
 
     private FollowUpScanner createFollowUpScanner() {
+        if (options.toConfiguration().get(CoreOptions.STREAMING_COMPACT)) {
+            return new ContinuousCompactorFollowUpScanner();
+        }
+
         CoreOptions.ChangelogProducer changelogProducer = options.changelogProducer();
         FollowUpScanner followUpScanner;
         switch (changelogProducer) {

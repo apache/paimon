@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.catalog.CatalogUtils;
+import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableAction;
 
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
@@ -116,6 +117,8 @@ public interface Action {
         private static final String DROP_PARTITION = "drop-partition";
         private static final String DELETE = "delete";
         private static final String MERGE_INTO = "merge-into";
+        // cdc actions
+        private static final String MYSQL_SYNC_TABLE = "mysql-sync-table";
 
         public static Optional<Action> create(String[] args) {
             String action = args[0].toLowerCase();
@@ -130,6 +133,8 @@ public interface Action {
                     return DeleteAction.create(actionArgs);
                 case MERGE_INTO:
                     return MergeIntoAction.create(actionArgs);
+                case MYSQL_SYNC_TABLE:
+                    return MySqlSyncTableAction.create(actionArgs);
                 default:
                     System.err.println("Unknown action \"" + action + "\"");
                     printHelp();
@@ -146,6 +151,7 @@ public interface Action {
             System.out.println("  " + DROP_PARTITION);
             System.out.println("  " + DELETE);
             System.out.println("  " + MERGE_INTO);
+            System.out.println("  " + MYSQL_SYNC_TABLE);
 
             System.out.println("For detailed options of each action, run <action> --help");
         }

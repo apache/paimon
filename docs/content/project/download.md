@@ -1,6 +1,6 @@
 ---
 title: "Download"
-weight: 100
+weight: 2
 type: docs
 aliases:
 - /project/download.html

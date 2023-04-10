@@ -31,15 +31,15 @@ import java.util.Arrays;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link BatchDataTableScan}. */
-public class BatchDataTableScanTest extends ScannerTestBase {
+/** Tests for {@link TableScan}. */
+public class TableScanTest extends ScannerTestBase {
 
     @Test
     public void testPlan() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
-        BatchDataTableScan scan = table.newScan();
+        TableScan scan = table.newScan();
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(1, 20, 200L));
@@ -53,7 +53,7 @@ public class BatchDataTableScanTest extends ScannerTestBase {
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(2);
 
-        DataTableScan.DataFilePlan plan = scan.plan();
+        TableScan.Plan plan = scan.plan();
         assertThat(getResult(table.newRead(), plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
 

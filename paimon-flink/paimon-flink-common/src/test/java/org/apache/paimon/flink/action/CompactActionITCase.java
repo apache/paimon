@@ -24,8 +24,8 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.DataTableScan;
-import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -146,8 +146,8 @@ public class CompactActionITCase extends ActionITCaseBase {
         Assertions.assertEquals(Snapshot.CommitKind.APPEND, snapshot.commitKind());
 
         // no full compaction has happened, so plan should be empty
-        StreamDataTableScan scan = table.newStreamScan();
-        DataTableScan.DataFilePlan plan = scan.plan();
+        StreamTableScan scan = table.newStreamScan();
+        TableScan.Plan plan = scan.plan();
         Assertions.assertTrue(plan.splits().isEmpty());
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -209,15 +209,14 @@ public class CompactActionITCase extends ActionITCaseBase {
     }
 
     private void validateResult(
-            FileStoreTable table, StreamDataTableScan scan, List<String> expected, long timeout)
+            FileStoreTable table, StreamTableScan scan, List<String> expected, long timeout)
             throws Exception {
         List<String> actual = new ArrayList<>();
         long start = System.currentTimeMillis();
         while (actual.size() != expected.size()) {
-            DataTableScan.DataFilePlan plan = scan.plan();
-            if (plan != null) {
-                actual.addAll(getResult(table.newRead(), plan.splits(), ROW_TYPE));
-            }
+            TableScan.Plan plan = scan.plan();
+            actual.addAll(getResult(table.newRead(), plan.splits(), ROW_TYPE));
+
             if (System.currentTimeMillis() - start > timeout) {
                 break;
             }

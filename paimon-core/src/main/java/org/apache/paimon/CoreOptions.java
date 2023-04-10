@@ -559,6 +559,15 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Full compaction will be constantly triggered after delta commits.");
 
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<Boolean> STREAMING_COMPACT =
+            key("streaming-compact")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Only used to force TableScan to construct 'ContinuousCompactorStartingScanner' and "
+                                    + "'ContinuousCompactorFollowUpScanner' for dedicated streaming compaction job.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {

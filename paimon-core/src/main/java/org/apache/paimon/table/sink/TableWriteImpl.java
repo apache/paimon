@@ -40,17 +40,17 @@ public class TableWriteImpl<T>
         implements InnerTableWrite, Restorable<List<AbstractFileStoreWrite.State>> {
 
     private final AbstractFileStoreWrite<T> write;
-    private final SinkRecordConverter recordConverter;
+    private final KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor;
     private final RecordExtractor<T> recordExtractor;
 
     private boolean batchCommitted = false;
 
     public TableWriteImpl(
             FileStoreWrite<T> write,
-            SinkRecordConverter recordConverter,
+            KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor,
             RecordExtractor<T> recordExtractor) {
         this.write = (AbstractFileStoreWrite<T>) write;
-        this.recordConverter = recordConverter;
+        this.keyAndBucketExtractor = keyAndBucketExtractor;
         this.recordExtractor = recordExtractor;
     }
 
@@ -68,12 +68,14 @@ public class TableWriteImpl<T>
 
     @Override
     public BinaryRow getPartition(InternalRow row) {
-        return recordConverter.partition(row);
+        keyAndBucketExtractor.setRecord(row);
+        return keyAndBucketExtractor.partition();
     }
 
     @Override
     public int getBucket(InternalRow row) {
-        return recordConverter.bucket(row);
+        keyAndBucketExtractor.setRecord(row);
+        return keyAndBucketExtractor.bucket();
     }
 
     @Override
@@ -82,13 +84,24 @@ public class TableWriteImpl<T>
     }
 
     public SinkRecord writeAndReturn(InternalRow row) throws Exception {
-        SinkRecord record = recordConverter.convert(row);
+        keyAndBucketExtractor.setRecord(row);
+        SinkRecord record =
+                new SinkRecord(
+                        keyAndBucketExtractor.partition(),
+                        keyAndBucketExtractor.bucket(),
+                        keyAndBucketExtractor.trimmedPrimaryKey(),
+                        row);
         write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
         return record;
     }
 
     public SinkRecord toLogRecord(SinkRecord record) {
-        return recordConverter.convertToLogSinkRecord(record);
+        keyAndBucketExtractor.setRecord(record.row());
+        return new SinkRecord(
+                record.partition(),
+                record.bucket(),
+                keyAndBucketExtractor.logPrimaryKey(),
+                record.row());
     }
 
     @Override

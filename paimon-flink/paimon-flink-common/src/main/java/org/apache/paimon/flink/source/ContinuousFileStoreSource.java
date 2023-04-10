@@ -20,9 +20,9 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 
 import org.apache.flink.api.connector.source.Boundedness;
@@ -44,21 +44,11 @@ public class ContinuousFileStoreSource extends FlinkSource {
     private static final long serialVersionUID = 3L;
 
     private final Map<String, String> options;
-    private final TableScanUtils.StreamTableScanFactory scanFactory;
 
     public ContinuousFileStoreSource(
             ReadBuilder readBuilder, Map<String, String> options, @Nullable Long limit) {
-        this(readBuilder, options, limit, TableScanUtils.defaultStreamScanFactory());
-    }
-
-    public ContinuousFileStoreSource(
-            ReadBuilder readBuilder,
-            Map<String, String> options,
-            @Nullable Long limit,
-            TableScanUtils.StreamTableScanFactory scanFactory) {
         super(readBuilder, limit);
         this.options = options;
-        this.scanFactory = scanFactory;
     }
 
     @Override
@@ -77,6 +67,8 @@ public class ContinuousFileStoreSource extends FlinkSource {
             splits = checkpoint.splits();
         }
         CoreOptions coreOptions = CoreOptions.fromMap(options);
+        StreamTableScan scan = readBuilder.newStreamScan();
+        scan.restore(nextSnapshotId);
         return new ContinuousFileSplitEnumerator(
                 context,
                 splits,
@@ -85,7 +77,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 coreOptions
                         .toConfiguration()
                         .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
-                scanFactory.create(readBuilder, nextSnapshotId));
+                scan);
     }
 
     @Override

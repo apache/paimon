@@ -16,24 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink;
+package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.TableSchema;
 
-import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.table.data.RowData;
 
-import java.util.Map;
+/** {@link AbstractChannelComputer} for {@link RowData}. */
+public class RowDataChannelComputer extends AbstractChannelComputer<RowData> {
 
-/** Utils for Flink. */
-public class FlinkUtils {
+    public RowDataChannelComputer(
+            int numChannels, TableSchema schema, boolean shuffleByPartitionEnable) {
+        super(numChannels, new RowDataKeyAndBucketExtractor(schema), shuffleByPartitionEnable);
+    }
 
-    public static CatalogContext createCatalogContext(
-            Map<String, String> options, ReadableConfig flinkConf) {
-        return CatalogContext.create(
-                Options.fromMap(options),
-                HadoopUtils.getHadoopConfiguration(
-                        TableConfigUtils.extractConfiguration(flinkConf)),
-                new FlinkFileIOLoader());
+    @Override
+    public int channel(RowData record) {
+        return channelImpl(record);
     }
 }
