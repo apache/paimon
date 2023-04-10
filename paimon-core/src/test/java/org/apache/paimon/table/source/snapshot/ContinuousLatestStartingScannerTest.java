@@ -51,6 +51,7 @@ public class ContinuousLatestStartingScannerTest extends ScannerTestBase {
         ContinuousLatestStartingScanner scanner = new ContinuousLatestStartingScanner();
         StartingScanner.Result result = scanner.scan(snapshotManager, snapshotSplitReader);
         assertThat(result.snapshotId()).isEqualTo(2);
+        assertThat(result.hasRead()).isFalse();
         assertThat(getResult(table.newRead(), toSplits(result.splits()))).isEmpty();
 
         write.close();

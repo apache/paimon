@@ -55,6 +55,7 @@ public class StaticFromTimestampStartingScanner implements StartingScanner {
         }
         return new Result(
                 startingSnapshot.id(),
+                true,
                 snapshotSplitReader
                         .withKind(ScanKind.ALL)
                         .withSnapshot(startingSnapshot.id())

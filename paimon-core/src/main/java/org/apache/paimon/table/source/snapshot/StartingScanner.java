@@ -37,14 +37,17 @@ public interface StartingScanner {
     class Result {
 
         private final long snapshotId;
+        // whether the given snapshot has been fully read
+        private final boolean hasRead;
         private final List<DataSplit> splits;
 
         public Result(long snapshotId) {
-            this(snapshotId, Collections.emptyList());
+            this(snapshotId, false, Collections.emptyList());
         }
 
-        public Result(long snapshotId, List<DataSplit> splits) {
+        public Result(long snapshotId, boolean hasRead, List<DataSplit> splits) {
             this.snapshotId = snapshotId;
+            this.hasRead = hasRead;
             this.splits = splits;
         }
 
@@ -54,6 +57,10 @@ public interface StartingScanner {
 
         public List<DataSplit> splits() {
             return splits;
+        }
+
+        public boolean hasRead() {
+            return hasRead;
         }
     }
 }

@@ -95,7 +95,8 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
         if (result != null) {
             long snapshotId = result.snapshotId();
             nextSnapshotId = snapshotId + 1;
-            if (boundedChecker.shouldEndInput(snapshotManager.snapshot(snapshotId))) {
+            if (result.hasRead()
+                    && boundedChecker.shouldEndInput(snapshotManager.snapshot(snapshotId))) {
                 isEnd = true;
             }
         }

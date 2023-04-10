@@ -44,6 +44,7 @@ public class StaticFromSnapshotStartingScanner implements StartingScanner {
         }
         return new Result(
                 snapshotId,
+                true,
                 snapshotSplitReader.withKind(ScanKind.ALL).withSnapshot(snapshotId).splits());
     }
 }

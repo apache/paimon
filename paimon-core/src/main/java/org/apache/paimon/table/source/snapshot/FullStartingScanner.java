@@ -42,6 +42,7 @@ public class FullStartingScanner implements StartingScanner {
         }
         return new Result(
                 startingSnapshotId,
+                true,
                 snapshotSplitReader
                         .withKind(ScanKind.ALL)
                         .withSnapshot(startingSnapshotId)
