@@ -120,8 +120,6 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                         .createRuntimeEncoder(sinkContext, physicalType);
         Options options = toOptions(helper.getOptions());
 
-        // createTopicIfNotExists(context, options);
-
         return new KafkaLogSinkProvider(
                 topic(context),
                 toKafkaProperties(options),
