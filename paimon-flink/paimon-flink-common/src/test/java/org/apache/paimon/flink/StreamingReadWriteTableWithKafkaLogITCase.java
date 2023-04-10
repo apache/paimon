@@ -24,7 +24,6 @@ import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -58,7 +57,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.validateStream
 public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBase {
 
     @BeforeEach
-    public void setUp() throws Exception {
+    public void setUp() {
         init(createAndRegisterTempFile("").toString());
     }
 
@@ -1244,14 +1243,6 @@ public class StreamingReadWriteTableWithKafkaLogITCase extends KafkaTableTestBas
                 .close();
     }
 
-    /**
-     * TODO.
-     *
-     * <p>This test will fail due to: <a
-     * href="https://issues.apache.org/jira/browse/FLINK-28185">FLINK-28185</a>. This bug will be
-     * fixed in Flink-1.16.1 and after we update flink version this case can work.
-     */
-    @Disabled
     @Test
     public void testReadInsertOnlyChangelogFromEnormousTimestamp() throws Exception {
         List<Row> initialRecords =
