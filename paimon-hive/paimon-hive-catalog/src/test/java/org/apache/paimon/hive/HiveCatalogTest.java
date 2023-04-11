@@ -46,12 +46,12 @@ public class HiveCatalogTest extends CatalogTestBase {
         hiveConf.setVar(METASTORECONNECTURLKEY, jdoConnectionURL + ";create=true");
         hiveConf.setVar(HiveConf.ConfVars.METASTOREWAREHOUSE, warehouse);
         HiveMetaStoreClient metaStoreClient = new HiveMetaStoreClient(hiveConf);
-        String METASTORE_CLIENT_CLASS = "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
+        String metastoreClientClass = "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
         try (MockedStatic<HiveCatalog> mocked = Mockito.mockStatic(HiveCatalog.class)) {
-            mocked.when(() -> HiveCatalog.createClient(hiveConf, METASTORE_CLIENT_CLASS))
+            mocked.when(() -> HiveCatalog.createClient(hiveConf, metastoreClientClass))
                     .thenReturn(metaStoreClient);
         }
-        catalog = new HiveCatalog(fileIO, hiveConf, METASTORE_CLIENT_CLASS);
+        catalog = new HiveCatalog(fileIO, hiveConf, metastoreClientClass);
     }
 
     @Test
