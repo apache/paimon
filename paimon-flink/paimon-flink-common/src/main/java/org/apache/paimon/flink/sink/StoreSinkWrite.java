@@ -26,15 +26,13 @@ import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
 
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
-import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.runtime.state.StateSnapshotContext;
 
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.List;
 import java.util.function.Function;
 
-/** Helper class of {@link AbstractStoreWriteOperator} for different types of paimon sinks. */
+/** Helper class of {@link PrepareCommitOperator} for different types of paimon sinks. */
 public interface StoreSinkWrite {
 
     SinkRecord write(InternalRow rowData) throws Exception;
@@ -47,7 +45,7 @@ public interface StoreSinkWrite {
 
     List<Committable> prepareCommit(boolean waitCompaction, long checkpointId) throws IOException;
 
-    void snapshotState(StateSnapshotContext context) throws Exception;
+    void snapshotState() throws Exception;
 
     void close() throws Exception;
 
@@ -68,7 +66,9 @@ public interface StoreSinkWrite {
     interface Provider extends Serializable {
 
         StoreSinkWrite provide(
-                FileStoreTable table, StateInitializationContext context, IOManager ioManager)
-                throws Exception;
+                FileStoreTable table,
+                String commitUser,
+                StoreSinkWriteState state,
+                IOManager ioManager);
     }
 }

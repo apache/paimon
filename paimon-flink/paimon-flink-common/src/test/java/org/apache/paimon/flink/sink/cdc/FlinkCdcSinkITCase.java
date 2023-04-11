@@ -20,7 +20,6 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -226,7 +225,6 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
         conf.set(CoreOptions.BUCKET, numBucket);
         conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
         conf.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
-        conf.set(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION, shuffleByPartitionEnable);
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
