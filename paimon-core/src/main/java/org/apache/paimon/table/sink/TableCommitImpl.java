@@ -102,7 +102,7 @@ public class TableCommitImpl implements InnerTableCommit {
         } else {
             commit.overwrite(overwritePartition, committable, Collections.emptyMap());
         }
-        expire();
+        expire(identifier);
     }
 
     public void commit(ManifestCommittable committable) {
@@ -110,10 +110,12 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commitMultiple(List<ManifestCommittable> committables) {
+        long partitionExpireIdentifier;
         if (overwritePartition == null) {
             for (ManifestCommittable committable : committables) {
                 commit.commit(committable, new HashMap<>());
             }
+            partitionExpireIdentifier = committables.get(committables.size() - 1).identifier();
         } else {
             ManifestCommittable committable;
             if (committables.size() > 1) {
@@ -129,18 +131,19 @@ public class TableCommitImpl implements InnerTableCommit {
                 committable = new ManifestCommittable(Long.MAX_VALUE);
             }
             commit.overwrite(overwritePartition, committable, Collections.emptyMap());
+            partitionExpireIdentifier = Long.MAX_VALUE;
         }
 
-        expire();
+        expire(partitionExpireIdentifier);
     }
 
-    private void expire() {
+    private void expire(long partitionExpireIdentifier) {
         if (expire != null) {
             expire.expire();
         }
 
         if (partitionExpire != null) {
-            partitionExpire.expire();
+            partitionExpire.expire(partitionExpireIdentifier);
         }
     }
 

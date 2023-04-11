@@ -34,7 +34,6 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
@@ -350,7 +349,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public void dropPartitions(List<Map<String, String>> partitions) {
+    public void dropPartitions(List<Map<String, String>> partitions, long commitIdentifier) {
         Preconditions.checkArgument(!partitions.isEmpty(), "Partitions list cannot be empty.");
 
         if (LOG.isDebugEnabled()) {
@@ -368,8 +367,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         tryOverwrite(
                 partitionFilter,
                 Collections.emptyList(),
-                // identifier is MAX_VALUE to avoid conflict
-                BatchWriteBuilder.COMMIT_IDENTIFIER,
+                commitIdentifier,
                 null,
                 Collections.emptyMap());
     }
