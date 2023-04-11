@@ -15,12 +15,8 @@
 
 name: SonarCloud
 on:
-  push:
-  pull_request:
-    branches: [master]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
+  schedule:
+    - cron: '0 1 * * *'
 jobs:
   build:
     runs-on: ubuntu-latest
