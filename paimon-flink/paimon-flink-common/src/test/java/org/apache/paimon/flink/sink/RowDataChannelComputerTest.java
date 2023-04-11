@@ -37,8 +37,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -111,7 +113,8 @@ public class RowDataChannelComputerTest {
         RowDataKeyAndBucketExtractor extractor = new RowDataKeyAndBucketExtractor(schema);
 
         int numChannels = random.nextInt(10) + 1;
-        RowDataChannelComputer channelComputer = new RowDataChannelComputer(schema);
+        boolean hasLogSink = random.nextBoolean();
+        RowDataChannelComputer channelComputer = new RowDataChannelComputer(schema, hasLogSink);
         channelComputer.setup(numChannels);
 
         // assert that channel(record) and channel(partition, bucket) gives the same result
@@ -146,6 +149,23 @@ public class RowDataChannelComputerTest {
             int max = bucketsPerChannel.values().stream().max(Integer::compareTo).get();
             int min = bucketsPerChannel.values().stream().min(Integer::compareTo).get();
             assertThat(max - min).isLessThanOrEqualTo(1);
+        }
+
+        // log sinks like Kafka only consider bucket and don't care about partition
+        // so same bucket, even from different partition, must go to the same channel
+
+        if (hasLogSink) {
+            Map<Integer, Set<Integer>> channelsPerBucket = new HashMap<>();
+            for (RowData rowData : input) {
+                extractor.setRecord(rowData);
+                int bucket = extractor.bucket();
+                channelsPerBucket
+                        .computeIfAbsent(bucket, k -> new HashSet<>())
+                        .add(channelComputer.channel(rowData));
+            }
+            for (Set<Integer> channels : channelsPerBucket.values()) {
+                assertThat(channels).hasSize(1);
+            }
         }
     }
 }

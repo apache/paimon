@@ -56,6 +56,6 @@ public class CdcRecordChannelComputer implements ChannelComputer<CdcRecord> {
 
     @Override
     public String toString() {
-        return "HASH[partition] + bucket";
+        return "HASH[partition, bucket]";
     }
 }

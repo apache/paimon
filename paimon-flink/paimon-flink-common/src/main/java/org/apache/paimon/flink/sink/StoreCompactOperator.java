@@ -81,7 +81,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData> {
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
 
-        RowDataChannelComputer channelComputer = new RowDataChannelComputer(table.schema());
+        RowDataChannelComputer channelComputer = new RowDataChannelComputer(table.schema(), false);
         channelComputer.setup(getRuntimeContext().getNumberOfParallelSubtasks());
         state =
                 new StoreSinkWriteState(

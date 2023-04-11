@@ -30,12 +30,14 @@ public class RowDataChannelComputer implements ChannelComputer<RowData> {
     private static final long serialVersionUID = 1L;
 
     private final TableSchema schema;
+    private final boolean hasLogSink;
 
     private transient int numChannels;
     private transient KeyAndBucketExtractor<RowData> extractor;
 
-    public RowDataChannelComputer(TableSchema schema) {
+    public RowDataChannelComputer(TableSchema schema, boolean hasLogSink) {
         this.schema = schema;
+        this.hasLogSink = hasLogSink;
     }
 
     @Override
@@ -51,12 +53,23 @@ public class RowDataChannelComputer implements ChannelComputer<RowData> {
     }
 
     public int channel(BinaryRow partition, int bucket) {
-        int startChannel = Math.abs(partition.hashCode()) % numChannels;
+        int startChannel;
+        if (hasLogSink) {
+            // log sinks like Kafka only consider bucket and don't care about partition
+            // so same bucket, even from different partition, must go to the same channel
+            startChannel = 0;
+        } else {
+            startChannel = Math.abs(partition.hashCode()) % numChannels;
+        }
         return (startChannel + bucket) % numChannels;
     }
 
     @Override
     public String toString() {
-        return "HASH[partition] + bucket";
+        if (hasLogSink) {
+            return "HASH[bucket]";
+        } else {
+            return "HASH[partition, bucket]";
+        }
     }
 }

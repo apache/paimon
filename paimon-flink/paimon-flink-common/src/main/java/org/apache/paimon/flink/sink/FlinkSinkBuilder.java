@@ -84,7 +84,8 @@ public class FlinkSinkBuilder {
 
     public DataStreamSink<?> build() {
         BucketingStreamPartitioner<RowData> partitioner =
-                new BucketingStreamPartitioner<>(new RowDataChannelComputer(table.schema()));
+                new BucketingStreamPartitioner<>(
+                        new RowDataChannelComputer(table.schema(), logSinkFunction != null));
         PartitionTransformation<RowData> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
         if (parallelism != null) {

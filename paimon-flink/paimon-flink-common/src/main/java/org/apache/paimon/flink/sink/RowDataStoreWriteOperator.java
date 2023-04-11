@@ -95,7 +95,8 @@ public class RowDataStoreWriteOperator extends PrepareCommitOperator<RowData> {
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
 
-        RowDataChannelComputer channelComputer = new RowDataChannelComputer(table.schema());
+        RowDataChannelComputer channelComputer =
+                new RowDataChannelComputer(table.schema(), logSinkFunction != null);
         channelComputer.setup(getRuntimeContext().getNumberOfParallelSubtasks());
         state =
                 new StoreSinkWriteState(
