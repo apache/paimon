@@ -1083,9 +1083,6 @@ public class CoreOptions implements Serializable {
     /** Specifies the type for streaming read. */
     public enum StreamingReadMode implements DescribedEnum {
         LOG("log", "Reads from the log store."),
-        // sad
-        // saddsa
-        // saddsa
         FILE("file", "Reads from the file store.");
 
         private final String value;

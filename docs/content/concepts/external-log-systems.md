@@ -63,11 +63,11 @@ By specifying `'log.system' = 'kafka'`, users can write changes into Kafka along
 
 ```sql
 CREATE TABLE T (...)
-    WITH (
-        'log.system' = 'kafka',
-        'kafka.bootstrap.servers' = '...',
-        'kafka.topic' = '...'
-        );
+WITH (
+    'log.system' = 'kafka',
+    'kafka.bootstrap.servers' = '...',
+    'kafka.topic' = '...'
+);
 ```
 
 {{< /tab >}}
