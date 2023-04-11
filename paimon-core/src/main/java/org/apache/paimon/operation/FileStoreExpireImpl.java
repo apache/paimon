@@ -23,7 +23,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -31,6 +30,7 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.Triple;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -170,7 +170,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                 LOG.debug("Ready to delete merge tree files not used by snapshot #" + id);
             }
             Snapshot snapshot = snapshotManager.snapshot(id);
-            // expire merge tree files and collect buckets of which data files have been deleted
+            // expire merge tree files and collect changed buckets
             expireMergeTreeFiles(snapshot.deltaManifestList())
                     .forEach(
                             (partition, buckets) ->
@@ -240,7 +240,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         writeEarliestHint(endExclusiveId);
     }
 
-    // return a map of partition-buckets of which data files have been deleted
+    // return a map of partition-buckets of which some data files have been deleted
     private Map<BinaryRow, Set<Integer>> expireMergeTreeFiles(String manifestListName) {
         return expireMergeTreeFiles(getManifestEntriesFromManifestList(manifestListName));
     }
@@ -249,29 +249,22 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     Map<BinaryRow, Set<Integer>> expireMergeTreeFiles(Iterable<ManifestEntry> dataFileLog) {
         // we cannot delete a data file directly when we meet a DELETE entry, because that
         // file might be upgraded
-        // partition -> bucket -> DataFileMeta
-        Map<BinaryRow, Map<Integer, Set<DataFileMeta>>> dataFileToDelete = new HashMap<>();
-
+        // data file path -> (partition, bucket, extra file paths)
+        Map<Path, Triple<BinaryRow, Integer, List<Path>>> dataFileToDelete = new HashMap<>();
         for (ManifestEntry entry : dataFileLog) {
+            Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
+            Path dataFilePath = new Path(bucketPath, entry.file().fileName());
             switch (entry.kind()) {
                 case ADD:
-                    dataFileToDelete.computeIfPresent(
-                            entry.partition(),
-                            (partition, bucketMap) -> {
-                                bucketMap.computeIfPresent(
-                                        entry.bucket(),
-                                        (bucket, files) -> {
-                                            files.remove(entry.file());
-                                            return files.isEmpty() ? null : files;
-                                        });
-                                return bucketMap.isEmpty() ? null : bucketMap;
-                            });
+                    dataFileToDelete.remove(dataFilePath);
                     break;
                 case DELETE:
-                    dataFileToDelete
-                            .computeIfAbsent(entry.partition(), partition -> new HashMap<>())
-                            .computeIfAbsent(entry.bucket(), bucket -> new HashSet<>())
-                            .add(entry.file());
+                    List<Path> extraFiles = new ArrayList<>(entry.file().extraFiles().size());
+                    for (String file : entry.file().extraFiles()) {
+                        extraFiles.add(new Path(bucketPath, file));
+                    }
+                    dataFileToDelete.put(
+                            dataFilePath, Triple.of(entry.partition(), entry.bucket(), extraFiles));
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -280,30 +273,16 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         }
 
         Map<BinaryRow, Set<Integer>> changedBuckets = new HashMap<>();
-        for (Map.Entry<BinaryRow, Map<Integer, Set<DataFileMeta>>> entry :
-                dataFileToDelete.entrySet()) {
-            BinaryRow partition = entry.getKey();
-            Map<Integer, Set<DataFileMeta>> bucketMap = entry.getValue();
-            bucketMap.forEach(
-                    (bucket, dataFileMetas) -> {
-                        deleteDataFiles(pathFactory.bucketPath(partition, bucket), dataFileMetas);
-                        // record changed buckets
-                        changedBuckets.computeIfAbsent(partition, p -> new HashSet<>()).add(bucket);
-                    });
-        }
+        dataFileToDelete.forEach(
+                (path, triple) -> {
+                    // delete data files
+                    fileIO.deleteQuietly(path);
+                    triple.f2.forEach(fileIO::deleteQuietly);
+                    // record changed buckets
+                    changedBuckets.computeIfAbsent(triple.f0, p -> new HashSet<>()).add(triple.f1);
+                });
 
         return changedBuckets;
-    }
-
-    private void deleteDataFiles(Path bucketPath, Set<DataFileMeta> dataFileMetas) {
-        dataFileMetas.forEach(
-                dataFileMeta -> {
-                    fileIO.deleteQuietly(new Path(bucketPath, dataFileMeta.fileName()));
-                    // delete extra files
-                    dataFileMeta
-                            .extraFiles()
-                            .forEach(extra -> fileIO.deleteQuietly(new Path(bucketPath, extra)));
-                });
     }
 
     private void expireChangelogFiles(String manifestListName) {

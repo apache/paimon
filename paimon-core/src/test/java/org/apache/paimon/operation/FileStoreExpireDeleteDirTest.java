@@ -30,24 +30,19 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.memory.HeapMemorySegmentPool;
-import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.table.sink.CommitMessageImpl;
-import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -57,7 +52,10 @@ import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.apache.paimon.operation.FileStoreTestUtils.assertPathExists;
+import static org.apache.paimon.operation.FileStoreTestUtils.assertPathNotExists;
+import static org.apache.paimon.operation.FileStoreTestUtils.commitData;
+import static org.apache.paimon.operation.FileStoreTestUtils.partitionedData;
 
 /**
  * Tests for {@link FileStoreExpireImpl}. After expiration, empty data file directories (buckets and
@@ -72,8 +70,6 @@ public class FileStoreExpireDeleteDirTest {
 
     private long commitIdentifier;
     private String root;
-    private TestKeyValueGenerator gen;
-    private TestFileStore store;
 
     @BeforeEach
     public void setup() throws Exception {
@@ -98,8 +94,10 @@ public class FileStoreExpireDeleteDirTest {
      */
     @Test
     public void testMultiPartitions() throws Exception {
-        createStore(TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
-        gen = new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
+        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
+        TestKeyValueGenerator gen =
+                new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
+        FileStorePathFactory pathFactory = store.pathFactory();
 
         // step 1: generate snapshot 1 by writing 5 randomly generated records to each bucket
         // writers for each bucket
@@ -109,19 +107,19 @@ public class FileStoreExpireDeleteDirTest {
         for (String dt : Arrays.asList("0401", "0402")) {
             for (int hr : Arrays.asList(8, 12)) {
                 for (int bucket : Arrays.asList(0, 1)) {
-                    List<KeyValue> kvs = partitionedData(5, dt, hr);
+                    List<KeyValue> kvs = partitionedData(5, gen, dt, hr);
                     BinaryRow partition = gen.getPartition(kvs.get(0));
                     partitions.add(partition);
-                    writeData(kvs, partition, bucket, writers);
+                    writeData(store, kvs, partition, bucket, writers);
                 }
             }
         }
 
-        commitData(writers);
+        commitData(store, commitIdentifier++, writers);
         // check all paths exist
         for (BinaryRow partition : partitions) {
             for (int bucket : Arrays.asList(0, 1)) {
-                assertPathExists(store.pathFactory().bucketPath(partition, bucket));
+                assertPathExists(fileIO, pathFactory.bucketPath(partition, bucket));
             }
         }
 
@@ -172,27 +170,29 @@ public class FileStoreExpireDeleteDirTest {
         // step 5: expire and check file paths
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
         // whole dt=0401 is deleted
-        assertPathNotExists(new Path(root, "dt=0401"));
+        assertPathNotExists(fileIO, new Path(root, "dt=0401"));
         // whole dt=0402/hr=8 is deleted
-        assertPathNotExists(new Path(root, "dt=0402/hr=8"));
+        assertPathNotExists(fileIO, new Path(root, "dt=0402/hr=8"));
         // for dt=0402/hr=12, bucket-0 is delete but bucket-1 survives
-        assertPathNotExists(store.pathFactory().bucketPath(partition, 0));
-        assertPathExists(store.pathFactory().bucketPath(partition, 1));
+        assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 0));
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
     }
 
     // only exists bucket directories
     @Test
     public void testNoPartitions() throws Exception {
-        createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
-        gen = new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
+        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
+        TestKeyValueGenerator gen =
+                new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
+        FileStorePathFactory pathFactory = store.pathFactory();
 
         Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
         for (int bucket : Arrays.asList(0, 1)) {
-            List<KeyValue> kvs = partitionedData(5);
+            List<KeyValue> kvs = partitionedData(5, gen);
             BinaryRow partition = gen.getPartition(kvs.get(0));
-            writeData(kvs, partition, bucket, writers);
+            writeData(store, kvs, partition, bucket, writers);
         }
-        commitData(writers);
+        commitData(store, commitIdentifier++, writers);
 
         // cleaning bucket 0
         List<ManifestEntry> bucketEntries =
@@ -218,16 +218,16 @@ public class FileStoreExpireDeleteDirTest {
                         null);
 
         // check before expiring
-        assertPathExists(store.pathFactory().bucketPath(partition, 0));
-        assertPathExists(store.pathFactory().bucketPath(partition, 1));
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
 
         // check after expiring
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
-        assertPathNotExists(store.pathFactory().bucketPath(partition, 0));
-        assertPathExists(store.pathFactory().bucketPath(partition, 1));
+        assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 0));
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
     }
 
-    private void createStore(TestKeyValueGenerator.GeneratorMode mode) throws Exception {
+    private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode) throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         CoreOptions.ChangelogProducer changelogProducer;
@@ -255,20 +255,7 @@ public class FileStoreExpireDeleteDirTest {
                 throw new UnsupportedOperationException("Unsupported generator mode: " + mode);
         }
 
-        store =
-                new TestFileStore.Builder(
-                                "avro",
-                                root,
-                                2,
-                                partitionType,
-                                TestKeyValueGenerator.KEY_TYPE,
-                                rowType,
-                                TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
-                                DeduplicateMergeFunction.factory())
-                        .changelogProducer(changelogProducer)
-                        .build();
-
-        SchemaManager schemaManager = new SchemaManager(fileIO, new Path(tempDir.toUri()));
+        SchemaManager schemaManager = new SchemaManager(fileIO, new Path(root));
         schemaManager.createTable(
                 new Schema(
                         rowType.getFields(),
@@ -276,85 +263,28 @@ public class FileStoreExpireDeleteDirTest {
                         TestKeyValueGenerator.getPrimaryKeys(mode),
                         Collections.emptyMap(),
                         null));
-    }
 
-    private List<KeyValue> partitionedData(int num, Object... partitionSpec) {
-        List<KeyValue> keyValues = new ArrayList<>();
-        for (int i = 0; i < num; i++) {
-            keyValues.add(gen.nextPartitionedData(RowKind.INSERT, partitionSpec));
-        }
-        return keyValues;
-    }
-
-    private void assertPathExists(Path path) throws IOException {
-        assertThat(fileIO.exists(path)).isTrue();
-    }
-
-    private void assertPathNotExists(Path path) throws IOException {
-        assertThat(fileIO.exists(path)).isFalse();
+        return new TestFileStore.Builder(
+                        "avro",
+                        root,
+                        2,
+                        partitionType,
+                        TestKeyValueGenerator.KEY_TYPE,
+                        rowType,
+                        TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
+                        DeduplicateMergeFunction.factory())
+                .changelogProducer(changelogProducer)
+                .build();
     }
 
     private void writeData(
+            TestFileStore store,
             List<KeyValue> kvs,
             BinaryRow partition,
             int bucket,
             Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers)
             throws Exception {
         writers.computeIfAbsent(partition, p -> new HashMap<>())
-                .put(bucket, writeData(kvs, partition, bucket));
-    }
-
-    // --------------------------------------------------------------------------------
-    // writeData & commitData is copied from TestFileStore#commitDataImpl and modified
-    // --------------------------------------------------------------------------------
-    private RecordWriter<KeyValue> writeData(List<KeyValue> kvs, BinaryRow partition, int bucket)
-            throws Exception {
-        AbstractFileStoreWrite<KeyValue> write = store.newWrite();
-        RecordWriter<KeyValue> writer =
-                write.createWriterContainer(partition, bucket, false).writer;
-        ((MemoryOwner) writer)
-                .setMemoryPool(
-                        new HeapMemorySegmentPool(
-                                TestFileStore.WRITE_BUFFER_SIZE.getBytes(),
-                                (int) TestFileStore.PAGE_SIZE.getBytes()));
-        for (KeyValue kv : kvs) {
-            writer.write(kv);
-        }
-        return writer;
-    }
-
-    private void commitData(Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers)
-            throws Exception {
-        FileStoreCommit commit = store.newCommit();
-        ManifestCommittable committable = new ManifestCommittable(commitIdentifier++, null);
-        for (Map.Entry<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> entryWithPartition :
-                writers.entrySet()) {
-            for (Map.Entry<Integer, RecordWriter<KeyValue>> entryWithBucket :
-                    entryWithPartition.getValue().entrySet()) {
-                CommitIncrement increment = entryWithBucket.getValue().prepareCommit(false);
-                committable.addFileCommittable(
-                        new CommitMessageImpl(
-                                entryWithPartition.getKey(),
-                                entryWithBucket.getKey(),
-                                increment.newFilesIncrement(),
-                                increment.compactIncrement()));
-            }
-        }
-
-        commit.commit(committable, Collections.emptyMap());
-
-        writers.values().stream()
-                .flatMap(m -> m.values().stream())
-                .forEach(
-                        w -> {
-                            try {
-                                // wait for compaction to end, otherwise orphan files may occur
-                                // see CompactManager#cancelCompaction for more info
-                                w.sync();
-                                w.close();
-                            } catch (Exception e) {
-                                throw new RuntimeException(e);
-                            }
-                        });
+                .put(bucket, FileStoreTestUtils.writeData(store, kvs, partition, bucket));
     }
 }
