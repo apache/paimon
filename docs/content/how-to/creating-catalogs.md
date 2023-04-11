@@ -66,12 +66,12 @@ The following shell command registers a paimon catalog named `paimon`. Metadata 
 spark-sql ... \
     --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
     --conf spark.sql.catalog.paimon.warehouse=hdfs://path/to/warehouse \
-    --conf spark.sql.catalog.paimon.table_default.key=value
+    --conf spark.sql.catalog.paimon.table-default.key=value
 ```
 
-The conf `--conf spark.sql.catalog.paimon.table_default.key=value` specifies the default property `'key' = 'value'` for tables created in the catalog.
+The conf `--conf spark.sql.catalog.paimon.table-default.key=value` specifies the default property `'key' = 'value'` for tables created in the catalog.
 
-You can define any default properties with the prefix `spark.sql.catalog.paimon.table_default.` configuration. If the table defines the same properties with the default properties, the table's properties will be taken.
+You can define any default properties with the prefix `spark.sql.catalog.paimon.table-default.` configuration. If the table defines the same properties with the default properties, the table's properties will be taken.
 
 After `spark-sql` is started, you can switch to the `default` database of the `paimon` catalog with the following SQL.
 
@@ -126,7 +126,7 @@ spark-sql ... \
     --conf spark.sql.catalog.paimon.uri=thrift://<hive-metastore-host-name>:<port>
 ```
 
-You can also define any default properties with the prefix `spark.sql.catalog.paimon.table_default.` configuration for tables as above `Catalog with Filesystem Metastore`.
+You can also define any default properties with the prefix `spark.sql.catalog.paimon.table-default.` configuration for tables as above `Catalog with Filesystem Metastore`.
 
 After `spark-sql` is started, you can switch to the `default` database of the `paimon` catalog with the following SQL.
 
