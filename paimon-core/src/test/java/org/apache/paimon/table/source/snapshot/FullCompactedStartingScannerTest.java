@@ -25,15 +25,43 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link CompactedStartingScanner}. */
-public class CompactedStartingScannerTest extends ScannerTestBase {
+/** Tests for {@link FullCompactedStartingScanner}. */
+public class FullCompactedStartingScannerTest extends ScannerTestBase {
 
     @Test
     public void testScan() throws Exception {
+        SnapshotManager snapshotManager = table.snapshotManager();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        for (int i = 0; i < 5; i++) {
+            write.write(rowData(1, 10, 102L));
+            write.write(rowData(1, 20, 201L));
+            write.compact(binaryRow(1), 0, true);
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(10);
+
+        FullCompactedStartingScanner scanner = new FullCompactedStartingScanner(3);
+        StartingScanner.Result result = scanner.scan(snapshotManager, snapshotSplitReader);
+        assertThat(result.snapshotId()).isEqualTo(8);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testNoSnapshot() {
+        SnapshotManager snapshotManager = table.snapshotManager();
+        FullCompactedStartingScanner scanner = new FullCompactedStartingScanner(3);
+        assertThat(scanner.scan(snapshotManager, snapshotSplitReader)).isNull();
+    }
+
+    @Test
+    public void testNoCompactSnapshot() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
@@ -55,40 +83,10 @@ public class CompactedStartingScannerTest extends ScannerTestBase {
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(4);
 
-        CompactedStartingScanner scanner = new CompactedStartingScanner();
-        StartingScanner.Result result = scanner.scan(snapshotManager, snapshotSplitReader);
-        assertThat(result.snapshotId()).isEqualTo(3);
-        assertThat(getResult(table.newRead(), toSplits(result.splits())))
-                .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
-
-        write.close();
-        commit.close();
-    }
-
-    @Test
-    public void testNoSnapshot() {
-        SnapshotManager snapshotManager = table.snapshotManager();
-        CompactedStartingScanner scanner = new CompactedStartingScanner();
-        assertThat(scanner.scan(snapshotManager, snapshotSplitReader)).isNull();
-    }
-
-    @Test
-    public void testNoCompactSnapshot() throws Exception {
-        SnapshotManager snapshotManager = table.snapshotManager();
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
-
-        write.write(rowData(1, 10, 100L));
-        write.write(rowData(1, 20, 200L));
-        write.write(rowData(1, 40, 400L));
-        commit.commit(0, write.prepareCommit(true, 0));
-
-        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(1);
-
-        CompactedStartingScanner scanner = new CompactedStartingScanner();
+        FullCompactedStartingScanner scanner = new FullCompactedStartingScanner(3);
 
         // No compact snapshot found, reading from the latest snapshot
-        assertThat(scanner.scan(snapshotManager, snapshotSplitReader).snapshotId()).isEqualTo(1);
+        assertThat(scanner.scan(snapshotManager, snapshotSplitReader).snapshotId()).isEqualTo(4);
 
         write.close();
         commit.close();
