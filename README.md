@@ -1,5 +1,8 @@
 # Paimon (Incubating)
 
+[![License](https://img.shields.io/badge/license-Apache%202-4EB1BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=apache_incubator-paimon&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=apache_incubator-paimon)
+
 Paimon is a streaming data lake platform that supports high-speed data ingestion, change data tracking and efficient real-time analytics.
 
 Background and documentation is available at https://paimon.apache.org

@@ -15,3 +15,4 @@ target
 .DS_Store
 *.ipr
 *.iws
+test/coverage
