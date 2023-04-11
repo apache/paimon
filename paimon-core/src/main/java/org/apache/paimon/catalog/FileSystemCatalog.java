@@ -116,6 +116,11 @@ public class FileSystemCatalog extends AbstractCatalog {
                 .orElseThrow(() -> new TableNotExistException(identifier));
     }
 
+    @Override
+    public boolean tableExists(Identifier identifier) {
+        return tableExists(getDataTableLocation(identifier));
+    }
+
     private boolean tableExists(Path tablePath) {
         return new SchemaManager(fileIO, tablePath).listAllIds().size() > 0;
     }

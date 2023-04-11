@@ -109,6 +109,14 @@ public interface Catalog extends AutoCloseable {
     List<String> listTables(String databaseName) throws DatabaseNotExistException;
 
     /**
+     * Check if a table exists in this catalog.
+     *
+     * @param identifier Path of the table
+     * @return true if the given table exists in the catalog false otherwise
+     */
+    boolean tableExists(Identifier identifier);
+
+    /**
      * Drop a table.
      *
      * <p>NOTE: System tables can not be dropped.
