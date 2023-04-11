@@ -30,7 +30,8 @@ import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerial
 import org.apache.flink.api.java.tuple.Tuple5;
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializer;
 import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.util.function.TriFunction;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -50,8 +51,7 @@ public class StoreSinkWriteState {
 
     @SuppressWarnings("unchecked")
     public StoreSinkWriteState(
-            StateInitializationContext context,
-            TriFunction<String, BinaryRow, Integer, Boolean> shouldKeep)
+            StateInitializationContext context, StateValueFilter stateValueFilter)
             throws Exception {
         TupleSerializer<Tuple5<String, String, byte[], Integer, byte[]>> listStateSerializer =
                 new TupleSerializer<>(
@@ -73,7 +73,7 @@ public class StoreSinkWriteState {
         map = new HashMap<>();
         for (Tuple5<String, String, byte[], Integer, byte[]> tuple : listState.get()) {
             BinaryRow partition = SerializationUtils.deserializeBinaryRow(tuple.f2);
-            if (shouldKeep.apply(tuple.f0, partition, tuple.f3)) {
+            if (stateValueFilter.filter(tuple.f0, partition, tuple.f3)) {
                 map.computeIfAbsent(tuple.f0, k -> new HashMap<>())
                         .computeIfAbsent(tuple.f1, k -> new ArrayList<>())
                         .add(new StateValue(partition, tuple.f3, tuple.f4));
@@ -81,7 +81,7 @@ public class StoreSinkWriteState {
         }
     }
 
-    public List<StateValue> get(String tableName, String key) {
+    public @Nullable List<StateValue> get(String tableName, String key) {
         Map<String, List<StateValue>> innerMap = map.get(tableName);
         return innerMap == null ? null : innerMap.get(key);
     }
@@ -135,5 +135,14 @@ public class StoreSinkWriteState {
         public byte[] value() {
             return value;
         }
+    }
+
+    /**
+     * Given the table name, partition and bucket of a {@link StateValue} in a union list state,
+     * decide whether to keep this {@link StateValue} in this subtask.
+     */
+    public interface StateValueFilter {
+
+        boolean filter(String tableName, BinaryRow partition, int bucket);
     }
 }

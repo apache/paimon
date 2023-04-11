@@ -34,7 +34,6 @@ import java.util.stream.IntStream;
 public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<CdcRecord> {
 
     private final int numBuckets;
-    private final boolean noPartition;
 
     private final List<DataField> partitionFields;
     private final Projection partitionProjection;
@@ -49,7 +48,6 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
 
     public CdcRecordKeyAndBucketExtractor(TableSchema schema) {
         numBuckets = new CoreOptions(schema.options()).bucket();
-        noPartition = schema.partitionKeys().isEmpty();
 
         RowType partitionType = schema.logicalPartitionType();
         this.partitionFields = partitionType.getFields();
@@ -72,11 +70,7 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
     @Override
     public BinaryRow partition() {
         if (partition == null) {
-            if (noPartition) {
-                partition = BinaryRow.EMPTY_ROW;
-            } else {
-                partition = partitionProjection.apply(record.project(partitionFields));
-            }
+            partition = partitionProjection.apply(record.project(partitionFields));
         }
         return partition;
     }

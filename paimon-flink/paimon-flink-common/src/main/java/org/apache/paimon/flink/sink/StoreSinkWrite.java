@@ -69,7 +69,6 @@ public interface StoreSinkWrite {
                 FileStoreTable table,
                 String commitUser,
                 StoreSinkWriteState state,
-                IOManager ioManager)
-                throws Exception;
+                IOManager ioManager);
     }
 }

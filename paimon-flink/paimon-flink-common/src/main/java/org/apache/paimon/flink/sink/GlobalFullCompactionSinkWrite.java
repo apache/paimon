@@ -68,8 +68,7 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
             IOManager ioManager,
             boolean isOverwrite,
             boolean waitCompaction,
-            int deltaCommits)
-            throws Exception {
+            int deltaCommits) {
         super(table, commitUser, state, ioManager, isOverwrite, waitCompaction);
 
         this.deltaCommits = deltaCommits;

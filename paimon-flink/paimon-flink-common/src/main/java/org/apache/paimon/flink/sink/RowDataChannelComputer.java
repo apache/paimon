@@ -66,10 +66,6 @@ public class RowDataChannelComputer implements ChannelComputer<RowData> {
 
     @Override
     public String toString() {
-        if (hasLogSink) {
-            return "HASH[bucket]";
-        } else {
-            return "HASH[partition, bucket]";
-        }
+        return "shuffle by bucket";
     }
 }

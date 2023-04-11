@@ -29,7 +29,6 @@ import org.apache.paimon.schema.TableSchema;
 public class InternalRowKeyAndBucketExtractor implements KeyAndBucketExtractor<InternalRow> {
 
     private final int numBuckets;
-    private final boolean noPartition;
     private final boolean sameBucketKeyAndTrimmedPrimaryKey;
 
     private final Projection partitionProjection;
@@ -47,7 +46,6 @@ public class InternalRowKeyAndBucketExtractor implements KeyAndBucketExtractor<I
 
     public InternalRowKeyAndBucketExtractor(TableSchema schema) {
         numBuckets = new CoreOptions(schema.options()).bucket();
-        noPartition = schema.partitionKeys().isEmpty();
         sameBucketKeyAndTrimmedPrimaryKey = schema.bucketKeys().equals(schema.trimmedPrimaryKeys());
 
         partitionProjection =
@@ -78,11 +76,7 @@ public class InternalRowKeyAndBucketExtractor implements KeyAndBucketExtractor<I
     @Override
     public BinaryRow partition() {
         if (partition == null) {
-            if (noPartition) {
-                partition = BinaryRow.EMPTY_ROW;
-            } else {
-                partition = partitionProjection.apply(record);
-            }
+            partition = partitionProjection.apply(record);
         }
         return partition;
     }
