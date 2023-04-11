@@ -61,48 +61,46 @@ public abstract class FlinkSink<T> implements Serializable {
         this.isOverwrite = isOverwrite;
     }
 
-    protected StoreSinkWrite.Provider createWriteProvider(String initialCommitUser) {
+    private StoreSinkWrite.Provider createWriteProvider(CheckpointConfig checkpointConfig) {
         boolean waitCompaction;
         if (table.coreOptions().writeOnly()) {
             waitCompaction = false;
         } else {
             Options options = table.coreOptions().toConfiguration();
             ChangelogProducer changelogProducer = table.coreOptions().changelogProducer();
-            if (changelogProducer == ChangelogProducer.FULL_COMPACTION
-                    && options.contains(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL)) {
-                long fullCompactionThresholdMs =
-                        options.get(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL).toMillis();
-                return (table, context, ioManager) ->
-                        new FullChangelogStoreSinkWrite(
-                                table,
-                                context,
-                                initialCommitUser,
-                                ioManager,
-                                isOverwrite,
-                                fullCompactionThresholdMs);
-            }
-
             waitCompaction =
                     changelogProducer == ChangelogProducer.LOOKUP
                             && options.get(CHANGELOG_PRODUCER_LOOKUP_WAIT);
-            if (changelogProducer == ChangelogProducer.FULL_COMPACTION
-                    || options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
-                int deltaCommits = options.getOptional(FULL_COMPACTION_DELTA_COMMITS).orElse(1);
-                return (table, context, ioManager) ->
+
+            int deltaCommits = -1;
+            if (options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
+                deltaCommits = options.get(FULL_COMPACTION_DELTA_COMMITS);
+            } else if (options.contains(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL)) {
+                long fullCompactionThresholdMs =
+                        options.get(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL).toMillis();
+                deltaCommits =
+                        (int)
+                                (fullCompactionThresholdMs
+                                        / checkpointConfig.getCheckpointInterval());
+            }
+
+            if (changelogProducer == ChangelogProducer.FULL_COMPACTION || deltaCommits >= 0) {
+                int finalDeltaCommits = Math.max(deltaCommits, 1);
+                return (table, commitUser, state, ioManager) ->
                         new GlobalFullCompactionSinkWrite(
                                 table,
-                                context,
-                                initialCommitUser,
+                                commitUser,
+                                state,
                                 ioManager,
                                 isOverwrite,
                                 waitCompaction,
-                                deltaCommits);
+                                finalDeltaCommits);
             }
         }
 
-        return (table, context, ioManager) ->
+        return (table, commitUser, state, ioManager) ->
                 new StoreSinkWriteImpl(
-                        table, context, initialCommitUser, ioManager, isOverwrite, waitCompaction);
+                        table, commitUser, state, ioManager, isOverwrite, waitCompaction);
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<T> input) {
@@ -112,7 +110,10 @@ public abstract class FlinkSink<T> implements Serializable {
         // When the job restarts, commitUser will be recovered from states and this value is
         // ignored.
         String initialCommitUser = UUID.randomUUID().toString();
-        return sinkFrom(input, initialCommitUser, createWriteProvider(initialCommitUser));
+        return sinkFrom(
+                input,
+                initialCommitUser,
+                createWriteProvider(input.getExecutionEnvironment().getCheckpointConfig()));
     }
 
     public DataStreamSink<?> sinkFrom(
@@ -134,7 +135,7 @@ public abstract class FlinkSink<T> implements Serializable {
                 input.transform(
                                 WRITER_NAME + " -> " + table.name(),
                                 typeInfo,
-                                createWriteOperator(sinkProvider, isStreaming))
+                                createWriteOperator(sinkProvider, isStreaming, commitUser))
                         .setParallelism(input.getParallelism());
 
         SingleOutputStreamOperator<?> committed =
@@ -165,7 +166,7 @@ public abstract class FlinkSink<T> implements Serializable {
     }
 
     protected abstract OneInputStreamOperator<T, Committable> createWriteOperator(
-            StoreSinkWrite.Provider writeProvider, boolean isStreaming);
+            StoreSinkWrite.Provider writeProvider, boolean isStreaming, String commitUser);
 
     protected abstract SerializableFunction<String, Committer> createCommitterFactory(
             boolean streamingCheckpointEnabled);
