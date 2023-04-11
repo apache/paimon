@@ -237,6 +237,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
 
         // compact & commit
         writer.compact(true);
+        writer.sync();
         FileStoreTestUtils.commitData(store, 1, writers);
 
         // check
