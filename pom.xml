@@ -594,8 +594,6 @@ under the License.
                             <shadeTestJar>true</shadeTestJar>
                             <shadedArtifactAttached>false</shadedArtifactAttached>
                             <createDependencyReducedPom>true</createDependencyReducedPom>
-                            <dependencyReducedPomLocation>${project.basedir}/target/dependency-reduced-pom.xml
-                            </dependencyReducedPomLocation>
                             <!-- Filters MUST be appended; merging filters does not work properly, see MSHADE-305 -->
                             <filters combine.children="append">
                                 <!-- Globally exclude log4j.properties from our JAR files. -->
