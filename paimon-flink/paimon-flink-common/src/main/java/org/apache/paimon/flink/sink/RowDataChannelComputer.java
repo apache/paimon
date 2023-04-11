@@ -30,14 +30,12 @@ public class RowDataChannelComputer implements ChannelComputer<RowData> {
     private static final long serialVersionUID = 1L;
 
     private final TableSchema schema;
-    private final boolean shuffleByPartitionEnable;
 
     private transient int numChannels;
     private transient KeyAndBucketExtractor<RowData> extractor;
 
-    public RowDataChannelComputer(TableSchema schema, boolean shuffleByPartitionEnable) {
+    public RowDataChannelComputer(TableSchema schema) {
         this.schema = schema;
-        this.shuffleByPartitionEnable = shuffleByPartitionEnable;
     }
 
     @Override
@@ -53,19 +51,12 @@ public class RowDataChannelComputer implements ChannelComputer<RowData> {
     }
 
     public int channel(BinaryRow partition, int bucket) {
-        if (shuffleByPartitionEnable) {
-            return ChannelComputer.channel(numChannels, bucket, partition);
-        } else {
-            return ChannelComputer.channel(numChannels, bucket);
-        }
+        int startChannel = Math.abs(partition.hashCode()) % numChannels;
+        return (startChannel + bucket) % numChannels;
     }
 
     @Override
     public String toString() {
-        if (shuffleByPartitionEnable) {
-            return "HASH[bucket, partition]";
-        } else {
-            return "HASH[bucket]";
-        }
+        return "HASH[partition] + bucket";
     }
 }

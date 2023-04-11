@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.log.LogWriteCallback;
 import org.apache.paimon.table.FileStoreTable;
@@ -96,12 +95,7 @@ public class RowDataStoreWriteOperator extends PrepareCommitOperator<RowData> {
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
 
-        RowDataChannelComputer channelComputer =
-                new RowDataChannelComputer(
-                        table.schema(),
-                        table.coreOptions()
-                                .toConfiguration()
-                                .get(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION));
+        RowDataChannelComputer channelComputer = new RowDataChannelComputer(table.schema());
         channelComputer.setup(getRuntimeContext().getNumberOfParallelSubtasks());
         state =
                 new StoreSinkWriteState(

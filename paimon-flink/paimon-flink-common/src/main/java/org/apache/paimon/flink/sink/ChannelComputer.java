@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink;
 
 import java.io.Serializable;
-import java.util.Objects;
 
 /**
  * A utility class to compute which downstream channel a given record should be sent to.
@@ -31,8 +30,4 @@ public interface ChannelComputer<T> extends Serializable {
     void setup(int numChannels);
 
     int channel(T record);
-
-    static int channel(int numChannels, Object... channelKeys) {
-        return Math.abs(Objects.hash(channelKeys)) % numChannels;
-    }
 }

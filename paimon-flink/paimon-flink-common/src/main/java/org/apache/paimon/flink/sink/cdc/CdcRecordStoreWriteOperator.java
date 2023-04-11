@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.PrepareCommitOperator;
 import org.apache.paimon.flink.sink.StateUtils;
@@ -81,12 +80,7 @@ public class CdcRecordStoreWriteOperator extends PrepareCommitOperator<CdcRecord
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
 
-        CdcRecordChannelComputer channelComputer =
-                new CdcRecordChannelComputer(
-                        table.schema(),
-                        table.coreOptions()
-                                .toConfiguration()
-                                .get(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION));
+        CdcRecordChannelComputer channelComputer = new CdcRecordChannelComputer(table.schema());
         channelComputer.setup(getRuntimeContext().getNumberOfParallelSubtasks());
         state =
                 new StoreSinkWriteState(

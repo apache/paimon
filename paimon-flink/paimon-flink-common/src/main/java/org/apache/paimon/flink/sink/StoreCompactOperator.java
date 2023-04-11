@@ -21,7 +21,6 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
@@ -82,12 +81,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData> {
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
 
-        RowDataChannelComputer channelComputer =
-                new RowDataChannelComputer(
-                        table.schema(),
-                        table.coreOptions()
-                                .toConfiguration()
-                                .get(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION));
+        RowDataChannelComputer channelComputer = new RowDataChannelComputer(table.schema());
         channelComputer.setup(getRuntimeContext().getNumberOfParallelSubtasks());
         state =
                 new StoreSinkWriteState(

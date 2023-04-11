@@ -32,12 +32,12 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -66,12 +66,17 @@ public class CdcRecordChannelComputerTest {
                                 ""));
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> fields = new HashMap<>();
-        fields.put("pt", String.valueOf(random.nextInt()));
-        fields.put("k", String.valueOf(random.nextLong()));
-        fields.put("v", String.valueOf(random.nextDouble()));
+        int numInputs = random.nextInt(1000) + 1;
+        List<Map<String, String>> input = new ArrayList<>();
+        for (int i = 0; i < numInputs; i++) {
+            Map<String, String> fields = new HashMap<>();
+            fields.put("pt", String.valueOf(random.nextInt(10) + 1));
+            fields.put("k", String.valueOf(random.nextLong()));
+            fields.put("v", String.valueOf(random.nextDouble()));
+            input.add(fields);
+        }
 
-        testImpl(schema, fields);
+        testImpl(schema, input);
     }
 
     @Test
@@ -93,46 +98,64 @@ public class CdcRecordChannelComputerTest {
                                 ""));
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> fields = new HashMap<>();
-        fields.put("k", String.valueOf(random.nextLong()));
-        fields.put("v", String.valueOf(random.nextDouble()));
+        int numInputs = random.nextInt(1000) + 1;
+        List<Map<String, String>> input = new ArrayList<>();
+        for (int i = 0; i < numInputs; i++) {
+            Map<String, String> fields = new HashMap<>();
+            fields.put("k", String.valueOf(random.nextLong()));
+            fields.put("v", String.valueOf(random.nextDouble()));
+            input.add(fields);
+        }
 
-        testImpl(schema, fields);
+        testImpl(schema, input);
     }
 
-    private void testImpl(TableSchema schema, Map<String, String> fields) {
-        CdcRecord insertRecord = new CdcRecord(RowKind.INSERT, fields);
-        CdcRecord deleteRecord = new CdcRecord(RowKind.DELETE, fields);
-
+    private void testImpl(TableSchema schema, List<Map<String, String>> input) {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
         CdcRecordKeyAndBucketExtractor extractor = new CdcRecordKeyAndBucketExtractor(schema);
-        extractor.setRecord(deleteRecord);
-        BinaryRow partition = extractor.partition();
-        int bucket = extractor.bucket();
 
-        int numChannels = ThreadLocalRandom.current().nextInt(10) + 1;
+        int numChannels = random.nextInt(10) + 1;
+        CdcRecordChannelComputer channelComputer = new CdcRecordChannelComputer(schema);
+        channelComputer.setup(numChannels);
 
         // assert that channel(record) and channel(partition, bucket) gives the same result
 
-        CdcRecordChannelComputer channelComputer = new CdcRecordChannelComputer(schema, true);
-        channelComputer.setup(numChannels);
-        assertThat(channelComputer.channel(insertRecord))
-                .isEqualTo(channelComputer.channel(partition, bucket));
-        assertThat(channelComputer.channel(deleteRecord))
-                .isEqualTo(channelComputer.channel(partition, bucket));
+        for (Map<String, String> fields : input) {
+            CdcRecord insertRecord = new CdcRecord(RowKind.INSERT, fields);
+            CdcRecord deleteRecord = new CdcRecord(RowKind.DELETE, fields);
 
-        channelComputer = new CdcRecordChannelComputer(schema, false);
-        channelComputer.setup(numChannels);
-        assertThat(channelComputer.channel(insertRecord))
-                .isEqualTo(channelComputer.channel(partition, bucket));
-        assertThat(channelComputer.channel(deleteRecord))
-                .isEqualTo(channelComputer.channel(partition, bucket));
+            extractor.setRecord(random.nextBoolean() ? insertRecord : deleteRecord);
+            BinaryRow partition = extractor.partition();
+            int bucket = extractor.bucket();
 
-        // assert that when only shuffle by bucket, distribution should be even
-
-        Set<Integer> usedChannels = new HashSet<>();
-        for (int i = 0; i < numChannels; i++) {
-            usedChannels.add(channelComputer.channel(partition, i));
+            assertThat(channelComputer.channel(insertRecord))
+                    .isEqualTo(channelComputer.channel(partition, bucket));
+            assertThat(channelComputer.channel(deleteRecord))
+                    .isEqualTo(channelComputer.channel(partition, bucket));
         }
-        assertThat(usedChannels).hasSize(numChannels);
+
+        // assert that distribution should be even
+
+        int numTests = random.nextInt(10) + 1;
+        for (int test = 0; test < numTests; test++) {
+            Map<Integer, Integer> bucketsPerChannel = new HashMap<>();
+            for (int i = 0; i < numChannels; i++) {
+                bucketsPerChannel.put(i, 0);
+            }
+
+            Map<String, String> fields = input.get(random.nextInt(input.size()));
+            extractor.setRecord(new CdcRecord(RowKind.INSERT, fields));
+            BinaryRow partition = extractor.partition();
+
+            int numBuckets = random.nextInt(numChannels * 4) + 1;
+            for (int i = 0; i < numBuckets; i++) {
+                int channel = channelComputer.channel(partition, i);
+                bucketsPerChannel.compute(channel, (k, v) -> v + 1);
+            }
+
+            int max = bucketsPerChannel.values().stream().max(Integer::compareTo).get();
+            int min = bucketsPerChannel.values().stream().min(Integer::compareTo).get();
+            assertThat(max - min).isLessThanOrEqualTo(1);
+        }
     }
 }

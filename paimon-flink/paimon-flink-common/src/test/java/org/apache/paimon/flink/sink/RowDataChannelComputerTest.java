@@ -29,14 +29,16 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.RowData;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -65,10 +67,15 @@ public class RowDataChannelComputerTest {
                                 ""));
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        GenericRowData rowData =
-                GenericRowData.of(random.nextInt(), random.nextLong(), random.nextDouble());
+        int numInputs = random.nextInt(1000) + 1;
+        List<RowData> input = new ArrayList<>();
+        for (int i = 0; i < numInputs; i++) {
+            input.add(
+                    GenericRowData.of(
+                            random.nextInt(10) + 1, random.nextLong(), random.nextDouble()));
+        }
 
-        testImpl(schema, rowData);
+        testImpl(schema, input);
     }
 
     @Test
@@ -90,37 +97,55 @@ public class RowDataChannelComputerTest {
                                 ""));
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        GenericRowData rowData = GenericRowData.of(random.nextLong(), random.nextDouble());
+        int numInputs = random.nextInt(1000) + 1;
+        List<RowData> input = new ArrayList<>();
+        for (int i = 0; i < numInputs; i++) {
+            input.add(GenericRowData.of(random.nextLong(), random.nextDouble()));
+        }
 
-        testImpl(schema, rowData);
+        testImpl(schema, input);
     }
 
-    private void testImpl(TableSchema schema, GenericRowData rowData) {
+    private void testImpl(TableSchema schema, List<RowData> input) {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
         RowDataKeyAndBucketExtractor extractor = new RowDataKeyAndBucketExtractor(schema);
-        extractor.setRecord(rowData);
-        BinaryRow partition = extractor.partition();
-        int bucket = extractor.bucket();
 
-        int numChannels = ThreadLocalRandom.current().nextInt(10) + 1;
+        int numChannels = random.nextInt(10) + 1;
+        RowDataChannelComputer channelComputer = new RowDataChannelComputer(schema);
+        channelComputer.setup(numChannels);
 
         // assert that channel(record) and channel(partition, bucket) gives the same result
 
-        RowDataChannelComputer channelComputer = new RowDataChannelComputer(schema, true);
-        channelComputer.setup(numChannels);
-        assertThat(channelComputer.channel(rowData))
-                .isEqualTo(channelComputer.channel(partition, bucket));
+        for (RowData rowData : input) {
+            extractor.setRecord(rowData);
+            BinaryRow partition = extractor.partition();
+            int bucket = extractor.bucket();
 
-        channelComputer = new RowDataChannelComputer(schema, false);
-        channelComputer.setup(numChannels);
-        assertThat(channelComputer.channel(rowData))
-                .isEqualTo(channelComputer.channel(partition, bucket));
-
-        // assert that when only shuffle by bucket, distribution should be even
-
-        Set<Integer> usedChannels = new HashSet<>();
-        for (int i = 0; i < numChannels; i++) {
-            usedChannels.add(channelComputer.channel(partition, i));
+            assertThat(channelComputer.channel(rowData))
+                    .isEqualTo(channelComputer.channel(partition, bucket));
         }
-        assertThat(usedChannels).hasSize(numChannels);
+
+        // assert that distribution should be even
+
+        int numTests = random.nextInt(10) + 1;
+        for (int test = 0; test < numTests; test++) {
+            Map<Integer, Integer> bucketsPerChannel = new HashMap<>();
+            for (int i = 0; i < numChannels; i++) {
+                bucketsPerChannel.put(i, 0);
+            }
+
+            extractor.setRecord(input.get(random.nextInt(input.size())));
+            BinaryRow partition = extractor.partition();
+
+            int numBuckets = random.nextInt(numChannels * 4) + 1;
+            for (int i = 0; i < numBuckets; i++) {
+                int channel = channelComputer.channel(partition, i);
+                bucketsPerChannel.compute(channel, (k, v) -> v + 1);
+            }
+
+            int max = bucketsPerChannel.values().stream().max(Integer::compareTo).get();
+            int min = bucketsPerChannel.values().stream().min(Integer::compareTo).get();
+            assertThat(max - min).isLessThanOrEqualTo(1);
+        }
     }
 }
