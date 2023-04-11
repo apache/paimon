@@ -684,6 +684,15 @@ under the License.
                 </configuration>
                 <executions>
                     <execution>
+                        <id>default-prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                        <configuration>
+                            <propertyName>surefireArgLine</propertyName>
+                        </configuration>
+                    </execution>
+                    <execution>
                         <id>default-instrument</id>
                         <goals>
                             <goal>instrument</goal>
