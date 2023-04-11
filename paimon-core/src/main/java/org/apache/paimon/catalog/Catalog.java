@@ -114,7 +114,13 @@ public interface Catalog extends AutoCloseable {
      * @param identifier Path of the table
      * @return true if the given table exists in the catalog false otherwise
      */
-    boolean tableExists(Identifier identifier);
+    default boolean tableExists(Identifier identifier) {
+        try {
+            return getTable(identifier) != null;
+        } catch (TableNotExistException e) {
+            return false;
+        }
+    }
 
     /**
      * Drop a table.

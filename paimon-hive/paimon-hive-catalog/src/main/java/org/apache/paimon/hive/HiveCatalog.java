@@ -190,13 +190,8 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public boolean tableExists(Identifier identifier) {
-        return paimonTableExists(identifier, true);
-    }
-
-    @Override
     public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
-        if (!tableExists(identifier)) {
+        if (!paimonTableExists(identifier)) {
             throw new TableNotExistException(identifier);
         }
         Path tableLocation = getDataTableLocation(identifier);
@@ -209,7 +204,7 @@ public class HiveCatalog extends AbstractCatalog {
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
         checkNotSystemTable(identifier, "dropTable");
-        if (!tableExists(identifier)) {
+        if (!paimonTableExists(identifier)) {
             if (ignoreIfNotExists) {
                 return;
             } else {
@@ -244,7 +239,7 @@ public class HiveCatalog extends AbstractCatalog {
         if (!databaseExists(databaseName)) {
             throw new DatabaseNotExistException(databaseName);
         }
-        if (tableExists(identifier)) {
+        if (paimonTableExists(identifier)) {
             if (ignoreIfExists) {
                 return;
             } else {
@@ -285,7 +280,7 @@ public class HiveCatalog extends AbstractCatalog {
             throws TableNotExistException, TableAlreadyExistException {
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
-        if (!tableExists(fromTable)) {
+        if (!paimonTableExists(fromTable)) {
             if (ignoreIfNotExists) {
                 return;
             } else {
@@ -293,7 +288,7 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
 
-        if (tableExists(toTable)) {
+        if (paimonTableExists(toTable)) {
             throw new TableAlreadyExistException(toTable);
         }
 
@@ -314,7 +309,7 @@ public class HiveCatalog extends AbstractCatalog {
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException {
         checkNotSystemTable(identifier, "alterTable");
-        if (!tableExists(identifier)) {
+        if (!paimonTableExists(identifier)) {
             if (ignoreIfNotExists) {
                 return;
             } else {
@@ -441,6 +436,10 @@ public class HiveCatalog extends AbstractCatalog {
                 dataField.name(),
                 HiveTypeUtils.logicalTypeToTypeInfo(dataField.type()).getTypeName(),
                 dataField.description());
+    }
+
+    private boolean paimonTableExists(Identifier identifier) {
+        return paimonTableExists(identifier, true);
     }
 
     private boolean schemaFileExists(Identifier identifier) {

@@ -196,6 +196,17 @@ public abstract class CatalogTestBase {
         boolean exists = catalog.tableExists(identifier);
         assertThat(exists).isTrue();
 
+        // Create table throws Exception when table is system table
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.createTable(
+                                        Identifier.create("test_db", "$system_table"),
+                                        DEFAULT_TABLE_SCHEMA,
+                                        false))
+                .withMessage(
+                        "Cannot 'createTable' for system table 'Identifier{database='test_db', table='$system_table'}', please use data table.");
+
         // Create table throws DatabaseNotExistException when database does not exist
         assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
                 .isThrownBy(
@@ -253,6 +264,58 @@ public abstract class CatalogTestBase {
     }
 
     @Test
+    public void testGetTable() throws Exception {
+        catalog.createDatabase("test_db", false);
+
+        // Get system and data table when the table exists
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+        Table systemTable = catalog.getTable(Identifier.create("test_db", "test_table$snapshots"));
+        assertThat(systemTable).isNotNull();
+        Table dataTable = catalog.getTable(identifier);
+        assertThat(dataTable).isNotNull();
+
+        // Get system table throws Exception when table contains multiple '$' separator
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.getTable(
+                                        Identifier.create(
+                                                "test_db", "test_table$snapshots$snapshots")))
+                .withMessage(
+                        "System table can only contain one '$' separator, but this is: test_table$snapshots$snapshots");
+
+        // Get system table throws TableNotExistException when data table does not exist
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.getTable(
+                                        Identifier.create(
+                                                "test_db", "non_existing_table$snapshots")))
+                .withMessage("Table test_db.non_existing_table does not exist.");
+
+        // Get system table throws TableNotExistException when system table type does not exist
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.getTable(
+                                        Identifier.create("test_db", "non_existing_table$schema1")))
+                .withMessage("Table test_db.non_existing_table does not exist.");
+
+        // Get data table throws TableNotExistException when table does not exist
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () -> catalog.getTable(Identifier.create("test_db", "non_existing_table")))
+                .withMessage("Table test_db.non_existing_table does not exist.");
+
+        // Get data table throws TableNotExistException when database does not exist
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () -> catalog.getTable(Identifier.create("non_existing_db", "test_table")))
+                .withMessage("Table non_existing_db.test_table does not exist.");
+    }
+
+    @Test
     public void testDropTable() throws Exception {
         catalog.createDatabase("test_db", false);
 
@@ -262,6 +325,15 @@ public abstract class CatalogTestBase {
         catalog.dropTable(identifier, false);
         boolean exists = catalog.tableExists(identifier);
         assertThat(exists).isFalse();
+
+        // Drop table throws Exception when table is system table
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.dropTable(
+                                        Identifier.create("test_db", "$system_table"), false))
+                .withMessage(
+                        "Cannot 'dropTable' for system table 'Identifier{database='test_db', table='$system_table'}', please use data table.");
 
         // Drop table throws TableNotExistException when table does not exist and ignoreIfNotExists
         // is false
@@ -286,6 +358,27 @@ public abstract class CatalogTestBase {
         catalog.renameTable(fromTable, toTable, false);
         assertThat(catalog.tableExists(fromTable)).isFalse();
         assertThat(catalog.tableExists(toTable)).isTrue();
+
+        // Rename table throws Exception when original or target table is system table
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.renameTable(
+                                        Identifier.create("test_db", "$system_table"),
+                                        toTable,
+                                        false))
+                .withMessage(
+                        "Cannot 'renameTable' for system table 'Identifier{database='test_db', table='$system_table'}', please use data table.");
+
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.renameTable(
+                                        fromTable,
+                                        Identifier.create("test_db", "$system_table"),
+                                        false))
+                .withMessage(
+                        "Cannot 'renameTable' for system table 'Identifier{database='test_db', table='$system_table'}', please use data table.");
 
         // Rename table throws TableNotExistException when table does not exist
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
@@ -322,6 +415,18 @@ public abstract class CatalogTestBase {
         int index = table.rowType().getFieldIndex("col2");
         assertThat(index).isEqualTo(1);
         assertThat(table.rowType().getTypeAt(index)).isEqualTo(DataTypes.DATE());
+
+        // Alter table throws Exception when table is system table
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        Identifier.create("test_db", "$system_table"),
+                                        Lists.newArrayList(
+                                                SchemaChange.addColumn("col2", DataTypes.DATE())),
+                                        false))
+                .withMessage(
+                        "Cannot 'alterTable' for system table 'Identifier{database='test_db', table='$system_table'}', please use data table.");
 
         // Alter table throws TableNotExistException when table does not exist
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
