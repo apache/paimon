@@ -43,16 +43,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link FileStoreSink} when writing file store and with savepoints. */
 public class SinkSavepointITCase extends AbstractTestBase {
@@ -65,15 +64,21 @@ public class SinkSavepointITCase extends AbstractTestBase {
         path = getTempDirPath();
         // for failure tests
         failingName = UUID.randomUUID().toString();
-        FailingFileIO.reset(failingName, 100, 500);
     }
 
     @Test
-    @Timeout(180000)
+    @Timeout(180)
     public void testRecoverFromSavepoint() throws Exception {
         String failingPath = FailingFileIO.getFailingPath(failingName, path);
         String savepointPath = null;
+
         ThreadLocalRandom random = ThreadLocalRandom.current();
+        boolean enableFailure = random.nextBoolean();
+        if (enableFailure) {
+            FailingFileIO.reset(failingName, 100, 500);
+        } else {
+            FailingFileIO.reset(failingName, 0, 1);
+        }
 
         OUTER:
         while (true) {
@@ -117,7 +122,8 @@ public class SinkSavepointITCase extends AbstractTestBase {
             // recover from savepoint in the next round
         }
 
-        checkRecoverFromSavepointResult(failingPath);
+        checkRecoverFromSavepointBatchResult();
+        checkRecoverFromSavepointStreamingResult();
     }
 
     private JobClient runRecoverFromSavepointJob(String failingPath, String savepointPath)
@@ -139,28 +145,10 @@ public class SinkSavepointITCase extends AbstractTestBase {
         tEnv.getConfig()
                 .getConfiguration()
                 .set(CheckpointingOptions.CHECKPOINTS_DIRECTORY, "file://" + path + "/checkpoint");
+        // input data must be strictly ordered for us to check changelog results
         tEnv.getConfig()
                 .getConfiguration()
-                .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 2);
-        // we're creating multiple table environments in the same process
-        // if we do not set this option, stream node id will be different even with the same SQL
-        // if stream node id is different then we can't recover from savepoint
-        tEnv.getConfig()
-                .getConfiguration()
-                .set(ExecutionConfigOptions.TABLE_EXEC_LEGACY_TRANSFORMATION_UIDS, true);
-
-        tEnv.executeSql(
-                String.join(
-                        "\n",
-                        "CREATE TABLE S (",
-                        "  a INT",
-                        ") WITH (",
-                        "  'connector' = 'datagen',",
-                        "  'rows-per-second' = '10000',",
-                        "  'fields.a.kind' = 'sequence',",
-                        "  'fields.a.start' = '0',",
-                        "  'fields.a.end' = '99999'",
-                        ")"));
+                .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
 
         String createCatalogSql =
                 String.join(
@@ -170,21 +158,41 @@ public class SinkSavepointITCase extends AbstractTestBase {
                         "  'warehouse' = '" + failingPath + "'",
                         ")");
         FailingFileIO.retryArtificialException(() -> tEnv.executeSql(createCatalogSql));
-
         tEnv.executeSql("USE CATALOG my_catalog");
+
+        tEnv.executeSql(
+                String.join(
+                        "\n",
+                        "CREATE TEMPORARY TABLE S (",
+                        "  a INT",
+                        ") WITH (",
+                        "  'connector' = 'datagen',",
+                        "  'rows-per-second' = '10000',",
+                        "  'fields.a.kind' = 'sequence',",
+                        "  'fields.a.start' = '0',",
+                        "  'fields.a.end' = '99999'",
+                        ")"));
 
         String createSinkSql =
                 String.join(
                         "\n",
                         "CREATE TABLE IF NOT EXISTS T (",
-                        "  a INT",
+                        "  k INT,",
+                        "  v INT,",
+                        "  PRIMARY KEY (k) NOT ENFORCED",
                         ") WITH (",
-                        "  'bucket' = '2',",
-                        "  'file.format' = 'avro'",
+                        "  'bucket' = '4',",
+                        "  'file.format' = 'avro',",
+                        "  'changelog-producer' = 'full-compaction',",
+                        "  'full-compaction.delta-commits' = '3'",
                         ")");
         FailingFileIO.retryArtificialException(() -> tEnv.executeSql(createSinkSql));
 
-        String insertIntoSql = "INSERT INTO T SELECT * FROM default_catalog.default_database.S";
+        // test changing sink parallelism by using a random parallelism
+        String insertIntoSql =
+                String.format(
+                        "INSERT INTO T /*+ OPTIONS('sink.parallelism' = '%d') */ SELECT (a %% 15000) AS k, a AS v FROM S",
+                        ThreadLocalRandom.current().nextInt(3) + 2);
         JobClient jobClient =
                 FailingFileIO.retryArtificialException(() -> tEnv.executeSql(insertIntoSql))
                         .getJobClient()
@@ -196,32 +204,89 @@ public class SinkSavepointITCase extends AbstractTestBase {
         return jobClient;
     }
 
-    private void checkRecoverFromSavepointResult(String failingPath) throws Exception {
+    private void checkRecoverFromSavepointBatchResult() throws Exception {
         EnvironmentSettings settings = EnvironmentSettings.newInstance().inBatchMode().build();
         TableEnvironment tEnv = TableEnvironment.create(settings);
-        // no failure should occur when checking for answer
-        FailingFileIO.reset(failingName, 0, 1);
 
-        String createCatalogSql =
+        tEnv.executeSql(
                 String.join(
                         "\n",
                         "CREATE CATALOG my_catalog WITH (",
                         "  'type' = 'paimon',",
-                        "  'warehouse' = '" + failingPath + "'",
-                        ")");
-        tEnv.executeSql(createCatalogSql);
-
+                        "  'warehouse' = '" + path + "'",
+                        ")"));
         tEnv.executeSql("USE CATALOG my_catalog");
 
-        List<Integer> actual = new ArrayList<>();
+        Map<Integer, Integer> expected = new HashMap<>();
+        for (int i = 0; i < 100000; i++) {
+            expected.put(i % 15000, i);
+        }
+
+        Map<Integer, Integer> actual = new HashMap<>();
         try (CloseableIterator<Row> it = tEnv.executeSql("SELECT * FROM T").collect()) {
             while (it.hasNext()) {
                 Row row = it.next();
-                assertEquals(1, row.getArity());
-                actual.add((Integer) row.getField(0));
+                assertThat(row.getArity()).isEqualTo(2);
+                actual.put((Integer) row.getField(0), (Integer) row.getField(1));
             }
         }
-        Collections.sort(actual);
-        assertEquals(IntStream.range(0, 100000).boxed().collect(Collectors.toList()), actual);
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    private void checkRecoverFromSavepointStreamingResult() throws Exception {
+        EnvironmentSettings settings = EnvironmentSettings.newInstance().inStreamingMode().build();
+        TableEnvironment tEnv = TableEnvironment.create(settings);
+
+        tEnv.executeSql(
+                String.join(
+                        "\n",
+                        "CREATE CATALOG my_catalog WITH (",
+                        "  'type' = 'paimon',",
+                        "  'warehouse' = '" + path + "'",
+                        ")"));
+        tEnv.executeSql("USE CATALOG my_catalog");
+
+        Map<Integer, Integer> expected = new HashMap<>();
+        for (int i = 0; i < 100000; i++) {
+            expected.put(i % 15000, i);
+        }
+        Set<Integer> expectedValues = new HashSet<>(expected.values());
+
+        int endCount = 0;
+        Map<Integer, Integer> actual = new HashMap<>();
+        try (CloseableIterator<Row> it =
+                tEnv.executeSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id' = '2') */")
+                        .collect()) {
+            while (it.hasNext()) {
+                Row row = it.next();
+                assertThat(row.getArity()).isEqualTo(2);
+
+                int k = (Integer) row.getField(0);
+                int v = (Integer) row.getField(1);
+                switch (row.getKind()) {
+                    case INSERT:
+                    case UPDATE_AFTER:
+                        assertThat(actual).doesNotContainKey(k);
+                        actual.put(k, v);
+                        break;
+                    case DELETE:
+                    case UPDATE_BEFORE:
+                        assertThat(actual).containsKey(k);
+                        actual.remove(k);
+                        break;
+                    default:
+                        throw new UnsupportedOperationException(
+                                "Unknown row kind " + row.getKind());
+                }
+
+                if (expectedValues.contains(v)) {
+                    endCount++;
+                }
+                if (endCount >= expectedValues.size()) {
+                    break;
+                }
+            }
+        }
+        assertThat(actual).isEqualTo(expected);
     }
 }

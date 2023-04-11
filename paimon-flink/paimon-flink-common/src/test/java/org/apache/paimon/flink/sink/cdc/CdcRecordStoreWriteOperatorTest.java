@@ -62,8 +62,8 @@ import java.util.function.Predicate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link SchemaAwareStoreWriteOperator}. */
-public class SchemaAwareStoreWriteOperatorTest {
+/** Tests for {@link CdcRecordStoreWriteOperator}. */
+public class CdcRecordStoreWriteOperatorTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -252,13 +252,13 @@ public class SchemaAwareStoreWriteOperatorTest {
 
     private OneInputStreamOperatorTestHarness<CdcRecord, Committable> createTestHarness(
             FileStoreTable table) throws Exception {
-        SchemaAwareStoreWriteOperator operator =
-                new SchemaAwareStoreWriteOperator(
+        CdcRecordStoreWriteOperator operator =
+                new CdcRecordStoreWriteOperator(
                         table,
-                        null,
-                        (t, context, ioManager) ->
+                        (t, commitUser, state, ioManager) ->
                                 new StoreSinkWriteImpl(
-                                        t, context, commitUser, ioManager, false, false));
+                                        t, commitUser, state, ioManager, false, false),
+                        commitUser);
         TypeSerializer<CdcRecord> inputSerializer = new JavaSerializer<>();
         TypeSerializer<Committable> outputSerializer =
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());
@@ -271,7 +271,7 @@ public class SchemaAwareStoreWriteOperatorTest {
     private FileStoreTable createFileStoreTable(
             RowType rowType, List<String> partitions, List<String> primaryKeys) throws Exception {
         Options conf = new Options();
-        conf.set(SchemaAwareStoreWriteOperator.RETRY_SLEEP_TIME, Duration.ofMillis(10));
+        conf.set(CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME, Duration.ofMillis(10));
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
