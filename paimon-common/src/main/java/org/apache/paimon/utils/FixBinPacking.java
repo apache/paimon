@@ -37,7 +37,6 @@ public class FixBinPacking {
         sorted.sort(comparingLong(weightFunc::apply));
 
         // 2. packing
-        List<List<T>> packed = new ArrayList<>();
         PriorityQueue<Bin<T>> bins = new PriorityQueue<>();
         for (T item : sorted) {
             long weight = weightFunc.apply(item);
@@ -47,6 +46,7 @@ public class FixBinPacking {
         }
 
         // 3. output
+        List<List<T>> packed = new ArrayList<>();
         bins.forEach(bin -> packed.add(bin.items));
         return packed;
     }
