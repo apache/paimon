@@ -71,6 +71,7 @@ public class ContinuousCompactorStartingScannerTest extends ScannerTestBase {
     public void testNoSnapshot() {
         SnapshotManager snapshotManager = table.snapshotManager();
         ContinuousCompactorStartingScanner scanner = new ContinuousCompactorStartingScanner();
-        assertThat(scanner.scan(snapshotManager, snapshotSplitReader)).isNull();
+        assertThat(scanner.scan(snapshotManager, snapshotSplitReader))
+                .isInstanceOf(StartingScanner.NullResult.class);
     }
 }

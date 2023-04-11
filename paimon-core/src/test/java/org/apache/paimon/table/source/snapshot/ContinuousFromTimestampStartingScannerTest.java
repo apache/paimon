@@ -61,7 +61,6 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
                 new ContinuousFromTimestampStartingScanner(timestamp);
         StartingScanner.Result result = scanner.scan(snapshotManager, snapshotSplitReader);
         assertThat(result.snapshotId()).isEqualTo(2);
-        assertThat(result.hasRead()).isFalse();
         assertThat(getResult(table.newRead(), toSplits(result.splits()))).isEmpty();
 
         write.close();
@@ -73,7 +72,8 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
         SnapshotManager snapshotManager = table.snapshotManager();
         ContinuousFromTimestampStartingScanner scanner =
                 new ContinuousFromTimestampStartingScanner(System.currentTimeMillis());
-        assertThat(scanner.scan(snapshotManager, snapshotSplitReader)).isNull();
+        assertThat(scanner.scan(snapshotManager, snapshotSplitReader))
+                .isInstanceOf(StartingScanner.NullResult.class);
     }
 
     @Test

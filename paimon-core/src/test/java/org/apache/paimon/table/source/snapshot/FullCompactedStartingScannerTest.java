@@ -57,7 +57,8 @@ public class FullCompactedStartingScannerTest extends ScannerTestBase {
     public void testNoSnapshot() {
         SnapshotManager snapshotManager = table.snapshotManager();
         FullCompactedStartingScanner scanner = new FullCompactedStartingScanner(3);
-        assertThat(scanner.scan(snapshotManager, snapshotSplitReader)).isNull();
+        assertThat(scanner.scan(snapshotManager, snapshotSplitReader))
+                .isInstanceOf(StartingScanner.NullResult.class);
     }
 
     @Test

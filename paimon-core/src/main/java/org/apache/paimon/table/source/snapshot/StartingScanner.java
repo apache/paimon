@@ -22,45 +22,74 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.SnapshotManager;
 
-import javax.annotation.Nullable;
-
 import java.util.Collections;
 import java.util.List;
 
 /** Helper class for the first planning of {@link TableScan}. */
 public interface StartingScanner {
 
-    @Nullable
     Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader);
 
     /** Scan result of {@link #scan}. */
-    class Result {
+    interface Result {
+        long snapshotId();
 
-        private final long snapshotId;
-        // whether the given snapshot has been fully read
-        private final boolean hasRead;
-        private final List<DataSplit> splits;
+        List<DataSplit> splits();
+    }
 
-        public Result(long snapshotId) {
-            this(snapshotId, false, Collections.emptyList());
+    /** A null Result. */
+    class NullResult implements Result {
+        @Override
+        public long snapshotId() {
+            throw new UnsupportedOperationException();
         }
 
-        public Result(long snapshotId, boolean hasRead, List<DataSplit> splits) {
+        @Override
+        public List<DataSplit> splits() {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    /** A non null Result. */
+    abstract class NonNullResult implements Result {
+        private final long snapshotId;
+        private final List<DataSplit> splits;
+
+        public NonNullResult(long snapshotId) {
+            this(snapshotId, Collections.emptyList());
+        }
+
+        public NonNullResult(long snapshotId, List<DataSplit> splits) {
             this.snapshotId = snapshotId;
-            this.hasRead = hasRead;
             this.splits = splits;
         }
 
+        @Override
         public long snapshotId() {
             return snapshotId;
         }
 
+        @Override
         public List<DataSplit> splits() {
             return splits;
         }
+    }
 
-        public boolean hasRead() {
-            return hasRead;
+    /** Contains an existing snapshot. */
+    class ExistingSnapshotResult extends NonNullResult {
+        public ExistingSnapshotResult(long snapshotId) {
+            super(snapshotId);
+        }
+
+        public ExistingSnapshotResult(long snapshotId, List<DataSplit> splits) {
+            super(snapshotId, splits);
+        }
+    }
+
+    /** Contains a non-existing snapshot. */
+    class NonExistingSnapshotResult extends NonNullResult {
+        public NonExistingSnapshotResult(long snapshotId) {
+            super(snapshotId);
         }
     }
 }

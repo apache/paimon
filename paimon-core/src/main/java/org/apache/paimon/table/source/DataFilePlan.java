@@ -20,8 +20,6 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 
-import javax.annotation.Nullable;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -40,7 +38,10 @@ public class DataFilePlan implements TableScan.Plan {
         return new ArrayList<>(splits);
     }
 
-    public static DataFilePlan fromResult(@Nullable StartingScanner.Result result) {
-        return new DataFilePlan(result == null ? Collections.emptyList() : result.splits());
+    public static DataFilePlan fromResult(StartingScanner.Result result) {
+        return new DataFilePlan(
+                result instanceof StartingScanner.NullResult
+                        ? Collections.emptyList()
+                        : result.splits());
     }
 }
