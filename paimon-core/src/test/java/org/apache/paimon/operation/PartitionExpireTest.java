@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
@@ -28,6 +29,8 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
@@ -40,13 +43,22 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 
+import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
+import static org.apache.paimon.CoreOptions.PARTITION_TIMESTAMP_FORMATTER;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -102,20 +114,90 @@ public class PartitionExpireTest {
         PartitionExpire expire = newExpire();
         expire.setLastCheck(date(1));
 
-        expire.expire(date(3));
+        expire.expire(date(3), Long.MAX_VALUE);
         assertThat(read())
                 .containsExactlyInAnyOrder(
                         "20230101:11", "20230101:12", "20230103:31", "20230103:32", "20230105:51");
 
-        expire.expire(date(5));
+        expire.expire(date(5), Long.MAX_VALUE);
         assertThat(read()).containsExactlyInAnyOrder("20230103:31", "20230103:32", "20230105:51");
 
         // PARTITION_EXPIRATION_INTERVAL not trigger
-        expire.expire(date(6));
+        expire.expire(date(6), Long.MAX_VALUE);
         assertThat(read()).containsExactlyInAnyOrder("20230103:31", "20230103:32", "20230105:51");
 
-        expire.expire(date(8));
+        expire.expire(date(8), Long.MAX_VALUE);
         assertThat(read()).isEmpty();
+    }
+
+    @Test
+    public void testFilterCommittedAfterExpiring() throws Exception {
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
+                        Collections.singletonList("f0"),
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
+                        ""));
+
+        table = FileStoreTableFactory.create(LocalFileIO.create(), path);
+        // disable compaction and snapshot expiration
+        table = table.copy(Collections.singletonMap(WRITE_ONLY.key(), "true"));
+        String commitUser = UUID.randomUUID().toString();
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+
+        // prepare commits
+        int now =
+                Integer.parseInt(
+                        LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")));
+        int preparedCommits = random.nextInt(20, 30);
+
+        List<List<CommitMessage>> commitMessages = new ArrayList<>();
+        Set<Long> notCommitted = new HashSet<>();
+        for (int i = 0; i < preparedCommits; i++) {
+            // ensure the partition will be expired
+            String f0 = String.valueOf(now - random.nextInt(10));
+            String f1 = String.valueOf(random.nextInt(25));
+            StreamTableWrite write = table.newWrite(commitUser);
+            write.write(GenericRow.of(BinaryString.fromString(f0), BinaryString.fromString(f1)));
+            commitMessages.add(write.prepareCommit(false, i));
+            notCommitted.add((long) i);
+        }
+
+        // commit a part of data and trigger partition expire
+        int successCommits = random.nextInt(preparedCommits / 4, preparedCommits / 2);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        for (int i = 0; i < successCommits - 2; i++) {
+            commit.commit(i, commitMessages.get(i));
+            notCommitted.remove((long) i);
+        }
+
+        // we need two commits to trigger partition expire
+        // the first commit will set the last check time to now
+        // the second commit will do the partition expire
+        Map<String, String> options = new HashMap<>();
+        options.put(WRITE_ONLY.key(), "false");
+        options.put(PARTITION_EXPIRATION_TIME.key(), "1 d");
+        options.put(PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "5 s");
+        options.put(PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd");
+        table = table.copy(options);
+        commit = table.newCommit(commitUser);
+        commit.commit(successCommits - 2, commitMessages.get(successCommits - 2));
+        notCommitted.remove((long) (successCommits - 2));
+        Thread.sleep(5000);
+        commit.commit(successCommits - 1, commitMessages.get(successCommits - 1));
+        notCommitted.remove((long) (successCommits - 1));
+
+        // check whether partition expire is triggered
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+
+        // check filter
+        Set<Long> toBeFiltered =
+                LongStream.range(0, preparedCommits).boxed().collect(Collectors.toSet());
+        assertThat(commit.filterCommitted(toBeFiltered))
+                .containsExactlyInAnyOrderElementsOf(notCommitted);
     }
 
     private List<String> read() throws IOException {
