@@ -92,13 +92,16 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
 
     private Plan tryFirstPlan() {
         StartingScanner.Result result = startingScanner.scan(snapshotManager, snapshotSplitReader);
-        if (result instanceof StartingScanner.NonNullResult) {
-            long snapshotId = result.snapshotId();
-            nextSnapshotId = snapshotId + 1;
-            if (result instanceof StartingScanner.ExistingSnapshotResult
-                    && boundedChecker.shouldEndInput(snapshotManager.snapshot(snapshotId))) {
-                isFullPhaseEnd = true;
-            }
+        if (result instanceof StartingScanner.ScannedResult) {
+            nextSnapshotId = result.snapshotId() + 1;
+            isFullPhaseEnd =
+                    boundedChecker.shouldEndInput(snapshotManager.snapshot(result.snapshotId()));
+        } else if (result instanceof StartingScanner.NextSnapshot) {
+            nextSnapshotId = result.snapshotId();
+            isFullPhaseEnd =
+                    snapshotManager.snapshotExists(nextSnapshotId - 1)
+                            && boundedChecker.shouldEndInput(
+                                    snapshotManager.snapshot(nextSnapshotId - 1));
         }
         return DataFilePlan.fromResult(result);
     }

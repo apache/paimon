@@ -39,7 +39,7 @@ public class CompactedStartingScanner implements StartingScanner {
             startingSnapshotId = snapshotManager.latestSnapshotId();
             if (startingSnapshotId == null) {
                 LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
-                return new NullResult();
+                return new NoSnapshot();
             } else {
                 LOG.debug(
                         "No compact snapshot found, reading from the latest snapshot {}.",
@@ -47,7 +47,7 @@ public class CompactedStartingScanner implements StartingScanner {
             }
         }
 
-        return new ExistingSnapshotResult(
+        return new ScannedResult(
                 startingSnapshotId,
                 snapshotSplitReader
                         .withKind(ScanKind.ALL)

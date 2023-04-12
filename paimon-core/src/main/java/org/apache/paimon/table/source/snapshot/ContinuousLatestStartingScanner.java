@@ -38,8 +38,8 @@ public class ContinuousLatestStartingScanner implements StartingScanner {
         Long startingSnapshotId = snapshotManager.latestSnapshotId();
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
-            return new NullResult();
+            return new NoSnapshot();
         }
-        return new ExistingSnapshotResult(startingSnapshotId);
+        return new NextSnapshot(startingSnapshotId + 1);
     }
 }

@@ -37,9 +37,9 @@ public class StaticFromSnapshotStartingScanner implements StartingScanner {
     public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
         if (snapshotManager.earliestSnapshotId() == null
                 || snapshotId < snapshotManager.earliestSnapshotId()) {
-            return new NullResult();
+            return new NoSnapshot();
         }
-        return new ExistingSnapshotResult(
+        return new ScannedResult(
                 snapshotId,
                 snapshotSplitReader.withKind(ScanKind.ALL).withSnapshot(snapshotId).splits());
     }

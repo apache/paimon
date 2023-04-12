@@ -60,7 +60,8 @@ public class ContinuousCompactorStartingScannerTest extends ScannerTestBase {
 
         ContinuousCompactorStartingScanner scanner = new ContinuousCompactorStartingScanner();
         StartingScanner.Result result = scanner.scan(snapshotManager, snapshotSplitReader);
-        assertThat(result.snapshotId()).isEqualTo(3);
+        // next snapshot
+        assertThat(result.snapshotId()).isEqualTo(4);
         assertThat(result.splits()).isEmpty();
 
         write.close();
@@ -72,6 +73,6 @@ public class ContinuousCompactorStartingScannerTest extends ScannerTestBase {
         SnapshotManager snapshotManager = table.snapshotManager();
         ContinuousCompactorStartingScanner scanner = new ContinuousCompactorStartingScanner();
         assertThat(scanner.scan(snapshotManager, snapshotSplitReader))
-                .isInstanceOf(StartingScanner.NullResult.class);
+                .isInstanceOf(StartingScanner.NoSnapshot.class);
     }
 }

@@ -37,8 +37,8 @@ public interface StartingScanner {
         List<DataSplit> splits();
     }
 
-    /** A null Result. */
-    class NullResult implements Result {
+    /** Currently, there is no snapshot, need to wait for the snapshot to be generated. */
+    class NoSnapshot implements Result {
         @Override
         public long snapshotId() {
             throw new UnsupportedOperationException();
@@ -50,23 +50,19 @@ public interface StartingScanner {
         }
     }
 
-    /** A non null Result. */
-    abstract class NonNullResult implements Result {
-        private final long snapshotId;
+    /** Result with scanned snapshot. Next snapshot should be the current snapshot plus 1. */
+    class ScannedResult implements Result {
+        private final long currentSnapshotId;
         private final List<DataSplit> splits;
 
-        public NonNullResult(long snapshotId) {
-            this(snapshotId, Collections.emptyList());
-        }
-
-        public NonNullResult(long snapshotId, List<DataSplit> splits) {
-            this.snapshotId = snapshotId;
+        public ScannedResult(long currentSnapshotId, List<DataSplit> splits) {
+            this.currentSnapshotId = currentSnapshotId;
             this.splits = splits;
         }
 
         @Override
         public long snapshotId() {
-            return snapshotId;
+            return currentSnapshotId;
         }
 
         @Override
@@ -75,21 +71,26 @@ public interface StartingScanner {
         }
     }
 
-    /** Contains an existing snapshot. */
-    class ExistingSnapshotResult extends NonNullResult {
-        public ExistingSnapshotResult(long snapshotId) {
-            super(snapshotId);
+    /**
+     * Return the next snapshot for followup scanning. The current snapshot is not scanned, so
+     * splits are always empty.
+     */
+    class NextSnapshot implements Result {
+
+        private final long nextSnapshotId;
+
+        public NextSnapshot(long nextSnapshotId) {
+            this.nextSnapshotId = nextSnapshotId;
         }
 
-        public ExistingSnapshotResult(long snapshotId, List<DataSplit> splits) {
-            super(snapshotId, splits);
+        @Override
+        public long snapshotId() {
+            return nextSnapshotId;
         }
-    }
 
-    /** Contains a non-existing snapshot. */
-    class NonExistingSnapshotResult extends NonNullResult {
-        public NonExistingSnapshotResult(long snapshotId) {
-            super(snapshotId);
+        @Override
+        public List<DataSplit> splits() {
+            return Collections.emptyList();
         }
     }
 }

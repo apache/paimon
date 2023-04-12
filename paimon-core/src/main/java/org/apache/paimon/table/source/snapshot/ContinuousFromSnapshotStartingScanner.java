@@ -37,12 +37,10 @@ public class ContinuousFromSnapshotStartingScanner implements StartingScanner {
     public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
         Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
         if (earliestSnapshotId == null) {
-            return new NullResult();
+            return new NoSnapshot();
         }
-        // We should use `snapshotId - 1` here to start to scan delta data from specific snapshot
-        // id. If the snapshotId < earliestSnapshotId, start to scan from the earliest.
-        return snapshotId > earliestSnapshotId
-                ? new ExistingSnapshotResult(snapshotId - 1)
-                : new NonExistingSnapshotResult(earliestSnapshotId - 1);
+        // We should return the specified snapshot as next snapshot to indicate to scan delta data
+        // from it. If the snapshotId < earliestSnapshotId, start from the earliest.
+        return new NextSnapshot(Math.max(snapshotId, earliestSnapshotId));
     }
 }

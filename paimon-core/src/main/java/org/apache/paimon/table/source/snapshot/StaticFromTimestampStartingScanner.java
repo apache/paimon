@@ -50,9 +50,9 @@ public class StaticFromTimestampStartingScanner implements StartingScanner {
             LOG.debug(
                     "There is currently no snapshot earlier than or equal to timestamp[{}]",
                     startupMillis);
-            return new NullResult();
+            return new NoSnapshot();
         }
-        return new ExistingSnapshotResult(
+        return new ScannedResult(
                 startingSnapshot.id(),
                 snapshotSplitReader
                         .withKind(ScanKind.ALL)

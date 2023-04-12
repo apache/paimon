@@ -35,9 +35,9 @@ public class FullStartingScanner implements StartingScanner {
         Long startingSnapshotId = snapshotManager.latestSnapshotId();
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");
-            return new NullResult();
+            return new NoSnapshot();
         }
-        return new ExistingSnapshotResult(
+        return new ScannedResult(
                 startingSnapshotId,
                 snapshotSplitReader
                         .withKind(ScanKind.ALL)

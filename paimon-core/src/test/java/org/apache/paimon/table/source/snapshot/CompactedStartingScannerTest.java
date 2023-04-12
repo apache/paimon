@@ -70,7 +70,7 @@ public class CompactedStartingScannerTest extends ScannerTestBase {
         SnapshotManager snapshotManager = table.snapshotManager();
         CompactedStartingScanner scanner = new CompactedStartingScanner();
         assertThat(scanner.scan(snapshotManager, snapshotSplitReader))
-                .isInstanceOf(StartingScanner.NullResult.class);
+                .isInstanceOf(StartingScanner.NoSnapshot.class);
     }
 
     @Test

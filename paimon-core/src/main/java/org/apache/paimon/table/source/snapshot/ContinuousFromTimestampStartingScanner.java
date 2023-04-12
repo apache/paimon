@@ -44,10 +44,8 @@ public class ContinuousFromTimestampStartingScanner implements StartingScanner {
         Long startingSnapshotId = snapshotManager.earlierThanTimeMills(startupMillis);
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");
-            return new NullResult();
+            return new NoSnapshot();
         }
-        return snapshotManager.snapshotExists(startingSnapshotId)
-                ? new ExistingSnapshotResult(startingSnapshotId)
-                : new NonExistingSnapshotResult(startingSnapshotId);
+        return new NextSnapshot(startingSnapshotId + 1);
     }
 }

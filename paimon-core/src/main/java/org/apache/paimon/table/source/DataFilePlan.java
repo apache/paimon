@@ -40,7 +40,7 @@ public class DataFilePlan implements TableScan.Plan {
 
     public static DataFilePlan fromResult(StartingScanner.Result result) {
         return new DataFilePlan(
-                result instanceof StartingScanner.NullResult
+                result instanceof StartingScanner.NoSnapshot
                         ? Collections.emptyList()
                         : result.splits());
     }

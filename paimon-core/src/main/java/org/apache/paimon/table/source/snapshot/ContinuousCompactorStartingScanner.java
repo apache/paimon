@@ -36,20 +36,20 @@ public class ContinuousCompactorStartingScanner implements StartingScanner {
         Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
         if (latestSnapshotId == null || earliestSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
-            return new NullResult();
+            return new NoSnapshot();
         }
 
         for (long id = latestSnapshotId; id >= earliestSnapshotId; id--) {
             Snapshot snapshot = snapshotManager.snapshot(id);
             if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
                 LOG.debug("Found latest compact snapshot {}, reading from the next snapshot.", id);
-                return new ExistingSnapshotResult(id);
+                return new NextSnapshot(id + 1);
             }
         }
 
         LOG.debug(
                 "No compact snapshot found, reading from the earliest snapshot {}.",
                 earliestSnapshotId);
-        return new NonExistingSnapshotResult(earliestSnapshotId - 1);
+        return new NextSnapshot(earliestSnapshotId);
     }
 }
