@@ -22,7 +22,6 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.SnapshotManager;
 
-import java.util.Collections;
 import java.util.List;
 
 /** Helper class for the first planning of {@link TableScan}. */
@@ -31,24 +30,10 @@ public interface StartingScanner {
     Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader);
 
     /** Scan result of {@link #scan}. */
-    interface Result {
-        long snapshotId();
-
-        List<DataSplit> splits();
-    }
+    interface Result {}
 
     /** Currently, there is no snapshot, need to wait for the snapshot to be generated. */
-    class NoSnapshot implements Result {
-        @Override
-        public long snapshotId() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public List<DataSplit> splits() {
-            throw new UnsupportedOperationException();
-        }
-    }
+    class NoSnapshot implements Result {}
 
     /** Result with scanned snapshot. Next snapshot should be the current snapshot plus 1. */
     class ScannedResult implements Result {
@@ -60,20 +45,18 @@ public interface StartingScanner {
             this.splits = splits;
         }
 
-        @Override
-        public long snapshotId() {
+        public long currentSnapshotId() {
             return currentSnapshotId;
         }
 
-        @Override
         public List<DataSplit> splits() {
             return splits;
         }
     }
 
     /**
-     * Return the next snapshot for followup scanning. The current snapshot is not scanned, so
-     * splits are always empty.
+     * Return the next snapshot for followup scanning. The current snapshot is not scanned (even
+     * doesn't exist), so there are no splits.
      */
     class NextSnapshot implements Result {
 
@@ -83,14 +66,8 @@ public interface StartingScanner {
             this.nextSnapshotId = nextSnapshotId;
         }
 
-        @Override
-        public long snapshotId() {
+        public long nextSnapshotId() {
             return nextSnapshotId;
-        }
-
-        @Override
-        public List<DataSplit> splits() {
-            return Collections.emptyList();
         }
     }
 }

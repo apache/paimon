@@ -59,10 +59,9 @@ public class ContinuousCompactorStartingScannerTest extends ScannerTestBase {
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(5);
 
         ContinuousCompactorStartingScanner scanner = new ContinuousCompactorStartingScanner();
-        StartingScanner.Result result = scanner.scan(snapshotManager, snapshotSplitReader);
-        // next snapshot
-        assertThat(result.snapshotId()).isEqualTo(4);
-        assertThat(result.splits()).isEmpty();
+        StartingScanner.NextSnapshot result =
+                (StartingScanner.NextSnapshot) scanner.scan(snapshotManager, snapshotSplitReader);
+        assertThat(result.nextSnapshotId()).isEqualTo(4);
 
         write.close();
         commit.close();
