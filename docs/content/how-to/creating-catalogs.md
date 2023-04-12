@@ -44,17 +44,13 @@ The following Flink SQL registers and uses a Paimon catalog named `my_catalog`. 
 ```sql
 CREATE CATALOG my_catalog WITH (
     'type' = 'paimon',
-    'warehouse' = 'hdfs://path/to/warehouse',
-    'table-default.key' = 'value'
+    'warehouse' = 'hdfs://path/to/warehouse'
 );
 
 USE CATALOG my_catalog;
 ```
 
-The property `'table-default.key' = 'value'` specifies the default property `'key' = 'value'` for tables created in the catalog.
-
-You can define any default properties with the prefix `table-default.`. If the table defines the same properties with the default properties, the table's properties will be taken.
-
+You can define any default table options with the prefix `table-default.` for tables created in the catalog.
 
 {{< /tab >}}
 
@@ -65,13 +61,10 @@ The following shell command registers a paimon catalog named `paimon`. Metadata 
 ```bash
 spark-sql ... \
     --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.paimon.warehouse=hdfs://path/to/warehouse \
-    --conf spark.sql.catalog.paimon.table-default.key=value
+    --conf spark.sql.catalog.paimon.warehouse=hdfs://path/to/warehouse
 ```
 
-The conf `--conf spark.sql.catalog.paimon.table-default.key=value` specifies the default property `'key' = 'value'` for tables created in the catalog.
-
-You can define any default properties with the prefix `spark.sql.catalog.paimon.table-default.` configuration. If the table defines the same properties with the default properties, the table's properties will be taken.
+You can define any default table options with the prefix `spark.sql.catalog.paimon.table-default.` for tables created in the catalog.
 
 After `spark-sql` is started, you can switch to the `default` database of the `paimon` catalog with the following SQL.
 
@@ -108,7 +101,7 @@ CREATE CATALOG my_hive WITH (
 USE CATALOG my_hive;
 ```
 
-You can also use the property with the prefix `table-default.` to define default properties for tables as above `Catalog with Filesystem Metastore`.
+You can define any default table options with the prefix `table-default.` for tables created in the catalog.
 
 {{< /tab >}}
 
@@ -126,7 +119,7 @@ spark-sql ... \
     --conf spark.sql.catalog.paimon.uri=thrift://<hive-metastore-host-name>:<port>
 ```
 
-You can also define any default properties with the prefix `spark.sql.catalog.paimon.table-default.` configuration for tables as above `Catalog with Filesystem Metastore`.
+You can define any default table options with the prefix `spark.sql.catalog.paimon.table-default.` for tables created in the catalog.
 
 After `spark-sql` is started, you can switch to the `default` database of the `paimon` catalog with the following SQL.
 
