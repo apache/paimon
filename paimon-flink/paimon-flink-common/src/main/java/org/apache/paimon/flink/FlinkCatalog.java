@@ -174,12 +174,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
     @Override
     public boolean tableExists(ObjectPath tablePath) throws CatalogException {
-        try {
-            catalog.getTable(toIdentifier(tablePath));
-            return true;
-        } catch (Catalog.TableNotExistException e) {
-            return false;
-        }
+        return catalog.tableExists(toIdentifier(tablePath));
     }
 
     @Override
