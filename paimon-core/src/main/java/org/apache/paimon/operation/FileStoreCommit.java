@@ -71,5 +71,5 @@ public interface FileStoreCommit {
      *
      * @param partitions A list of partition {@link Map}s. NOTE: cannot be empty!
      */
-    void dropPartitions(List<Map<String, String>> partitions);
+    void dropPartitions(List<Map<String, String>> partitions, long commitIdentifier);
 }
