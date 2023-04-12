@@ -28,6 +28,7 @@ import org.apache.paimon.schema.TableSchema;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 
@@ -38,6 +39,11 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     public FileSystemCatalog(FileIO fileIO, Path warehouse) {
         super(fileIO);
+        this.warehouse = warehouse;
+    }
+
+    public FileSystemCatalog(FileIO fileIO, Path warehouse, Map<String, String> options) {
+        super(fileIO, options);
         this.warehouse = warehouse;
     }
 
@@ -152,6 +158,8 @@ public class FileSystemCatalog extends AbstractCatalog {
 
             throw new TableAlreadyExistException(identifier);
         }
+
+        copyTableDefaultOptions(schema.options());
 
         uncheck(() -> new SchemaManager(fileIO, path).createTable(schema));
     }
