@@ -18,6 +18,11 @@ on:
   schedule:
     - cron: '0 1 * * *'
   workflow_dispatch:
+
+concurrency:
+  group: code-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
