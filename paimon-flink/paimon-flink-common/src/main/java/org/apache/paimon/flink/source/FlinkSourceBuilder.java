@@ -146,9 +146,7 @@ public class FlinkSourceBuilder {
             StartupMode startupMode = CoreOptions.startupMode(conf);
             StreamingReadMode streamingReadMode = CoreOptions.streamReadType(conf);
 
-            if (streamingReadMode == FILE) {
-                return buildContinuousFileSource();
-            } else {
+            if (logSourceProvider != null && streamingReadMode != FILE) {
                 if (startupMode != StartupMode.LATEST_FULL) {
                     return logSourceProvider.createSource(null);
                 }
@@ -159,6 +157,8 @@ public class FlinkSourceBuilder {
                                 new LogHybridSourceFactory(logSourceProvider),
                                 Boundedness.CONTINUOUS_UNBOUNDED)
                         .build();
+            } else {
+                return buildContinuousFileSource();
             }
         } else {
             return buildStaticFileSource();

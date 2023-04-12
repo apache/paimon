@@ -115,15 +115,9 @@ public abstract class AbstractFlinkTableFactory
         options.forEach(configOptions::setString);
 
         if (configOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE)) {
-            // Use file store continuous reading and set streaming-read-mode
-            options.put(STREAMING_READ_MODE.key(), StreamingReadMode.FILE.getValue());
+            // Use file store continuous reading
             validateFileStoreContinuous(configOptions);
             return Optional.empty();
-        } else {
-            // user does not set streaming-read-mode, making default value log
-            if (!options.containsKey(STREAMING_READ_MODE.key())) {
-                options.put(STREAMING_READ_MODE.key(), StreamingReadMode.LOG.getValue());
-            }
         }
 
         return Optional.of(discoverLogStoreFactory(classLoader, configOptions.get(LOG_SYSTEM)));
@@ -155,6 +149,7 @@ public abstract class AbstractFlinkTableFactory
     static Table buildPaimonTable(DynamicTableFactory.Context context) {
         CatalogTable origin = context.getCatalogTable().getOrigin();
         Table table;
+
         if (origin instanceof DataCatalogTable) {
             table = ((DataCatalogTable) origin).table().copy(origin.getOptions());
         } else {
