@@ -355,16 +355,10 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private void tryDeleteDirectories(Map<BinaryRow, Set<Integer>> changedBuckets) {
         // All directory paths are deduplicated and sorted by hierarchy level
         Map<Integer, Set<Path>> deduplicate = new HashMap<>();
-        // help to deduplicate
-        Set<Path> uncheck = new HashSet<>();
         for (Map.Entry<BinaryRow, Set<Integer>> entry : changedBuckets.entrySet()) {
             // try to delete bucket directories
-            boolean allAttemptsSuccessful = true;
             for (Integer bucket : entry.getValue()) {
-                allAttemptsSuccessful =
-                        allAttemptsSuccessful
-                                && tryDeleteEmptyDirectory(
-                                        pathFactory.bucketPath(entry.getKey(), bucket));
+                tryDeleteEmptyDirectory(pathFactory.bucketPath(entry.getKey(), bucket));
             }
 
             List<Path> hierarchicalPaths = pathFactory.getHierarchicalPartitionPath(entry.getKey());
@@ -373,30 +367,18 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                 continue;
             }
 
-            if (allAttemptsSuccessful
-                    && tryDeleteEmptyDirectory(hierarchicalPaths.get(hierarchies - 1))) {
+            if (tryDeleteEmptyDirectory(hierarchicalPaths.get(hierarchies - 1))) {
                 // deduplicate high level partition directories
                 for (int hierarchy = 0; hierarchy < hierarchies - 1; hierarchy++) {
                     Path path = hierarchicalPaths.get(hierarchy);
-                    if (!uncheck.contains(path)) {
-                        deduplicate.computeIfAbsent(hierarchy, i -> new HashSet<>()).add(path);
-                    }
-                }
-            } else {
-                // if there has left bucket directories or the deepest partition directory, give up
-                // to check this partition and add high level paths to uncheck list
-                if (hierarchies > 1) {
-                    uncheck.addAll(hierarchicalPaths.subList(1, hierarchies));
+                    deduplicate.computeIfAbsent(hierarchy, i -> new HashSet<>()).add(path);
                 }
             }
         }
 
         // from deepest to shallowest
         for (int hierarchy = deduplicate.size() - 1; hierarchy >= 0; hierarchy--) {
-            Set<Path> paths = deduplicate.get(hierarchy);
-            if (paths != null) {
-                paths.forEach(this::tryDeleteEmptyDirectory);
-            }
+            deduplicate.get(hierarchy).forEach(this::tryDeleteEmptyDirectory);
         }
     }
 
