@@ -132,6 +132,10 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
         return types.length;
     }
 
+    public DataType[] fieldTypes() {
+        return types;
+    }
+
     /** Convert {@link InternalRow} into {@link BinaryRow}. TODO modify it to code gen. */
     @Override
     public BinaryRow toBinaryRow(InternalRow row) {
