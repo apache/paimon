@@ -32,12 +32,12 @@ Apache Spark and Apache Hive.
 
 ## Compatibility Matrix
 
-| Engine  | Version                     | Feature | Read Pushdown |
-|---------|-----------------------------|---|---|
-| Flink   | 1.17/1.16/1.15/1.14         | batch/streaming read, batch/streaming write, create/drop table, create/drop database | Projection, Filter |
-| Hive    | 3.1/2.3/2.2/2.1/2.1 CDH 6.3 | batch read | Projection, Filter |
-| Spark   | 3.3/3.2/3.1                 | batch read, batch write, create/drop table, create/drop database | Projection, Filter |
-| Spark   | 2.4                         | batch read | Projection, Filter |
-| Trino   | 388/358                     | batch read, create/drop table, create/drop database | Projection, Filter |
+| Engine | Version                     | Feature                                                                              | Read Pushdown      |
+|--------|-----------------------------|--------------------------------------------------------------------------------------|--------------------|
+| Flink  | 1.17/1.16/1.15/1.14         | batch/streaming read, batch/streaming write, create/drop table, create/drop database | Projection, Filter |
+| Hive   | 3.1/2.3/2.2/2.1/2.1 CDH 6.3 | batch read                                                                           | Projection, Filter |
+| Spark  | 3.3/3.2/3.1                 | batch read, batch write, create/drop table, create/drop database                     | Projection, Filter |
+| Spark  | 2.4                         | batch read                                                                           | Projection, Filter |
+| Trino  | 388/358                     | batch read, create/drop table, create/drop database                                  | Projection, Filter |
 
 [Download Link]({{< ref "project/download#engine-jars" >}})

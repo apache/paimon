@@ -36,18 +36,18 @@ Download the jar file with corresponding version.
 
 {{< stable >}}
 
-| Version   | Jar                                                                                                                                                                              |
-|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Spark 3.3 | [paimon-spark-3.3-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-spark-3.3-{{< version >}}.jar) |
-| Spark 3.2 | [paimon-spark-3.2-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-spark-3.2-{{< version >}}.jar) |
-| Spark 3.1 | [paimon-spark-3.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-spark-3.1-{{< version >}}.jar) |
+| Version   | Jar                                                                                                                                                                  |
+|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Spark 3.3 | [paimon-spark-3.3-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.3/{{< version >}}/paimon-spark-3.3-{{< version >}}.jar) |
+| Spark 3.2 | [paimon-spark-3.2-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.2/{{< version >}}/paimon-spark-3.2-{{< version >}}.jar) |
+| Spark 3.1 | [paimon-spark-3.1-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.1/{{< version >}}/paimon-spark-3.1-{{< version >}}.jar) |
 
 {{< /stable >}}
 
 {{< unstable >}}
 
-| Version   | Jar                                                                                                                                                                              |
-|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Version   | Jar                                                                                                                                 |
+|-----------|-------------------------------------------------------------------------------------------------------------------------------------|
 | Spark 3.3 | [paimon-spark-3.3-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.3/{{< version >}}/) |
 | Spark 3.2 | [paimon-spark-3.2-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.2/{{< version >}}/) |
 | Spark 3.1 | [paimon-spark-3.1-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.1/{{< version >}}/) |

@@ -36,7 +36,7 @@ Paimon supports Spark 2.4+. It is highly recommended to use Spark 2.4+ version w
 
 {{< stable >}}
 
-Download [paimon-spark-2-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-spark-2-{{< version >}}.jar).
+Download [paimon-spark-2-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-2/{{< version >}}/paimon-spark-2-{{< version >}}.jar).
 
 {{< /stable >}}
 
