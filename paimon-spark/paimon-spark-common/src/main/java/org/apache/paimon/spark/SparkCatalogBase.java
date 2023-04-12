@@ -217,7 +217,7 @@ public abstract class SparkCatalogBase implements TableCatalog, SupportsNamespac
         try {
             return catalog.tableExists(toIdentifier(ident));
         } catch (NoSuchTableException e) {
-            throw new RuntimeException(e);
+            return false;
         }
     }
 
