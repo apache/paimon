@@ -28,8 +28,10 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.concurrent.ThreadSafe;
 
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.ConfigOptions.key;
 
@@ -122,6 +124,17 @@ public class FileStorePathFactory {
                 partitionComputer.generatePartValues(
                         Preconditions.checkNotNull(
                                 partition, "Partition row data is null. This is unexpected.")));
+    }
+
+    public List<Path> getHierarchicalPartitionPath(BinaryRow partition) {
+        return PartitionPathUtils.generateHierarchicalPartitionPaths(
+                        partitionComputer.generatePartValues(
+                                Preconditions.checkNotNull(
+                                        partition,
+                                        "Partition binary row is null. This is unexpected.")))
+                .stream()
+                .map(p -> new Path(root + "/" + p))
+                .collect(Collectors.toList());
     }
 
     @VisibleForTesting

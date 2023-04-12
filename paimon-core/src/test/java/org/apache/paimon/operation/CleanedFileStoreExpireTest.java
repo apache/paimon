@@ -26,6 +26,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.AfterEach;
@@ -34,7 +35,9 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
@@ -211,5 +214,46 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
                 assertSnapshot(i, allData, snapshotPositions);
             }
         }
+    }
+
+    @Test
+    public void testExpireWithUpgradedFile() throws Exception {
+        // write & commit data
+        List<KeyValue> data = FileStoreTestUtils.partitionedData(5, gen, "0401", 8);
+        BinaryRow partition = gen.getPartition(data.get(0));
+        RecordWriter<KeyValue> writer = FileStoreTestUtils.writeData(store, data, partition, 0);
+        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers =
+                Collections.singletonMap(partition, Collections.singletonMap(0, writer));
+        FileStoreTestUtils.commitData(store, 0, writers);
+
+        // check
+        List<ManifestEntry> entries = store.newScan().plan().files();
+        assertThat(entries.size()).isEqualTo(1);
+        ManifestEntry entry = entries.get(0);
+        assertThat(entry.file().level()).isEqualTo(0);
+        Path dataFilePath1 =
+                new Path(store.pathFactory().bucketPath(partition, 0), entry.file().fileName());
+        FileStoreTestUtils.assertPathExists(fileIO, dataFilePath1);
+
+        // compact & commit
+        writer.compact(true);
+        writer.sync();
+        FileStoreTestUtils.commitData(store, 1, writers);
+
+        // check
+        entries = store.newScan().plan().files(FileKind.ADD);
+        assertThat(entries.size()).isEqualTo(1);
+        entry = entries.get(0);
+        // data file has been upgraded due to compact
+        assertThat(entry.file().level()).isEqualTo(5);
+        Path dataFilePath2 =
+                new Path(store.pathFactory().bucketPath(partition, 0), entry.file().fileName());
+        assertThat(dataFilePath1).isEqualTo(dataFilePath2);
+        FileStoreTestUtils.assertPathExists(fileIO, dataFilePath2);
+
+        // the data file still exists after expire
+        FileStoreExpire expire = store.newExpire(1, 1, Long.MAX_VALUE);
+        expire.expire();
+        FileStoreTestUtils.assertPathExists(fileIO, dataFilePath2);
     }
 }

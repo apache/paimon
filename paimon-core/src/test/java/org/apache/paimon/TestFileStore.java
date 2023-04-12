@@ -117,6 +117,10 @@ public class TestFileStore extends KeyValueFileStore {
         this.commitIdentifier = 0L;
     }
 
+    public AbstractFileStoreWrite<KeyValue> newWrite() {
+        return super.newWrite(commitUser);
+    }
+
     public FileStoreCommitImpl newCommit() {
         return super.newCommit(commitUser);
     }
@@ -217,7 +221,7 @@ public class TestFileStore extends KeyValueFileStore {
             Long watermark,
             BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction)
             throws Exception {
-        AbstractFileStoreWrite<KeyValue> write = newWrite(commitUser);
+        AbstractFileStoreWrite<KeyValue> write = newWrite();
         Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
         for (KeyValue kv : kvs) {
             BinaryRow partition = partitionCalculator.apply(kv);
