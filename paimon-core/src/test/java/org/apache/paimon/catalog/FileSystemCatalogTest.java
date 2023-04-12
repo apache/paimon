@@ -18,28 +18,30 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.table.TableType;
 
-import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-/** Factory to create {@link FileSystemCatalog}. */
-public class FileSystemCatalogFactory implements CatalogFactory {
+import java.util.List;
 
-    public static final String IDENTIFIER = "filesystem";
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** Tests for {@link FileSystemCatalog}. */
+public class FileSystemCatalogTest extends CatalogTestBase {
 
     @Override
-    public String identifier() {
-        return IDENTIFIER;
+    @BeforeEach
+    public void setUp() throws Exception {
+        super.setUp();
+        catalog = new FileSystemCatalog(fileIO, new Path(warehouse));
     }
 
+    @Test
     @Override
-    public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
-        if (!TableType.MANAGED.equals(context.options().get(TABLE_TYPE))) {
-            throw new IllegalArgumentException(
-                    "Only managed table is supported in File system catalog.");
-        }
-        return new FileSystemCatalog(fileIO, warehouse, context.options().toMap());
+    public void testListDatabasesWhenNoDatabases() {
+        // List databases returns an empty list when there are no databases
+        List<String> databases = catalog.listDatabases();
+        assertThat(databases).isEmpty();
     }
 }
