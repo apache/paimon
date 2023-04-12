@@ -39,7 +39,7 @@ Maven dependency:
 ```
 
 Or download the jar file:
-{{< stable >}}[Paimon Bundle](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-bundle-{{< version >}}.jar).{{< /stable >}}
+{{< stable >}}[Paimon Bundle](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-bundle/{{< version >}}/paimon-bundle-{{< version >}}.jar).{{< /stable >}}
 {{< unstable >}}[Paimon Bundle](https://repository.apache.org/snapshots/org/apache/paimon/paimon-bundle/{{< version >}}/).{{< /unstable >}}
 
 Paimon relies on Hadoop environment, you should add hadoop classpath or bundled jar.

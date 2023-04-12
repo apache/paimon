@@ -28,7 +28,7 @@ under the License.
 
 {{< stable >}}
 
-Download [paimon-oss-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-oss-{{< version >}}.jar).
+Download [paimon-oss-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-oss/{{< version >}}/paimon-oss-{{< version >}}.jar).
 
 {{< /stable >}}
 
