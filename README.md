@@ -55,6 +55,15 @@ Paimon tracks issues in GitHub and prefers to receive contributions as pull requ
 
 <b style="color:red">Please make sure you are subscribed to the mailing list you are posting to!</b> If you are not subscribed to the mailing list, your message will either be rejected (dev@ list) or you won't receive the response (user@ list).
 
+## Slack
+
+You can join the Paimon community on Slack. Paimon channel is in ASF Slack workspace.
+
+- Anyone with an @apache.org email address can become a full member of the ASF Slack workspace. Search `paimon` channel and join it.
+- If you don't have an @apache.org email address, you can email to `user@paimon.apache.org` to apply for a slack invitation.
+
+Don’t forget to introduce yourself in channel.
+
 ## Building
 JDK 8/11 is required for building the project.
 
