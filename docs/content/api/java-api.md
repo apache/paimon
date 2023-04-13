@@ -191,7 +191,8 @@ public class ReadTable {
 The writing is divided into two stages:
 
 1. Write records: Write records in distributed tasks, generate commit messages.
-2. Commit: Collect all CommitMessages, commit them in a global node ('Coordinator', or named 'Driver', or named 'Committer').
+2. Commit/Abort: Collect all CommitMessages, commit them in a global node ('Coordinator', or named 'Driver', or named 'Committer'). 
+   When the commit fails for certain reason, abort unsuccessful commit via CommitMessages. 
 
 ```java
 import java.util.List;
@@ -218,6 +219,9 @@ public class WriteTable {
         // 3. Collect all CommitMessages to a global node and commit
         BatchTableCommit commit = writeBuilder.newCommit();
         commit.commit(messages);
+        
+        // Abort unsuccessful commit to delete data files
+        // commit.abort(messages);
     }
 }
 ```
@@ -279,7 +283,7 @@ Key points to achieve exactly-once consistency:
 - The commitIdentifier of `StreamTableWrite` and `StreamTableCommit` needs to be consistent, and the
   id needs to be incremented for the next committing.
 - When a failure occurs, if you still have uncommitted `CommitMessage`s, please use `StreamTableCommit#filterCommitted`
-  to exclude the committed messages by commitIdentifier.
+  to exclude the committed messages by commitIdentifier. Meanwhile, you could abort uncommitted `CommitMessage`s via `StreamTableCommit#abort`.
 
 ```java
 import java.util.List;
