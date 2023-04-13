@@ -22,38 +22,52 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.SnapshotManager;
 
-import javax.annotation.Nullable;
-
-import java.util.Collections;
 import java.util.List;
 
 /** Helper class for the first planning of {@link TableScan}. */
 public interface StartingScanner {
 
-    @Nullable
     Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader);
 
     /** Scan result of {@link #scan}. */
-    class Result {
+    interface Result {}
 
-        private final long snapshotId;
+    /** Currently, there is no snapshot, need to wait for the snapshot to be generated. */
+    class NoSnapshot implements Result {}
+
+    /** Result with scanned snapshot. Next snapshot should be the current snapshot plus 1. */
+    class ScannedResult implements Result {
+        private final long currentSnapshotId;
         private final List<DataSplit> splits;
 
-        public Result(long snapshotId) {
-            this(snapshotId, Collections.emptyList());
-        }
-
-        public Result(long snapshotId, List<DataSplit> splits) {
-            this.snapshotId = snapshotId;
+        public ScannedResult(long currentSnapshotId, List<DataSplit> splits) {
+            this.currentSnapshotId = currentSnapshotId;
             this.splits = splits;
         }
 
-        public long snapshotId() {
-            return snapshotId;
+        public long currentSnapshotId() {
+            return currentSnapshotId;
         }
 
         public List<DataSplit> splits() {
             return splits;
+        }
+    }
+
+    /**
+     * Return the next snapshot for followup scanning. The current snapshot is not scanned (even
+     * doesn't exist), so there are no splits.
+     */
+    class NextSnapshot implements Result {
+
+        private final long nextSnapshotId;
+
+        public NextSnapshot(long nextSnapshotId) {
+            this.nextSnapshotId = nextSnapshotId;
+        }
+
+        public long nextSnapshotId() {
+            return nextSnapshotId;
         }
     }
 }

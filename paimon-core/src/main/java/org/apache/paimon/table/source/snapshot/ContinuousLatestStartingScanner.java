@@ -24,8 +24,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 /**
  * {@link StartingScanner} for the {@link CoreOptions.StartupMode#LATEST} startup mode of a
  * streaming read.
@@ -36,13 +34,12 @@ public class ContinuousLatestStartingScanner implements StartingScanner {
             LoggerFactory.getLogger(ContinuousLatestStartingScanner.class);
 
     @Override
-    @Nullable
     public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
         Long startingSnapshotId = snapshotManager.latestSnapshotId();
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
-            return null;
+            return new NoSnapshot();
         }
-        return new Result(startingSnapshotId);
+        return new NextSnapshot(startingSnapshotId + 1);
     }
 }
