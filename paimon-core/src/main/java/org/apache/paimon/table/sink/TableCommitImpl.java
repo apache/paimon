@@ -159,4 +159,9 @@ public class TableCommitImpl implements InnerTableCommit {
         batchCommitted = true;
         commit(BatchWriteBuilder.COMMIT_IDENTIFIER, commitMessages);
     }
+
+    @Override
+    public void abort(List<CommitMessage> commitMessages) {
+        commit.abort(commitMessages);
+    }
 }
