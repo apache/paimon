@@ -125,8 +125,8 @@ public abstract class AbstractFlinkTableFactory
                 || configOptions.get(SCAN_MODE) == FROM_SNAPSHOT_FULL) {
             throw new ValidationException(
                     String.format(
-                            "%s must be null when you use %s for %s",
-                            LOG_SYSTEM.key(), configOptions.get(SCAN_MODE), SCAN_MODE.key()));
+                            "Log system does not support %s and %s scan mode",
+                            FROM_SNAPSHOT, FROM_SNAPSHOT_FULL));
         }
 
         return Optional.of(discoverLogStoreFactory(classLoader, configOptions.get(LOG_SYSTEM)));
