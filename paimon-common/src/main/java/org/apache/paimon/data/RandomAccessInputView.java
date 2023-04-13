@@ -24,6 +24,7 @@ import org.apache.paimon.utils.MathUtils;
 
 import java.io.EOFException;
 import java.util.ArrayList;
+import java.util.List;
 
 /** A {@link AbstractPagedInputView} to read pages in memory. */
 public class RandomAccessInputView extends AbstractPagedInputView implements SeekableDataInputView {
@@ -85,5 +86,9 @@ public class RandomAccessInputView extends AbstractPagedInputView implements See
         return this.currentSegmentIndex == this.segments.size() - 1
                 ? this.limitInLastSegment
                 : this.segmentSize;
+    }
+
+    public List<MemorySegment> segments() {
+        return segments;
     }
 }

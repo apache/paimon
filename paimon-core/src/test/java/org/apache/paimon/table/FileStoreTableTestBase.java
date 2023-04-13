@@ -33,6 +33,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
@@ -402,6 +403,45 @@ public abstract class FileStoreTableTestBase {
         }
 
         write.close();
+    }
+
+    @Test
+    public void testManifestCache() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf ->
+                                conf.set(
+                                        CoreOptions.MANIFEST_CACHE_SIZE,
+                                        MemorySize.ofMebiBytes(1)));
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // lots of commits, produce lots of manifest
+        List<String> expected = new ArrayList<>();
+        int cnt = 50;
+        for (int i = 0; i < cnt; i++) {
+            write.write(rowData(i, i, (long) i));
+            commit.commit(i, write.prepareCommit(false, i));
+            expected.add(
+                    String.format("%s|%s|%s|binary|varbinary|mapKey:mapVal|multiset", i, i, i));
+        }
+        write.close();
+
+        // create new write and reload manifests
+        write = table.newWrite(commitUser);
+        for (int i = 0; i < cnt; i++) {
+            write.write(rowData(i, i + 1, (long) i + 1));
+            expected.add(
+                    String.format(
+                            "%s|%s|%s|binary|varbinary|mapKey:mapVal|multiset", i, i + 1, i + 1));
+        }
+        commit.commit(cnt, write.prepareCommit(false, cnt));
+
+        // check result
+        List<String> result =
+                getResult(table.newRead(), table.newScan().plan().splits(), BATCH_ROW_TO_STRING);
+        assertThat(result.size()).isEqualTo(expected.size());
+        assertThat(result).containsExactlyInAnyOrderElementsOf(expected);
     }
 
     @Test

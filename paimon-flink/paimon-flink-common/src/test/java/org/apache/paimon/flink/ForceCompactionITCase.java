@@ -234,7 +234,7 @@ public class ForceCompactionITCase extends CatalogITCaseBase {
                         CoreOptions.FILE_FORMAT.defaultValue().toString());
 
         List<ManifestFileMeta> manifestFileMetas =
-                new ManifestList.Factory(LocalFileIO.create(), partType, avro, pathFactory)
+                new ManifestList.Factory(LocalFileIO.create(), avro, pathFactory, null)
                         .create()
                         .read(snapshot.deltaManifestList());
         assertThat(manifestFileMetas.get(0).numDeletedFiles()).isGreaterThanOrEqualTo(1);

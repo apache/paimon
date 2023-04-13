@@ -151,7 +151,8 @@ public class ManifestFileMetaTest {
                                 PARTITION_TYPE,
                                 "default",
                                 CoreOptions.FILE_FORMAT.defaultValue().toString()),
-                        Long.MAX_VALUE)
+                        Long.MAX_VALUE,
+                        null)
                 .create();
     }
 
