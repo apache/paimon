@@ -57,6 +57,7 @@ public class AvroFileFormatTest {
         dataFields.add(new DataField(index++, "timestamp_type", DataTypes.TIMESTAMP(3)));
         dataFields.add(new DataField(index++, "date_type", DataTypes.DATE()));
         dataFields.add(new DataField(index++, "decimal_type", DataTypes.DECIMAL(10, 3)));
+        dataFields.add(new DataField(index++, "local_timestamp_type", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3)));
 
         RowType rowType = new RowType(dataFields);
         fileFormat.validateDataFields(rowType);

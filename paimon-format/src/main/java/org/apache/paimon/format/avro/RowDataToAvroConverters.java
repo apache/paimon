@@ -35,6 +35,7 @@ import org.apache.avro.util.Utf8;
 
 import java.io.Serializable;
 import java.nio.ByteBuffer;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -143,6 +144,18 @@ public class RowDataToAvroConverters {
                             @Override
                             public Object convert(Schema schema, Object object) {
                                 return ((Timestamp) object).toInstant().toEpochMilli();
+                            }
+                        };
+                break;
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                converter =
+                        new RowDataToAvroConverter() {
+                            private static final long serialVersionUID = 1L;
+
+                            @Override
+                            public Object convert(Schema schema, Object object) {
+                                return ((Timestamp) object).toInstant().atZone(ZoneId.systemDefault())
+                                        .toInstant().toEpochMilli();
                             }
                         };
                 break;

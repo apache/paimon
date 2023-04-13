@@ -23,6 +23,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
@@ -110,6 +111,21 @@ public class AvroSchemaConverter {
                 }
                 Schema timestamp = avroLogicalType.addToSchema(SchemaBuilder.builder().longType());
                 return nullable ? nullableSchema(timestamp) : timestamp;
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                final LocalZonedTimestampType localTimestampType = (LocalZonedTimestampType) dataType;
+                precision = localTimestampType.getPrecision();
+                org.apache.avro.LogicalType localTimestampLogicalType;
+                if (precision <= 3) {
+                    localTimestampLogicalType = LogicalTypes.localTimestampMillis();
+                } else {
+                    throw new IllegalArgumentException(
+                            "Avro does not support TIMESTAMP type "
+                                    + "with precision: "
+                                    + precision
+                                    + ", it only supports precision less than 3.");
+                }
+                Schema localTimestampSchema = localTimestampLogicalType.addToSchema(SchemaBuilder.builder().longType());
+                return nullable ? nullableSchema(localTimestampSchema) : localTimestampSchema;
             case DATE:
                 // use int to represents Date
                 Schema date = LogicalTypes.date().addToSchema(SchemaBuilder.builder().intType());

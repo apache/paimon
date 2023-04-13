@@ -42,6 +42,8 @@ import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoField;
 import java.util.HashMap;
 import java.util.List;
@@ -115,6 +117,8 @@ public class AvroToRowDataConverters {
                 return AvroToRowDataConverters::convertToTime;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 return AvroToRowDataConverters::convertToTimestamp;
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return AvroToRowDataConverters::convertToOffsetTimestamp;
             case CHAR:
             case VARCHAR:
                 return avroObject -> BinaryString.fromString(avroObject.toString());
@@ -202,6 +206,22 @@ public class AvroToRowDataConverters {
             }
         }
         return Timestamp.fromEpochMillis(millis);
+    }
+
+    private static Object convertToOffsetTimestamp(Object object) {
+        if (object instanceof Long) {
+            return Timestamp.fromInstant(OffsetDateTime.ofInstant(Instant.ofEpochMilli((Long) object),
+                            ZoneOffset.systemDefault())
+                    .toInstant());
+        } else if (object instanceof Instant) {
+            return Timestamp
+                    .fromInstant(OffsetDateTime.ofInstant((Instant) object, ZoneOffset.systemDefault())
+                            .toInstant());
+        } else {
+            //todo support convert into offset timestamp.
+            throw new IllegalArgumentException(
+                    "Unexpected object type for TIMESTAMP logical type. Received: " + object);
+        }
     }
 
     private static int convertToDate(Object object) {
