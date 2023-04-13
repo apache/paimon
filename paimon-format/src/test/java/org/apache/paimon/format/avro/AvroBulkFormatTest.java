@@ -58,8 +58,7 @@ class AvroBulkFormatTest {
                     GenericRow.of(
                             BinaryString.fromString("AvroBulk"),
                             BinaryString.fromString("FormatTest"),
-                            Timestamp.fromEpochMillis(TIMESTAMP)
-                    ),
+                            Timestamp.fromEpochMillis(TIMESTAMP)),
                     GenericRow.of(
                             BinaryString.fromString("Apache"),
                             BinaryString.fromString("Paimon"),
@@ -71,14 +70,12 @@ class AvroBulkFormatTest {
                                             + "以为流觞曲水，列坐其次。虽无丝竹管弦之盛，一觞一咏，亦足以畅"
                                             + "叙幽情。"),
                             BinaryString.fromString(""),
-                            Timestamp.fromEpochMillis(TIMESTAMP)
-                    ),
+                            Timestamp.fromEpochMillis(TIMESTAMP)),
                     // -------- batch 1, block start 593 --------
                     GenericRow.of(
                             BinaryString.fromString("File"),
                             BinaryString.fromString("Format"),
-                            Timestamp.fromEpochMillis(TIMESTAMP)
-                    ),
+                            Timestamp.fromEpochMillis(TIMESTAMP)),
                     GenericRow.of(
                             null,
                             BinaryString.fromString(
@@ -90,7 +87,7 @@ class AvroBulkFormatTest {
                             BinaryString.fromString("only one record"),
                             Timestamp.fromEpochMillis(TIMESTAMP))
                     // -------- file length 752 --------
-            );
+                    );
     private static final List<Long> BLOCK_STARTS = Arrays.asList(351L, 734L, 860L);
 
     private File tmpFile;

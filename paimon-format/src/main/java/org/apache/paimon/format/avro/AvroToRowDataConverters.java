@@ -210,15 +210,16 @@ public class AvroToRowDataConverters {
 
     private static Object convertToOffsetTimestamp(Object object) {
         if (object instanceof Long) {
-            return Timestamp.fromInstant(OffsetDateTime.ofInstant(Instant.ofEpochMilli((Long) object),
-                            ZoneOffset.systemDefault())
-                    .toInstant());
+            return Timestamp.fromInstant(
+                    OffsetDateTime.ofInstant(
+                                    Instant.ofEpochMilli((Long) object), ZoneOffset.systemDefault())
+                            .toInstant());
         } else if (object instanceof Instant) {
-            return Timestamp
-                    .fromInstant(OffsetDateTime.ofInstant((Instant) object, ZoneOffset.systemDefault())
+            return Timestamp.fromInstant(
+                    OffsetDateTime.ofInstant((Instant) object, ZoneOffset.systemDefault())
                             .toInstant());
         } else {
-            //todo support convert into offset timestamp.
+            // todo support convert into offset timestamp.
             throw new IllegalArgumentException(
                     "Unexpected object type for TIMESTAMP logical type. Received: " + object);
         }

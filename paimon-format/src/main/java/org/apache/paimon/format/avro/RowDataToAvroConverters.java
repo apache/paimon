@@ -154,8 +154,11 @@ public class RowDataToAvroConverters {
 
                             @Override
                             public Object convert(Schema schema, Object object) {
-                                return ((Timestamp) object).toInstant().atZone(ZoneId.systemDefault())
-                                        .toInstant().toEpochMilli();
+                                return ((Timestamp) object)
+                                        .toInstant()
+                                        .atZone(ZoneId.systemDefault())
+                                        .toInstant()
+                                        .toEpochMilli();
                             }
                         };
                 break;

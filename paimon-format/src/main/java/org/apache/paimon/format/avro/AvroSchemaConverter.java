@@ -112,7 +112,8 @@ public class AvroSchemaConverter {
                 Schema timestamp = avroLogicalType.addToSchema(SchemaBuilder.builder().longType());
                 return nullable ? nullableSchema(timestamp) : timestamp;
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                final LocalZonedTimestampType localTimestampType = (LocalZonedTimestampType) dataType;
+                final LocalZonedTimestampType localTimestampType =
+                        (LocalZonedTimestampType) dataType;
                 precision = localTimestampType.getPrecision();
                 org.apache.avro.LogicalType localTimestampLogicalType;
                 if (precision <= 3) {
@@ -124,7 +125,8 @@ public class AvroSchemaConverter {
                                     + precision
                                     + ", it only supports precision less than 3.");
                 }
-                Schema localTimestampSchema = localTimestampLogicalType.addToSchema(SchemaBuilder.builder().longType());
+                Schema localTimestampSchema =
+                        localTimestampLogicalType.addToSchema(SchemaBuilder.builder().longType());
                 return nullable ? nullableSchema(localTimestampSchema) : localTimestampSchema;
             case DATE:
                 // use int to represents Date
