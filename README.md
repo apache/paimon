@@ -59,8 +59,10 @@ Paimon tracks issues in GitHub and prefers to receive contributions as pull requ
 
 You can join the Paimon community on Slack. Paimon channel is in ASF Slack workspace.
 
-- Anyone with an @apache.org email address can become a full member of the ASF Slack workspace. Search `paimon` channel and join it.
-- If you don't have an @apache.org email address, you can email to `user@paimon.apache.org` to apply for a slack invitation.
+- Anyone with an @apache.org email address can become a full member of the ASF Slack workspace.
+  Search [Paimon channel](https://the-asf.slack.com/archives/C053Q2NCW8G) and join it.
+- If you don't have an @apache.org email address, you can email to `user@paimon.apache.org` to apply for an
+  [ASF Slack invitation](https://infra.apache.org/slack.html). Then join [Paimon channel](https://the-asf.slack.com/archives/C053Q2NCW8G).
 
 Don’t forget to introduce yourself in channel.
 
