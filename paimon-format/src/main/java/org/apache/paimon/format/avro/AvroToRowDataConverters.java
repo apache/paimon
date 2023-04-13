@@ -99,7 +99,7 @@ public class AvroToRowDataConverters {
     }
 
     /** Creates a runtime converter which assuming input object is not null. */
-    private static AvroToRowDataConverter createConverter(DataType type) {
+    public static AvroToRowDataConverter createConverter(DataType type) {
         switch (type.getTypeRoot()) {
             case TINYINT:
                 return avroObject -> ((Integer) avroObject).byteValue();
@@ -219,9 +219,10 @@ public class AvroToRowDataConverters {
                     OffsetDateTime.ofInstant((Instant) object, ZoneOffset.systemDefault())
                             .toInstant());
         } else {
-            // todo support convert into offset timestamp.
+            // todo support string convert into offset timestamp.
             throw new IllegalArgumentException(
-                    "Unexpected object type for TIMESTAMP logical type. Received: " + object);
+                    "Unexpected object type for TIMESTAMP WITH LOCAL TIME ZONE logical type. Received: "
+                            + object);
         }
     }
 
