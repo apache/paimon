@@ -89,6 +89,7 @@ public class FlinkCdcSyncTableSinkBuilder<T> {
                                 new SchemaChangeProcessFunction(
                                         new SchemaManager(table.fileIO(), table.location())));
         schemaChangeProcessFunction.getTransformation().setParallelism(1);
+        schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
 
         BucketingStreamPartitioner<CdcRecord> partitioner =
                 new BucketingStreamPartitioner<>(new CdcRecordChannelComputer(table.schema()));
