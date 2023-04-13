@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.table.sink.CommitMessage;
 
 import java.util.List;
 import java.util.Map;
@@ -72,4 +73,7 @@ public interface FileStoreCommit {
      * @param partitions A list of partition {@link Map}s. NOTE: cannot be empty!
      */
     void dropPartitions(List<Map<String, String>> partitions, long commitIdentifier);
+
+    /** Abort an unsuccessful commit. The data files will be deleted. */
+    void abort(List<CommitMessage> commitMessages);
 }
