@@ -24,8 +24,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 /**
  * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_TIMESTAMP} startup mode of a
  * streaming read.
@@ -42,13 +40,12 @@ public class ContinuousFromTimestampStartingScanner implements StartingScanner {
     }
 
     @Override
-    @Nullable
     public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
         Long startingSnapshotId = snapshotManager.earlierThanTimeMills(startupMillis);
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");
-            return null;
+            return new NoSnapshot();
         }
-        return new Result(startingSnapshotId);
+        return new NextSnapshot(startingSnapshotId + 1);
     }
 }

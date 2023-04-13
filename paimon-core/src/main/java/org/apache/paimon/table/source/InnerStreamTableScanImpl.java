@@ -51,7 +51,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     private StartingScanner startingScanner;
     private FollowUpScanner followUpScanner;
     private BoundedChecker boundedChecker;
-    private boolean isEnd = false;
+    private boolean isFullPhaseEnd = false;
     @Nullable private Long nextSnapshotId;
 
     public InnerStreamTableScanImpl(
@@ -92,19 +92,24 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
 
     private Plan tryFirstPlan() {
         StartingScanner.Result result = startingScanner.scan(snapshotManager, snapshotSplitReader);
-        if (result != null) {
-            long snapshotId = result.snapshotId();
-            nextSnapshotId = snapshotId + 1;
-            if (boundedChecker.shouldEndInput(snapshotManager.snapshot(snapshotId))) {
-                isEnd = true;
-            }
+        if (result instanceof StartingScanner.ScannedResult) {
+            long currentSnapshotId = ((StartingScanner.ScannedResult) result).currentSnapshotId();
+            nextSnapshotId = currentSnapshotId + 1;
+            isFullPhaseEnd =
+                    boundedChecker.shouldEndInput(snapshotManager.snapshot(currentSnapshotId));
+        } else if (result instanceof StartingScanner.NextSnapshot) {
+            nextSnapshotId = ((StartingScanner.NextSnapshot) result).nextSnapshotId();
+            isFullPhaseEnd =
+                    snapshotManager.snapshotExists(nextSnapshotId - 1)
+                            && boundedChecker.shouldEndInput(
+                                    snapshotManager.snapshot(nextSnapshotId - 1));
         }
         return DataFilePlan.fromResult(result);
     }
 
     private Plan nextPlan() {
         while (true) {
-            if (isEnd) {
+            if (isFullPhaseEnd) {
                 throw new EndOfScanException();
             }
 
