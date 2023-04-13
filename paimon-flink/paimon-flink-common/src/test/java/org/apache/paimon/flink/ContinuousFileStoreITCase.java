@@ -286,7 +286,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                                         "SELECT * FROM T1 /*+ OPTIONS('log.changelog-mode'='upsert') */"))
                 .hasCauseInstanceOf(ValidationException.class)
                 .hasRootCauseMessage(
-                        "File store continuous reading dose not support upsert changelog mode.");
+                        "File store continuous reading does not support upsert changelog mode.");
     }
 
     @TestTemplate
@@ -297,6 +297,6 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                                         "SELECT * FROM T1 /*+ OPTIONS('log.consistency'='eventual') */"))
                 .hasCauseInstanceOf(ValidationException.class)
                 .hasRootCauseMessage(
-                        "File store continuous reading dose not support eventual consistency mode.");
+                        "File store continuous reading does not support eventual consistency mode.");
     }
 }

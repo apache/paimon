@@ -22,6 +22,7 @@ import org.apache.paimon.flink.kafka.KafkaTableTestBase;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.table.api.TableResult;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,7 @@ import java.io.IOException;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for table with log system. */
 public class LogSystemITCase extends KafkaTableTestBase {
@@ -66,5 +68,122 @@ public class LogSystemITCase extends KafkaTableTestBase {
         assertThat(collect).hasSize(10);
         write.getJobClient().get().cancel();
         read.close();
+    }
+
+    @Test
+    public void testReadFromFile() throws Exception {
+        createTopicIfNotExists("test-double-sink", 1);
+        env.getCheckpointConfig().setCheckpointInterval(3 * 1000);
+        env.setParallelism(1);
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE kafka_file_double_sink (\n"
+                                + " word STRING ,\n"
+                                + "    cnt BIGINT,\n"
+                                + "      PRIMARY KEY (word) NOT ENFORCED\n"
+                                + ")\n"
+                                + "WITH (\n"
+                                + " 'merge-engine' = 'aggregation',\n"
+                                + "  'changelog-producer' = 'full-compaction',\n"
+                                + "    'log.system' = 'kafka',\n"
+                                + "    'streaming-read-mode'='file',\n"
+                                + "    'fields.cnt.aggregate-function' = 'sum',\n"
+                                + "    'kafka.bootstrap.servers' = '%s',\n"
+                                + "    'kafka.topic' = 'test-double-sink',\n"
+                                + "    'kafka.transaction.timeout.ms'='30000'\n"
+                                + "\n"
+                                + ");",
+                        getBootstrapServers()));
+        TableResult write =
+                tEnv.executeSql(
+                        "INSERT INTO kafka_file_double_sink values('a',1),('b',2),('c',3);");
+        BlockingIterator<Row, Row> read =
+                BlockingIterator.of(
+                        tEnv.executeSql("SELECT * FROM kafka_file_double_sink").collect());
+        assertThat(read.collect(3))
+                .containsExactlyInAnyOrder(Row.of("a", 1L), Row.of("b", 2L), Row.of("c", 3L));
+        write.getJobClient().get().cancel();
+        read.close();
+    }
+
+    @Test
+    public void testReadFromLog() throws Exception {
+        createTopicIfNotExists("test-single-sink", 1);
+        // disable checkpointing to test eventual
+        env.getCheckpointConfig().disableCheckpointing();
+        env.setParallelism(1);
+        // 'fields.cnt.aggregate-function' = 'sum' is miss will throw
+        // java.lang.UnsupportedOperationException: Aggregate function 'last_non_null_value' does
+        // not support retraction
+        // data will only be written to kafka
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE kafka_file_single_sink (\n"
+                                + " word STRING ,\n"
+                                + "    cnt BIGINT,\n"
+                                + "      PRIMARY KEY (word) NOT ENFORCED\n"
+                                + ")\n"
+                                + "WITH (\n"
+                                + " 'merge-engine' = 'aggregation',\n"
+                                + "    'changelog-producer' = 'full-compaction',\n"
+                                + "    'log.consistency' = 'eventual',\n"
+                                + "    'log.system' = 'kafka',\n"
+                                + "    'streaming-read-mode'='log',\n"
+                                + "    'kafka.bootstrap.servers' = '%s',\n"
+                                + "    'kafka.topic' = 'test-single-sink',\n"
+                                + "    'kafka.transaction.timeout.ms'='30000'\n"
+                                + "\n"
+                                + ");",
+                        getBootstrapServers()));
+        tEnv.executeSql(
+                "CREATE TEMPORARY TABLE word_table (\n"
+                        + "    word STRING\n"
+                        + ") WITH (\n"
+                        + "    'connector' = 'datagen',\n"
+                        + "    'fields.word.length' = '1'\n"
+                        + ");");
+        TableResult write =
+                tEnv.executeSql(
+                        "INSERT INTO kafka_file_single_sink SELECT word, COUNT(*) FROM word_table GROUP BY word;");
+        BlockingIterator<Row, Row> read =
+                BlockingIterator.of(
+                        tEnv.executeSql("SELECT * FROM kafka_file_single_sink").collect());
+        List<Row> collect = read.collect(10);
+        assertThat(collect).hasSize(10);
+        write.getJobClient().get().cancel();
+        read.close();
+    }
+
+    @Test
+    public void testReadFromLogWithOutSteamingReadMode() throws Exception {
+        createTopicIfNotExists("test-single-sink", 1);
+        env.setParallelism(1);
+
+        tEnv.executeSql(
+                "CREATE TABLE kafka_file_single_sink (\n"
+                        + " word STRING ,\n"
+                        + "    cnt BIGINT,\n"
+                        + "      PRIMARY KEY (word) NOT ENFORCED\n"
+                        + ")\n"
+                        + "WITH (\n"
+                        + " 'merge-engine' = 'aggregation',\n"
+                        + "    'changelog-producer' = 'full-compaction',\n"
+                        + "    'streaming-read-mode'='log'\n"
+                        + ");");
+        tEnv.executeSql(
+                "CREATE TEMPORARY TABLE word_table (\n"
+                        + "    word STRING\n"
+                        + ") WITH (\n"
+                        + "    'connector' = 'datagen',\n"
+                        + "    'fields.word.length' = '1'\n"
+                        + ");");
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                        "INSERT INTO kafka_file_single_sink SELECT word, COUNT(*) FROM word_table GROUP BY word;"))
+                .getRootCause()
+                .isInstanceOf(ValidationException.class)
+                .hasMessage(
+                        "File store continuous reading does not support the log streaming read mode.");
     }
 }
