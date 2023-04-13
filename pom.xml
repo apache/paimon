@@ -398,6 +398,7 @@ under the License.
                         <exclude>docs/static/js/anchor.min.js</exclude>
                         <exclude>docs/layouts/shortcodes/generated/**</exclude>
                         <exclude>**/*.svg</exclude>
+                        <exclude>**/dependency-reduced-pom.xml</exclude>
                         <!-- Bundled license files -->
                         <exclude>**/LICENSE*</exclude>
                         <!-- artifacts created during release process -->
@@ -594,8 +595,6 @@ under the License.
                             <shadeTestJar>true</shadeTestJar>
                             <shadedArtifactAttached>false</shadedArtifactAttached>
                             <createDependencyReducedPom>true</createDependencyReducedPom>
-                            <dependencyReducedPomLocation>${project.basedir}/target/dependency-reduced-pom.xml
-                            </dependencyReducedPomLocation>
                             <!-- Filters MUST be appended; merging filters does not work properly, see MSHADE-305 -->
                             <filters combine.children="append">
                                 <!-- Globally exclude log4j.properties from our JAR files. -->
@@ -651,6 +650,21 @@ under the License.
                 </executions>
             </plugin>
 
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <configuration>
+                    <filesets>
+                        <fileset>
+                            <directory>${project.basedir}</directory>
+                            <includes>
+                                <include>dependency-reduced-pom.xml</include>
+                            </includes>
+                        </fileset>
+                    </filesets>
+                </configuration>
+            </plugin>
+
             <!-- generate configuration docs -->
             <plugin>
                 <groupId>org.commonjava.maven.plugins</groupId>
@@ -683,6 +697,15 @@ under the License.
                     <dataFile>${project.build.directory}/jacoco.exec</dataFile>
                 </configuration>
                 <executions>
+                    <execution>
+                        <id>default-prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                        <configuration>
+                            <propertyName>surefireArgLine</propertyName>
+                        </configuration>
+                    </execution>
                     <execution>
                         <id>default-instrument</id>
                         <goals>
