@@ -568,6 +568,28 @@ public class CoreOptions implements Serializable {
                             "Only used to force TableScan to construct 'ContinuousCompactorStartingScanner' and "
                                     + "'ContinuousCompactorFollowUpScanner' for dedicated streaming compaction job.");
 
+    public static final ConfigOption<StreamingReadMode> STREAMING_READ_MODE =
+            key("streaming-read-mode")
+                    .enumType(StreamingReadMode.class)
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "The mode of streaming read that specifies to read the data of table file or log")
+                                    .linebreak()
+                                    .linebreak()
+                                    .text("Possible values:")
+                                    .linebreak()
+                                    .list(
+                                            text(
+                                                    StreamingReadMode.FILE.getValue()
+                                                            + ": Reads from the data of table file store."))
+                                    .list(
+                                            text(
+                                                    StreamingReadMode.LOG.getValue()
+                                                            + ": Read from the data of table log store."))
+                                    .build());
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -822,6 +844,10 @@ public class CoreOptions implements Serializable {
         return options.get(READ_BATCH_SIZE);
     }
 
+    public static StreamingReadMode streamReadType(Options options) {
+        return options.get(STREAMING_READ_MODE);
+    }
+
     /** Specifies the merge engine for table with primary key. */
     public enum MergeEngine implements DescribedEnum {
         DEDUPLICATE("deduplicate", "De-duplicate and keep the last row."),
@@ -1051,6 +1077,49 @@ public class CoreOptions implements Serializable {
                             value,
                             StringUtils.join(
                                     Arrays.stream(FileFormatType.values()).iterator(), ",")));
+        }
+    }
+
+    /** Specifies the type for streaming read. */
+    public enum StreamingReadMode implements DescribedEnum {
+        LOG("log", "Reads from the log store."),
+        FILE("file", "Reads from the file store.");
+
+        private final String value;
+        private final String description;
+
+        StreamingReadMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+
+        public String getValue() {
+            return value;
+        }
+
+        @VisibleForTesting
+        public static StreamingReadMode fromValue(String value) {
+            for (StreamingReadMode formatType : StreamingReadMode.values()) {
+                if (formatType.value.equals(value)) {
+                    return formatType;
+                }
+            }
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid format type %s, only support [%s]",
+                            value,
+                            StringUtils.join(
+                                    Arrays.stream(StreamingReadMode.values()).iterator(), ",")));
         }
     }
 
