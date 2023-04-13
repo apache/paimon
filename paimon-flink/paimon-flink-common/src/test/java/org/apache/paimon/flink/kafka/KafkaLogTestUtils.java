@@ -178,7 +178,8 @@ public class KafkaLogTestUtils {
                 changelogMode,
                 consistency,
                 RowType.of(new IntType(), new IntType()),
-                keyed ? new int[] {0} : new int[0]);
+                keyed ? new int[] {0} : new int[0],
+                new HashMap<>());
     }
 
     public static DynamicTableFactory.Context testContext(
@@ -187,12 +188,14 @@ public class KafkaLogTestUtils {
             LogChangelogMode changelogMode,
             LogConsistency consistency,
             RowType type,
-            int[] keys) {
+            int[] keys,
+            Map<String, String> dynamicOptions) {
         Map<String, String> options = new HashMap<>();
         options.put(LOG_CHANGELOG_MODE.key(), changelogMode.toString());
         options.put(LOG_CONSISTENCY.key(), consistency.toString());
         options.put(BOOTSTRAP_SERVERS.key(), servers);
         options.put(TOPIC.key(), UUID.randomUUID().toString());
+        options.putAll(dynamicOptions);
         return createContext(name, type, keys, options);
     }
 
