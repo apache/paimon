@@ -26,45 +26,68 @@ import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * A {@link ProcessFunction} to parse CDC change event to either {@link SchemaChange} or {@link
- * CdcRecord} and send them to different downstreams.
+ * CdcRecord} and send them to different side outputs according to table name.
  *
- * <p>This {@link ProcessFunction} can only handle records for a single constant table. To handle
- * records for different tables, see {@link CdcMultiTableParsingProcessFunction}.
+ * <p>This {@link ProcessFunction} can handle records for different tables at the same time.
  *
  * @param <T> CDC change event type
  */
-public class CdcParsingProcessFunction<T> extends ProcessFunction<T, CdcRecord> {
-
-    public static final OutputTag<SchemaChange> SCHEMA_CHANGE_OUTPUT_TAG =
-            new OutputTag<>("schema-change", TypeInformation.of(SchemaChange.class));
+public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, Void> {
 
     private final EventParser.Factory<T> parserFactory;
 
     private transient EventParser<T> parser;
+    private transient Map<String, OutputTag<SchemaChange>> schemaChangeOutputTags;
+    private transient Map<String, OutputTag<CdcRecord>> recordOutputTags;
 
-    public CdcParsingProcessFunction(EventParser.Factory<T> parserFactory) {
+    public CdcMultiTableParsingProcessFunction(EventParser.Factory<T> parserFactory) {
         this.parserFactory = parserFactory;
     }
 
     @Override
     public void open(Configuration parameters) throws Exception {
         parser = parserFactory.create();
+        schemaChangeOutputTags = new HashMap<>();
+        recordOutputTags = new HashMap<>();
     }
 
     @Override
-    public void processElement(T raw, Context context, Collector<CdcRecord> collector)
-            throws Exception {
+    public void processElement(T raw, Context context, Collector<Void> collector) throws Exception {
         parser.setRawEvent(raw);
+        String tableName = parser.tableName();
+
         if (parser.isSchemaChange()) {
             for (SchemaChange schemaChange : parser.getSchemaChanges()) {
-                context.output(SCHEMA_CHANGE_OUTPUT_TAG, schemaChange);
+                context.output(getSchemaChangeOutputTag(tableName), schemaChange);
             }
         } else {
             for (CdcRecord record : parser.getRecords()) {
-                collector.collect(record);
+                context.output(getRecordOutputTag(tableName), record);
             }
         }
+    }
+
+    private OutputTag<SchemaChange> getSchemaChangeOutputTag(String tableName) {
+        return schemaChangeOutputTags.computeIfAbsent(
+                tableName, CdcMultiTableParsingProcessFunction::createSchemaChangeOutputTag);
+    }
+
+    public static OutputTag<SchemaChange> createSchemaChangeOutputTag(String tableName) {
+        return new OutputTag<>(
+                "schema-change-" + tableName, TypeInformation.of(SchemaChange.class));
+    }
+
+    private OutputTag<CdcRecord> getRecordOutputTag(String tableName) {
+        return recordOutputTags.computeIfAbsent(
+                tableName, CdcMultiTableParsingProcessFunction::createRecordOutputTag);
+    }
+
+    public static OutputTag<CdcRecord> createRecordOutputTag(String tableName) {
+        return new OutputTag<>("record-" + tableName, TypeInformation.of(CdcRecord.class));
     }
 }

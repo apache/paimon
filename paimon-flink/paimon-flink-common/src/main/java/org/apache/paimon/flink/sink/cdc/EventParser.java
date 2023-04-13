@@ -32,6 +32,8 @@ public interface EventParser<T> {
 
     void setRawEvent(T rawEvent);
 
+    String tableName();
+
     boolean isSchemaChange();
 
     List<SchemaChange> getSchemaChanges();
