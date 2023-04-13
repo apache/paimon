@@ -25,16 +25,16 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.sink.cdc.EventParser;
-import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncTableSinkBuilder;
+import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.Preconditions;
 
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -44,26 +44,24 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * An {@link Action} which synchronize one or multiple MySQL tables into one Paimon table.
+ * An {@link Action} which synchronize the whole MySQL database into one Paimon database.
  *
- * <p>You should specify MySQL source table in {@code mySqlConfig}. See <a
+ * <p>You should specify MySQL source database in {@code mySqlConfig}. See <a
  * href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options">document
  * of flink-cdc-connectors</a> for detailed keys and values.
  *
- * <p>If the specified Paimon table does not exist, this action will automatically create the table.
- * Its schema will be derived from all specified MySQL tables. If the Paimon table already exists,
- * its schema will be compared against the schema of all specified MySQL tables.
+ * <p>For each MySQL table to be synchronized, if the corresponding Paimon table does not exist,
+ * this action will automatically create the table. Its schema will be derived from all specified
+ * MySQL tables. If the Paimon table already exists, its schema will be compared against the schema
+ * of all specified MySQL tables.
  *
  * <p>This action supports a limited number of schema changes. Unsupported schema changes will be
  * ignored. Currently supported schema changes includes:
@@ -83,43 +81,51 @@ import java.util.stream.Collectors;
  *       </ul>
  *       are supported. Other type changes will cause exceptions.
  * </ul>
+ *
+ * <p>This action creates a Paimon table sink for each Paimon table to be written, so this action is
+ * not very efficient in resource saving. We may optimize this action by merging all sinks into one
+ * instance in the future.
  */
-public class MySqlSyncTableAction implements Action {
+public class MySqlSyncDatabaseAction implements Action {
 
     private final Configuration mySqlConfig;
     private final String warehouse;
     private final String database;
-    private final String table;
-    private final List<String> partitionKeys;
-    private final List<String> primaryKeys;
     private final Map<String, String> paimonConfig;
 
-    MySqlSyncTableAction(
+    MySqlSyncDatabaseAction(
             Map<String, String> mySqlConfig,
             String warehouse,
             String database,
-            String table,
-            List<String> partitionKeys,
-            List<String> primaryKeys,
             Map<String, String> paimonConfig) {
         this.mySqlConfig = Configuration.fromMap(mySqlConfig);
         this.warehouse = warehouse;
         this.database = database;
-        this.table = table;
-        this.partitionKeys = partitionKeys;
-        this.primaryKeys = primaryKeys;
         this.paimonConfig = paimonConfig;
     }
 
     public void build(StreamExecutionEnvironment env) throws Exception {
+        Preconditions.checkArgument(
+                !mySqlConfig.contains(MySqlSourceOptions.TABLE_NAME),
+                MySqlSourceOptions.TABLE_NAME.key()
+                        + " cannot be set for mysql-sync-database. "
+                        + "If you want to sync several MySQL tables into one Paimon table, "
+                        + "use mysql-sync-table instead.");
+        List<MySqlSchema> mySqlSchemas = getMySqlSchemaList();
+        Preconditions.checkArgument(
+                mySqlSchemas.size() > 0,
+                "No tables found in MySQL database "
+                        + mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME)
+                        + ", or MySQL database does not exist.");
+
+        mySqlConfig.set(
+                MySqlSourceOptions.TABLE_NAME,
+                "("
+                        + mySqlSchemas.stream()
+                                .map(MySqlSchema::tableName)
+                                .collect(Collectors.joining("|"))
+                        + ")");
         MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig);
-        MySqlSchema mySqlSchema =
-                getMySqlSchemaList().stream()
-                        .reduce(MySqlSchema::merge)
-                        .orElseThrow(
-                                () ->
-                                        new RuntimeException(
-                                                "No table satisfies the given database name and table name"));
 
         Catalog catalog =
                 CatalogFactory.createCatalog(
@@ -127,17 +133,24 @@ public class MySqlSyncTableAction implements Action {
                                 new Options().set(CatalogOptions.WAREHOUSE, warehouse)));
         catalog.createDatabase(database, true);
 
-        Identifier identifier = new Identifier(database, table);
-        FileStoreTable table;
-        try {
-            table = (FileStoreTable) catalog.getTable(identifier);
-            MySqlActionUtils.assertSchemaCompatible(table.schema(), mySqlSchema);
-        } catch (Catalog.TableNotExistException e) {
-            Schema schema =
-                    MySqlActionUtils.buildPaimonSchema(
-                            mySqlSchema, partitionKeys, primaryKeys, paimonConfig);
-            catalog.createTable(identifier, schema, false);
-            table = (FileStoreTable) catalog.getTable(identifier);
+        List<FileStoreTable> fileStoreTables = new ArrayList<>();
+        for (MySqlSchema mySqlSchema : mySqlSchemas) {
+            Identifier identifier = new Identifier(database, mySqlSchema.tableName());
+            FileStoreTable table;
+            try {
+                table = (FileStoreTable) catalog.getTable(identifier);
+                MySqlActionUtils.assertSchemaCompatible(table.schema(), mySqlSchema);
+            } catch (Catalog.TableNotExistException e) {
+                Schema schema =
+                        MySqlActionUtils.buildPaimonSchema(
+                                mySqlSchema,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                paimonConfig);
+                catalog.createTable(identifier, schema, false);
+                table = (FileStoreTable) catalog.getTable(identifier);
+            }
+            fileStoreTables.add(table);
         }
 
         EventParser.Factory<String> parserFactory;
@@ -148,13 +161,13 @@ public class MySqlSyncTableAction implements Action {
             parserFactory = MySqlDebeziumJsonEventParser::new;
         }
 
-        FlinkCdcSyncTableSinkBuilder<String> sinkBuilder =
-                new FlinkCdcSyncTableSinkBuilder<String>()
+        FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
+                new FlinkCdcSyncDatabaseSinkBuilder<String>()
                         .withInput(
                                 env.fromSource(
                                         source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
                         .withParserFactory(parserFactory)
-                        .withTable(table);
+                        .withTables(fileStoreTables);
         String sinkParallelism = paimonConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
@@ -163,27 +176,18 @@ public class MySqlSyncTableAction implements Action {
     }
 
     private List<MySqlSchema> getMySqlSchemaList() throws Exception {
-        Pattern databasePattern =
-                Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME));
-        Pattern tablePattern = Pattern.compile(mySqlConfig.get(MySqlSourceOptions.TABLE_NAME));
+        String databaseName = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME);
         List<MySqlSchema> mySqlSchemaList = new ArrayList<>();
         try (Connection conn = MySqlActionUtils.getConnection(mySqlConfig)) {
             DatabaseMetaData metaData = conn.getMetaData();
-            try (ResultSet schemas = metaData.getCatalogs()) {
-                while (schemas.next()) {
-                    String databaseName = schemas.getString("TABLE_CAT");
-                    Matcher databaseMatcher = databasePattern.matcher(databaseName);
-                    if (databaseMatcher.matches()) {
-                        try (ResultSet tables = metaData.getTables(databaseName, null, "%", null)) {
-                            while (tables.next()) {
-                                String tableName = tables.getString("TABLE_NAME");
-                                Matcher tableMatcher = tablePattern.matcher(tableName);
-                                if (tableMatcher.matches()) {
-                                    mySqlSchemaList.add(
-                                            new MySqlSchema(metaData, databaseName, tableName));
-                                }
-                            }
-                        }
+            try (ResultSet tables =
+                    metaData.getTables(databaseName, null, "%", new String[] {"TABLE"})) {
+                while (tables.next()) {
+                    String tableName = tables.getString("TABLE_NAME");
+                    MySqlSchema mySqlSchema = new MySqlSchema(metaData, databaseName, tableName);
+                    if (mySqlSchema.primaryKeys().size() > 0) {
+                        // only tables with primary keys will be considered
+                        mySqlSchemaList.add(mySqlSchema);
                     }
                 }
             }
@@ -203,24 +207,8 @@ public class MySqlSyncTableAction implements Action {
             return Optional.empty();
         }
 
-        Tuple3<String, String, String> tablePath = Action.getTablePath(params);
-        if (tablePath == null) {
-            return Optional.empty();
-        }
-
-        List<String> partitionKeys = Collections.emptyList();
-        if (params.has("partition-keys")) {
-            partitionKeys =
-                    Arrays.stream(params.get("partition-keys").split(","))
-                            .collect(Collectors.toList());
-        }
-
-        List<String> primaryKeys = Collections.emptyList();
-        if (params.has("primary-keys")) {
-            primaryKeys =
-                    Arrays.stream(params.get("primary-keys").split(","))
-                            .collect(Collectors.toList());
-        }
+        String warehouse = params.get("warehouse");
+        String database = params.get("database");
 
         Map<String, String> mySqlConfig = getConfigMap(params, "mysql-conf");
         Map<String, String> paimonConfig = getConfigMap(params, "paimon-conf");
@@ -229,14 +217,7 @@ public class MySqlSyncTableAction implements Action {
         }
 
         return Optional.of(
-                new MySqlSyncTableAction(
-                        mySqlConfig,
-                        tablePath.f0,
-                        tablePath.f1,
-                        tablePath.f2,
-                        partitionKeys,
-                        primaryKeys,
-                        paimonConfig));
+                new MySqlSyncDatabaseAction(mySqlConfig, warehouse, database, paimonConfig));
     }
 
     private static Map<String, String> getConfigMap(MultipleParameterTool params, String key) {
@@ -250,7 +231,7 @@ public class MySqlSyncTableAction implements Action {
             }
 
             System.err.println(
-                    "Invalid " + key + " " + param + ".\nRun mysql-sync-table --help for help.");
+                    "Invalid " + key + " " + param + ".\nRun mysql-sync-database --help for help.");
             return null;
         }
         return map;
@@ -258,37 +239,28 @@ public class MySqlSyncTableAction implements Action {
 
     private static void printHelp() {
         System.out.println(
-                "Action \"mysql-sync-table\" creates a streaming job "
-                        + "with a Flink MySQL CDC source and a Paimon table sink to consume CDC events.");
+                "Action \"mysql-sync-database\" creates a streaming job "
+                        + "with a Flink MySQL CDC source and multiple Paimon table sinks "
+                        + "to synchronize a whole MySQL database into one Paimon database.\n"
+                        + "Only MySQL tables with primary keys will be considered. "
+                        + "Newly created MySQL tables after the job starts will not be included.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  mysql-sync-table --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> "
-                        + "[--partition-keys <partition-keys>] "
-                        + "[--primary-keys <primary-keys>] "
+                "  mysql-sync-database --warehouse <warehouse-path> --database <database-name> "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--paimon-conf <paimon-table-sink-conf> [--paimon-conf <paimon-table-sink-conf> ...]]");
-        System.out.println();
-
-        System.out.println("Partition keys syntax:");
-        System.out.println("  key1,key2,...");
-        System.out.println(
-                "If partition key is not defined and the specified Paimon table does not exist, "
-                        + "this action will automatically create an unpartitioned Paimon table.");
-        System.out.println();
-
-        System.out.println("Primary keys syntax:");
-        System.out.println("  key1,key2,...");
-        System.out.println("Primary keys will be derived from MySQL tables if not specified.");
         System.out.println();
 
         System.out.println("MySQL CDC source conf syntax:");
         System.out.println("  key=value");
         System.out.println(
-                "'hostname', 'username', 'password', 'database-name' and 'table-name' "
-                        + "are required configurations, others are optional.");
+                "'hostname', 'username', 'password' and 'database-name' "
+                        + "are required configurations, others are optional. "
+                        + "Note that 'database-name' should be the exact name "
+                        + "of the MySQL databse you want to synchronize. "
+                        + "It can't be a regular expression.");
         System.out.println(
                 "For a complete list of supported configurations, "
                         + "see https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options");
@@ -296,6 +268,7 @@ public class MySqlSyncTableAction implements Action {
 
         System.out.println("Paimon table sink conf syntax:");
         System.out.println("  key=value");
+        System.out.println("All Paimon sink table will be applied the same set of configurations.");
         System.out.println(
                 "For a complete list of supported configurations, "
                         + "see https://paimon.apache.org/docs/master/maintenance/configurations/");
@@ -303,17 +276,13 @@ public class MySqlSyncTableAction implements Action {
 
         System.out.println("Examples:");
         System.out.println(
-                "  mysql-sync-table \\\n"
+                "  mysql-sync-database \\\n"
                         + "    --warehouse hdfs:///path/to/warehouse \\\n"
                         + "    --database test_db \\\n"
-                        + "    --table test_table \\\n"
-                        + "    --partition-keys pt \\\n"
-                        + "    --primary-keys pt,uid \\\n"
                         + "    --mysql-conf hostname=127.0.0.1 \\\n"
                         + "    --mysql-conf username=root \\\n"
                         + "    --mysql-conf password=123456 \\\n"
                         + "    --mysql-conf database-name=source_db \\\n"
-                        + "    --mysql-conf table-name='source_table_.*' \\\n"
                         + "    --paimon-conf bucket=4 \\\n"
                         + "    --paimon-conf changelog-producer=input \\\n"
                         + "    --paimon-conf sink.parallelism=4");
@@ -323,6 +292,6 @@ public class MySqlSyncTableAction implements Action {
     public void run() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         build(env);
-        env.execute(String.format("MySQL-Paimon Table Sync: %s.%s", database, table));
+        env.execute(String.format("MySQL-Paimon Database Sync: %s", database));
     }
 }

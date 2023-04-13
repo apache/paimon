@@ -16,16 +16,16 @@
 
 -- In production you would almost certainly limit the replication user must be on the follower (slave) machine,
 -- to prevent other clients accessing the log from other machines. For example, 'replicator'@'follower.acme.com'.
--- However, in this database we'll grant 2 users different privileges:
+-- However, in this database we'll grant the test user 'paimonuser' all privileges:
 --
--- 1) 'paimonuser' - all privileges required by the snapshot reader AND binlog reader (used for testing)
--- 2) 'mysqluser' - all privileges
---
-GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT, LOCK TABLES  ON *.* TO 'paimonuser'@'%';
-CREATE USER 'mysqluser' IDENTIFIED BY 'mysqlpw';
-GRANT ALL PRIVILEGES ON *.* TO 'mysqluser'@'%';
+GRANT ALL PRIVILEGES ON *.* TO 'paimonuser'@'%';
 
-USE paimon_test;
+-- ################################################################################
+--  MySqlCdcE2eTestBase#testSyncTable
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_table;
+USE paimon_sync_table;
 
 CREATE TABLE schema_evolution_1 (
     pt INT,
@@ -39,4 +39,24 @@ CREATE TABLE schema_evolution_2 (
     _id INT,
     v1 VARCHAR(10),
     PRIMARY KEY (_id)
+);
+
+-- ################################################################################
+--  MySqlCdcE2eTestBase#testSyncDatabase
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database;
+USE paimon_sync_database;
+
+CREATE TABLE t1 (
+    k INT,
+    v INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k1 INT,
+    k2 VARCHAR(10),
+    v1 INT,
+    PRIMARY KEY (k1, k2)
 );
