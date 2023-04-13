@@ -141,4 +141,32 @@ public class FileStorePathFactory {
     public String uuid() {
         return uuid;
     }
+
+    public PathFactory manifestFileFactory() {
+        return new PathFactory() {
+            @Override
+            public Path newPath() {
+                return newManifestFile();
+            }
+
+            @Override
+            public Path toPath(String fileName) {
+                return toManifestFilePath(fileName);
+            }
+        };
+    }
+
+    public PathFactory manifestListFactory() {
+        return new PathFactory() {
+            @Override
+            public Path newPath() {
+                return newManifestList();
+            }
+
+            @Override
+            public Path toPath(String fileName) {
+                return toManifestListPath(fileName);
+            }
+        };
+    }
 }

@@ -26,10 +26,14 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.FileStoreExpireImpl;
 import org.apache.paimon.operation.PartitionExpire;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
+
+import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.Comparator;
@@ -47,6 +51,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final CoreOptions options;
     protected final RowType partitionType;
 
+    @Nullable private final SegmentsCache<String> manifestCache;
+
     public AbstractFileStore(
             FileIO fileIO,
             SchemaManager schemaManager,
@@ -58,6 +64,11 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
         this.schemaId = schemaId;
         this.options = options;
         this.partitionType = partitionType;
+        MemorySize manifestCacheSize = options.manifestCacheSize();
+        this.manifestCache =
+                manifestCacheSize.getBytes() == 0
+                        ? null
+                        : new SegmentsCache<>(options.pageSize(), manifestCacheSize);
     }
 
     public FileStorePathFactory pathFactory() {
@@ -81,13 +92,14 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 partitionType,
                 options.manifestFormat(),
                 pathFactory(),
-                options.manifestTargetSize().getBytes());
+                options.manifestTargetSize().getBytes(),
+                manifestCache);
     }
 
     @VisibleForTesting
     public ManifestList.Factory manifestListFactory() {
         return new ManifestList.Factory(
-                fileIO, partitionType, options.manifestFormat(), pathFactory());
+                fileIO, options.manifestFormat(), pathFactory(), manifestCache);
     }
 
     @Override

@@ -27,44 +27,32 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.FileUtils;
+import org.apache.paimon.utils.ObjectsFile;
+import org.apache.paimon.utils.PathFactory;
+import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
-import java.io.IOException;
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /**
  * This file includes several {@link ManifestFileMeta}, representing all data of the whole table at
  * the corresponding snapshot.
  */
-public class ManifestList {
+public class ManifestList extends ObjectsFile<ManifestFileMeta> {
 
-    private final FileIO fileIO;
-    private final ManifestFileMetaSerializer serializer;
-    private final FormatReaderFactory readerFactory;
     private final FormatWriterFactory writerFactory;
-    private final FileStorePathFactory pathFactory;
 
     private ManifestList(
             FileIO fileIO,
             ManifestFileMetaSerializer serializer,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
-            FileStorePathFactory pathFactory) {
-        this.fileIO = fileIO;
-        this.serializer = serializer;
-        this.readerFactory = readerFactory;
+            PathFactory pathFactory,
+            @Nullable SegmentsCache<String> cache) {
+        super(fileIO, serializer, readerFactory, pathFactory, cache);
         this.writerFactory = writerFactory;
-        this.pathFactory = pathFactory;
-    }
-
-    public List<ManifestFileMeta> read(String fileName) {
-        try {
-            return FileUtils.readListFromFile(
-                    fileIO, pathFactory.toManifestListPath(fileName), serializer, readerFactory);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to read manifest list " + fileName, e);
-        }
     }
 
     /**
@@ -73,9 +61,20 @@ public class ManifestList {
      * <p>NOTE: This method is atomic.
      */
     public String write(List<ManifestFileMeta> metas) {
-        Path path = pathFactory.newManifestList();
+        Path path = pathFactory.newPath();
         try {
-            return write(metas, path);
+            try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
+                FormatWriter writer = writerFactory.create(out);
+                try {
+                    for (ManifestFileMeta record : metas) {
+                        writer.addElement(serializer.toRow(record));
+                    }
+                } finally {
+                    writer.flush();
+                    writer.finish();
+                }
+            }
+            return path.getName();
         } catch (Throwable e) {
             fileIO.deleteQuietly(path);
             throw new RuntimeException(
@@ -83,43 +82,23 @@ public class ManifestList {
         }
     }
 
-    private String write(List<ManifestFileMeta> metas, Path path) throws IOException {
-        try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
-            // Initialize the bulk writer to accept the ManifestFileMeta.
-            FormatWriter writer = writerFactory.create(out);
-            try {
-                for (ManifestFileMeta manifest : metas) {
-                    writer.addElement(serializer.toRow(manifest));
-                }
-            } finally {
-                writer.flush();
-                writer.finish();
-            }
-        }
-        return path.getName();
-    }
-
-    public void delete(String fileName) {
-        fileIO.deleteQuietly(pathFactory.toManifestListPath(fileName));
-    }
-
     /** Creator of {@link ManifestList}. */
     public static class Factory {
 
         private final FileIO fileIO;
-        private final RowType partitionType;
         private final FileFormat fileFormat;
         private final FileStorePathFactory pathFactory;
+        @Nullable private final SegmentsCache<String> cache;
 
         public Factory(
                 FileIO fileIO,
-                RowType partitionType,
                 FileFormat fileFormat,
-                FileStorePathFactory pathFactory) {
+                FileStorePathFactory pathFactory,
+                @Nullable SegmentsCache<String> cache) {
             this.fileIO = fileIO;
-            this.partitionType = partitionType;
             this.fileFormat = fileFormat;
             this.pathFactory = pathFactory;
+            this.cache = cache;
         }
 
         public ManifestList create() {
@@ -129,7 +108,8 @@ public class ManifestList {
                     new ManifestFileMetaSerializer(),
                     fileFormat.createReaderFactory(metaType),
                     fileFormat.createWriterFactory(metaType),
-                    pathFactory);
+                    pathFactory.manifestFileFactory(),
+                    cache);
         }
     }
 }
