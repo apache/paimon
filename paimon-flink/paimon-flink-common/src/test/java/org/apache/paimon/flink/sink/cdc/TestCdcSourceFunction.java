@@ -18,9 +18,6 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.SerializableFunction;
-
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
@@ -28,11 +25,10 @@ import org.apache.flink.runtime.state.FunctionSnapshotContext;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunction;
 
-import java.util.Arrays;
+import java.util.Collection;
 import java.util.LinkedList;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
 /**
  * Testing {@link RichParallelSourceFunction} to produce {@link TestCdcEvent}. {@link TestCdcEvent}s
@@ -44,17 +40,14 @@ public class TestCdcSourceFunction extends RichParallelSourceFunction<TestCdcEve
     private static final long serialVersionUID = 1L;
 
     private final LinkedList<TestCdcEvent> events;
-    private final SerializableFunction<CdcRecord, Integer> getKeyHash;
 
     private volatile boolean isRunning = true;
     private transient int numRecordsPerCheckpoint;
     private transient AtomicInteger recordsThisCheckpoint;
     private transient ListState<Integer> remainingEventsCount;
 
-    public TestCdcSourceFunction(
-            TestCdcEvent[] events, SerializableFunction<CdcRecord, Integer> getKeyHash) {
-        this.events = Arrays.stream(events).collect(Collectors.toCollection(LinkedList::new));
-        this.getKeyHash = getKeyHash;
+    public TestCdcSourceFunction(Collection<TestCdcEvent> events) {
+        this.events = new LinkedList<>(events);
     }
 
     @Override
@@ -95,18 +88,9 @@ public class TestCdcSourceFunction extends RichParallelSourceFunction<TestCdcEve
             synchronized (ctx.getCheckpointLock()) {
                 TestCdcEvent event = events.poll();
                 if (event.records() != null) {
-                    for (int i = 0; i + 1 < event.records().size(); i++) {
-                        Preconditions.checkArgument(
-                                getKeyHash
-                                        .apply(event.records().get(i))
-                                        .equals(getKeyHash.apply(event.records().get(i + 1))),
-                                "Key hashes in the same List<Record> are not equal."
-                                        + "This is an invalid test data.");
-                    }
-                    int hash = getKeyHash.apply(event.records().get(0));
                     int subtaskId = getRuntimeContext().getIndexOfThisSubtask();
                     int totalSubtasks = getRuntimeContext().getNumberOfParallelSubtasks();
-                    if (Math.abs(hash) % totalSubtasks != subtaskId) {
+                    if (Math.abs(event.hashCode()) % totalSubtasks != subtaskId) {
                         continue;
                     }
                 }

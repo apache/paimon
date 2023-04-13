@@ -34,6 +34,11 @@ public class TestCdcEventParser implements EventParser<TestCdcEvent> {
     }
 
     @Override
+    public String tableName() {
+        return raw.tableName();
+    }
+
+    @Override
     public boolean isSchemaChange() {
         return raw.schemaChange() != null;
     }

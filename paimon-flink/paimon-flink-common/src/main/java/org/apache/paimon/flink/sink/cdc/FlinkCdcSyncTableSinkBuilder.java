@@ -34,11 +34,11 @@ import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import javax.annotation.Nullable;
 
 /**
- * Builder for {@link FlinkCdcSink}.
+ * Builder for {@link FlinkCdcSink} when syncing multiple database tables into one Paimon table.
  *
  * @param <T> CDC change event type
  */
-public class FlinkCdcSinkBuilder<T> {
+public class FlinkCdcSyncTableSinkBuilder<T> {
 
     private DataStream<T> input = null;
     private EventParser.Factory<T> parserFactory = null;
@@ -47,27 +47,27 @@ public class FlinkCdcSinkBuilder<T> {
 
     @Nullable private Integer parallelism;
 
-    public FlinkCdcSinkBuilder<T> withInput(DataStream<T> input) {
+    public FlinkCdcSyncTableSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
         return this;
     }
 
-    public FlinkCdcSinkBuilder<T> withParserFactory(EventParser.Factory<T> parserFactory) {
+    public FlinkCdcSyncTableSinkBuilder<T> withParserFactory(EventParser.Factory<T> parserFactory) {
         this.parserFactory = parserFactory;
         return this;
     }
 
-    public FlinkCdcSinkBuilder<T> withTable(FileStoreTable table) {
+    public FlinkCdcSyncTableSinkBuilder<T> withTable(FileStoreTable table) {
         this.table = table;
         return this;
     }
 
-    public FlinkCdcSinkBuilder<T> withLockFactory(Lock.Factory lockFactory) {
+    public FlinkCdcSyncTableSinkBuilder<T> withLockFactory(Lock.Factory lockFactory) {
         this.lockFactory = lockFactory;
         return this;
     }
 
-    public FlinkCdcSinkBuilder<T> withParallelism(@Nullable Integer parallelism) {
+    public FlinkCdcSyncTableSinkBuilder<T> withParallelism(@Nullable Integer parallelism) {
         this.parallelism = parallelism;
         return this;
     }
@@ -89,6 +89,7 @@ public class FlinkCdcSinkBuilder<T> {
                                 new SchemaChangeProcessFunction(
                                         new SchemaManager(table.fileIO(), table.location())));
         schemaChangeProcessFunction.getTransformation().setParallelism(1);
+        schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
 
         BucketingStreamPartitioner<CdcRecord> partitioner =
                 new BucketingStreamPartitioner<>(new CdcRecordChannelComputer(table.schema()));
