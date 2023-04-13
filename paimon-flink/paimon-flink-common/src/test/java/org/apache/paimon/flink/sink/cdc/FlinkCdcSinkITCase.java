@@ -42,6 +42,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.TraceableFileIO;
 
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
@@ -72,11 +73,10 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         int numEvents = random.nextInt(1500) + 1;
-        int numSchemaChanges = random.nextInt(10) + 1;
+        int numSchemaChanges = Math.min(numEvents / 2, random.nextInt(10) + 1);
         int numPartitions = random.nextInt(3) + 1;
         int numKeys = random.nextInt(150) + 1;
         int numBucket = random.nextInt(5) + 1;
-        boolean shuffleByPartitionEnable = random.nextBoolean();
         boolean enableFailure = random.nextBoolean();
 
         TestCdcEvent[] events = new TestCdcEvent[numEvents];
@@ -160,11 +160,14 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
                                 new String[] {"pt", "k", "v0"}),
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "k"),
-                        numBucket,
-                        shuffleByPartitionEnable);
+                        numBucket);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.getCheckpointConfig().setCheckpointInterval(100);
+        if (!enableFailure) {
+            env.setRestartStrategy(RestartStrategies.noRestart());
+        }
+
         TestCdcSourceFunction sourceFunction =
                 new TestCdcSourceFunction(
                         events, record -> Integer.valueOf(record.fields().get("k")));
@@ -218,8 +221,7 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
             RowType rowType,
             List<String> partitions,
             List<String> primaryKeys,
-            int numBucket,
-            boolean shuffleByPartitionEnable)
+            int numBucket)
             throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.BUCKET, numBucket);
