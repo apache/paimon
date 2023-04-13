@@ -124,6 +124,13 @@ public class ParquetSplitReaderUtil {
                                 descriptors.get(0),
                                 pages.getPageReader(descriptors.get(0)),
                                 ((DecimalType) fieldType).getPrecision());
+                    default:
+                        throw new UnsupportedOperationException(
+                                "Unsupported primitive type: "
+                                        + descriptors
+                                                .get(0)
+                                                .getPrimitiveType()
+                                                .getPrimitiveTypeName());
                 }
             case ARRAY:
                 return new ArrayColumnReader(

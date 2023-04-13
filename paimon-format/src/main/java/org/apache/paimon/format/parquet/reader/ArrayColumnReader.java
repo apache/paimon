@@ -166,12 +166,16 @@ public class ArrayColumnReader extends BaseVectorizedColumnReader {
                     case BINARY:
                     case FIXED_LEN_BYTE_ARRAY:
                         return dataColumn.readBytes();
+                    default:
+                        throw new UnsupportedOperationException(
+                                "Unsupported primitive type: "
+                                        + descriptor.getPrimitiveType().getPrimitiveTypeName());
                 }
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 return dataColumn.readTimestamp();
             default:
-                throw new RuntimeException("Unsupported type in the list: " + type);
+                throw new UnsupportedOperationException("Unsupported type in the list: " + type);
         }
     }
 
@@ -211,6 +215,10 @@ public class ArrayColumnReader extends BaseVectorizedColumnReader {
                     case FIXED_LEN_BYTE_ARRAY:
                     case BINARY:
                         return dictionary.readBytes(dictionaryValue);
+                    default:
+                        throw new UnsupportedOperationException(
+                                "Unsupported primitive type: "
+                                        + descriptor.getPrimitiveType().getPrimitiveTypeName());
                 }
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
