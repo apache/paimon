@@ -28,16 +28,12 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -49,21 +45,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
-/** IT cases for {@link FlinkCdcSink}. */
-public class FlinkCdcSinkITCase extends AbstractTestBase {
+/** IT cases for {@link FlinkCdcSyncTableSinkBuilder}. */
+public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -79,63 +68,8 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
         int numBucket = random.nextInt(5) + 1;
         boolean enableFailure = random.nextBoolean();
 
-        TestCdcEvent[] events = new TestCdcEvent[numEvents];
-
-        Set<Integer> schemaChangePositions = new HashSet<>();
-        for (int i = 0; i < numSchemaChanges; i++) {
-            int pos;
-            do {
-                pos = random.nextInt(numEvents);
-            } while (schemaChangePositions.contains(pos));
-            schemaChangePositions.add(pos);
-        }
-
-        Map<Integer, Map<String, String>> expected = new HashMap<>();
-        List<String> fieldNames = new ArrayList<>();
-        List<Boolean> isBigInt = new ArrayList<>();
-        fieldNames.add("v0");
-        isBigInt.add(false);
-        int suffixId = 0;
-        for (int i = 0; i < numEvents; i++) {
-            if (schemaChangePositions.contains(i)) {
-                if (random.nextBoolean()) {
-                    int idx = random.nextInt(fieldNames.size());
-                    isBigInt.set(idx, true);
-                    events[i] =
-                            new TestCdcEvent(
-                                    SchemaChange.updateColumnType(
-                                            fieldNames.get(idx), DataTypes.BIGINT()));
-                } else {
-                    suffixId++;
-                    String newName = "v" + suffixId;
-                    fieldNames.add(newName);
-                    isBigInt.add(false);
-                    events[i] = new TestCdcEvent(SchemaChange.addColumn(newName, DataTypes.INT()));
-                }
-            } else {
-                Map<String, String> fields = new HashMap<>();
-                int key = random.nextInt(numKeys);
-                fields.put("k", String.valueOf(key));
-                int pt = key % numPartitions;
-                fields.put("pt", String.valueOf(pt));
-                for (int j = 0; j < fieldNames.size(); j++) {
-                    String fieldName = fieldNames.get(j);
-                    if (isBigInt.get(j)) {
-                        fields.put(fieldName, String.valueOf(random.nextLong()));
-                    } else {
-                        fields.put(fieldName, String.valueOf(random.nextInt()));
-                    }
-                }
-
-                List<CdcRecord> records = new ArrayList<>();
-                if (expected.containsKey(key)) {
-                    records.add(new CdcRecord(RowKind.DELETE, expected.get(key)));
-                }
-                records.add(new CdcRecord(RowKind.INSERT, fields));
-                events[i] = new TestCdcEvent(records);
-                expected.put(key, fields);
-            }
-        }
+        TestTable testTable =
+                new TestTable("test_tbl", numEvents, numSchemaChanges, numPartitions, numKeys);
 
         Path tablePath;
         FileIO fileIO;
@@ -155,9 +89,7 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
                 createFileStoreTable(
                         tablePath,
                         fileIO,
-                        RowType.of(
-                                new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
-                                new String[] {"pt", "k", "v0"}),
+                        testTable.initialRowType(),
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "k"),
                         numBucket);
@@ -168,12 +100,10 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
             env.setRestartStrategy(RestartStrategies.noRestart());
         }
 
-        TestCdcSourceFunction sourceFunction =
-                new TestCdcSourceFunction(
-                        events, record -> Integer.valueOf(record.fields().get("k")));
+        TestCdcSourceFunction sourceFunction = new TestCdcSourceFunction(testTable.events());
         DataStreamSource<TestCdcEvent> source = env.addSource(sourceFunction);
         source.setParallelism(2);
-        new FlinkCdcSinkBuilder<TestCdcEvent>()
+        new FlinkCdcSyncTableSinkBuilder<TestCdcEvent>()
                 .withInput(source)
                 .withParserFactory(TestCdcEventParser::new)
                 .withTable(table)
@@ -192,27 +122,11 @@ public class FlinkCdcSinkITCase extends AbstractTestBase {
         SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
         TableSchema schema = schemaManager.latest().get();
 
-        Map<Integer, Map<String, String>> actual = new HashMap<>();
         TableScan.Plan plan = table.newScan().plan();
         try (RecordReaderIterator<InternalRow> it =
                 new RecordReaderIterator<>(table.newRead().createReader(plan))) {
-            while (it.hasNext()) {
-                InternalRow row = it.next();
-                Map<String, String> fields = new HashMap<>();
-                for (int i = 0; i < schema.fieldNames().size(); i++) {
-                    if (!row.isNullAt(i)) {
-                        fields.put(
-                                schema.fieldNames().get(i),
-                                String.valueOf(
-                                        schema.fields().get(i).type().equals(DataTypes.BIGINT())
-                                                ? row.getLong(i)
-                                                : row.getInt(i)));
-                    }
-                }
-                actual.put(Integer.valueOf(fields.get("k")), fields);
-            }
+            testTable.assertResult(schema, it);
         }
-        assertThat(actual).isEqualTo(expected);
     }
 
     private FileStoreTable createFileStoreTable(
