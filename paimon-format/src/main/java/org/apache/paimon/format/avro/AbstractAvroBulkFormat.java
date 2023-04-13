@@ -23,7 +23,6 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.IteratorResultIterator;
 import org.apache.paimon.utils.Pool;
 
@@ -107,14 +106,11 @@ public abstract class AbstractAvroBulkFormat<A> implements FormatReaderFactory {
 
         private DataFileReader<A> createReaderFromPath(Path path) throws IOException {
             DatumReader<A> datumReader = new GenericDatumReader<>(null, readerSchema);
-            SeekableInput in =
+
+            try (SeekableInput in =
                     new SeekableInputStreamWrapper(
-                            fileIO.newInputStream(path), fileIO.getFileSize(path));
-            try {
+                            fileIO.newInputStream(path), fileIO.getFileSize(path))) {
                 return (DataFileReader<A>) DataFileReader.openReader(in, datumReader);
-            } catch (Throwable e) {
-                IOUtils.closeQuietly(in);
-                throw e;
             }
         }
 

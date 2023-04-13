@@ -157,6 +157,8 @@ public class MySqlSyncTableAction implements Action {
             Schema schema = buildSchema(mySqlSchema);
             catalog.createTable(identifier, schema, false);
             table = (FileStoreTable) catalog.getTable(identifier);
+        } finally {
+            catalog.close();
         }
 
         EventParser.Factory<String> parserFactory;
