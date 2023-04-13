@@ -54,7 +54,10 @@ import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
+import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_MODE;
+import static org.apache.paimon.CoreOptions.StartupMode.FROM_SNAPSHOT;
+import static org.apache.paimon.CoreOptions.StartupMode.FROM_SNAPSHOT_FULL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.NONE;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
@@ -118,6 +121,12 @@ public abstract class AbstractFlinkTableFactory
             // Use file store continuous reading
             validateFileStoreContinuous(configOptions);
             return Optional.empty();
+        } else if (configOptions.get(SCAN_MODE) == FROM_SNAPSHOT
+                || configOptions.get(SCAN_MODE) == FROM_SNAPSHOT_FULL) {
+            throw new ValidationException(
+                    String.format(
+                            "Log system does not support %s and %s scan mode",
+                            FROM_SNAPSHOT, FROM_SNAPSHOT_FULL));
         }
 
         return Optional.of(discoverLogStoreFactory(classLoader, configOptions.get(LOG_SYSTEM)));
