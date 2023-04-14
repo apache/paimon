@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.flink.table.catalog.exceptions.*;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
@@ -26,6 +25,9 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.InternalRowUtils;
 
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.catalog.AbstractCatalog;
@@ -38,17 +40,22 @@ import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.CatalogTableImpl;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.exceptions.CatalogException;
+import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
+import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
+import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
+import org.apache.flink.table.catalog.exceptions.FunctionNotExistException;
+import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
+import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
+import org.apache.flink.table.catalog.exceptions.TableNotExistException;
+import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.types.logical.RowType;
-import org.apache.paimon.table.source.Split;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.InternalRowUtils;
 
-import javax.xml.crypto.Data;
 import java.io.IOException;
 import java.util.*;
 
@@ -406,7 +413,7 @@ public class FlinkCatalog extends AbstractCatalog {
         }
 
         List<String> partitionKeys = table.partitionKeys();
-        if(partitionKeys.size() == 0) {
+        if (partitionKeys.size() == 0) {
             throw new TableNotPartitionedException(this.getName(), tablePath);
         }
 
@@ -423,19 +430,29 @@ public class FlinkCatalog extends AbstractCatalog {
 
         try {
             List<Split> splits = table.newReadBuilder().newScan().plan().splits();
-            table.newReadBuilder().newRead()
+            table.newReadBuilder()
+                    .newRead()
                     .createReader(splits)
-                    .forEachRemaining(row -> {
-                        Map<String, String> map = new HashMap<>();
-                        for (String partitionKey : partitionKeys) {
-                            DataType partitionType = partitionKeysType.get(partitionKey);
-                            Integer partitionPosition = partitionKeysPosition.get(partitionKey);
-                            map.put(partitionKey, String.valueOf(InternalRowUtils.get(row, partitionPosition, partitionType)));
-                        }
-                        partitions.add(new CatalogPartitionSpec(map));
-                    });
+                    .forEachRemaining(
+                            row -> {
+                                Map<String, String> map = new HashMap<>();
+                                for (String partitionKey : partitionKeys) {
+                                    DataType partitionType = partitionKeysType.get(partitionKey);
+                                    Integer partitionPosition =
+                                            partitionKeysPosition.get(partitionKey);
+                                    map.put(
+                                            partitionKey,
+                                            String.valueOf(
+                                                    InternalRowUtils.get(
+                                                            row,
+                                                            partitionPosition,
+                                                            partitionType)));
+                                }
+                                partitions.add(new CatalogPartitionSpec(map));
+                            });
         } catch (IOException e) {
-            throw new CatalogException(String.format("Failed to list partitions of table %s", tablePath), e);
+            throw new CatalogException(
+                    String.format("Failed to list partitions of table %s", tablePath), e);
         }
 
         return new ArrayList<>(partitions);
