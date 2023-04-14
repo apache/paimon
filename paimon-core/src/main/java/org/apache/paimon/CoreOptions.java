@@ -94,7 +94,7 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "A comma-separated list of columns for which to create a bloon filter when writing.");
+                            "A comma-separated list of columns for which to create a bloom filter when writing.");
 
     public static final ConfigOption<Double> ORC_BLOOM_FILTER_FPP =
             key("orc.bloom.filter.fpp")
