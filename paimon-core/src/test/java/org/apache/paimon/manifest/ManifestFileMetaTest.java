@@ -152,8 +152,7 @@ public class ManifestFileMetaTest {
                                 "default",
                                 CoreOptions.FILE_FORMAT.defaultValue().toString()),
                         Long.MAX_VALUE,
-                        null,
-                        CoreOptions.FILE_COMPRESSION.defaultValue())
+                        null)
                 .create();
     }
 

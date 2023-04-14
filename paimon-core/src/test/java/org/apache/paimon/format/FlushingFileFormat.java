@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -47,7 +48,11 @@ public class FlushingFileFormat extends FileFormat {
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
         return (PositionOutputStream, level) -> {
-            FormatWriter wrapped = format.createWriterFactory(type).create(PositionOutputStream);
+            FormatWriter wrapped =
+                    format.createWriterFactory(type)
+                            .create(
+                                    PositionOutputStream,
+                                    CoreOptions.FILE_COMPRESSION.defaultValue());
             return new FormatWriter() {
                 @Override
                 public void addElement(InternalRow rowData) throws IOException {

@@ -108,8 +108,7 @@ public class ManifestFileTest {
                         avro,
                         pathFactory,
                         suggestedFileSize,
-                        null,
-                        CoreOptions.FILE_COMPRESSION.defaultValue())
+                        null)
                 .create();
     }
 

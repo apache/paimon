@@ -34,8 +34,4 @@ public interface FormatWriterFactory {
      *     exception.
      */
     FormatWriter create(PositionOutputStream out, String compression) throws IOException;
-
-    default FormatWriter create(PositionOutputStream out) throws IOException {
-        return create(out, "LZ4");
-    }
 }

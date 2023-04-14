@@ -18,6 +18,7 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FieldStatsCollector;
 import org.apache.paimon.format.FileFormat;
@@ -51,7 +52,6 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     private final RowType partitionType;
     private final FormatWriterFactory writerFactory;
     private final long suggestedFileSize;
-    private final String fileCompression;
 
     private ManifestFile(
             FileIO fileIO,
@@ -62,14 +62,12 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             FormatWriterFactory writerFactory,
             PathFactory pathFactory,
             long suggestedFileSize,
-            @Nullable SegmentsCache<String> cache,
-            String fileCompression) {
+            @Nullable SegmentsCache<String> cache) {
         super(fileIO, serializer, readerFactory, pathFactory, cache);
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
         this.writerFactory = writerFactory;
         this.suggestedFileSize = suggestedFileSize;
-        this.fileCompression = fileCompression;
     }
 
     @VisibleForTesting
@@ -87,7 +85,9 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 new RollingFileWriter<>(
                         () ->
                                 new ManifestEntryWriter(
-                                        writerFactory, pathFactory.newPath(), fileCompression),
+                                        writerFactory,
+                                        pathFactory.newPath(),
+                                        CoreOptions.FILE_COMPRESSION.defaultValue()),
                         suggestedFileSize);
         try {
             writer.write(entries);
@@ -157,7 +157,6 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
         @Nullable private final SegmentsCache<String> cache;
-        private final String fileCompression;
 
         public Factory(
                 FileIO fileIO,
@@ -166,8 +165,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 FileFormat fileFormat,
                 FileStorePathFactory pathFactory,
                 long suggestedFileSize,
-                @Nullable SegmentsCache<String> cache,
-                String fileCompression) {
+                @Nullable SegmentsCache<String> cache) {
             this.fileIO = fileIO;
             this.schemaManager = schemaManager;
             this.partitionType = partitionType;
@@ -175,7 +173,6 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
             this.cache = cache;
-            this.fileCompression = fileCompression;
         }
 
         public ManifestFile create() {
@@ -189,8 +186,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     fileFormat.createWriterFactory(entryType),
                     pathFactory.manifestFileFactory(),
                     suggestedFileSize,
-                    cache,
-                    fileCompression);
+                    cache);
         }
     }
 }
