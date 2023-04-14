@@ -433,9 +433,8 @@ under the License.
                         <test.randomization.seed>${test.randomization.seed}</test.randomization.seed>
                         <test.flink.main.version>${test.flink.main.version}</test.flink.main.version>
                         <test.flink.version>${test.flink.version}</test.flink.version>
-                        <jacoco-agent.destfile>${project.build.directory}/jacoco.exec</jacoco-agent.destfile>
                     </systemPropertyVariables>
-                    <argLine>-Xms256m -Xmx2048m -Dmvn.forkNumber=${surefire.forkNumber} -XX:+UseG1GC</argLine>
+                    <argLine>@{argLine} -Xms256m -Xmx2048m -Dmvn.forkNumber=${surefire.forkNumber} -XX:+UseG1GC</argLine>
                 </configuration>
                 <executions>
                     <!--execute all the unit tests-->
@@ -693,10 +692,6 @@ under the License.
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>${jacoco.version}</version>
-                <configuration>
-                    <skip>false</skip>
-                    <dataFile>${project.build.directory}/jacoco.exec</dataFile>
-                </configuration>
                 <executions>
                     <execution>
                         <id>default-prepare-agent</id>

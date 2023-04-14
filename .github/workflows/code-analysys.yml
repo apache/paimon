@@ -36,6 +36,14 @@ jobs:
         with:
           java-version: 11
           distribution: 'adopt'
+      - uses: actions/cache@v3
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven
+      - name: Run Unit tests
+        run: ./mvnw clean verify -B -Dmaven.test.skip=false -Dcheckstyle.skip=true
+      - name: Upload coverage report to codecov
+        run: bash <(curl -s https://codecov.io/bash)
       - name: Run SonarCloud Analysis
         run: bash ./tools/ci/sonar_check.sh
         env:
