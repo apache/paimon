@@ -137,7 +137,7 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
 
             tEnv.executeSql("INSERT INTO T VALUES ('1', '2', '3'), ('4', '5', '6')").await();
             BlockingIterator<Row, Row> iterator =
-                BlockingIterator.of(tEnv.from("T").execute().collect());
+                    BlockingIterator.of(tEnv.from("T").execute().collect());
             List<Row> result = iterator.collectAndClose(2);
             assertThat(result)
                     .containsExactlyInAnyOrder(Row.of("1", "2", "3", 4), Row.of("4", "5", "6", 7));
@@ -193,7 +193,7 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
     private void innerTestWriteRead() throws Exception {
         tEnv.executeSql("INSERT INTO T VALUES ('1', '2', '3'), ('4', '5', '6')").await();
         BlockingIterator<Row, Row> iterator =
-            BlockingIterator.of(tEnv.from("T").execute().collect());
+                BlockingIterator.of(tEnv.from("T").execute().collect());
         List<Row> result = iterator.collectAndClose(2);
         assertThat(result).containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
     }

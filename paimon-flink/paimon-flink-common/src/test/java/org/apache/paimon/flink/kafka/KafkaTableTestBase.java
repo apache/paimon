@@ -95,9 +95,13 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
                             .withEnv("KAFKA_ACLS", "User:calvin:READ;Topic:*:ALLOW")
                             .withEnv("KAFKA_CFG_SECURITY_INTER_BROKER_PROTOCOL", "PLAINTEXT")
                             .withEnv("KAFKA_CFG_LISTENERS", "PLAINTEXT://0.0.0.0:9093")
-                            .withEnv("KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP", "PLAINTEXT:PLAINTEXT")
+                            .withEnv(
+                                    "KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP",
+                                    "PLAINTEXT:PLAINTEXT")
                             .withEnv("KAFKA_CFG_ADVERTISED_LISTENERS", "PLAINTEXT://localhost:9093")
-                            .withEnv("authorizer.class.name", "kafka.security.auth.SimpleAclAuthorizer");
+                            .withEnv(
+                                    "authorizer.class.name",
+                                    "kafka.security.auth.SimpleAclAuthorizer");
 
     protected StreamExecutionEnvironment env;
     protected StreamTableEnvironment tEnv;
