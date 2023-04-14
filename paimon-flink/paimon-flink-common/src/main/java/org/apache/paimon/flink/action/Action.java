@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.catalog.CatalogUtils;
+import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncDatabaseAction;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableAction;
 
 import org.apache.flink.api.java.tuple.Tuple3;
@@ -119,6 +120,7 @@ public interface Action {
         private static final String MERGE_INTO = "merge-into";
         // cdc actions
         private static final String MYSQL_SYNC_TABLE = "mysql-sync-table";
+        private static final String MYSQL_SYNC_DATABASE = "mysql-sync-database";
 
         public static Optional<Action> create(String[] args) {
             String action = args[0].toLowerCase();
@@ -135,6 +137,8 @@ public interface Action {
                     return MergeIntoAction.create(actionArgs);
                 case MYSQL_SYNC_TABLE:
                     return MySqlSyncTableAction.create(actionArgs);
+                case MYSQL_SYNC_DATABASE:
+                    return MySqlSyncDatabaseAction.create(actionArgs);
                 default:
                     System.err.println("Unknown action \"" + action + "\"");
                     printHelp();

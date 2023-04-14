@@ -29,7 +29,9 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.fs.FileIOFinder;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
@@ -319,6 +321,20 @@ public abstract class FileStoreTableTestBase {
                                 .splits());
         assertThat(splits.size()).isEqualTo(1);
         assertThat(((DataSplit) splits.get(0)).bucket()).isEqualTo(1);
+    }
+
+    @Test
+    public void testAbort() throws Exception {
+        FileStoreTable table = createFileStoreTable(conf -> conf.set(BUCKET, 1));
+        StreamTableWrite write = table.newWrite(commitUser);
+        write.write(rowData(1, 2, 3L));
+        List<CommitMessage> messages = write.prepareCommit(true, 0);
+        table.newCommit(commitUser).abort(messages);
+
+        FileStatus[] files =
+                LocalFileIO.create().listStatus(new Path(tablePath + "/pt=1/bucket-0"));
+        assertThat(files).isEmpty();
+        write.close();
     }
 
     @Test
