@@ -31,6 +31,7 @@ import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 
+/** Test for row data to avro converters. */
 public class RowDataToAvroConvertersTest {
 
     @Test
