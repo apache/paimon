@@ -41,52 +41,72 @@ CREATE TABLE schema_evolution_2 (
     PRIMARY KEY (_id)
 );
 
+-- add comment lines for the convenience of reading
 CREATE TABLE all_types_table (
     _id INT,
+    -- TINYINT
     _boolean TINYINT(1),
     _tinyint TINYINT,
     _tinyint_unsigned TINYINT(2) UNSIGNED,
     _tinyint_unsigned_zerofill TINYINT(2) UNSIGNED ZEROFILL,
+    -- SMALLINT
     _smallint SMALLINT,
     _smallint_unsigned SMALLINT UNSIGNED,
     _smallint_unsigned_zerofill SMALLINT(4) UNSIGNED ZEROFILL,
+    -- MEDIUMINT
     _mediumint MEDIUMINT,
     _mediumint_unsigned MEDIUMINT UNSIGNED,
     _mediumint_unsigned_zerofill MEDIUMINT(8) UNSIGNED ZEROFILL,
+    -- INT
     _int INT,
     _int_unsigned INT UNSIGNED,
     _int_unsigned_zerofill INT(8) UNSIGNED ZEROFILL,
+    -- BIGINT
     _bigint BIGINT,
     _bigint_unsigned BIGINT UNSIGNED,
     _bigint_unsigned_zerofill BIGINT(16) UNSIGNED ZEROFILL,
     _serial SERIAL,
+    -- FLOAT
     _float FLOAT,
     _float_unsigned FLOAT UNSIGNED,
     _float_unsigned_zerofill FLOAT(4) UNSIGNED ZEROFILL,
+    -- REAL
     _real REAL,
     _real_unsigned REAL UNSIGNED,
     _real_unsigned_zerofill REAL(10, 7) UNSIGNED ZEROFILL,
+    -- DOUBLE
     _double DOUBLE,
     _double_unsigned DOUBLE UNSIGNED,
     _double_unsigned_zerofill DOUBLE(10, 7) UNSIGNED ZEROFILL,
+    -- DOUBLE PRECISION
     _double_precision DOUBLE PRECISION,
     _double_precision_unsigned DOUBLE PRECISION UNSIGNED,
     _double_precision_unsigned_zerofill DOUBLE PRECISION(10, 7) UNSIGNED ZEROFILL,
+    -- NUMERIC
     _numeric NUMERIC(8, 3),
     _numeric_unsigned NUMERIC(8, 3) UNSIGNED,
     _numeric_unsigned_zerofill NUMERIC(8, 3) UNSIGNED ZEROFILL,
+    -- FIXED
     _fixed FIXED(40, 3),
     _fixed_unsigned FIXED(40, 3) UNSIGNED,
     _fixed_unsigned_zerofill FIXED(40, 3) UNSIGNED ZEROFILL,
+    -- DECIMAL
     _decimal DECIMAL(8),
     _decimal_unsigned DECIMAL(8) UNSIGNED,
     _decimal_unsigned_zerofill DECIMAL(8) UNSIGNED ZEROFILL,
+    -- DATE
     _date DATE,
+    -- DATETIME
     _datetime DATETIME,
+    _datetime3 DATETIME(3),
+    _datetime6 DATETIME(6),
+    -- TIMESTAMP
     _timestamp TIMESTAMP(6) DEFAULT NULL,
+    -- string
     _char CHAR(10),
     _varchar VARCHAR(20),
     _text TEXT,
+    -- BINARY
     _bin BINARY(10),
     _varbin VARBINARY(20),
     _blob BLOB,
@@ -95,20 +115,39 @@ CREATE TABLE all_types_table (
 
 INSERT INTO all_types_table VALUES (
     1,
+    -- TINYINT
     true, 1, 2, 3,
+    -- SMALLINT
     1000, 2000, 3000,
+    -- MEDIUMINT
     100000, 200000, 300000,
+    -- INT
     1000000, 2000000, 3000000,
+    -- BIGINT
     10000000000, 20000000000, 30000000000, 40000000000,
+    -- FLOAT
     1.5, 2.5, 3.5,
+    -- REAL
     1.000001, 2.000002, 3.000003,
+    -- DOUBLE
     1.000011, 2.000022, 3.000033,
+    -- DOUBLE PRECISION
     1.000111, 2.000222, 3.000333,
+    -- NUMERIC
     12345.11, 12345.22, 12345.33,
+    -- FIXED
     123456789876543212345678987654321.11, 123456789876543212345678987654321.22, 123456789876543212345678987654321.33,
+    -- DECIMAL
     11111, 22222, 33333,
-    '2023-03-23', '2023-03-23 14:30:05', '2023-03-23 15:00:10.123456',
+    -- DATE
+    '2023-03-23',
+    -- DATETIME
+    '2023-03-23 14:30:05', '2023-03-23 14:30:05.123', '2023-03-23 14:30:05.123456',
+    -- TIMESTAMP
+    '2023-03-23 15:00:10.123456',
+    -- string
     'Paimon', 'Apache Paimon', 'Apache Paimon MySQL Test Data',
+    -- BINARY
     'bytes', 'more bytes', 'very long bytes test data'
 ), (
     2,
@@ -124,7 +163,9 @@ INSERT INTO all_types_table VALUES (
     NULL, NULL, NULL,
     NULL, NULL, NULL,
     NULL, NULL, NULL,
+    NULL,
     NULL, NULL, NULL,
+    NULL,
     NULL, NULL, NULL,
     NULL, NULL, NULL
 );

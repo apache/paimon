@@ -311,6 +311,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.DECIMAL(8, 0), // _decimal_unsigned_zerofill
                             DataTypes.DATE(), // _date
                             DataTypes.TIMESTAMP(0), // _datetime
+                            DataTypes.TIMESTAMP(3), // _datetime3
+                            DataTypes.TIMESTAMP(6), // _datetime6
                             DataTypes.TIMESTAMP(6), // _timestamp
                             DataTypes.CHAR(10), // _char
                             DataTypes.VARCHAR(20), // _varchar
@@ -361,6 +363,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             "_decimal_unsigned_zerofill",
                             "_date",
                             "_datetime",
+                            "_datetime3",
+                            "_datetime6",
                             "_timestamp",
                             "_char",
                             "_varchar",
@@ -385,7 +389,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "12345.110, 12345.220, 12345.330, "
                                 + "1.2345678987654322E32, 1.2345678987654322E32, 1.2345678987654322E32, "
                                 + "11111, 22222, 33333, "
-                                + "19439, 2023-03-23T14:30:05, 2023-03-23T15:00:10.123456, "
+                                + "19439, "
+                                + "2023-03-23T14:30:05, 2023-03-23T14:30:05.123, 2023-03-23T14:30:05.123456, "
+                                + "2023-03-23T15:00:10.123456, "
                                 + "Paimon, Apache Paimon, Apache Paimon MySQL Test Data, "
                                 + "[98, 121, 116, 101, 115, 0, 0, 0, 0, 0], "
                                 + "[109, 111, 114, 101, 32, 98, 121, 116, 101, 115], "
@@ -404,7 +410,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "
+                                + "NULL, "
                                 + "NULL, NULL, NULL, "
+                                + "NULL, "
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL"
                                 + "]");

@@ -201,6 +201,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                     continue;
                 }
 
+                // pay attention to the temporal types
+                // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-temporal-types
                 if ("bytes".equals(mySqlType) && className == null) {
                     // MySQL binary, varbinary, blob
                     newValue = new String(Base64.getDecoder().decode(oldValue));
@@ -223,9 +225,23 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                     // MySQL date
                     newValue = LocalDate.ofEpochDay(Integer.parseInt(oldValue)).toString();
                 } else if ("io.debezium.time.Timestamp".equals(className)) {
-                    // MySQL datetime
+                    // MySQL datetime (precision 0-3)
                     newValue =
                             Instant.ofEpochMilli(Long.parseLong(oldValue))
+                                    .atZone(serverTimeZone)
+                                    .toLocalDateTime()
+                                    .toString()
+                                    .replace('T', ' ');
+                } else if ("io.debezium.time.MicroTimestamp".equals(className)) {
+                    // MySQL datetime (precision 4-6)
+                    long microseconds = Long.parseLong(oldValue);
+                    long microsecondsPerSecond = 1_000_000;
+                    long nanosecondsPerMicros = 1_000;
+                    long seconds = microseconds / microsecondsPerSecond;
+                    long nanoAdjustment =
+                            (microseconds % microsecondsPerSecond) * nanosecondsPerMicros;
+                    newValue =
+                            Instant.ofEpochSecond(seconds, nanoAdjustment)
                                     .atZone(serverTimeZone)
                                     .toLocalDateTime()
                                     .toString()
