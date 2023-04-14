@@ -43,6 +43,7 @@ import java.util.Map;
 import java.util.Properties;
 
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
+import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.paimon.CoreOptions.LogConsistency;
@@ -124,7 +125,8 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 primaryKeySerializer,
                 valueSerializer,
                 options.get(LOG_CONSISTENCY),
-                options.get(LOG_CHANGELOG_MODE));
+                options.get(LOG_CHANGELOG_MODE),
+                options.get(BUCKET));
     }
 
     private int[] getPrimaryKeyIndexes(ResolvedSchema schema) {
