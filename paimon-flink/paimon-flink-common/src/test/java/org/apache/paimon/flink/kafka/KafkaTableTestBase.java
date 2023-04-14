@@ -89,7 +89,15 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
                             // Disable log deletion to prevent records from being deleted during
                             // test run
                             .withEnv("KAFKA_LOG_RETENTION_MS", "-1")
-                            .withEnv("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "false");
+                            .withEnv("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "false")
+                            .withEnv("KAFKA_ACL_ENABLE", "true")
+                            .withEnv("KAFKA_SUPER_USERS", "User:admin")
+                            .withEnv("KAFKA_ACLS", "User:calvin:READ;Topic:*:ALLOW")
+                            .withEnv("KAFKA_CFG_SECURITY_INTER_BROKER_PROTOCOL", "PLAINTEXT")
+                            .withEnv("KAFKA_CFG_LISTENERS", "PLAINTEXT://0.0.0.0:9093")
+                            .withEnv("KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP", "PLAINTEXT:PLAINTEXT")
+                            .withEnv("KAFKA_CFG_ADVERTISED_LISTENERS", "PLAINTEXT://localhost:9093")
+                            .withEnv("authorizer.class.name", "kafka.security.auth.SimpleAclAuthorizer");
 
     protected StreamExecutionEnvironment env;
     protected StreamTableEnvironment tEnv;

@@ -118,7 +118,7 @@ public class KafkaLogSinkProvider implements LogSinkProvider {
                                 "Failed to create kafka topic. " + "Reason: topic %s exists. ",
                                 topic));
             }
-            throw new TableException("Error in createTopic", e);
+            throw new TableException("Error in createTopicIfNotExists", e);
         }
     }
 }

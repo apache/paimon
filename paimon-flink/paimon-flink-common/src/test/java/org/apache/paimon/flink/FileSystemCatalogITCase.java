@@ -18,6 +18,22 @@
 
 package org.apache.paimon.flink;
 
+import com.sun.deploy.config.ClientConfig;
+import java.util.Collections;
+import java.util.Optional;
+import java.util.Properties;
+import org.apache.flink.table.api.TableException;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.CreateAclsResult;
+import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.common.acl.AccessControlEntry;
+import org.apache.kafka.common.acl.AclBinding;
+import org.apache.kafka.common.acl.AclOperation;
+import org.apache.kafka.common.acl.AclPermissionType;
+import org.apache.kafka.common.errors.TopicExistsException;
+import org.apache.kafka.common.resource.PatternType;
+import org.apache.kafka.common.resource.ResourcePattern;
+import org.apache.kafka.common.resource.ResourceType;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
@@ -95,6 +111,7 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
     @Test
     public void testLogWriteRead() throws Exception {
         String topic = UUID.randomUUID().toString();
+
         tEnv.executeSql(
                 String.format(
                         "CREATE TABLE T (a STRING, b STRING, c STRING) WITH ("
