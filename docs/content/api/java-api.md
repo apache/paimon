@@ -283,7 +283,7 @@ Key points to achieve exactly-once consistency:
 - The commitIdentifier of `StreamTableWrite` and `StreamTableCommit` needs to be consistent, and the
   id needs to be incremented for the next committing.
 - When a failure occurs, if you still have uncommitted `CommitMessage`s, please use `StreamTableCommit#filterCommitted`
-  to exclude the committed messages by commitIdentifier. Meanwhile, you could abort uncommitted `CommitMessage`s via `StreamTableCommit#abort`.
+  to exclude the committed messages by commitIdentifier.
 
 ```java
 import java.util.List;
