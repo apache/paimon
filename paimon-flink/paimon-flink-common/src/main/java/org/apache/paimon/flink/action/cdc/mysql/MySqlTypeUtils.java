@@ -25,9 +25,6 @@ import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
  * Converts from MySQL type to {@link DataType}.
  *
@@ -105,19 +102,6 @@ public class MySqlTypeUtils {
     // It returns the number of characters when converting this timestamp to string.
     // The base length of a timestamp is 19, for example "2023-03-23 17:20:00".
     private static final int JDBC_TIMESTAMP_BASE_LENGTH = 19;
-
-    public static DataType toDataType(String type, String params) {
-        List<Integer> paramList = new ArrayList<>();
-        if (params != null) {
-            for (String s : params.split(",")) {
-                paramList.add(Integer.parseInt(s.trim()));
-            }
-        }
-        return toDataType(
-                type,
-                paramList.size() > 0 ? paramList.get(0) : null,
-                paramList.size() > 1 ? paramList.get(1) : null);
-    }
 
     public static DataType toDataType(
             String type, @Nullable Integer length, @Nullable Integer scale) {

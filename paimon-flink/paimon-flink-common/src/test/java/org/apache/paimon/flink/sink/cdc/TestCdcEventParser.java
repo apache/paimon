@@ -18,10 +18,10 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.types.DataField;
 
-import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 /** Testing {@link EventParser} for {@link TestCdcEvent}. */
 public class TestCdcEventParser implements EventParser<TestCdcEvent> {
@@ -39,13 +39,13 @@ public class TestCdcEventParser implements EventParser<TestCdcEvent> {
     }
 
     @Override
-    public boolean isSchemaChange() {
-        return raw.schemaChange() != null;
+    public boolean isNewDataFieldList() {
+        return raw.newDataFieldList() != null;
     }
 
     @Override
-    public List<SchemaChange> getSchemaChanges() {
-        return Collections.singletonList(raw.schemaChange());
+    public Optional<List<DataField>> getNewDataFieldList() {
+        return Optional.ofNullable(raw.newDataFieldList());
     }
 
     @Override

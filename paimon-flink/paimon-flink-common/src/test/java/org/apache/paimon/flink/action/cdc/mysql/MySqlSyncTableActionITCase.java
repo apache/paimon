@@ -244,6 +244,99 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
+    @Timeout(60)
+    public void testMultipleSchemaEvolutions() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "schema_evolution_multiple");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(1);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        MySqlSyncTableAction action =
+                new MySqlSyncTableAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.emptyList(),
+                        Collections.singletonList("_id"),
+                        new HashMap<>());
+        action.build(env);
+        JobClient client = env.executeAsync();
+
+        while (true) {
+            JobStatus status = client.getJobStatus().get();
+            if (status == JobStatus.RUNNING) {
+                break;
+            }
+            Thread.sleep(1000);
+        }
+
+        try (Connection conn =
+                DriverManager.getConnection(
+                        MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
+                        MYSQL_CONTAINER.getUsername(),
+                        MYSQL_CONTAINER.getPassword())) {
+            try (Statement statement = conn.createStatement()) {
+                testSchemaEvolutionMultipleImpl(statement);
+            }
+        }
+    }
+
+    private void testSchemaEvolutionMultipleImpl(Statement statement) throws Exception {
+        FileStoreTable table = getFileStoreTable();
+        statement.executeUpdate("USE paimon_sync_table");
+
+        statement.executeUpdate(
+                "INSERT INTO schema_evolution_multiple VALUES (1, 'one', 10, 'string_1')");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10),
+                            DataTypes.INT(),
+                            DataTypes.VARCHAR(10)
+                        },
+                        new String[] {"_id", "v1", "v2", "v3"});
+        List<String> primaryKeys = Collections.singletonList("_id");
+        List<String> expected = Collections.singletonList("+I[1, one, 10, string_1]");
+        waitForResult(expected, table, rowType, primaryKeys);
+
+        statement.executeUpdate(
+                "ALTER TABLE schema_evolution_multiple "
+                        + "ADD v4 INT, "
+                        + "MODIFY COLUMN v1 VARCHAR(20), "
+                        // I'd love to change COMMENT to DEFAULT
+                        // however debezium parser seems to have a bug here
+                        + "ADD COLUMN (v5 DOUBLE, v6 DECIMAL(5, 3), `$% ^,& *(` VARCHAR(10) COMMENT 'Hi, v700 DOUBLE \\', v701 INT a test'), "
+                        + "MODIFY v2 BIGINT");
+        statement.executeUpdate(
+                "INSERT INTO schema_evolution_multiple VALUES "
+                        + "(2, 'long_string_two', 2000000000000, 'string_2', 20, 20.5, 20.002, 'test_2')");
+        rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(20),
+                            DataTypes.BIGINT(),
+                            DataTypes.VARCHAR(10),
+                            DataTypes.INT(),
+                            DataTypes.DOUBLE(),
+                            DataTypes.DECIMAL(5, 3),
+                            DataTypes.VARCHAR(10)
+                        },
+                        new String[] {"_id", "v1", "v2", "v3", "v4", "v5", "v6", "$% ^,& *("});
+        expected =
+                Arrays.asList(
+                        "+I[1, one, 10, string_1, NULL, NULL, NULL, NULL]",
+                        "+I[2, long_string_two, 2000000000000, string_2, 20, 20.5, 20.002, test_2]");
+        waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
     @Timeout(30)
     public void testAllTypes() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
