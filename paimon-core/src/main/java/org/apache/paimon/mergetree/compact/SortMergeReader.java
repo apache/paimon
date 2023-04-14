@@ -38,7 +38,6 @@ import java.util.List;
  */
 public class SortMergeReader<T> implements RecordReader<T> {
 
-    private final Comparator<InternalRow> userKeyComparator;
     private final MergeFunctionWrapper<T> mergeFunctionWrapper;
     private final LoserTree<KeyValue> loserTree;
 
@@ -46,30 +45,12 @@ public class SortMergeReader<T> implements RecordReader<T> {
             List<RecordReader<KeyValue>> readers,
             Comparator<InternalRow> userKeyComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper) {
-        this.userKeyComparator = userKeyComparator;
         this.mergeFunctionWrapper = mergeFunctionWrapper;
-
         this.loserTree =
                 new LoserTree<>(
                         readers,
-                        (e1, e2) -> {
-                            if (e1 == null) {
-                                return -1;
-                            } else {
-                                return e2 == null
-                                        ? 1
-                                        : userKeyComparator.compare(e2.key(), e1.key());
-                            }
-                        },
-                        (e1, e2) -> {
-                            if (e1 == null) {
-                                return -1;
-                            } else {
-                                return e2 == null
-                                        ? 1
-                                        : Long.compare(e2.sequenceNumber(), e1.sequenceNumber());
-                            }
-                        });
+                        (e1, e2) -> userKeyComparator.compare(e2.key(), e1.key()),
+                        (e1, e2) -> Long.compare(e2.sequenceNumber(), e1.sequenceNumber()));
     }
 
     @Nullable
@@ -101,14 +82,14 @@ public class SortMergeReader<T> implements RecordReader<T> {
                 mergeFunctionWrapper.reset();
                 mergeFunctionWrapper.add(winner);
 
-                T result = merge(winner);
+                T result = merge();
                 if (result != null) {
                     return result;
                 }
             }
         }
 
-        private T merge(KeyValue winner) {
+        private T merge() {
             Preconditions.checkState(
                     !released, "SortMergeIterator#nextImpl is called after release");
 

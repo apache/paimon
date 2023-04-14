@@ -39,6 +39,9 @@ import java.util.List;
  * <p>The process of building the loser tree is the same as a regular loser tree. The difference is
  * that in the process of adjusting the tree, we need to record the index of the same key and the
  * state of the winner/loser for subsequent quick adjustment of the position of the winner.
+ *
+ * <p>Detailed design can refer to
+ * https://docs.google.com/document/d/1OPyb9o9K226Fb4O-SzZpBYgwfsvNY7X0H5T3ivdu1ck/edit?usp=sharing
  */
 public class LoserTree<T> implements Closeable {
     private final int[] tree;
@@ -56,8 +59,10 @@ public class LoserTree<T> implements Closeable {
         this.size = nextBatchReaders.size();
         this.leaves = new ArrayList<>(size);
         this.tree = new int[size];
-        this.firstComparator = firstComparator;
-        this.secondComparator = secondComparator;
+        this.firstComparator =
+                (e1, e2) -> e1 == null ? -1 : (e2 == null ? 1 : firstComparator.compare(e1, e2));
+        this.secondComparator =
+                (e1, e2) -> e1 == null ? -1 : (e2 == null ? 1 : secondComparator.compare(e1, e2));
         this.initialized = false;
 
         for (RecordReader<T> reader : nextBatchReaders) {
@@ -114,27 +119,38 @@ public class LoserTree<T> implements Closeable {
         for (int parent = (winner + this.size) / 2; parent > 0 && winner >= 0; parent /= 2) {
             LeafIterator<T> winnerNode = leaves.get(winner);
             LeafIterator<T> parentNode;
-            if (winnerNode.state == State.WINNER_POPPED) {
-                // adjust the current winner node
-                if (winnerNode.firstSameKeyIndex < 0) {
-                    // fast path, which means that the same key is not yet processed in the current
-                    // tree.
-                    break;
-                }
-                // fast path. Directly exchange positions with the same key that has not yet been
-                // processed,
-                // no need to compare level by level.
-                parent = winnerNode.firstSameKeyIndex;
-                parentNode = leaves.get(this.tree[parent]);
-                winnerNode.state = State.LOSER_POPPED;
-                parentNode.state = State.WINNER_WITH_SAME_KEY;
-            } else if (this.tree[parent] == -1) {
+            if (this.tree[parent] == -1) {
                 // initialize the tree.
                 winnerNode.state = State.LOSER_WITH_NEW_KEY;
             } else {
-                // adjust according to the state of parent and winner nodes.
                 parentNode = leaves.get(this.tree[parent]);
-                this.adjustNodeState(parent, parentNode, winnerNode);
+                switch (winnerNode.state) {
+                    case WINNER_WITH_NEW_KEY:
+                        adjustWithNewWinnerKey(parent, parentNode, winnerNode);
+                        break;
+                    case WINNER_WITH_SAME_KEY:
+                        adjustWithSameWinnerKey(parent, parentNode, winnerNode);
+                        break;
+                    case WINNER_POPPED:
+                        if (winnerNode.firstSameKeyIndex < 0) {
+                            // fast path, which means that the same key is not yet processed in the
+                            // current
+                            // tree.
+                            parent = -1;
+                        } else {
+                            // fast path. Directly exchange positions with the same key that has not
+                            // yet been
+                            // processed, no need to compare level by level.
+                            parent = winnerNode.firstSameKeyIndex;
+                            parentNode = leaves.get(this.tree[parent]);
+                            winnerNode.state = State.LOSER_POPPED;
+                            parentNode.state = State.WINNER_WITH_SAME_KEY;
+                        }
+                        break;
+                    default:
+                        throw new UnsupportedOperationException(
+                                "unknown state for " + winnerNode.state.name());
+                }
             }
 
             // if the winner loses, exchange nodes.
@@ -147,35 +163,41 @@ public class LoserTree<T> implements Closeable {
         this.tree[0] = winner;
     }
 
-    /**
-     * Decide how to compare with the new winner according to the state of the last loser, which can
-     * reduce the number of comparisons.
-     */
-    private void adjustNodeState(
+    /** The winner node has the same userKey as the global winner. */
+    private void adjustWithSameWinnerKey(
             int index, LeafIterator<T> parentNode, LeafIterator<T> winnerNode) {
         switch (parentNode.state) {
-            case LOSER_WITH_NEW_KEY:
-                adjustWithNewLoserKey(index, parentNode, winnerNode);
-                return;
             case LOSER_WITH_SAME_KEY:
-                adjustWithSameLoserKey(index, parentNode, winnerNode);
+                // the key of the previous loser is the same as the key of the current winner,
+                // only the sequence needs to be compared.
+                T parentKey = parentNode.peek();
+                T childKey = winnerNode.peek();
+                int secondResult = secondComparator.compare(parentKey, childKey);
+                if (secondResult > 0) {
+                    parentNode.state = State.WINNER_WITH_SAME_KEY;
+                    winnerNode.state = State.LOSER_WITH_SAME_KEY;
+                    parentNode.setFirstSameKeyIndex(index);
+                } else {
+                    winnerNode.setFirstSameKeyIndex(index);
+                }
                 return;
+            case LOSER_WITH_NEW_KEY:
             case LOSER_POPPED:
-                adjustWithPoppedLoserKey(parentNode, winnerNode);
                 return;
             default:
                 throw new UnsupportedOperationException(
-                        "unknown state for " + winnerNode.state.name());
+                        "unknown state for " + parentNode.state.name());
         }
     }
 
     /**
-     * The previous loser is a new key, which means it is not the same key as the previous winner.
+     * The userKey of the new local winner node is different from that of the previous global
+     * winner.
      */
-    private void adjustWithNewLoserKey(
+    private void adjustWithNewWinnerKey(
             int index, LeafIterator<T> parentNode, LeafIterator<T> winnerNode) {
-        switch (winnerNode.state) {
-            case WINNER_WITH_NEW_KEY:
+        switch (parentNode.state) {
+            case LOSER_WITH_NEW_KEY:
                 // when the new winner is also a new key, it needs to be compared.
                 T parentKey = parentNode.peek();
                 T childKey = winnerNode.peek();
@@ -198,71 +220,20 @@ public class LoserTree<T> implements Closeable {
                     winnerNode.state = State.LOSER_WITH_NEW_KEY;
                 }
                 return;
-            case WINNER_WITH_SAME_KEY:
-                // the winner has the same key as the winner of the previous time, so the comparison
-                // is skipped directly.
-                return;
-                // there is no need to deal with the WINNER_POPPED, because the fast path is used
-                // first.
-            default:
-                throw new UnsupportedOperationException(
-                        "unknown state for " + winnerNode.state.name());
-        }
-    }
-
-    /**
-     * The key of the previous loser is the same as the previous winner, which can greatly reduce
-     * the number of comparisons.
-     */
-    private void adjustWithSameLoserKey(
-            int index, LeafIterator<T> parentNode, LeafIterator<T> winnerNode) {
-        switch (winnerNode.state) {
-            case WINNER_WITH_NEW_KEY:
+            case LOSER_WITH_SAME_KEY:
                 // the previous loser has the same key as the winner of the previous time,
                 // so the comparison is skipped directly.
                 parentNode.state = State.WINNER_WITH_SAME_KEY;
                 winnerNode.state = State.LOSER_WITH_NEW_KEY;
                 return;
-            case WINNER_WITH_SAME_KEY:
-                // the key of the previous loser is the same as the key of the current winner,
-                // only the sequence needs to be compared.
-                T parentKey = parentNode.peek();
-                T childKey = winnerNode.peek();
-                int secondResult = secondComparator.compare(parentKey, childKey);
-                if (secondResult > 0) {
-                    parentNode.state = State.WINNER_WITH_SAME_KEY;
-                    winnerNode.state = State.LOSER_WITH_SAME_KEY;
-                    parentNode.setFirstSameKeyIndex(index);
-                } else {
-                    winnerNode.setFirstSameKeyIndex(index);
-                }
-                return;
-                // there is no need to deal with the WINNER_POPPED, because the fast path is used
-                // first.
-            default:
-                throw new UnsupportedOperationException(
-                        "unknown state for " + winnerNode.state.name());
-        }
-    }
-
-    /**
-     * The loser's key is the same as the previous winner's key and has been processed. This means
-     * that when encountering a new key, we can win directly.
-     */
-    private void adjustWithPoppedLoserKey(LeafIterator<T> parentNode, LeafIterator<T> winnerNode) {
-        switch (winnerNode.state) {
-            case WINNER_WITH_NEW_KEY:
+            case LOSER_POPPED:
                 parentNode.state = State.WINNER_POPPED;
                 parentNode.firstSameKeyIndex = -1;
                 winnerNode.state = State.LOSER_WITH_NEW_KEY;
                 return;
-            case WINNER_WITH_SAME_KEY:
-                return;
-                // there is no need to deal with the WINNER_POPPED, because the fast path is used
-                // first.
             default:
                 throw new UnsupportedOperationException(
-                        "unknown state for " + winnerNode.state.name());
+                        "unknown state for " + parentNode.state.name());
         }
     }
 
