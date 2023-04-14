@@ -313,6 +313,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.TIMESTAMP(0), // _datetime
                             DataTypes.TIMESTAMP(3), // _datetime3
                             DataTypes.TIMESTAMP(6), // _datetime6
+                            DataTypes.TIMESTAMP(0), // _datetime_p
+                            DataTypes.TIMESTAMP(2), // _datetime_p2
                             DataTypes.TIMESTAMP(6), // _timestamp
                             DataTypes.CHAR(10), // _char
                             DataTypes.VARCHAR(20), // _varchar
@@ -365,6 +367,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             "_datetime",
                             "_datetime3",
                             "_datetime6",
+                            "_datetime_p",
+                            "_datetime_p2",
                             "_timestamp",
                             "_char",
                             "_varchar",
@@ -391,6 +395,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "11111, 22222, 33333, "
                                 + "19439, "
                                 + "2023-03-23T14:30:05, 2023-03-23T14:30:05.123, 2023-03-23T14:30:05.123456, "
+                                + "2023-03-24T14:30, 2023-03-24T14:30:05.120, "
                                 + "2023-03-23T15:00:10.123456, "
                                 + "Paimon, Apache Paimon, Apache Paimon MySQL Test Data, "
                                 + "[98, 121, 116, 101, 115, 0, 0, 0, 0, 0], "
@@ -412,6 +417,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "NULL, NULL, NULL, "
                                 + "NULL, "
                                 + "NULL, NULL, NULL, "
+                                + "NULL, NULL, "
                                 + "NULL, "
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL"

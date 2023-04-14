@@ -100,6 +100,9 @@ CREATE TABLE all_types_table (
     _datetime DATETIME,
     _datetime3 DATETIME(3),
     _datetime6 DATETIME(6),
+    -- DATETIME precision test
+    _datetime_p DATETIME,
+    _datetime_p2 DATETIME(2),
     -- TIMESTAMP
     _timestamp TIMESTAMP(6) DEFAULT NULL,
     -- string
@@ -143,6 +146,8 @@ INSERT INTO all_types_table VALUES (
     '2023-03-23',
     -- DATETIME
     '2023-03-23 14:30:05', '2023-03-23 14:30:05.123', '2023-03-23 14:30:05.123456',
+    -- DATETIME precision test
+    '2023-03-24 14:30', '2023-03-24 14:30:05.12',
     -- TIMESTAMP
     '2023-03-23 15:00:10.123456',
     -- string
@@ -165,6 +170,7 @@ INSERT INTO all_types_table VALUES (
     NULL, NULL, NULL,
     NULL,
     NULL, NULL, NULL,
+    NULL, NULL,
     NULL,
     NULL, NULL, NULL,
     NULL, NULL, NULL
