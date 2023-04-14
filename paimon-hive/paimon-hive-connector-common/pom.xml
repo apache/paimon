@@ -33,6 +33,10 @@ under the License.
 
     <packaging>jar</packaging>
 
+    <properties>
+        <aws.version>1.12.319</aws.version>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
@@ -536,6 +540,36 @@ under the License.
             </exclusions>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-s3</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+            <type>test-jar</type>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-s3</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-core</artifactId>
+            <version>${aws.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-s3</artifactId>
+            <version>${aws.version}</version>
+            <scope>test</scope>
+        </dependency>
+
     </dependencies>
 
     <build>
