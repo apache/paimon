@@ -93,7 +93,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestFormat(),
                 pathFactory(),
                 options.manifestTargetSize().getBytes(),
-                manifestCache);
+                manifestCache,
+                options.fileCompression());
     }
 
     @VisibleForTesting

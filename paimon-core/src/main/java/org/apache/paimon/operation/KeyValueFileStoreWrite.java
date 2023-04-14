@@ -135,7 +135,11 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         }
 
         KeyValueFileWriterFactory writerFactory =
-                writerFactoryBuilder.build(partition, bucket, options.fileCompressionPerLevel());
+                writerFactoryBuilder.build(
+                        partition,
+                        bucket,
+                        options.fileCompressionPerLevel(),
+                        options.fileCompression());
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
         UniversalCompaction universalCompaction =
@@ -194,7 +198,11 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             BinaryRow partition, int bucket, Comparator<InternalRow> keyComparator, Levels levels) {
         KeyValueFileReaderFactory readerFactory = readerFactoryBuilder.build(partition, bucket);
         KeyValueFileWriterFactory writerFactory =
-                writerFactoryBuilder.build(partition, bucket, options.fileCompressionPerLevel());
+                writerFactoryBuilder.build(
+                        partition,
+                        bucket,
+                        options.fileCompressionPerLevel(),
+                        options.fileCompression());
         switch (options.changelogProducer()) {
             case FULL_COMPACTION:
                 return new FullChangelogMergeTreeCompactRewriter(

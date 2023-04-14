@@ -51,6 +51,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     private final RowType partitionType;
     private final FormatWriterFactory writerFactory;
     private final long suggestedFileSize;
+    private final String fileCompression;
 
     private ManifestFile(
             FileIO fileIO,
@@ -61,12 +62,14 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             FormatWriterFactory writerFactory,
             PathFactory pathFactory,
             long suggestedFileSize,
-            @Nullable SegmentsCache<String> cache) {
+            @Nullable SegmentsCache<String> cache,
+            String fileCompression) {
         super(fileIO, serializer, readerFactory, pathFactory, cache);
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
         this.writerFactory = writerFactory;
         this.suggestedFileSize = suggestedFileSize;
+        this.fileCompression = fileCompression;
     }
 
     @VisibleForTesting
@@ -82,7 +85,9 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     public List<ManifestFileMeta> write(List<ManifestEntry> entries) {
         RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
                 new RollingFileWriter<>(
-                        () -> new ManifestEntryWriter(writerFactory, pathFactory.newPath()),
+                        () ->
+                                new ManifestEntryWriter(
+                                        writerFactory, pathFactory.newPath(), fileCompression),
                         suggestedFileSize);
         try {
             writer.write(entries);
@@ -102,8 +107,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private long numDeletedFiles = 0;
         private long schemaId = Long.MIN_VALUE;
 
-        ManifestEntryWriter(FormatWriterFactory factory, Path path) {
-            super(ManifestFile.this.fileIO, factory, path, serializer::toRow, null);
+        ManifestEntryWriter(FormatWriterFactory factory, Path path, String fileCompression) {
+            super(ManifestFile.this.fileIO, factory, path, serializer::toRow, fileCompression);
 
             this.partitionStatsCollector = new FieldStatsCollector(partitionType);
             this.partitionStatsSerializer = new FieldStatsArraySerializer(partitionType);
@@ -152,6 +157,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
         @Nullable private final SegmentsCache<String> cache;
+        private final String fileCompression;
 
         public Factory(
                 FileIO fileIO,
@@ -160,7 +166,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 FileFormat fileFormat,
                 FileStorePathFactory pathFactory,
                 long suggestedFileSize,
-                @Nullable SegmentsCache<String> cache) {
+                @Nullable SegmentsCache<String> cache,
+                String fileCompression) {
             this.fileIO = fileIO;
             this.schemaManager = schemaManager;
             this.partitionType = partitionType;
@@ -168,6 +175,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
             this.cache = cache;
+            this.fileCompression = fileCompression;
         }
 
         public ManifestFile create() {
@@ -181,7 +189,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     fileFormat.createWriterFactory(entryType),
                     pathFactory.manifestFileFactory(),
                     suggestedFileSize,
-                    cache);
+                    cache,
+                    fileCompression);
         }
     }
 }
