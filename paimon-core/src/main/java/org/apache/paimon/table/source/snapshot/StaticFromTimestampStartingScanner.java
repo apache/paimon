@@ -44,16 +44,15 @@ public class StaticFromTimestampStartingScanner implements StartingScanner {
     }
 
     @Override
-    @Nullable
     public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
         Snapshot startingSnapshot = timeTravelToTimestamp(snapshotManager, startupMillis);
         if (startingSnapshot == null) {
             LOG.debug(
                     "There is currently no snapshot earlier than or equal to timestamp[{}]",
                     startupMillis);
-            return null;
+            return new NoSnapshot();
         }
-        return new Result(
+        return new ScannedResult(
                 startingSnapshot.id(),
                 snapshotSplitReader
                         .withKind(ScanKind.ALL)

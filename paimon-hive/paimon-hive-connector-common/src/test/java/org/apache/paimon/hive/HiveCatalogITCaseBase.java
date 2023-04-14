@@ -49,6 +49,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -515,6 +516,54 @@ public abstract class HiveCatalogITCaseBase {
         new LocalFileIO().delete(new org.apache.paimon.fs.Path(path, "test_db.db/t"), true);
         tables = collect("SHOW TABLES");
         Assert.assertEquals("[]", tables.toString());
+    }
+
+    @Test
+    public void testCatalogOptionsInheritAndOverride() throws Exception {
+        tEnv.executeSql(
+                        String.join(
+                                "\n",
+                                "CREATE CATALOG my_hive_options WITH (",
+                                "  'type' = 'paimon',",
+                                "  'metastore' = 'hive',",
+                                "  'uri' = '',",
+                                "  'hive-conf-dir' = '"
+                                        + hiveShell.getBaseDir().getRoot().getPath()
+                                        + HIVE_CONF
+                                        + "',",
+                                "  'warehouse' = '" + path + "',",
+                                "  'lock.enabled' = 'true',",
+                                "  'table-default.opt1' = 'value1',",
+                                "  'table-default.opt2' = 'value2',",
+                                "  'table-default.opt3' = 'value3'",
+                                ")"))
+                .await();
+        tEnv.executeSql("USE CATALOG my_hive_options").await();
+
+        // check inherit
+        tEnv.executeSql("CREATE TABLE table_without_options (a INT, b STRING)").await();
+
+        Identifier identifier = new Identifier("default", "table_without_options");
+        Catalog catalog =
+                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
+        Map<String, String> tableOptions = catalog.getTable(identifier).options();
+
+        Assertions.assertThat(tableOptions).containsEntry("opt1", "value1");
+        Assertions.assertThat(tableOptions).containsEntry("opt2", "value2");
+        Assertions.assertThat(tableOptions).containsEntry("opt3", "value3");
+        Assertions.assertThat(tableOptions).doesNotContainKey("lock.enabled");
+
+        // check override
+        tEnv.executeSql(
+                        "CREATE TABLE table_with_options (a INT, b STRING) WITH ('opt1' = 'new_value')")
+                .await();
+        identifier = new Identifier("default", "table_with_options");
+        tableOptions = catalog.getTable(identifier).options();
+
+        Assertions.assertThat(tableOptions).containsEntry("opt1", "new_value");
+        Assertions.assertThat(tableOptions).containsEntry("opt2", "value2");
+        Assertions.assertThat(tableOptions).containsEntry("opt3", "value3");
+        Assertions.assertThat(tableOptions).doesNotContainKey("lock.enabled");
     }
 
     protected List<Row> collect(String sql) throws Exception {

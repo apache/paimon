@@ -28,17 +28,27 @@ public class TestCdcEvent implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    private final String tableName;
     private final SchemaChange schemaChange;
     private final List<CdcRecord> records;
+    private final int keyHash;
 
-    public TestCdcEvent(SchemaChange schemaChange) {
+    public TestCdcEvent(String tableName, SchemaChange schemaChange) {
+        this.tableName = tableName;
         this.schemaChange = schemaChange;
         this.records = null;
+        this.keyHash = 0;
     }
 
-    public TestCdcEvent(List<CdcRecord> records) {
+    public TestCdcEvent(String tableName, List<CdcRecord> records, int keyHash) {
+        this.tableName = tableName;
         this.schemaChange = null;
         this.records = records;
+        this.keyHash = keyHash;
+    }
+
+    public String tableName() {
+        return tableName;
     }
 
     public SchemaChange schemaChange() {
@@ -50,7 +60,14 @@ public class TestCdcEvent implements Serializable {
     }
 
     @Override
+    public int hashCode() {
+        return keyHash;
+    }
+
+    @Override
     public String toString() {
-        return String.format("{schemChange = %s, records = %s}", schemaChange, records);
+        return String.format(
+                "{tableName = %s, schemChange = %s, records = %s}",
+                tableName, schemaChange, records);
     }
 }

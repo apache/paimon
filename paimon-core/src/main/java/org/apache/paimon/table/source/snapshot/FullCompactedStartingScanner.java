@@ -21,11 +21,7 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.CoreOptions.StartupMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
-import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.utils.SnapshotManager;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -33,9 +29,7 @@ import javax.annotation.Nullable;
  * {@link StartingScanner} for the {@link StartupMode#COMPACTED_FULL} startup mode with
  * 'full-compaction.delta-commits'.
  */
-public class FullCompactedStartingScanner implements StartingScanner {
-
-    private static final Logger LOG = LoggerFactory.getLogger(FullCompactedStartingScanner.class);
+public class FullCompactedStartingScanner extends CompactedStartingScanner {
 
     private final int deltaCommits;
 
@@ -45,18 +39,8 @@ public class FullCompactedStartingScanner implements StartingScanner {
 
     @Override
     @Nullable
-    public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
-        Long startingSnapshotId = snapshotManager.pickSnapshot(this::picked);
-        if (startingSnapshotId == null) {
-            LOG.debug("There is currently no compact snapshot. Waiting for snapshot generation.");
-            return null;
-        }
-        return new Result(
-                startingSnapshotId,
-                snapshotSplitReader
-                        .withKind(ScanKind.ALL)
-                        .withSnapshot(startingSnapshotId)
-                        .splits());
+    protected Long pick(SnapshotManager snapshotManager) {
+        return snapshotManager.pickFromLatest(this::picked);
     }
 
     private boolean picked(Snapshot snapshot) {

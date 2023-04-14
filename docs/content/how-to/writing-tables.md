@@ -98,8 +98,7 @@ Use `INSERT INTO` to apply records and changes to tables.
 INSERT INTO MyTable SELECT ...
 ```
 
-Paimon supports shuffle data by bucket in sink phase. To improve data skew, Paimon also
-supports shuffling data by partition fields. You can add option `sink.partition-shuffle` to the table.
+Paimon supports shuffle data by partition and bucket in sink phase.
 
 {{< /tab >}}
 

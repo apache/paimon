@@ -18,14 +18,10 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.sink.AbstractChannelComputer;
 import org.apache.paimon.flink.sink.BucketingStreamPartitioner;
-import org.apache.paimon.flink.sink.LogSinkFunction;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
@@ -38,46 +34,40 @@ import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import javax.annotation.Nullable;
 
 /**
- * Builder for {@link FlinkCdcSink}.
+ * Builder for {@link FlinkCdcSink} when syncing multiple database tables into one Paimon table.
  *
  * @param <T> CDC change event type
  */
-public class FlinkCdcSinkBuilder<T> {
+public class FlinkCdcSyncTableSinkBuilder<T> {
 
     private DataStream<T> input = null;
     private EventParser.Factory<T> parserFactory = null;
     private FileStoreTable table = null;
     private Lock.Factory lockFactory = Lock.emptyFactory();
-    @Nullable private LogSinkFunction logSinkFunction;
 
     @Nullable private Integer parallelism;
 
-    public FlinkCdcSinkBuilder<T> withInput(DataStream<T> input) {
+    public FlinkCdcSyncTableSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
         return this;
     }
 
-    public FlinkCdcSinkBuilder<T> withParserFactory(EventParser.Factory<T> parserFactory) {
+    public FlinkCdcSyncTableSinkBuilder<T> withParserFactory(EventParser.Factory<T> parserFactory) {
         this.parserFactory = parserFactory;
         return this;
     }
 
-    public FlinkCdcSinkBuilder<T> withTable(FileStoreTable table) {
+    public FlinkCdcSyncTableSinkBuilder<T> withTable(FileStoreTable table) {
         this.table = table;
         return this;
     }
 
-    public FlinkCdcSinkBuilder<T> withLockFactory(Lock.Factory lockFactory) {
+    public FlinkCdcSyncTableSinkBuilder<T> withLockFactory(Lock.Factory lockFactory) {
         this.lockFactory = lockFactory;
         return this;
     }
 
-    public FlinkCdcSinkBuilder<T> withLogSinkFunction(@Nullable LogSinkFunction logSinkFunction) {
-        this.logSinkFunction = logSinkFunction;
-        return this;
-    }
-
-    public FlinkCdcSinkBuilder<T> withParallelism(@Nullable Integer parallelism) {
+    public FlinkCdcSyncTableSinkBuilder<T> withParallelism(@Nullable Integer parallelism) {
         this.parallelism = parallelism;
         return this;
     }
@@ -99,15 +89,10 @@ public class FlinkCdcSinkBuilder<T> {
                                 new SchemaChangeProcessFunction(
                                         new SchemaManager(table.fileIO(), table.location())));
         schemaChangeProcessFunction.getTransformation().setParallelism(1);
+        schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
 
-        TableSchema schema = table.schema();
-        boolean shuffleByPartitionEnable =
-                table.coreOptions()
-                        .toConfiguration()
-                        .get(FlinkConnectorOptions.SINK_SHUFFLE_BY_PARTITION);
         BucketingStreamPartitioner<CdcRecord> partitioner =
-                new BucketingStreamPartitioner<>(
-                        new ChannelComputerProvider(schema, shuffleByPartitionEnable));
+                new BucketingStreamPartitioner<>(new CdcRecordChannelComputer(table.schema()));
         PartitionTransformation<CdcRecord> partitioned =
                 new PartitionTransformation<>(parsed.getTransformation(), partitioner);
         if (parallelism != null) {
@@ -115,35 +100,7 @@ public class FlinkCdcSinkBuilder<T> {
         }
 
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
-        FlinkCdcSink sink = new FlinkCdcSink(table, lockFactory, logSinkFunction);
+        FlinkCdcSink sink = new FlinkCdcSink(table, lockFactory);
         return sink.sinkFrom(new DataStream<>(env, partitioned));
-    }
-
-    private static class ChannelComputerProvider
-            implements AbstractChannelComputer.Provider<CdcRecord> {
-
-        private static final long serialVersionUID = 1L;
-
-        private final TableSchema schema;
-        private final boolean shuffleByPartitionEnable;
-
-        private ChannelComputerProvider(TableSchema schema, boolean shuffleByPartitionEnable) {
-            this.schema = schema;
-            this.shuffleByPartitionEnable = shuffleByPartitionEnable;
-        }
-
-        @Override
-        public AbstractChannelComputer<CdcRecord> provide(int numChannels) {
-            return new CdcRecordChannelComputer(numChannels, schema, shuffleByPartitionEnable);
-        }
-
-        @Override
-        public String toString() {
-            if (shuffleByPartitionEnable) {
-                return "HASH[bucket, partition]";
-            } else {
-                return "HASH[bucket]";
-            }
-        }
     }
 }

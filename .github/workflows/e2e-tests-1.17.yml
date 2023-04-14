@@ -28,10 +28,13 @@ on:
 env:
   JDK_VERSION: 8
 
+concurrency:
+  group: e2e-tests-17-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v2

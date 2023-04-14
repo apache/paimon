@@ -29,6 +29,7 @@ import org.apache.paimon.utils.OffsetRow;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
+import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 
@@ -47,7 +48,9 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData> {
     private final FileStoreTable table;
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
     private final boolean isStreaming;
+    private final String initialCommitUser;
 
+    private transient StoreSinkWriteState state;
     private transient StoreSinkWrite write;
     private transient InternalRowSerializer partitionSerializer;
     private transient OffsetRow reusedPartition;
@@ -56,21 +59,43 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData> {
     public StoreCompactOperator(
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
-            boolean isStreaming) {
+            boolean isStreaming,
+            String initialCommitUser) {
         Preconditions.checkArgument(
                 !table.coreOptions().writeOnly(),
                 CoreOptions.WRITE_ONLY.key() + " should not be true for StoreCompactOperator.");
         this.table = table;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.isStreaming = isStreaming;
+        this.initialCommitUser = initialCommitUser;
     }
 
     @Override
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
+
+        // Each job can only have one user name and this name must be consistent across restarts.
+        // We cannot use job id as commit user name here because user may change job id by creating
+        // a savepoint, stop the job and then resume from savepoint.
+        String commitUser =
+                StateUtils.getSingleValueFromState(
+                        context, "commit_user_state", String.class, initialCommitUser);
+
+        RowDataChannelComputer channelComputer = new RowDataChannelComputer(table.schema(), false);
+        channelComputer.setup(getRuntimeContext().getNumberOfParallelSubtasks());
+        state =
+                new StoreSinkWriteState(
+                        context,
+                        (tableName, partition, bucket) ->
+                                channelComputer.channel(partition, bucket)
+                                        == getRuntimeContext().getIndexOfThisSubtask());
+
         write =
                 storeSinkWriteProvider.provide(
-                        table, context, getContainingTask().getEnvironment().getIOManager());
+                        table,
+                        commitUser,
+                        state,
+                        getContainingTask().getEnvironment().getIOManager());
     }
 
     @Override
@@ -111,5 +136,18 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData> {
     protected List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
             throws IOException {
         return write.prepareCommit(doCompaction, checkpointId);
+    }
+
+    @Override
+    public void snapshotState(StateSnapshotContext context) throws Exception {
+        super.snapshotState(context);
+        write.snapshotState();
+        state.snapshotState();
+    }
+
+    @Override
+    public void close() throws Exception {
+        super.close();
+        write.close();
     }
 }

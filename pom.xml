@@ -123,6 +123,7 @@ under the License.
         <json-smart.version>2.4.9</json-smart.version>
         <avro.version>1.11.1</avro.version>
         <kafka.version>3.2.3</kafka.version>
+        <jacoco.version>0.8.8</jacoco.version>
     </properties>
 
     <dependencies>
@@ -185,6 +186,14 @@ under the License.
             <groupId>org.awaitility</groupId>
             <artifactId>awaitility</artifactId>
             <version>${awaitility.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jacoco</groupId>
+            <artifactId>org.jacoco.agent</artifactId>
+            <version>${jacoco.version}</version>
+            <classifier>runtime</classifier>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -389,6 +398,7 @@ under the License.
                         <exclude>docs/static/js/anchor.min.js</exclude>
                         <exclude>docs/layouts/shortcodes/generated/**</exclude>
                         <exclude>**/*.svg</exclude>
+                        <exclude>**/dependency-reduced-pom.xml</exclude>
                         <!-- Bundled license files -->
                         <exclude>**/LICENSE*</exclude>
                         <!-- artifacts created during release process -->
@@ -585,8 +595,6 @@ under the License.
                             <shadeTestJar>true</shadeTestJar>
                             <shadedArtifactAttached>false</shadedArtifactAttached>
                             <createDependencyReducedPom>true</createDependencyReducedPom>
-                            <dependencyReducedPomLocation>${project.basedir}/target/dependency-reduced-pom.xml
-                            </dependencyReducedPomLocation>
                             <!-- Filters MUST be appended; merging filters does not work properly, see MSHADE-305 -->
                             <filters combine.children="append">
                                 <!-- Globally exclude log4j.properties from our JAR files. -->
@@ -642,6 +650,21 @@ under the License.
                 </executions>
             </plugin>
 
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <configuration>
+                    <filesets>
+                        <fileset>
+                            <directory>${project.basedir}</directory>
+                            <includes>
+                                <include>dependency-reduced-pom.xml</include>
+                            </includes>
+                        </fileset>
+                    </filesets>
+                </configuration>
+            </plugin>
+
             <!-- generate configuration docs -->
             <plugin>
                 <groupId>org.commonjava.maven.plugins</groupId>
@@ -661,6 +684,45 @@ under the License.
                                 <artifactId>paimon-parent</artifactId>
                             </project>
                         </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- add plugin jacoco report -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <configuration>
+                    <skip>false</skip>
+                    <dataFile>${project.build.directory}/jacoco.exec</dataFile>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>default-prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                        <configuration>
+                            <propertyName>surefireArgLine</propertyName>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>default-instrument</id>
+                        <goals>
+                            <goal>instrument</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>default-restore-instrumented-classes</id>
+                        <goals>
+                            <goal>restore-instrumented-classes</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>default-report</id>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
                     </execution>
                 </executions>
             </plugin>
@@ -845,4 +907,17 @@ under the License.
             </plugins>
         </pluginManagement>
     </build>
+
+    <repositories>
+        <repository>
+            <id>apache-releases</id>
+            <name>apache releases</name>
+            <url>https://repository.apache.org/content/repositories/releases/</url>
+        </repository>
+        <repository>
+            <id>apache-snapshots</id>
+            <name>apache snapshots</name>
+            <url>https://repository.apache.org/content/repositories/snapshots/</url>
+        </repository>
+    </repositories>
 </project>

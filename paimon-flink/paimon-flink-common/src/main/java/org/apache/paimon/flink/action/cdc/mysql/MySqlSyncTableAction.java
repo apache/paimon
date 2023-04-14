@@ -25,7 +25,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.sink.cdc.EventParser;
-import org.apache.paimon.flink.sink.cdc.FlinkCdcSinkBuilder;
+import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncTableSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.SchemaChangeProcessFunction;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -167,8 +167,8 @@ public class MySqlSyncTableAction implements Action {
             parserFactory = MySqlDebeziumJsonEventParser::new;
         }
 
-        FlinkCdcSinkBuilder<String> sinkBuilder =
-                new FlinkCdcSinkBuilder<String>()
+        FlinkCdcSyncTableSinkBuilder<String> sinkBuilder =
+                new FlinkCdcSyncTableSinkBuilder<String>()
                         .withInput(
                                 env.fromSource(
                                         source, WatermarkStrategy.noWatermarks(), "MySQL Source"))

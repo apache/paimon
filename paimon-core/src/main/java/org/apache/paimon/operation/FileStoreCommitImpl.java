@@ -19,11 +19,13 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -34,11 +36,11 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -350,7 +352,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public void dropPartitions(List<Map<String, String>> partitions) {
+    public void dropPartitions(List<Map<String, String>> partitions, long commitIdentifier) {
         Preconditions.checkArgument(!partitions.isEmpty(), "Partitions list cannot be empty.");
 
         if (LOG.isDebugEnabled()) {
@@ -368,10 +370,32 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         tryOverwrite(
                 partitionFilter,
                 Collections.emptyList(),
-                // identifier is MAX_VALUE to avoid conflict
-                BatchWriteBuilder.COMMIT_IDENTIFIER,
+                commitIdentifier,
                 null,
                 Collections.emptyMap());
+    }
+
+    @Override
+    public void abort(List<CommitMessage> commitMessages) {
+        Map<Pair<BinaryRow, Integer>, DataFilePathFactory> factoryMap = new HashMap<>();
+        for (CommitMessage message : commitMessages) {
+            DataFilePathFactory pathFactory =
+                    factoryMap.computeIfAbsent(
+                            Pair.of(message.partition(), message.bucket()),
+                            k ->
+                                    this.pathFactory.createDataFilePathFactory(
+                                            k.getKey(), k.getValue()));
+            CommitMessageImpl commitMessage = (CommitMessageImpl) message;
+            List<DataFileMeta> toDelete = new ArrayList<>();
+            toDelete.addAll(commitMessage.newFilesIncrement().newFiles());
+            toDelete.addAll(commitMessage.newFilesIncrement().changelogFiles());
+            toDelete.addAll(commitMessage.compactIncrement().compactAfter());
+            toDelete.addAll(commitMessage.compactIncrement().changelogFiles());
+
+            for (DataFileMeta file : toDelete) {
+                fileIO.deleteQuietly(pathFactory.toPath(file.fileName()));
+            }
+        }
     }
 
     private void collectChanges(
@@ -479,7 +503,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
-    private boolean tryCommitOnce(
+    @VisibleForTesting
+    public boolean tryCommitOnce(
             List<ManifestEntry> tableFiles,
             List<ManifestEntry> changelogFiles,
             long identifier,

@@ -39,22 +39,12 @@ public class StateUtils {
             throws Exception {
         ListState<T> state =
                 context.getOperatorStateStore()
-                        .getListState(new ListStateDescriptor<>(stateName, valueClass));
+                        .getUnionListState(new ListStateDescriptor<>(stateName, valueClass));
 
         List<T> values = new ArrayList<>();
         state.get().forEach(values::add);
 
         if (context.isRestored()) {
-            // Values may contain 0 element or more than 1 element.
-            //
-            // Let's say a vertex has 3 tasks (A, B and C). If A is finished while B and C are still
-            // running, then states of A will be divided between B and C. That is, if the job
-            // restarts, state of vertex A will be empty, and state of vertex B and C may contain
-            // more than 1 element.
-            if (values.isEmpty()) {
-                return null;
-            }
-
             // As we're storing the same value for each task, we hereby check if all elements are
             // equal.
             for (int i = 1; i < values.size(); i++) {

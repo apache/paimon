@@ -67,6 +67,10 @@ CREATE TABLE MyTable (
 
 {{< /tabs >}}
 
+{{< hint info >}}
+Inserting jobs on the table should be stopped prior to dropping tables, or table files couldn't be deleted completely.
+{{< /hint >}}
+
 ### Partitioned Tables
 
 The following SQL creates a table named `MyTable` with five columns partitioned by `dt` and `hh`, where `dt`, `hh` and `user_id` are the primary keys.

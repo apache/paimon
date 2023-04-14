@@ -21,8 +21,6 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.utils.SnapshotManager;
 
-import javax.annotation.Nullable;
-
 /**
  * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_SNAPSHOT} startup mode of a
  * streaming read.
@@ -36,15 +34,13 @@ public class ContinuousFromSnapshotStartingScanner implements StartingScanner {
     }
 
     @Override
-    @Nullable
     public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
         Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
         if (earliestSnapshotId == null) {
-            return null;
+            return new NoSnapshot();
         }
-        // We should use `snapshotId - 1` here to start to scan delta data from specific snapshot
-        // id. If the snapshotId < earliestSnapshotId, start to scan from the earliest.
-        return new Result(
-                snapshotId >= earliestSnapshotId ? snapshotId - 1 : earliestSnapshotId - 1);
+        // We should return the specified snapshot as next snapshot to indicate to scan delta data
+        // from it. If the snapshotId < earliestSnapshotId, start from the earliest.
+        return new NextSnapshot(Math.max(snapshotId, earliestSnapshotId));
     }
 }

@@ -189,7 +189,7 @@ public class DataTableSource extends FlinkTableSource
                                     options.get(SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL));
                 } catch (NoSuchMethodError error) {
                     throw new RuntimeException(
-                            "Flink 1.14 dose not support watermark alignment, please check your Flink version.",
+                            "Flink 1.14 does not support watermark alignment, please check your Flink version.",
                             error);
                 }
             }

@@ -17,6 +17,10 @@ name: Check licensing
 
 on: [push, pull_request]
 
+concurrency:
+  group: cl-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest

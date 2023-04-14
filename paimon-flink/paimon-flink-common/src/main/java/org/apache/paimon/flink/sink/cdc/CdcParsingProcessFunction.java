@@ -30,6 +30,9 @@ import org.apache.flink.util.OutputTag;
  * A {@link ProcessFunction} to parse CDC change event to either {@link SchemaChange} or {@link
  * CdcRecord} and send them to different downstreams.
  *
+ * <p>This {@link ProcessFunction} can only handle records for a single constant table. To handle
+ * records for different tables, see {@link CdcMultiTableParsingProcessFunction}.
+ *
  * @param <T> CDC change event type
  */
 public class CdcParsingProcessFunction<T> extends ProcessFunction<T, CdcRecord> {

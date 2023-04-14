@@ -50,6 +50,8 @@ CREATE CATALOG my_catalog WITH (
 USE CATALOG my_catalog;
 ```
 
+You can define any default table options with the prefix `table-default.` for tables created in the catalog.
+
 {{< /tab >}}
 
 {{< tab "Spark3" >}}
@@ -61,6 +63,8 @@ spark-sql ... \
     --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
     --conf spark.sql.catalog.paimon.warehouse=hdfs://path/to/warehouse
 ```
+
+You can define any default table options with the prefix `spark.sql.catalog.paimon.table-default.` for tables created in the catalog.
 
 After `spark-sql` is started, you can switch to the `default` database of the `paimon` catalog with the following SQL.
 
@@ -97,6 +101,8 @@ CREATE CATALOG my_hive WITH (
 USE CATALOG my_hive;
 ```
 
+You can define any default table options with the prefix `table-default.` for tables created in the catalog.
+
 {{< /tab >}}
 
 {{< tab "Spark3" >}}
@@ -112,6 +118,8 @@ spark-sql ... \
     --conf spark.sql.catalog.paimon.metastore=hive \
     --conf spark.sql.catalog.paimon.uri=thrift://<hive-metastore-host-name>:<port>
 ```
+
+You can define any default table options with the prefix `spark.sql.catalog.paimon.table-default.` for tables created in the catalog.
 
 After `spark-sql` is started, you can switch to the `default` database of the `paimon` catalog with the following SQL.
 

@@ -31,8 +31,12 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.FileUtils;
+import org.apache.paimon.utils.ObjectsFile;
+import org.apache.paimon.utils.PathFactory;
+import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.VersionedObjectSerializer;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
@@ -41,15 +45,11 @@ import java.util.List;
  * This file includes several {@link ManifestEntry}s, representing the additional changes since last
  * snapshot.
  */
-public class ManifestFile {
+public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
-    private final FileIO fileIO;
     private final SchemaManager schemaManager;
     private final RowType partitionType;
-    private final ManifestEntrySerializer serializer;
-    private final FormatReaderFactory readerFactory;
     private final FormatWriterFactory writerFactory;
-    private final FileStorePathFactory pathFactory;
     private final long suggestedFileSize;
 
     private ManifestFile(
@@ -59,30 +59,19 @@ public class ManifestFile {
             ManifestEntrySerializer serializer,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
-            FileStorePathFactory pathFactory,
-            long suggestedFileSize) {
-        this.fileIO = fileIO;
+            PathFactory pathFactory,
+            long suggestedFileSize,
+            @Nullable SegmentsCache<String> cache) {
+        super(fileIO, serializer, readerFactory, pathFactory, cache);
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
-        this.serializer = serializer;
-        this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
-        this.pathFactory = pathFactory;
         this.suggestedFileSize = suggestedFileSize;
     }
 
     @VisibleForTesting
     public long suggestedFileSize() {
         return suggestedFileSize;
-    }
-
-    public List<ManifestEntry> read(String fileName) {
-        try {
-            return FileUtils.readListFromFile(
-                    fileIO, pathFactory.toManifestFilePath(fileName), serializer, readerFactory);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to read manifest file " + fileName, e);
-        }
     }
 
     /**
@@ -93,7 +82,7 @@ public class ManifestFile {
     public List<ManifestFileMeta> write(List<ManifestEntry> entries) {
         RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
                 new RollingFileWriter<>(
-                        () -> new ManifestEntryWriter(writerFactory, pathFactory.newManifestFile()),
+                        () -> new ManifestEntryWriter(writerFactory, pathFactory.newPath()),
                         suggestedFileSize);
         try {
             writer.write(entries);
@@ -102,10 +91,6 @@ public class ManifestFile {
             throw new RuntimeException(e);
         }
         return writer.result();
-    }
-
-    public void delete(String fileName) {
-        fileIO.deleteQuietly(pathFactory.toManifestFilePath(fileName));
     }
 
     private class ManifestEntryWriter extends SingleFileWriter<ManifestEntry, ManifestFileMeta> {
@@ -166,6 +151,7 @@ public class ManifestFile {
         private final FileFormat fileFormat;
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
+        @Nullable private final SegmentsCache<String> cache;
 
         public Factory(
                 FileIO fileIO,
@@ -173,13 +159,15 @@ public class ManifestFile {
                 RowType partitionType,
                 FileFormat fileFormat,
                 FileStorePathFactory pathFactory,
-                long suggestedFileSize) {
+                long suggestedFileSize,
+                @Nullable SegmentsCache<String> cache) {
             this.fileIO = fileIO;
             this.schemaManager = schemaManager;
             this.partitionType = partitionType;
             this.fileFormat = fileFormat;
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
+            this.cache = cache;
         }
 
         public ManifestFile create() {
@@ -191,8 +179,9 @@ public class ManifestFile {
                     new ManifestEntrySerializer(),
                     fileFormat.createReaderFactory(entryType),
                     fileFormat.createWriterFactory(entryType),
-                    pathFactory,
-                    suggestedFileSize);
+                    pathFactory.manifestFileFactory(),
+                    suggestedFileSize,
+                    cache);
         }
     }
 }
