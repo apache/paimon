@@ -61,7 +61,8 @@ public class CatalogOptions {
             ConfigOptions.key("case.ignore")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("If the current value is true，fields will convert upperCase to lowerCase automatically to HiveCatalog.");
+                    .withDescription(
+                            "If the current value is true，fields will convert upperCase to lowerCase automatically to HiveCatalog.");
 
     public static final ConfigOption<Duration> LOCK_CHECK_MAX_SLEEP =
             key("lock-check-max-sleep")

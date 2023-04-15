@@ -23,6 +23,7 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.StringUtils;
 
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.MySqlSourceBuilder;
@@ -35,7 +36,6 @@ import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import com.ververica.cdc.debezium.table.DebeziumOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
-import org.apache.paimon.utils.StringUtils;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -53,7 +53,8 @@ class MySqlActionUtils {
                 mySqlConfig.get(MySqlSourceOptions.PASSWORD));
     }
 
-    static void assertSchemaCompatible(TableSchema tableSchema, MySqlSchema mySqlSchema, Map<String, String> paimonConfig) {
+    static void assertSchemaCompatible(
+            TableSchema tableSchema, MySqlSchema mySqlSchema, Map<String, String> paimonConfig) {
         if (!schemaCompatible(tableSchema, mySqlSchema, paimonConfig)) {
             throw new IllegalArgumentException(
                     "Paimon schema and MySQL schema are not compatible.\n"
@@ -64,9 +65,16 @@ class MySqlActionUtils {
         }
     }
 
-    static boolean schemaCompatible(TableSchema tableSchema, MySqlSchema mySqlSchema, Map<String, String> paimonConfig) {
+    static boolean schemaCompatible(
+            TableSchema tableSchema, MySqlSchema mySqlSchema, Map<String, String> paimonConfig) {
         for (Map.Entry<String, DataType> entry : mySqlSchema.fields().entrySet()) {
-            int idx = tableSchema.fieldNames().indexOf(ignoreCase(paimonConfig)?entry.getKey().toLowerCase(Locale.ROOT): entry.getKey());
+            int idx =
+                    tableSchema
+                            .fieldNames()
+                            .indexOf(
+                                    ignoreCase(paimonConfig)
+                                            ? entry.getKey().toLowerCase(Locale.ROOT)
+                                            : entry.getKey());
             if (idx < 0) {
                 return false;
             }
@@ -202,8 +210,10 @@ class MySqlActionUtils {
     }
 
     static boolean ignoreCase(Map<String, String> paimonConfig) {
-        if (!StringUtils.isBlank(paimonConfig.get(CatalogOptions.METASTORE.key())) && "hive".equals(paimonConfig.get(CatalogOptions.METASTORE.key()))) {
-            return !StringUtils.isBlank(paimonConfig.get(CatalogOptions.CASE_IGNORE.key())) && "true".equals(paimonConfig.get(CatalogOptions.CASE_IGNORE.key()));
+        if (!StringUtils.isBlank(paimonConfig.get(CatalogOptions.METASTORE.key()))
+                && "hive".equals(paimonConfig.get(CatalogOptions.METASTORE.key()))) {
+            return !StringUtils.isBlank(paimonConfig.get(CatalogOptions.CASE_IGNORE.key()))
+                    && "true".equals(paimonConfig.get(CatalogOptions.CASE_IGNORE.key()));
         }
         return false;
     }

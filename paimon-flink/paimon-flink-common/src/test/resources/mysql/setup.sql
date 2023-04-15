@@ -180,3 +180,9 @@ CREATE TABLE t2 (
 CREATE TABLE t3 (
     v1 INT
 );
+
+
+-- fields are upperCase
+CREATE TABLE t4 (
+    V1 INT
+);
