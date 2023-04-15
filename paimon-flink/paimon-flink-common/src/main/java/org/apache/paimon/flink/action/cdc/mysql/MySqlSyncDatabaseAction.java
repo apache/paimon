@@ -139,7 +139,7 @@ public class MySqlSyncDatabaseAction implements Action {
             FileStoreTable table;
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
-                MySqlActionUtils.assertSchemaCompatible(table.schema(), mySqlSchema);
+                MySqlActionUtils.assertSchemaCompatible(table.schema(), mySqlSchema, paimonConfig);
             } catch (Catalog.TableNotExistException e) {
                 Schema schema =
                         MySqlActionUtils.buildPaimonSchema(

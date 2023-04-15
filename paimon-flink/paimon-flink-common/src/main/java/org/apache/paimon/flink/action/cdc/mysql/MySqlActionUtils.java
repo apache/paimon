@@ -34,13 +34,11 @@ import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import com.ververica.cdc.debezium.table.DebeziumOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
+import org.apache.paimon.utils.StringUtils;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
+import java.util.*;
 
 class MySqlActionUtils {
 
@@ -54,8 +52,8 @@ class MySqlActionUtils {
                 mySqlConfig.get(MySqlSourceOptions.PASSWORD));
     }
 
-    static void assertSchemaCompatible(TableSchema tableSchema, MySqlSchema mySqlSchema) {
-        if (!schemaCompatible(tableSchema, mySqlSchema)) {
+    static void assertSchemaCompatible(TableSchema tableSchema, MySqlSchema mySqlSchema, Map<String, String> paimonConfig) {
+        if (!schemaCompatible(tableSchema, mySqlSchema, paimonConfig)) {
             throw new IllegalArgumentException(
                     "Paimon schema and MySQL schema are not compatible.\n"
                             + "Paimon fields are: "
@@ -65,9 +63,9 @@ class MySqlActionUtils {
         }
     }
 
-    static boolean schemaCompatible(TableSchema tableSchema, MySqlSchema mySqlSchema) {
+    static boolean schemaCompatible(TableSchema tableSchema, MySqlSchema mySqlSchema, Map<String, String> paimonConfig) {
         for (Map.Entry<String, DataType> entry : mySqlSchema.fields().entrySet()) {
-            int idx = tableSchema.fieldNames().indexOf(entry.getKey());
+            int idx = tableSchema.fieldNames().indexOf(ignoreCase(paimonConfig)?entry.getKey().toLowerCase(Locale.ROOT): entry.getKey());
             if (idx < 0) {
                 return false;
             }
@@ -200,5 +198,12 @@ class MySqlActionUtils {
         JsonDebeziumDeserializationSchema schema =
                 new JsonDebeziumDeserializationSchema(true, customConverterConfigs);
         return sourceBuilder.deserializer(schema).includeSchemaChanges(true).build();
+    }
+
+    static boolean ignoreCase(Map<String, String> paimonConfig) {
+        if (!StringUtils.isBlank(paimonConfig.get("metastore")) && "hive".equals(paimonConfig.get("metastore"))) {
+            return !StringUtils.isBlank(paimonConfig.get("case-ignore")) && "true".equals(paimonConfig.get("case-ignore"));
+        }
+        return false;
     }
 }

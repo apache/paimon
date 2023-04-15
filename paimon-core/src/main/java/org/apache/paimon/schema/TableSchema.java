@@ -105,7 +105,7 @@ public class TableSchema implements Serializable {
     public List<String> trimmedPrimaryKeys() {
         if (primaryKeys.size() > 0) {
             Preconditions.checkState(
-                    primaryKeys.containsAll(partitionKeys),
+                    new HashSet<>(primaryKeys).containsAll(partitionKeys),
                     String.format(
                             "Primary key constraint %s should include all partition fields %s",
                             primaryKeys, partitionKeys));
