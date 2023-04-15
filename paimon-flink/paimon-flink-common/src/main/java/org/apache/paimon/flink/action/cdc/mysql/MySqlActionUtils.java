@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.sink.cdc.SchemaChangeProcessFunction;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataType;
@@ -201,8 +202,8 @@ class MySqlActionUtils {
     }
 
     static boolean ignoreCase(Map<String, String> paimonConfig) {
-        if (!StringUtils.isBlank(paimonConfig.get("metastore")) && "hive".equals(paimonConfig.get("metastore"))) {
-            return !StringUtils.isBlank(paimonConfig.get("case-ignore")) && "true".equals(paimonConfig.get("case-ignore"));
+        if (!StringUtils.isBlank(paimonConfig.get(CatalogOptions.METASTORE.key())) && "hive".equals(paimonConfig.get(CatalogOptions.METASTORE.key()))) {
+            return !StringUtils.isBlank(paimonConfig.get(CatalogOptions.CASE_IGNORE.key())) && "true".equals(paimonConfig.get(CatalogOptions.CASE_IGNORE.key()));
         }
         return false;
     }

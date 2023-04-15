@@ -57,6 +57,12 @@ public class CatalogOptions {
                     .defaultValue(false)
                     .withDescription("Enable Catalog Lock.");
 
+    public static final ConfigOption<Boolean> CASE_IGNORE =
+            ConfigOptions.key("case.ignore")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("If the current value is true，fields will convert upperCase to lowerCase automatically to HiveCatalog.");
+
     public static final ConfigOption<Duration> LOCK_CHECK_MAX_SLEEP =
             key("lock-check-max-sleep")
                     .durationType()
