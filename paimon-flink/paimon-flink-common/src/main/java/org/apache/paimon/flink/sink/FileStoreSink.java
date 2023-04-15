@@ -22,6 +22,7 @@ import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.TableCommitImpl;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
@@ -66,7 +67,10 @@ public class FileStoreSink extends FlinkSink<RowData> {
         // a restart.
         return user ->
                 new StoreCommitter(
-                        table.newCommit(user)
+                        ((TableCommitImpl)
+                                        table.newStreamWriteBuilder()
+                                                .withCommitUser(user)
+                                                .newCommit())
                                 .withOverwrite(overwritePartition)
                                 .withLock(lockFactory.create())
                                 .ignoreEmptyCommit(!streamingCheckpointEnabled));

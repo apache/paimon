@@ -54,7 +54,7 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
     @Override
     public InputSplit[] getSplits(JobConf jobConf, int numSplits) {
         FileStoreTable table = createFileStoreTable(jobConf);
-        InnerTableScan scan = table.newScan();
+        InnerTableScan scan = (InnerTableScan) table.newReadBuilder().newScan();
         createPredicate(table.schema(), jobConf).ifPresent(scan::withFilter);
         return scan.plan().splits().stream()
                 .map(split -> new PaimonInputSplit(table.location().toString(), (DataSplit) split))

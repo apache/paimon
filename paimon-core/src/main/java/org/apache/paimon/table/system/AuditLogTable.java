@@ -38,6 +38,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.types.DataField;
@@ -84,8 +85,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
     private final FileStoreTable dataTable;
 
+    private final ReadBuilder readBuilder;
+
     public AuditLogTable(FileStoreTable dataTable) {
         this.dataTable = dataTable;
+        this.readBuilder = dataTable.newReadBuilder();
     }
 
     @Override
@@ -123,12 +127,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
     @Override
     public InnerTableScan newScan() {
-        return new AuditLogBatchScan(dataTable.newScan());
+        return new AuditLogBatchScan((InnerTableScan) readBuilder.newScan());
     }
 
     @Override
     public InnerStreamTableScan newStreamScan() {
-        return new AuditLogStreamScan(dataTable.newStreamScan());
+        return new AuditLogStreamScan((InnerStreamTableScan) readBuilder.newStreamScan());
     }
 
     @Override
@@ -148,7 +152,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new AuditLogRead(dataTable.newRead());
+        return new AuditLogRead((InnerTableRead) readBuilder.newRead());
     }
 
     @Override

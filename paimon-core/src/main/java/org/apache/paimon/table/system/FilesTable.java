@@ -38,6 +38,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
@@ -159,8 +160,11 @@ public class FilesTable implements ReadonlyTable {
 
         private final FileStoreTable storeTable;
 
+        private final ReadBuilder readBuilder;
+
         private FilesSplit(FileStoreTable storeTable) {
             this.storeTable = storeTable;
+            this.readBuilder = storeTable.newReadBuilder();
         }
 
         @Override
@@ -173,7 +177,7 @@ public class FilesTable implements ReadonlyTable {
         }
 
         private TableScan.Plan plan() {
-            return storeTable.newScan().plan();
+            return readBuilder.newScan().plan();
         }
 
         @Override

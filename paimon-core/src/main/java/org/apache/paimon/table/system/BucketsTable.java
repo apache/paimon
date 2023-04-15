@@ -34,6 +34,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.types.BigIntType;
@@ -62,10 +63,12 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     private static final long serialVersionUID = 1L;
 
     private final FileStoreTable wrapped;
+    private final ReadBuilder readBuilder;
     private final boolean isContinuous;
 
     public BucketsTable(FileStoreTable wrapped, boolean isContinuous) {
         this.wrapped = wrapped;
+        this.readBuilder = wrapped.newReadBuilder();
         this.isContinuous = isContinuous;
     }
 
@@ -111,12 +114,12 @@ public class BucketsTable implements DataTable, ReadonlyTable {
 
     @Override
     public InnerTableScan newScan() {
-        return wrapped.newScan();
+        return (InnerTableScan) readBuilder.newScan();
     }
 
     @Override
     public InnerStreamTableScan newStreamScan() {
-        return wrapped.newStreamScan();
+        return (InnerStreamTableScan) readBuilder.newStreamScan();
     }
 
     @Override

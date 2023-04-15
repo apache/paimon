@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.InnerTableCommit;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
@@ -46,7 +47,13 @@ public class CompactorSink extends FlinkSink<RowData> {
     @Override
     protected SerializableFunction<String, Committer> createCommitterFactory(
             boolean streamingCheckpointEnabled) {
-        return user -> new StoreCommitter(table.newCommit(user).withLock(lockFactory.create()));
+        return user ->
+                new StoreCommitter(
+                        ((InnerTableCommit)
+                                        table.newStreamWriteBuilder()
+                                                .withCommitUser(user)
+                                                .newCommit())
+                                .withLock(lockFactory.create()));
     }
 
     @Override
