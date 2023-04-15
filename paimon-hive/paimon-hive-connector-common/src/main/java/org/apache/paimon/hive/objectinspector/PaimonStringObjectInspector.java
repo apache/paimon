@@ -27,7 +27,7 @@ import org.apache.hadoop.io.Text;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for STRING type. */
 public class PaimonStringObjectInspector extends AbstractPrimitiveJavaObjectInspector
-        implements StringObjectInspector {
+        implements StringObjectInspector, WriteableObjectInspector {
 
     public PaimonStringObjectInspector() {
         super(TypeInfoFactory.stringTypeInfo);
@@ -51,5 +51,10 @@ public class PaimonStringObjectInspector extends AbstractPrimitiveJavaObjectInsp
         } else {
             return o;
         }
+    }
+
+    @Override
+    public BinaryString convert(Object value) {
+        return value == null ? null : BinaryString.fromString(value.toString());
     }
 }

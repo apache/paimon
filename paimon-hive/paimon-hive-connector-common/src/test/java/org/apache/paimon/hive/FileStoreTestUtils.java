@@ -33,15 +33,26 @@ import java.util.List;
 /** Test utils related to {@link FileStore}. */
 public class FileStoreTestUtils {
 
-    private static final String TABLE_NAME = "hive_test_table";
+    public static final String TABLE_NAME = "hive_test_table";
 
-    private static final String DATABASE_NAME = "default";
+    public static final String DATABASE_NAME = "default";
 
     private static final Identifier TABLE_IDENTIFIER = Identifier.create(DATABASE_NAME, TABLE_NAME);
 
     public static Table createFileStoreTable(
             Options conf, RowType rowType, List<String> partitionKeys, List<String> primaryKeys)
             throws Exception {
+        return createFileStoreTable(conf, rowType, partitionKeys, primaryKeys, null);
+    }
+
+    public static Table createFileStoreTable(
+            Options conf,
+            RowType rowType,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            Identifier identifier)
+            throws Exception {
+        Identifier identifierNotNull = identifier == null ? TABLE_IDENTIFIER : identifier;
         // create CatalogContext using the options
         CatalogContext catalogContext = CatalogContext.create(conf);
         Catalog catalog = CatalogFactory.createCatalog(catalogContext);
@@ -49,10 +60,10 @@ public class FileStoreTestUtils {
         catalog.createDatabase(DATABASE_NAME, false);
         // create table
         catalog.createTable(
-                TABLE_IDENTIFIER,
+                identifierNotNull,
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, conf.toMap(), ""),
                 false);
-        Table table = catalog.getTable(TABLE_IDENTIFIER);
+        Table table = catalog.getTable(identifierNotNull);
         catalog.close();
         return table;
     }

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.hive.mapred.PaimonOutputCommitter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
@@ -38,6 +39,10 @@ public class PaimonJobConf {
     private static final String INTERNAL_LOCATION = "paimon.internal.location";
     private static final String INTERNAL_CATALOG_CONFIG = "paimon.catalog.config";
 
+    public static final String MAPRED_OUTPUT_COMMITTER = "mapred.output.committer.class";
+
+    public static final String PAIMON_WRITE = "paimon.write";
+
     private static final String PAIMON_PREFIX = "paimon.";
 
     private final JobConf jobConf;
@@ -54,6 +59,16 @@ public class PaimonJobConf {
         map.put(
                 INTERNAL_LOCATION,
                 properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION));
+    }
+
+    public static void configureOutputJobProperties(
+            Configuration configuration, Properties properties, Map<String, String> map) {
+        map.put(
+                INTERNAL_LOCATION,
+                properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION));
+        map.put(MAPRED_OUTPUT_COMMITTER, PaimonOutputCommitter.class.getName());
+        map.put(PAIMON_WRITE, Boolean.TRUE.toString());
+        properties.put(PAIMON_WRITE, Boolean.TRUE.toString());
     }
 
     public String getLocation() {
