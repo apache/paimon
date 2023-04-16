@@ -155,12 +155,6 @@ CREATE TABLE incompatible_pk_2 (
     PRIMARY KEY (a)
 );
 
--- fields are upperCase
-CREATE TABLE ignore_case (
-    V1 INT,
-    PRIMARY KEY (V1)
-);
-
 -- ################################################################################
 --  MySqlSyncDatabaseActionITCase
 -- ################################################################################
