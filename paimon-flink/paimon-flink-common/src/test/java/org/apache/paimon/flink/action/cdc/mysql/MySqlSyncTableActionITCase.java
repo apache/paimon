@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -527,6 +528,71 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "Primary keys are not specified. "
                                 + "Also, can't infer primary keys from MySQL table schemas because "
                                 + "MySQL tables have no primary keys or have different primary keys.");
+    }
+
+    @Test
+    public void ignoreCase() {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "t4");
+
+        Map<String, String> paimonConfig = new HashMap<>();
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        MySqlSyncTableAction action =
+                new MySqlSyncTableAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        paimonConfig);
+
+        try {
+            action.build(env);
+        } catch (Exception ex) {
+            throw new RuntimeException(ex);
+        }
+
+        paimonConfig.put(CatalogOptions.CASE_IGNORE.key(), "true");
+
+        action =
+                new MySqlSyncTableAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        paimonConfig);
+
+        try {
+            action.build(env);
+        } catch (Exception ex) {
+            throw new RuntimeException(ex);
+        }
+
+        paimonConfig.put(CatalogOptions.CASE_IGNORE.key(), "false");
+
+        action =
+                new MySqlSyncTableAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        paimonConfig);
+
+        MySqlSyncTableAction finalAction1 = action;
+        IllegalArgumentException e =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> finalAction1.build(env),
+                        "Expecting IllegalArgumentException");
+        assertThat(e).hasMessage("Paimon schema and MySQL schema are not compatible.");
     }
 
     private FileStoreTable getFileStoreTable() throws Exception {
