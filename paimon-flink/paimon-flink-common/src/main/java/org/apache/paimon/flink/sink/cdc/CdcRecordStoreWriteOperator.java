@@ -54,19 +54,21 @@ public class CdcRecordStoreWriteOperator extends PrepareCommitOperator<CdcRecord
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
     private final String initialCommitUser;
     private final long retrySleepMillis;
-
+    private final boolean ignoreCase;
     private transient StoreSinkWriteState state;
     private transient StoreSinkWrite write;
 
     public CdcRecordStoreWriteOperator(
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
-            String initialCommitUser) {
+            String initialCommitUser,
+            boolean ignoreCase) {
         this.table = table;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;
         this.retrySleepMillis =
                 table.coreOptions().toConfiguration().get(RETRY_SLEEP_TIME).toMillis();
+        this.ignoreCase = ignoreCase;
     }
 
     @Override
@@ -101,11 +103,12 @@ public class CdcRecordStoreWriteOperator extends PrepareCommitOperator<CdcRecord
     @Override
     public void processElement(StreamRecord<CdcRecord> element) throws Exception {
         CdcRecord record = element.getValue();
-        Optional<GenericRow> optionalConverted = record.toGenericRow(table.schema().fields());
+        Optional<GenericRow> optionalConverted =
+                record.toGenericRow(table.schema().fields(), ignoreCase);
         if (!optionalConverted.isPresent()) {
             while (true) {
                 table = table.copyWithLatestSchema();
-                optionalConverted = record.toGenericRow(table.schema().fields());
+                optionalConverted = record.toGenericRow(table.schema().fields(), ignoreCase);
                 if (optionalConverted.isPresent()) {
                     break;
                 }

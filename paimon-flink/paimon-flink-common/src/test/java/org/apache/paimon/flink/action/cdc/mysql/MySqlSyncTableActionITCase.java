@@ -39,11 +39,7 @@ import org.junit.jupiter.api.Timeout;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -534,9 +530,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     public void ignoreCase() {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
-        mySqlConfig.put("table-name", "t4");
+        mySqlConfig.put("table-name", "ignore_case");
 
         Map<String, String> paimonConfig = new HashMap<>();
+
+        paimonConfig.put(CatalogOptions.METASTORE.key(), "hive");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 

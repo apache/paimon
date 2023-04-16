@@ -42,15 +42,18 @@ public class FlinkCdcSink extends FlinkSink<CdcRecord> {
 
     private final Lock.Factory lockFactory;
 
-    public FlinkCdcSink(FileStoreTable table, Lock.Factory lockFactory) {
+    private final boolean ignoreCase;
+
+    public FlinkCdcSink(FileStoreTable table, Lock.Factory lockFactory, boolean ignoreCase) {
         super(table, false);
         this.lockFactory = lockFactory;
+        this.ignoreCase = ignoreCase;
     }
 
     @Override
     protected OneInputStreamOperator<CdcRecord, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, boolean isStreaming, String commitUser) {
-        return new CdcRecordStoreWriteOperator(table, writeProvider, commitUser);
+        return new CdcRecordStoreWriteOperator(table, writeProvider, commitUser, ignoreCase);
     }
 
     @Override

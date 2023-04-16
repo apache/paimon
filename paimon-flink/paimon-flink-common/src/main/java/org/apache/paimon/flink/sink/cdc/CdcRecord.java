@@ -93,10 +93,16 @@ public class CdcRecord implements Serializable {
      *     Optional#of(GenericRow)} will be returned, otherwise an {@code Optional#empty()} will be
      *     returned
      */
-    public Optional<GenericRow> toGenericRow(List<DataField> dataFields) {
+    public Optional<GenericRow> toGenericRow(List<DataField> dataFields, boolean ignoreCase) {
         GenericRow genericRow = new GenericRow(dataFields.size());
         List<String> fieldNames =
-                dataFields.stream().map(DataField::name).collect(Collectors.toList());
+                dataFields.stream()
+                        .map(
+                                dataField ->
+                                        ignoreCase
+                                                ? dataField.name().toLowerCase()
+                                                : dataField.name())
+                        .collect(Collectors.toList());
 
         for (Map.Entry<String, String> field : fields.entrySet()) {
             String key = field.getKey();

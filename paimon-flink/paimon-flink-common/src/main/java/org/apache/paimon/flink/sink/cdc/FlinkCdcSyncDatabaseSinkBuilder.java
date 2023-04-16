@@ -53,6 +53,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
     @Nullable private Integer parallelism;
 
+    private boolean ignoreCase = false;
+
     public FlinkCdcSyncDatabaseSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
         return this;
@@ -76,6 +78,11 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withParallelism(@Nullable Integer parallelism) {
         this.parallelism = parallelism;
+        return this;
+    }
+
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withIgnoreCase(boolean ignoreCase) {
+        this.ignoreCase = ignoreCase;
         return this;
     }
 
@@ -116,7 +123,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                 partitioned.setParallelism(parallelism);
             }
 
-            FlinkCdcSink sink = new FlinkCdcSink(table, lockFactory);
+            FlinkCdcSink sink = new FlinkCdcSink(table, lockFactory, ignoreCase);
             sink.sinkFrom(new DataStream<>(env, partitioned));
         }
     }
