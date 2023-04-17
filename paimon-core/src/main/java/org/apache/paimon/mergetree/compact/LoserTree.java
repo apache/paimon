@@ -134,13 +134,11 @@ public class LoserTree<T> implements Closeable {
                     case WINNER_POPPED:
                         if (winnerNode.firstSameKeyIndex < 0) {
                             // fast path, which means that the same key is not yet processed in the
-                            // current
-                            // tree.
+                            // current tree.
                             parent = -1;
                         } else {
                             // fast path. Directly exchange positions with the same key that has not
-                            // yet been
-                            // processed, no need to compare level by level.
+                            // yet been processed, no need to compare level by level.
                             parent = winnerNode.firstSameKeyIndex;
                             parentNode = leaves.get(this.tree[parent]);
                             winnerNode.state = State.LOSER_POPPED;
@@ -221,11 +219,11 @@ public class LoserTree<T> implements Closeable {
                 }
                 return;
             case LOSER_WITH_SAME_KEY:
-                // the previous loser has the same key as the winner of the previous time,
-                // so the comparison is skipped directly.
-                parentNode.state = State.WINNER_WITH_SAME_KEY;
-                winnerNode.state = State.LOSER_WITH_NEW_KEY;
-                return;
+                // A node in the WINNER_WITH_NEW_KEY state cannot encounter a node in the
+                // LOSER_WITH_SAME_KEY state.
+                throw new RuntimeException(
+                        "This is a bug. Please file an issue. A node in the WINNER_WITH_NEW_KEY "
+                                + "state cannot encounter a node in the LOSER_WITH_SAME_KEY state.");
             case LOSER_POPPED:
                 parentNode.state = State.WINNER_POPPED;
                 parentNode.firstSameKeyIndex = -1;
