@@ -927,6 +927,12 @@ under the License.
         </pluginManagement>
     </build>
 
+    <!--
+    Uncomment the following "repositories" tag if your maven fails to download paimon-bundle snapshot files.
+    We comment these tags by default because downloading from apache repositories is very slow for both github and developers.
+    -->
+
+    <!--
     <repositories>
         <repository>
             <id>apache-releases</id>
@@ -939,4 +945,5 @@ under the License.
             <url>https://repository.apache.org/content/repositories/snapshots/</url>
         </repository>
     </repositories>
+    -->
 </project>
