@@ -54,8 +54,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.catalog.Catalog.DEFAULT_DATABASE;
-
 /** Abstract base of {@link Action}. */
 public abstract class ActionBase implements Action {
 
@@ -81,15 +79,15 @@ public abstract class ActionBase implements Action {
 
     ActionBase(String warehouse, String databaseName, String tableName, Options options) {
         identifier = new Identifier(databaseName, tableName);
-        CatalogContext catalogContext = CatalogContext.create(
-            new Options().set(CatalogOptions.WAREHOUSE, warehouse));
-        catalog =
-                CatalogFactory.createCatalog(catalogContext);
+        CatalogContext catalogContext =
+                CatalogContext.create(new Options().set(CatalogOptions.WAREHOUSE, warehouse));
+        catalog = CatalogFactory.createCatalog(catalogContext);
 
-        flinkCatalog = FlinkCatalogFactory.createCatalog(
-            catalogName,
-            catalogContext,
-            Thread.currentThread().getContextClassLoader());
+        flinkCatalog =
+                FlinkCatalogFactory.createCatalog(
+                        catalogName,
+                        catalogContext,
+                        Thread.currentThread().getContextClassLoader());
 
         env = StreamExecutionEnvironment.getExecutionEnvironment();
         tEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
