@@ -25,6 +25,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeRefe
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.kafka.connect.json.JsonConverterConfig;
@@ -33,7 +34,7 @@ import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -201,6 +202,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                     continue;
                 }
 
+                // pay attention to the temporal types
+                // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-temporal-types
                 if ("bytes".equals(mySqlType) && className == null) {
                     // MySQL binary, varbinary, blob
                     newValue = new String(Base64.getDecoder().decode(oldValue));
@@ -221,15 +224,27 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                     }
                 } else if ("io.debezium.time.Date".equals(className)) {
                     // MySQL date
-                    newValue = LocalDate.ofEpochDay(Integer.parseInt(oldValue)).toString();
+                    newValue = DateTimeUtils.toLocalDate(Integer.parseInt(oldValue)).toString();
                 } else if ("io.debezium.time.Timestamp".equals(className)) {
-                    // MySQL datetime
-                    newValue =
+                    // MySQL datetime (precision 0-3)
+                    LocalDateTime localDateTime =
                             Instant.ofEpochMilli(Long.parseLong(oldValue))
                                     .atZone(serverTimeZone)
-                                    .toLocalDateTime()
-                                    .toString()
-                                    .replace('T', ' ');
+                                    .toLocalDateTime();
+                    newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 3);
+                } else if ("io.debezium.time.MicroTimestamp".equals(className)) {
+                    // MySQL datetime (precision 4-6)
+                    long microseconds = Long.parseLong(oldValue);
+                    long microsecondsPerSecond = 1_000_000;
+                    long nanosecondsPerMicros = 1_000;
+                    long seconds = microseconds / microsecondsPerSecond;
+                    long nanoAdjustment =
+                            (microseconds % microsecondsPerSecond) * nanosecondsPerMicros;
+                    LocalDateTime localDateTime =
+                            Instant.ofEpochSecond(seconds, nanoAdjustment)
+                                    .atZone(serverTimeZone)
+                                    .toLocalDateTime();
+                    newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 6);
                 } else if ("io.debezium.time.ZonedTimestamp".equals(className)) {
                     // MySQL timestamp
                     newValue =
