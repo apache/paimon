@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
+import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.utils.TableEnvironmentUtils;
@@ -80,11 +81,15 @@ public abstract class ActionBase implements Action {
 
     ActionBase(String warehouse, String databaseName, String tableName, Options options) {
         identifier = new Identifier(databaseName, tableName);
+        CatalogContext catalogContext = CatalogContext.create(
+            new Options().set(CatalogOptions.WAREHOUSE, warehouse));
         catalog =
-                CatalogFactory.createCatalog(
-                        CatalogContext.create(
-                                new Options().set(CatalogOptions.WAREHOUSE, warehouse)));
-        flinkCatalog = new FlinkCatalog(catalog, catalogName, DEFAULT_DATABASE);
+                CatalogFactory.createCatalog(catalogContext);
+
+        flinkCatalog = FlinkCatalogFactory.createCatalog(
+            catalogName,
+            catalogContext,
+            Thread.currentThread().getContextClassLoader());
 
         env = StreamExecutionEnvironment.getExecutionEnvironment();
         tEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
