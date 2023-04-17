@@ -44,7 +44,7 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     private final EventParser.Factory<T> parserFactory;
 
     private transient EventParser<T> parser;
-    private transient Map<String, OutputTag<List<DataField>>> newDataFieldListOutputTags;
+    private transient Map<String, OutputTag<List<DataField>>> updatedDataFieldsOutputTags;
     private transient Map<String, OutputTag<CdcRecord>> recordOutputTags;
 
     public CdcMultiTableParsingProcessFunction(EventParser.Factory<T> parserFactory) {
@@ -54,7 +54,7 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     @Override
     public void open(Configuration parameters) throws Exception {
         parser = parserFactory.create();
-        newDataFieldListOutputTags = new HashMap<>();
+        updatedDataFieldsOutputTags = new HashMap<>();
         recordOutputTags = new HashMap<>();
     }
 
@@ -63,9 +63,9 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
         parser.setRawEvent(raw);
         String tableName = parser.tableName();
 
-        if (parser.isNewDataFieldList()) {
-            parser.getNewDataFieldList()
-                    .ifPresent(t -> context.output(getNewDataFieldListOutputTag(tableName), t));
+        if (parser.isUpdatedDataFields()) {
+            parser.getUpdatedDataFields()
+                    .ifPresent(t -> context.output(getUpdatedDataFieldsOutputTag(tableName), t));
         } else {
             for (CdcRecord record : parser.getRecords()) {
                 context.output(getRecordOutputTag(tableName), record);
@@ -73,12 +73,12 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
         }
     }
 
-    private OutputTag<List<DataField>> getNewDataFieldListOutputTag(String tableName) {
-        return newDataFieldListOutputTags.computeIfAbsent(
-                tableName, CdcMultiTableParsingProcessFunction::createNewDataFieldListOutputTag);
+    private OutputTag<List<DataField>> getUpdatedDataFieldsOutputTag(String tableName) {
+        return updatedDataFieldsOutputTags.computeIfAbsent(
+                tableName, CdcMultiTableParsingProcessFunction::createUpdatedDataFieldsOutputTag);
     }
 
-    public static OutputTag<List<DataField>> createNewDataFieldListOutputTag(String tableName) {
+    public static OutputTag<List<DataField>> createUpdatedDataFieldsOutputTag(String tableName) {
         return new OutputTag<>(
                 "new-data-field-list-" + tableName, new ListTypeInfo<>(DataField.class));
     }

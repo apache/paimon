@@ -59,8 +59,8 @@ public class CdcParsingProcessFunction<T> extends ProcessFunction<T, CdcRecord> 
     public void processElement(T raw, Context context, Collector<CdcRecord> collector)
             throws Exception {
         parser.setRawEvent(raw);
-        if (parser.isNewDataFieldList()) {
-            parser.getNewDataFieldList()
+        if (parser.isUpdatedDataFields()) {
+            parser.getUpdatedDataFields()
                     .ifPresent(t -> context.output(NEW_DATA_FIELD_LIST_OUTPUT_TAG, t));
         } else {
             for (CdcRecord record : parser.getRecords()) {

@@ -35,9 +35,9 @@ public interface EventParser<T> {
 
     String tableName();
 
-    boolean isNewDataFieldList();
+    boolean isUpdatedDataFields();
 
-    Optional<List<DataField>> getNewDataFieldList();
+    Optional<List<DataField>> getUpdatedDataFields();
 
     List<CdcRecord> getRecords();
 

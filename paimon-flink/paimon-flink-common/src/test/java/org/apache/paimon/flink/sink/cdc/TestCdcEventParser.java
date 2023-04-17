@@ -39,13 +39,13 @@ public class TestCdcEventParser implements EventParser<TestCdcEvent> {
     }
 
     @Override
-    public boolean isNewDataFieldList() {
-        return raw.newDataFieldList() != null;
+    public boolean isUpdatedDataFields() {
+        return raw.updatedDataFields() != null;
     }
 
     @Override
-    public Optional<List<DataField>> getNewDataFieldList() {
-        return Optional.ofNullable(raw.newDataFieldList());
+    public Optional<List<DataField>> getUpdatedDataFields() {
+        return Optional.ofNullable(raw.updatedDataFields());
     }
 
     @Override

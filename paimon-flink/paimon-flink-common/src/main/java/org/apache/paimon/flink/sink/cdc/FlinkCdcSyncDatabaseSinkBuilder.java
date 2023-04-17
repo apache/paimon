@@ -95,9 +95,9 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                     SingleOutputStreamOperatorUtils.getSideOutput(
                                     parsed,
                                     CdcMultiTableParsingProcessFunction
-                                            .createNewDataFieldListOutputTag(table.name()))
+                                            .createUpdatedDataFieldsOutputTag(table.name()))
                             .process(
-                                    new NewDataFieldListProcessFunction(
+                                    new UpdatedDataFieldsProcessFunction(
                                             new SchemaManager(table.fileIO(), table.location())));
             schemaChangeProcessFunction.getTransformation().setParallelism(1);
             schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.flink.sink.cdc.NewDataFieldListProcessFunction;
+import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.types.DataType;
 
 import java.sql.DatabaseMetaData;
@@ -86,7 +86,7 @@ public class MySqlSchema {
             DataType newType = entry.getValue();
             if (fields.containsKey(fieldName)) {
                 DataType oldType = fields.get(fieldName);
-                switch (NewDataFieldListProcessFunction.canConvert(oldType, newType)) {
+                switch (UpdatedDataFieldsProcessFunction.canConvert(oldType, newType)) {
                     case CONVERT:
                         fields.put(fieldName, newType);
                         break;

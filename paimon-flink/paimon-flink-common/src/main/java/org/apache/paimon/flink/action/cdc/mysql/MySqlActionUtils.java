@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.flink.sink.cdc.NewDataFieldListProcessFunction;
+import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataType;
@@ -72,8 +72,8 @@ class MySqlActionUtils {
                 return false;
             }
             DataType type = tableSchema.fields().get(idx).type();
-            if (NewDataFieldListProcessFunction.canConvert(entry.getValue(), type)
-                    != NewDataFieldListProcessFunction.ConvertAction.CONVERT) {
+            if (UpdatedDataFieldsProcessFunction.canConvert(entry.getValue(), type)
+                    != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
                 return false;
             }
         }

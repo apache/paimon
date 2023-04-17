@@ -48,27 +48,27 @@ import java.util.Objects;
  * <p>NOTE: To avoid concurrent schema changes, the parallelism of this {@link ProcessFunction} must
  * be 1.
  */
-public class NewDataFieldListProcessFunction extends ProcessFunction<List<DataField>, Void> {
+public class UpdatedDataFieldsProcessFunction extends ProcessFunction<List<DataField>, Void> {
 
     private static final Logger LOG =
-            LoggerFactory.getLogger(NewDataFieldListProcessFunction.class);
+            LoggerFactory.getLogger(UpdatedDataFieldsProcessFunction.class);
 
     private final SchemaManager schemaManager;
 
-    public NewDataFieldListProcessFunction(SchemaManager schemaManager) {
+    public UpdatedDataFieldsProcessFunction(SchemaManager schemaManager) {
         this.schemaManager = schemaManager;
     }
 
     @Override
     public void processElement(
-            List<DataField> newDataFieldList, Context context, Collector<Void> collector)
+            List<DataField> updatedDataFields, Context context, Collector<Void> collector)
             throws Exception {
-        for (SchemaChange schemaChange : extractSchemaChanges(newDataFieldList)) {
+        for (SchemaChange schemaChange : extractSchemaChanges(updatedDataFields)) {
             applySchemaChange(schemaChange);
         }
     }
 
-    private List<SchemaChange> extractSchemaChanges(List<DataField> newDataFieldList) {
+    private List<SchemaChange> extractSchemaChanges(List<DataField> updatedDataFields) {
         RowType oldRowType = schemaManager.latest().get().logicalRowType();
         Map<String, DataField> oldFields = new HashMap<>();
         for (DataField oldField : oldRowType.getFields()) {
@@ -76,7 +76,7 @@ public class NewDataFieldListProcessFunction extends ProcessFunction<List<DataFi
         }
 
         List<SchemaChange> result = new ArrayList<>();
-        for (DataField newField : newDataFieldList) {
+        for (DataField newField : updatedDataFields) {
             if (oldFields.containsKey(newField.name())) {
                 DataField oldField = oldFields.get(newField.name());
                 // we compare by ignoring nullable, because partition keys and primary keys might be
@@ -205,7 +205,7 @@ public class NewDataFieldListProcessFunction extends ProcessFunction<List<DataFi
     }
 
     /**
-     * Return type of {@link NewDataFieldListProcessFunction#canConvert(DataType, DataType)}. This
+     * Return type of {@link UpdatedDataFieldsProcessFunction#canConvert(DataType, DataType)}. This
      * enum indicates the action to perform.
      */
     public enum ConvertAction {

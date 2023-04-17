@@ -82,7 +82,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                                     + "in the JsonDebeziumDeserializationSchema you created");
             payload = root.get("payload");
 
-            if (!isNewDataFieldList()) {
+            if (!isUpdatedDataFields()) {
                 updateFieldTypes(schema);
             }
         } catch (Exception e) {
@@ -119,12 +119,12 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     @Override
-    public boolean isNewDataFieldList() {
+    public boolean isUpdatedDataFields() {
         return payload.get("op") == null;
     }
 
     @Override
-    public Optional<List<DataField>> getNewDataFieldList() {
+    public Optional<List<DataField>> getUpdatedDataFields() {
         JsonNode historyRecord = payload.get("historyRecord");
         if (historyRecord == null) {
             return Optional.empty();
