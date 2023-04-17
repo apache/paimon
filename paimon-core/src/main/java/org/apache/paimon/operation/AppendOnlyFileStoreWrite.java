@@ -64,7 +64,6 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
     private final boolean commitForceCompact;
     private final boolean skipCompaction;
     private final boolean assertDisorder;
-    private final String fileCompression;
 
     public AppendOnlyFileStoreWrite(
             FileIO fileIO,
@@ -89,7 +88,6 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
         this.commitForceCompact = options.commitForceCompact();
         this.skipCompaction = options.writeOnly();
         this.assertDisorder = options.toConfiguration().get(APPEND_ONLY_ASSERT_DISORDER);
-        this.fileCompression = options.fileCompression();
     }
 
     @Override
@@ -114,7 +112,6 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                                 targetFileSize,
                                 compactRewriter(partition, bucket),
                                 assertDisorder);
-
         return new AppendOnlyWriter(
                 fileIO,
                 schemaId,
@@ -125,8 +122,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                 compactManager,
                 commitForceCompact,
                 factory,
-                restoreIncrement,
-                fileCompression);
+                restoreIncrement);
     }
 
     private AppendOnlyCompactManager.CompactRewriter compactRewriter(
@@ -143,8 +139,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                             targetFileSize,
                             rowType,
                             pathFactory.createDataFilePathFactory(partition, bucket),
-                            new LongCounter(toCompact.get(0).minSequenceNumber()),
-                            fileCompression);
+                            new LongCounter(toCompact.get(0).minSequenceNumber()));
             rewriter.write(
                     new RecordReaderIterator<>(
                             read.createReader(

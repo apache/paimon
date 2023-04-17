@@ -316,8 +316,7 @@ public class AppendOnlyWriterTest {
                         compactManager,
                         forceCompact,
                         pathFactory,
-                        null,
-                        CoreOptions.FILE_COMPRESSION.defaultValue());
+                        null);
         return Pair.of(writer, compactManager.allFiles());
     }
 

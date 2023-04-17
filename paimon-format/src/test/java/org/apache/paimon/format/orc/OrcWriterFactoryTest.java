@@ -50,8 +50,8 @@ class OrcWriterFactoryTest {
                                 "struct<_col0:string,_col1:int>",
                                 new DataType[] {DataTypes.STRING(), DataTypes.INT()}),
                         memoryManager);
-        factory.create(new LocalPositionOutputStream(tmpDir.resolve("file1").toFile()), "LZ4");
-        factory.create(new LocalPositionOutputStream(tmpDir.resolve("file2").toFile()), "LZ4");
+        factory.create(new LocalPositionOutputStream(tmpDir.resolve("file1").toFile()));
+        factory.create(new LocalPositionOutputStream(tmpDir.resolve("file2").toFile()));
 
         List<Path> addedWriterPath = memoryManager.getAddedWriterPath();
         assertThat(addedWriterPath).hasSize(2);

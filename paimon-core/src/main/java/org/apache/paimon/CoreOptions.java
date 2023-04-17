@@ -113,14 +113,6 @@ public class CoreOptions implements Serializable {
                                     + "could be NONE, ZLIB, SNAPPY, LZO, LZ4, for parquet file format, the compression value could be "
                                     + "UNCOMPRESSED, SNAPPY, GZIP, LZO, BROTLI, LZ4, ZSTD.");
 
-    public static final ConfigOption<String> FILE_COMPRESSION =
-            key("file.compression")
-                    .stringType()
-                    .defaultValue("LZ4")
-                    .withDescription(
-                            "Default file compression format, can be overridden by "
-                                    + FILE_COMPRESSION_PER_LEVEL.key());
-
     public static final ConfigOption<FileFormatType> MANIFEST_FORMAT =
             key("manifest.format")
                     .enumType(FileFormatType.class)
@@ -679,10 +671,6 @@ public class CoreOptions implements Serializable {
         Map<String, String> levelCompressions = options.get(FILE_COMPRESSION_PER_LEVEL);
         return levelCompressions.entrySet().stream()
                 .collect(Collectors.toMap(e -> Integer.valueOf(e.getKey()), Map.Entry::getValue));
-    }
-
-    public String fileCompression() {
-        return options.get(FILE_COMPRESSION);
     }
 
     public int snapshotNumRetainMin() {

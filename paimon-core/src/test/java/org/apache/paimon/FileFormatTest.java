@@ -59,9 +59,7 @@ public class FileFormatTest {
         expected.add(GenericRow.of(2, 22));
         expected.add(GenericRow.of(3, 33));
         PositionOutputStream out = LocalFileIO.create().newOutputStream(path, false);
-        FormatWriter writer =
-                avro.createWriterFactory(rowType)
-                        .create(out, CoreOptions.FILE_COMPRESSION.defaultValue());
+        FormatWriter writer = avro.createWriterFactory(rowType).create(out);
         for (InternalRow row : expected) {
             writer.addElement(row);
         }
@@ -85,10 +83,7 @@ public class FileFormatTest {
         Path path = new Path(tempDir.toUri().toString(), "1.avro");
         Assertions.assertThrows(
                 RuntimeException.class,
-                () ->
-                        writerFactory.create(
-                                LocalFileIO.create().newOutputStream(path, false),
-                                CoreOptions.FILE_COMPRESSION.defaultValue()),
+                () -> writerFactory.create(LocalFileIO.create().newOutputStream(path, false)),
                 "Unrecognized codec: _unsupported");
     }
 
