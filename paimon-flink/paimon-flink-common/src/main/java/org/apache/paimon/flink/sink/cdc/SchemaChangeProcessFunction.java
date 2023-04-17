@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -57,7 +58,7 @@ public class SchemaChangeProcessFunction extends ProcessFunction<SchemaChange, V
         if (schemaChange instanceof SchemaChange.AddColumn) {
             try {
                 schemaManager.commitChanges(schemaChange);
-            } catch (IllegalArgumentException e) {
+            } catch (Catalog.ColumnAlreadyExistException e) {
                 // This is normal. For example when a table is split into multiple database tables,
                 // all these tables will be added the same column. However schemaManager can't
                 // handle duplicated column adds, so we just catch the exception and log it.
