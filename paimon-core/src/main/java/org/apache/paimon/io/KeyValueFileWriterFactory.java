@@ -18,6 +18,7 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
 import org.apache.paimon.annotation.VisibleForTesting;
@@ -46,6 +47,7 @@ public class KeyValueFileWriterFactory {
     private final DataFilePathFactory pathFactory;
     private final long suggestedFileSize;
     private final Map<Integer, String> levelCompressions;
+    private final String fileCompression;
 
     private KeyValueFileWriterFactory(
             FileIO fileIO,
@@ -56,7 +58,8 @@ public class KeyValueFileWriterFactory {
             @Nullable FileStatsExtractor fileStatsExtractor,
             DataFilePathFactory pathFactory,
             long suggestedFileSize,
-            Map<Integer, String> levelCompressions) {
+            Map<Integer, String> levelCompressions,
+            String fileCompression) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.keyType = keyType;
@@ -66,6 +69,7 @@ public class KeyValueFileWriterFactory {
         this.pathFactory = pathFactory;
         this.suggestedFileSize = suggestedFileSize;
         this.levelCompressions = levelCompressions;
+        this.fileCompression = fileCompression;
     }
 
     public RowType keyType() {
@@ -88,7 +92,11 @@ public class KeyValueFileWriterFactory {
     }
 
     private String getCompression(int level) {
-        return null == levelCompressions ? null : levelCompressions.get(level);
+        if (null == levelCompressions) {
+            return fileCompression;
+        } else {
+            return levelCompressions.getOrDefault(level, fileCompression);
+        }
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
@@ -160,6 +168,18 @@ public class KeyValueFileWriterFactory {
 
         public KeyValueFileWriterFactory build(
                 BinaryRow partition, int bucket, Map<Integer, String> levelCompressions) {
+            return build(
+                    partition,
+                    bucket,
+                    levelCompressions,
+                    CoreOptions.FILE_COMPRESSION.defaultValue());
+        }
+
+        public KeyValueFileWriterFactory build(
+                BinaryRow partition,
+                int bucket,
+                Map<Integer, String> levelCompressions,
+                String fileCompression) {
             RowType recordType = KeyValue.schema(keyType, valueType);
             return new KeyValueFileWriterFactory(
                     fileIO,
@@ -170,7 +190,8 @@ public class KeyValueFileWriterFactory {
                     fileFormat.createStatsExtractor(recordType).orElse(null),
                     pathFactory.createDataFilePathFactory(partition, bucket),
                     suggestedFileSize,
-                    levelCompressions);
+                    levelCompressions,
+                    fileCompression);
         }
     }
 }
