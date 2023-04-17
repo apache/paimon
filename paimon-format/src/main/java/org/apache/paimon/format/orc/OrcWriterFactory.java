@@ -71,7 +71,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
      *     VectorizerRowBatch.
      */
     public OrcWriterFactory(Vectorizer<InternalRow> vectorizer, Configuration configuration) {
-        this(vectorizer, null, configuration);
+        this(vectorizer, new Properties(), configuration);
     }
 
     /**
@@ -87,7 +87,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
             Properties writerProperties,
             Configuration configuration) {
         this.vectorizer = checkNotNull(vectorizer);
-        this.writerProperties = writerProperties;
+        this.writerProperties = checkNotNull(writerProperties);
         this.confMap = new HashMap<>();
 
         // Todo: Replace the Map based approach with a better approach
