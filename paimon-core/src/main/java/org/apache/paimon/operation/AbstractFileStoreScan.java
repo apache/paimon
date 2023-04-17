@@ -20,7 +20,10 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
@@ -63,7 +66,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private final ConcurrentMap<Long, TableSchema> tableSchemas;
     private final SchemaManager schemaManager;
-    private final long schemaId;
 
     private Predicate partitionFilter;
     private BucketSelector bucketSelector;
@@ -74,12 +76,13 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private ScanKind scanKind = ScanKind.ALL;
     private Filter<Integer> levelFilter = null;
 
+    private ManifestCacheFilter manifestCacheFilter = null;
+
     public AbstractFileStoreScan(
             RowType partitionType,
             RowType bucketKeyType,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
-            long schemaId,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
@@ -91,7 +94,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         this.bucketKeyType = bucketKeyType;
         this.snapshotManager = snapshotManager;
         this.schemaManager = schemaManager;
-        this.schemaId = schemaId;
         this.manifestFileFactory = manifestFileFactory;
         this.manifestList = manifestListFactory.create();
         this.numOfBuckets = numOfBuckets;
@@ -172,6 +174,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
+    public FileStoreScan withManifestCacheFilter(ManifestCacheFilter manifestFilter) {
+        this.manifestCacheFilter = manifestFilter;
+        return this;
+    }
+
+    @Override
     public Plan plan() {
         List<ManifestFileMeta> manifests = specifiedManifests;
         Long snapshotId = specifiedSnapshotId;
@@ -200,7 +208,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                                     .parallelStream()
                                                     .filter(this::filterManifestFileMeta)
                                                     .flatMap(m -> readManifestFileMeta(m).stream())
-                                                    .filter(this::filterManifestEntry)
+                                                    .filter(this::filterByStats)
                                                     .collect(Collectors.toList()))
                             .get();
         } catch (InterruptedException | ExecutionException e) {
@@ -280,10 +288,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     // called by multiple threads
     // ------------------------------------------------------------------------
 
-    protected long tableSchemaId() {
-        return schemaId;
-    }
-
     /** Note: Keep this thread-safe. */
     protected TableSchema scanTableSchema(long id) {
         return tableSchemas.computeIfAbsent(id, key -> schemaManager.schema(id));
@@ -295,17 +299,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 || partitionFilter.test(
                         manifest.numAddedFiles() + manifest.numDeletedFiles(),
                         manifest.partitionStats().fields(partitionStatsConverter));
-    }
-
-    /** Note: Keep this thread-safe. */
-    private boolean filterManifestEntry(ManifestEntry entry) {
-        return filterByPartition(entry) && filterByStats(entry);
-    }
-
-    /** Note: Keep this thread-safe. */
-    private boolean filterByPartition(ManifestEntry entry) {
-        return (partitionFilter == null
-                || partitionFilter.test(partitionConverter.convert(entry.partition())));
     }
 
     /** Note: Keep this thread-safe. */
@@ -329,7 +322,51 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     /** Note: Keep this thread-safe. */
     private List<ManifestEntry> readManifestFileMeta(ManifestFileMeta manifest) {
-        return manifestFileFactory.create().read(manifest.fileName());
+        return manifestFileFactory
+                .create()
+                .read(manifest.fileName(), manifestCacheRowFilter(), manifestEntryRowFilter());
+    }
+
+    /** Note: Keep this thread-safe. */
+    private Filter<InternalRow> manifestEntryRowFilter() {
+        Function<InternalRow, BinaryRow> partitionGetter =
+                ManifestEntrySerializer.partitionGetter();
+        Function<InternalRow, Integer> bucketGetter = ManifestEntrySerializer.bucketGetter();
+        Function<InternalRow, Integer> totalBucketGetter =
+                ManifestEntrySerializer.totalBucketGetter();
+        return row -> {
+            if ((partitionFilter != null
+                    && !partitionFilter.test(
+                            partitionConverter.convert(partitionGetter.apply(row))))) {
+                return false;
+            }
+
+            if (specifiedBucket != null && numOfBuckets == totalBucketGetter.apply(row)) {
+                return specifiedBucket.intValue() == bucketGetter.apply(row);
+            }
+
+            return true;
+        };
+    }
+
+    /** Note: Keep this thread-safe. */
+    private Filter<InternalRow> manifestCacheRowFilter() {
+        if (manifestCacheFilter == null) {
+            return Filter.alwaysTrue();
+        }
+
+        Function<InternalRow, BinaryRow> partitionGetter =
+                ManifestEntrySerializer.partitionGetter();
+        Function<InternalRow, Integer> bucketGetter = ManifestEntrySerializer.bucketGetter();
+        Function<InternalRow, Integer> totalBucketGetter =
+                ManifestEntrySerializer.totalBucketGetter();
+        return row -> {
+            if (numOfBuckets != totalBucketGetter.apply(row)) {
+                return true;
+            }
+
+            return manifestCacheFilter.test(partitionGetter.apply(row), bucketGetter.apply(row));
+        };
     }
 
     // ------------------------------------------------------------------------

@@ -16,29 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.manifest;
 
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.data.BinaryRow;
 
-/**
- * Represents a filter (boolean-valued function) of one argument. This class is for avoiding name
- * conflicting to {@link Predicate}.
- */
-@FunctionalInterface
-public interface Filter<T> {
+import javax.annotation.concurrent.ThreadSafe;
 
-    Filter<?> ALWAYS_TRUE = t -> true;
+/** Filter for manifest cache. */
+@ThreadSafe
+public interface ManifestCacheFilter {
 
-    /**
-     * Evaluates this predicate on the given argument.
-     *
-     * @param t the input argument
-     * @return {@code true} if the input argument matches the predicate, otherwise {@code false}
-     */
-    boolean test(T t);
-
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    static <T> Filter<T> alwaysTrue() {
-        return (Filter) ALWAYS_TRUE;
-    }
+    boolean test(BinaryRow partition, int bucket);
 }

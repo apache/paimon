@@ -21,6 +21,7 @@ package org.apache.paimon;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.KeyValueFileStoreRead;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
@@ -99,6 +100,24 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 pathFactory(),
                 snapshotManager(),
                 newScan(true),
+                options,
+                keyValueFieldsExtractor);
+    }
+
+    @Override
+    public KeyValueFileStoreWrite newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
+        return new KeyValueFileStoreWrite(
+                fileIO,
+                schemaManager,
+                schemaId,
+                commitUser,
+                keyType,
+                valueType,
+                keyComparatorSupplier,
+                mfFactory,
+                pathFactory(),
+                snapshotManager(),
+                newScan(true).withManifestCacheFilter(manifestFilter),
                 options,
                 keyValueFieldsExtractor);
     }

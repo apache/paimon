@@ -35,7 +35,6 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Function;
 
 /** Default implementation of {@link StoreSinkWrite}. This writer does not have states. */
 public class StoreSinkWriteImpl implements StoreSinkWrite {
@@ -44,6 +43,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     protected final String commitUser;
     protected final StoreSinkWriteState state;
+    private final IOManager ioManager;
+    private final boolean isOverwrite;
     private final boolean waitCompaction;
 
     protected TableWriteImpl<?> write;
@@ -57,12 +58,19 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             boolean waitCompaction) {
         this.commitUser = commitUser;
         this.state = state;
+        this.ioManager = ioManager;
+        this.isOverwrite = isOverwrite;
         this.waitCompaction = waitCompaction;
+        this.write = newTableWrite(table);
+    }
 
-        write =
-                table.newWrite(commitUser)
-                        .withIOManager(new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()))
-                        .withOverwrite(isOverwrite);
+    private TableWriteImpl<?> newTableWrite(FileStoreTable table) {
+        return table.newWrite(
+                        commitUser,
+                        (part, bucket) ->
+                                state.stateValueFilter().filter(table.name(), part, bucket))
+                .withIOManager(new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()))
+                .withOverwrite(isOverwrite);
     }
 
     @Override
@@ -125,14 +133,14 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     }
 
     @Override
-    public void replace(Function<String, TableWriteImpl<?>> newWriteProvider) throws Exception {
+    public void replace(FileStoreTable newTable) throws Exception {
         if (commitUser == null) {
             return;
         }
 
         List<AbstractFileStoreWrite.State> states = write.checkpoint();
         write.close();
-        write = newWriteProvider.apply(commitUser);
+        write = newTableWrite(newTable);
         write.restore(states);
     }
 }

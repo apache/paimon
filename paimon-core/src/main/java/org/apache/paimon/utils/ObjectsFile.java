@@ -21,10 +21,12 @@ package org.apache.paimon.utils;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.reader.RecordReader;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.apache.paimon.utils.FileUtils.createFormatReader;
@@ -54,13 +56,24 @@ public abstract class ObjectsFile<T> {
     }
 
     public List<T> read(String fileName) {
+        return read(fileName, Filter.alwaysTrue(), Filter.alwaysTrue());
+    }
+
+    public List<T> read(
+            String fileName, Filter<InternalRow> loadFilter, Filter<InternalRow> readFilter) {
         try {
             if (cache != null) {
-                return cache.read(fileName);
+                return cache.read(fileName, loadFilter, readFilter);
             }
 
-            return FileUtils.readListFromFile(
-                    fileIO, pathFactory.toPath(fileName), serializer, readerFactory);
+            RecordReader<InternalRow> reader =
+                    createFormatReader(fileIO, readerFactory, pathFactory.toPath(fileName));
+            if (readFilter != Filter.ALWAYS_TRUE) {
+                reader = reader.filter(readFilter);
+            }
+            List<T> result = new ArrayList<>();
+            reader.forEachRemaining(row -> result.add(serializer.fromRow(row)));
+            return result;
         } catch (IOException e) {
             throw new RuntimeException("Failed to read manifest list " + fileName, e);
         }

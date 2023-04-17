@@ -18,27 +18,9 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.predicate.Predicate;
-
-/**
- * Represents a filter (boolean-valued function) of one argument. This class is for avoiding name
- * conflicting to {@link Predicate}.
- */
+/** Represents a filter (boolean-valued function) of two argument. */
 @FunctionalInterface
-public interface Filter<T> {
+public interface BiFilter<L, R> {
 
-    Filter<?> ALWAYS_TRUE = t -> true;
-
-    /**
-     * Evaluates this predicate on the given argument.
-     *
-     * @param t the input argument
-     * @return {@code true} if the input argument matches the predicate, otherwise {@code false}
-     */
-    boolean test(T t);
-
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    static <T> Filter<T> alwaysTrue() {
-        return (Filter) ALWAYS_TRUE;
-    }
+    boolean test(L l, R r);
 }

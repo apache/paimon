@@ -111,7 +111,7 @@ public class CdcRecordStoreWriteOperator extends PrepareCommitOperator<CdcRecord
                 }
                 Thread.sleep(retrySleepMillis);
             }
-            write.replace(commitUser -> table.newWrite(commitUser));
+            write.replace(table);
         }
 
         try {
