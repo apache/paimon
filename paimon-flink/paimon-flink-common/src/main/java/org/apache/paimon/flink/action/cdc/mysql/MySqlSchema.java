@@ -31,8 +31,8 @@ import java.util.Map;
 /** Utility class to load MySQL table schema with JDBC. */
 public class MySqlSchema {
 
-    private final String databaseName;
-    private final String tableName;
+    private String databaseName;
+    private String tableName;
 
     private final Map<String, DataType> fields;
     private final List<String> primaryKeys;
@@ -108,5 +108,27 @@ public class MySqlSchema {
             primaryKeys.clear();
         }
         return this;
+    }
+
+    public void toCaseInsensitiveForm() {
+        Map<String, DataType> origin = new LinkedHashMap<>(fields);
+        fields.clear();
+        for (Map.Entry<String, DataType> entry : origin.entrySet()) {
+            String fieldName = entry.getKey().toLowerCase();
+            if (fields.containsKey(fieldName)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Duplicate field names appears in %s.%s. This is unexpected.",
+                                databaseName, tableName));
+            }
+            fields.put(fieldName, entry.getValue());
+        }
+
+        for (int i = 0; i < primaryKeys().size(); i++) {
+            primaryKeys.set(i, primaryKeys.get(i).toLowerCase());
+        }
+
+        databaseName = databaseName.toLowerCase();
+        tableName = tableName.toLowerCase();
     }
 }

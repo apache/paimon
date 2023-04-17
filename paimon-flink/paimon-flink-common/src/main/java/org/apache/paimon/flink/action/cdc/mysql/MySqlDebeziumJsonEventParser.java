@@ -43,6 +43,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * {@link EventParser} for MySQL Debezium JSON.
@@ -58,6 +59,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ZoneId serverTimeZone;
 
+    private boolean caseSensitive = true;
     private JsonNode payload;
     private Map<String, String> mySqlFieldTypes;
     private Map<String, String> fieldClassNames;
@@ -91,8 +93,14 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     @Override
+    public void setCaseSensitive(boolean caseSensitive) {
+        this.caseSensitive = caseSensitive;
+    }
+
+    @Override
     public String tableName() {
-        return payload.get("source").get("table").asText();
+        String tableName = payload.get("source").get("table").asText();
+        return caseSensitive ? tableName : tableName.toLowerCase();
     }
 
     private void updateFieldTypes(JsonNode schema) {
@@ -164,7 +172,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 type = type.notNull();
             }
 
-            result.add(new DataField(i, column.get("name").asText(), type));
+            String fieldName = column.get("name").asText();
+            result.add(new DataField(i, caseSensitive ? fieldName : fieldName.toLowerCase(), type));
         }
         return Optional.of(result);
     }
@@ -183,7 +192,11 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             records.add(new CdcRecord(RowKind.INSERT, after));
         }
 
-        return records;
+        return caseSensitive
+                ? records
+                : records.stream()
+                        .map(CdcRecord::toCaseInsensitiveForm)
+                        .collect(Collectors.toList());
     }
 
     private Map<String, String> extractRow(JsonNode recordRow) {

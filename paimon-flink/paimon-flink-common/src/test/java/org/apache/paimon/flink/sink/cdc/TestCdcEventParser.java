@@ -34,6 +34,9 @@ public class TestCdcEventParser implements EventParser<TestCdcEvent> {
     }
 
     @Override
+    public void setCaseSensitive(boolean caseSensitive) {}
+
+    @Override
     public String tableName() {
         return raw.tableName();
     }

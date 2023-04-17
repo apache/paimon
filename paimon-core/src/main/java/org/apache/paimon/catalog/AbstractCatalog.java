@@ -36,8 +36,6 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected static final String DB_SUFFIX = ".db";
 
-    protected static final String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
-
     protected final FileIO fileIO;
 
     protected final Map<String, String> tableDefaultOptions;
@@ -117,7 +115,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected void copyTableDefaultOptions(Map<String, String> options) {
-        tableDefaultOptions.forEach((k, v) -> options.putIfAbsent(k, v));
+        tableDefaultOptions.forEach(options::putIfAbsent);
     }
 
     private String[] tableAndSystemName(Identifier identifier) {

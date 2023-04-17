@@ -39,21 +39,19 @@ import java.util.Map;
  *
  * @param <T> CDC change event type
  */
-public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, Void> {
+public class CdcMultiTableParsingProcessFunction<T> extends CdcParsingProcessFunctionBase<T, Void> {
 
-    private final EventParser.Factory<T> parserFactory;
-
-    private transient EventParser<T> parser;
     private transient Map<String, OutputTag<List<DataField>>> updatedDataFieldsOutputTags;
     private transient Map<String, OutputTag<CdcRecord>> recordOutputTags;
 
-    public CdcMultiTableParsingProcessFunction(EventParser.Factory<T> parserFactory) {
-        this.parserFactory = parserFactory;
+    public CdcMultiTableParsingProcessFunction(
+            EventParser.Factory<T> parserFactory, boolean caseSensitive) {
+        super(parserFactory, caseSensitive);
     }
 
     @Override
     public void open(Configuration parameters) throws Exception {
-        parser = parserFactory.create();
+        super.open(parameters);
         updatedDataFieldsOutputTags = new HashMap<>();
         recordOutputTags = new HashMap<>();
     }

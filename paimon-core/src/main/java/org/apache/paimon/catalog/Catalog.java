@@ -40,6 +40,8 @@ public interface Catalog extends AutoCloseable {
 
     String SYSTEM_TABLE_SPLITTER = "$";
 
+    String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
+
     /**
      * Get lock factory from catalog. Lock is used to support multiple concurrent writes on the
      * object store.
@@ -181,6 +183,11 @@ public interface Catalog extends AutoCloseable {
      */
     void alterTable(Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException;
+
+    /** Return a boolean that indicates whether this catalog is case-sensitive. */
+    default boolean caseSensitive() {
+        return true;
+    }
 
     /** Exception for trying to drop on a database that is not empty. */
     class DatabaseNotEmptyException extends Exception {

@@ -90,7 +90,7 @@ public class MySqlSyncDatabaseAction implements Action {
 
     private final Configuration mySqlConfig;
     private final String warehouse;
-    private final String database;
+    private String database;
     private final Map<String, String> paimonConfig;
 
     MySqlSyncDatabaseAction(
@@ -130,7 +130,15 @@ public class MySqlSyncDatabaseAction implements Action {
         Catalog catalog =
                 CatalogFactory.createCatalog(
                         CatalogContext.create(
-                                new Options().set(CatalogOptions.WAREHOUSE, warehouse)));
+                                new Options(paimonConfig)
+                                        .set(CatalogOptions.WAREHOUSE, warehouse)));
+        MySqlActionUtils.removeTableDefaultOptions(paimonConfig);
+
+        if (!catalog.caseSensitive()) {
+            database = database.toLowerCase();
+            mySqlSchemas.forEach(MySqlSchema::toCaseInsensitiveForm);
+        }
+
         catalog.createDatabase(database, true);
 
         List<FileStoreTable> fileStoreTables = new ArrayList<>();
@@ -167,7 +175,8 @@ public class MySqlSyncDatabaseAction implements Action {
                                 env.fromSource(
                                         source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
                         .withParserFactory(parserFactory)
-                        .withTables(fileStoreTables);
+                        .withTables(fileStoreTables)
+                        .withCaseSensitive(catalog.caseSensitive());
         String sinkParallelism = paimonConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));

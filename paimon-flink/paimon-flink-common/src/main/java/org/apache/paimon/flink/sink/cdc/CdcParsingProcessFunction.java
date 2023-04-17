@@ -21,7 +21,6 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.types.DataField;
 
 import org.apache.flink.api.java.typeutils.ListTypeInfo;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
@@ -37,22 +36,13 @@ import java.util.List;
  *
  * @param <T> CDC change event type
  */
-public class CdcParsingProcessFunction<T> extends ProcessFunction<T, CdcRecord> {
+public class CdcParsingProcessFunction<T> extends CdcParsingProcessFunctionBase<T, CdcRecord> {
 
     public static final OutputTag<List<DataField>> NEW_DATA_FIELD_LIST_OUTPUT_TAG =
             new OutputTag<>("new-data-field-list", new ListTypeInfo<>(DataField.class));
 
-    private final EventParser.Factory<T> parserFactory;
-
-    private transient EventParser<T> parser;
-
-    public CdcParsingProcessFunction(EventParser.Factory<T> parserFactory) {
-        this.parserFactory = parserFactory;
-    }
-
-    @Override
-    public void open(Configuration parameters) throws Exception {
-        parser = parserFactory.create();
+    public CdcParsingProcessFunction(EventParser.Factory<T> parserFactory, boolean caseSensitive) {
+        super(parserFactory, caseSensitive);
     }
 
     @Override

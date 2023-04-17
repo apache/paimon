@@ -18,34 +18,26 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.types.DataField;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.functions.ProcessFunction;
 
-import java.io.Serializable;
-import java.util.List;
-import java.util.Optional;
+/** Base class of {@link ProcessFunction} for CDC parsing. */
+public abstract class CdcParsingProcessFunctionBase<T, O> extends ProcessFunction<T, O> {
 
-/**
- * Parse a CDC change event to a list of {@link DataField}s or {@link CdcRecord}.
- *
- * @param <T> CDC change event type
- */
-public interface EventParser<T> {
+    private final EventParser.Factory<T> parserFactory;
+    protected final boolean caseSensitive;
 
-    void setRawEvent(T rawEvent);
+    protected transient EventParser<T> parser;
 
-    void setCaseSensitive(boolean caseSensitive);
+    public CdcParsingProcessFunctionBase(
+            EventParser.Factory<T> parserFactory, boolean caseSensitive) {
+        this.parserFactory = parserFactory;
+        this.caseSensitive = caseSensitive;
+    }
 
-    String tableName();
-
-    boolean isUpdatedDataFields();
-
-    Optional<List<DataField>> getUpdatedDataFields();
-
-    List<CdcRecord> getRecords();
-
-    /** Factory to create an {@link EventParser}. */
-    interface Factory<T> extends Serializable {
-
-        EventParser<T> create();
+    @Override
+    public void open(Configuration parameters) throws Exception {
+        parser = parserFactory.create();
+        parser.setCaseSensitive(caseSensitive);
     }
 }

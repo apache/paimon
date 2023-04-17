@@ -66,7 +66,9 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
         Map<String, String> paimonConfig = new HashMap<>();
-        paimonConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        paimonConfig.put(
+                Catalog.TABLE_DEFAULT_OPTION_PREFIX + "bucket",
+                String.valueOf(random.nextInt(3) + 1));
         paimonConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(mySqlConfig, warehouse, database, paimonConfig);

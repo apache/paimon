@@ -88,10 +88,10 @@ public class MySqlSyncTableAction implements Action {
 
     private final Configuration mySqlConfig;
     private final String warehouse;
-    private final String database;
-    private final String table;
-    private final List<String> partitionKeys;
-    private final List<String> primaryKeys;
+    private String database;
+    private String table;
+    private List<String> partitionKeys;
+    private List<String> primaryKeys;
     private final Map<String, String> paimonConfig;
 
     MySqlSyncTableAction(
@@ -124,7 +124,15 @@ public class MySqlSyncTableAction implements Action {
         Catalog catalog =
                 CatalogFactory.createCatalog(
                         CatalogContext.create(
-                                new Options().set(CatalogOptions.WAREHOUSE, warehouse)));
+                                new Options(paimonConfig)
+                                        .set(CatalogOptions.WAREHOUSE, warehouse)));
+        MySqlActionUtils.removeTableDefaultOptions(paimonConfig);
+
+        if (!catalog.caseSensitive()) {
+            toCaseInsensitiveForm();
+            mySqlSchema.toCaseInsensitiveForm();
+        }
+
         catalog.createDatabase(database, true);
 
         Identifier identifier = new Identifier(database, table);
@@ -154,12 +162,21 @@ public class MySqlSyncTableAction implements Action {
                                 env.fromSource(
                                         source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
                         .withParserFactory(parserFactory)
-                        .withTable(table);
+                        .withTable(table)
+                        .withCaseSensitive(catalog.caseSensitive());
         String sinkParallelism = paimonConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
         }
         sinkBuilder.build();
+    }
+
+    private void toCaseInsensitiveForm() {
+        database = database.toLowerCase();
+        table = table.toLowerCase();
+        partitionKeys =
+                partitionKeys.stream().map(String::toLowerCase).collect(Collectors.toList());
+        primaryKeys = primaryKeys.stream().map(String::toLowerCase).collect(Collectors.toList());
     }
 
     private List<MySqlSchema> getMySqlSchemaList() throws Exception {

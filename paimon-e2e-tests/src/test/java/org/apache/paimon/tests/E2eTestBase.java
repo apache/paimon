@@ -212,6 +212,22 @@ public abstract class E2eTestBase {
                         topicName, tmpDir, filename));
     }
 
+    private static final String PAIMON_HIVE_CONNECTOR_JAR_NAME = "paimon-hive-connector.jar";
+
+    protected void setupHiveConnector() throws Exception {
+        getHive()
+                .execInContainer(
+                        "/bin/bash",
+                        "-c",
+                        "mkdir /opt/hive/auxlib && cp /jars/"
+                                + PAIMON_HIVE_CONNECTOR_JAR_NAME
+                                + " /opt/hive/auxlib");
+    }
+
+    protected ContainerState getHive() {
+        return environment.getContainerByServiceName("hive-server_1").get();
+    }
+
     private static final Pattern JOB_ID_PATTERN =
             Pattern.compile(
                     "SQL update statement has been successfully submitted to the cluster:\\s+Job ID: (\\S+)");
