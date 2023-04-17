@@ -88,20 +88,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public KeyValueFileStoreWrite newWrite(String commitUser) {
-        return new KeyValueFileStoreWrite(
-                fileIO,
-                schemaManager,
-                schemaId,
-                commitUser,
-                keyType,
-                valueType,
-                keyComparatorSupplier,
-                mfFactory,
-                pathFactory(),
-                snapshotManager(),
-                newScan(true),
-                options,
-                keyValueFieldsExtractor);
+        return newWrite(commitUser, null);
     }
 
     @Override
