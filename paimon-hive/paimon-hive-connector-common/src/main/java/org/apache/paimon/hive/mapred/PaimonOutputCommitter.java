@@ -281,8 +281,4 @@ public class PaimonOutputCommitter extends OutputCommitter {
                     String.format("Can not read or parse CommitMessage file: %s", location));
         }
     }
-
-    public PaimonOutputCommitter() {
-        super();
-    }
 }

@@ -45,9 +45,6 @@ class PaimonRecordWriter
     private static final Map<TaskAttemptID, Map<String, PaimonRecordWriter>> writers =
             Maps.newConcurrentMap();
 
-    // private static final Map<TaskID, Map<String, PaimonRecordWriter>> have =
-    //    Maps.newConcurrentMap();
-
     private BatchTableWrite batchTableWrite;
 
     public PaimonRecordWriter(

@@ -34,7 +34,7 @@ Paimon currently supports Hive 2.1, 2.1-cdh-6.3, 2.2, 2.3 and 3.1.
 
 ## Execution Engine
 
-Paimon currently supports MR and Tez execution engine for Hive Read, and MR execution engine for Hive Write 
+Paimon currently supports MR and Tez execution engine for Hive Read, and MR execution engine for Hive Write. 
 
 ## Installation
 
