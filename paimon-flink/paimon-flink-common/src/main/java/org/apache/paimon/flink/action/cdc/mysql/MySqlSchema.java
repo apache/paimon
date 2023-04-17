@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.flink.sink.cdc.SchemaChangeProcessFunction;
+import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.types.DataType;
 
 import java.sql.DatabaseMetaData;
@@ -86,19 +86,19 @@ public class MySqlSchema {
             DataType newType = entry.getValue();
             if (fields.containsKey(fieldName)) {
                 DataType oldType = fields.get(fieldName);
-                if (SchemaChangeProcessFunction.canConvert(oldType, newType)) {
-                    fields.put(fieldName, newType);
-                } else if (SchemaChangeProcessFunction.canConvert(newType, oldType)) {
-                    // nothing to do
-                } else {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "Column %s have different types in table %s.%s and table %s.%s",
-                                    fieldName,
-                                    databaseName,
-                                    tableName,
-                                    other.databaseName,
-                                    other.tableName));
+                switch (UpdatedDataFieldsProcessFunction.canConvert(oldType, newType)) {
+                    case CONVERT:
+                        fields.put(fieldName, newType);
+                        break;
+                    case EXCEPTION:
+                        throw new IllegalArgumentException(
+                                String.format(
+                                        "Column %s have different types in table %s.%s and table %s.%s",
+                                        fieldName,
+                                        databaseName,
+                                        tableName,
+                                        other.databaseName,
+                                        other.tableName));
                 }
             } else {
                 fields.put(fieldName, newType);

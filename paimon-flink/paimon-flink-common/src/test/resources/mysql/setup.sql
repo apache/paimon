@@ -41,7 +41,14 @@ CREATE TABLE schema_evolution_2 (
     PRIMARY KEY (_id)
 );
 
--- add comment lines for the convenience of reading
+CREATE TABLE schema_evolution_multiple (
+    _id INT,
+    v1 VARCHAR(10),
+    v2 INT,
+    v3 VARCHAR(10),
+    PRIMARY KEY (_id)
+);
+
 CREATE TABLE all_types_table (
     _id INT,
     -- TINYINT

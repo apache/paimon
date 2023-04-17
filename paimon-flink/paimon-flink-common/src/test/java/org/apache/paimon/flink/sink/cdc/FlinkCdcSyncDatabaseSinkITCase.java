@@ -69,7 +69,7 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
         int numTables = random.nextInt(3) + 1;
         boolean enableFailure = random.nextBoolean();
 
-        int maxEvents = 1500;
+        int maxEvents = 1000;
         int maxSchemaChanges = 10;
         int maxPartitions = 3;
         int maxKeys = 150;

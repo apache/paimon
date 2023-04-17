@@ -20,10 +20,11 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.EventParser;
-import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Preconditions;
@@ -38,12 +39,10 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Optional;
 
 /**
  * {@link EventParser} for MySQL Debezium JSON.
@@ -55,13 +54,8 @@ import java.util.regex.Pattern;
 public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlDebeziumJsonEventParser.class);
-    private static final String SCHEMA_CHANGE_REGEX =
-            "ALTER\\s+TABLE\\s+[^\\s]+\\s+(ADD|DROP|MODIFY)\\s+(COLUMN\\s+)?([^\\s]+)(\\s+([^\\s\\(]+))?\\s*(\\((.*?)\\))?.*";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final Pattern schemaChangePattern =
-            Pattern.compile(SCHEMA_CHANGE_REGEX, Pattern.CASE_INSENSITIVE);
-
     private final ZoneId serverTimeZone;
 
     private JsonNode payload;
@@ -88,7 +82,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                                     + "in the JsonDebeziumDeserializationSchema you created");
             payload = root.get("payload");
 
-            if (!isSchemaChange()) {
+            if (!isUpdatedDataFields()) {
                 updateFieldTypes(schema);
             }
         } catch (Exception e) {
@@ -125,45 +119,54 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     @Override
-    public boolean isSchemaChange() {
+    public boolean isUpdatedDataFields() {
         return payload.get("op") == null;
     }
 
     @Override
-    public List<SchemaChange> getSchemaChanges() {
+    public Optional<List<DataField>> getUpdatedDataFields() {
         JsonNode historyRecord = payload.get("historyRecord");
         if (historyRecord == null) {
-            return Collections.emptyList();
+            return Optional.empty();
         }
 
-        JsonNode ddlNode;
+        JsonNode columns;
         try {
-            ddlNode = objectMapper.readTree(historyRecord.asText()).get("ddl");
-        } catch (Exception e) {
-            LOG.debug("Failed to parse history record for schema changes", e);
-            return Collections.emptyList();
-        }
-        if (ddlNode == null) {
-            return Collections.emptyList();
-        }
-        String ddl = ddlNode.asText();
-
-        Matcher matcher = schemaChangePattern.matcher(ddl);
-        if (matcher.find()) {
-            String op = matcher.group(1);
-            String column = matcher.group(3);
-            String type = matcher.group(5);
-            String len = matcher.group(7);
-            if ("add".equalsIgnoreCase(op)) {
-                return Collections.singletonList(
-                        SchemaChange.addColumn(column, MySqlTypeUtils.toDataType(type, len)));
-            } else if ("modify".equalsIgnoreCase(op)) {
-                return Collections.singletonList(
-                        SchemaChange.updateColumnType(
-                                column, MySqlTypeUtils.toDataType(type, len)));
+            String historyRecordString = historyRecord.asText();
+            JsonNode tableChanges = objectMapper.readTree(historyRecordString).get("tableChanges");
+            if (tableChanges.size() != 1) {
+                throw new IllegalArgumentException(
+                        "Invalid historyRecord, because tableChanges should contain exactly 1 item.\n"
+                                + historyRecordString);
             }
+            columns = tableChanges.get(0).get("table").get("columns");
+        } catch (Exception e) {
+            LOG.info("Failed to parse history record for schema changes", e);
+            return Optional.empty();
         }
-        return Collections.emptyList();
+        if (columns == null) {
+            return Optional.empty();
+        }
+
+        List<DataField> result = new ArrayList<>();
+        for (int i = 0; i < columns.size(); i++) {
+            JsonNode column = columns.get(i);
+            JsonNode length = column.get("length");
+            JsonNode scale = column.get("scale");
+            DataType type =
+                    MySqlTypeUtils.toDataType(
+                            column.get("typeName").asText(),
+                            length == null ? null : length.asInt(),
+                            scale == null ? null : scale.asInt());
+            if (column.get("optional").asBoolean()) {
+                type = type.nullable();
+            } else {
+                type = type.notNull();
+            }
+
+            result.add(new DataField(i, column.get("name").asText(), type));
+        }
+        return Optional.of(result);
     }
 
     @Override

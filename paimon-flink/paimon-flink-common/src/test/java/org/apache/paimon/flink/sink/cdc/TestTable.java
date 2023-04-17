@@ -19,8 +19,8 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -102,19 +102,12 @@ public class TestTable {
                 if (random.nextBoolean()) {
                     int idx = random.nextInt(fieldNames.size());
                     isBigInt.set(idx, true);
-                    events.add(
-                            new TestCdcEvent(
-                                    tableName,
-                                    SchemaChange.updateColumnType(
-                                            fieldNames.get(idx), DataTypes.BIGINT())));
                 } else {
                     String newName = "v" + fieldNames.size();
                     fieldNames.add(newName);
                     isBigInt.add(false);
-                    events.add(
-                            new TestCdcEvent(
-                                    tableName, SchemaChange.addColumn(newName, DataTypes.INT())));
                 }
+                events.add(new TestCdcEvent(tableName, currentDataFieldList(fieldNames, isBigInt)));
             } else {
                 Map<String, String> fields = new HashMap<>();
                 int key = random.nextInt(numKeys);
@@ -140,6 +133,25 @@ public class TestTable {
                 expected.put(key, fields);
             }
         }
+    }
+
+    private List<DataField> currentDataFieldList(List<String> fieldNames, List<Boolean> isBigInt) {
+        List<DataField> fields = new ArrayList<>();
+
+        // pt
+        fields.add(initialRowType.getFields().get(0));
+        // k
+        fields.add(initialRowType.getFields().get(1));
+
+        for (int i = 0; i < fieldNames.size(); i++) {
+            fields.add(
+                    new DataField(
+                            2 + i,
+                            fieldNames.get(i),
+                            isBigInt.get(i) ? DataTypes.BIGINT() : DataTypes.INT()));
+        }
+
+        return fields;
     }
 
     public RowType initialRowType() {
