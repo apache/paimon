@@ -59,8 +59,7 @@ public class MySqlIgnoreCaseE2EeTest extends MySqlCdcE2eTestBase {
                                 + ");",
                         warehousePath);
         useCatalogCmd = "USE CATALOG ts_catalog;";
-        // database name should be converted to lower case
-        useDatabaseCmd = "USE uppercase_db;";
+        useDatabaseCmd = "USE test_db;";
     }
 
     @Disabled("one test is enough")
@@ -84,7 +83,7 @@ public class MySqlIgnoreCaseE2EeTest extends MySqlCdcE2eTestBase {
                         "--warehouse",
                         warehousePath,
                         "--database",
-                        "UPPERCASE_DB",
+                        "test_db",
                         "--mysql-conf",
                         "hostname=mysql-1",
                         "--mysql-conf",
@@ -94,7 +93,7 @@ public class MySqlIgnoreCaseE2EeTest extends MySqlCdcE2eTestBase {
                         "--mysql-conf",
                         String.format("password='%s'", mySqlContainer.getPassword()),
                         "--mysql-conf",
-                        "database-name='paimon_ignore_case'",
+                        "database-name='paimon_ignore_CASE'",
                         "--catalog-conf",
                         "metastore=hive",
                         "--catalog-conf",
@@ -136,7 +135,7 @@ public class MySqlIgnoreCaseE2EeTest extends MySqlCdcE2eTestBase {
     }
 
     private void checkSyncDatabase(Statement statement) throws Exception {
-        statement.executeUpdate("USE paimon_ignore_case");
+        statement.executeUpdate("USE paimon_ignore_CASE");
         statement.executeUpdate("INSERT INTO T VALUES (1, 'Hi')");
 
         statement.executeUpdate("ALTER TABLE T MODIFY COLUMN UPPERCASE_V0 VARCHAR(30)");

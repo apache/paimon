@@ -28,7 +28,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Serializable;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -130,20 +129,6 @@ public class CdcRecord implements Serializable {
             }
         }
         return Optional.of(genericRow);
-    }
-
-    public CdcRecord toCaseInsensitiveForm() {
-        Map<String, String> origin = new HashMap<>(fields);
-        fields.clear();
-        for (Map.Entry<String, String> entry : origin.entrySet()) {
-            String fieldName = entry.getKey().toLowerCase();
-            if (fields.containsKey(fieldName)) {
-                throw new IllegalArgumentException(
-                        "Duplicate field names appears. This is unexpected.");
-            }
-            fields.put(fieldName, entry.getValue());
-        }
-        return this;
     }
 
     @Override
