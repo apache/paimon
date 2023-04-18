@@ -18,7 +18,6 @@
 
 package org.apache.paimon.tests.cdc;
 
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlContainer;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlVersion;
 
@@ -96,12 +95,12 @@ public class MySqlIgnoreCaseE2EeTest extends MySqlCdcE2eTestBase {
                         String.format("password='%s'", mySqlContainer.getPassword()),
                         "--mysql-conf",
                         "database-name='paimon_ignore_case'",
-                        "--paimon-conf",
+                        "--catalog-conf",
                         "metastore=hive",
-                        "--paimon-conf",
+                        "--catalog-conf",
                         "uri=thrift://hive-metastore:9083",
-                        "--paimon-conf",
-                        Catalog.TABLE_DEFAULT_OPTION_PREFIX + "bucket=2");
+                        "--table-conf",
+                        "bucket=2");
         Container.ExecResult execResult =
                 jobManager.execInContainer("su", "flink", "-c", runActionCommand);
         if (execResult.getExitCode() != 0) {

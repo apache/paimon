@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
@@ -42,8 +41,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 class MySqlActionUtils {
 
@@ -204,13 +201,5 @@ class MySqlActionUtils {
         JsonDebeziumDeserializationSchema schema =
                 new JsonDebeziumDeserializationSchema(true, customConverterConfigs);
         return sourceBuilder.deserializer(schema).includeSchemaChanges(true).build();
-    }
-
-    static void removeTableDefaultOptions(Map<String, String> paimonConfig) {
-        Set<String> defaultOptions =
-                paimonConfig.keySet().stream()
-                        .filter(key -> key.startsWith(Catalog.TABLE_DEFAULT_OPTION_PREFIX))
-                        .collect(Collectors.toSet());
-        defaultOptions.forEach(paimonConfig::remove);
     }
 }

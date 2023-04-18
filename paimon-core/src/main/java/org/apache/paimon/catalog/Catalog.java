@@ -40,8 +40,6 @@ public interface Catalog extends AutoCloseable {
 
     String SYSTEM_TABLE_SPLITTER = "$";
 
-    String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
-
     /**
      * Get lock factory from catalog. Lock is used to support multiple concurrent writes on the
      * object store.

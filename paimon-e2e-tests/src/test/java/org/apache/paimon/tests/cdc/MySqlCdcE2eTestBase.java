@@ -18,7 +18,6 @@
 
 package org.apache.paimon.tests.cdc;
 
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlContainer;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlVersion;
 import org.apache.paimon.tests.E2eTestBase;
@@ -138,8 +137,8 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                         "database-name='paimon_sync_table'",
                         "--mysql-conf",
                         "table-name='schema_evolution_.+'",
-                        "--paimon-conf",
-                        Catalog.TABLE_DEFAULT_OPTION_PREFIX + "bucket=2");
+                        "--table-conf",
+                        "bucket=2");
         Container.ExecResult execResult =
                 jobManager.execInContainer("su", "flink", "-c", runActionCommand);
         LOG.info(execResult.getStdout());
@@ -248,8 +247,8 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                         String.format("password='%s'", mySqlContainer.getPassword()),
                         "--mysql-conf",
                         "database-name='paimon_sync_database'",
-                        "--paimon-conf",
-                        Catalog.TABLE_DEFAULT_OPTION_PREFIX + "bucket=2");
+                        "--table-conf",
+                        "bucket=2");
         jobManager.execInContainer("su", "flink", "-c", runActionCommand);
 
         try (Connection conn = getMySqlConnection();

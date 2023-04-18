@@ -43,7 +43,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * {@link EventParser} for MySQL Debezium JSON.
@@ -184,19 +185,17 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
         Map<String, String> before = extractRow(payload.get("before"));
         if (before.size() > 0) {
+            before = caseSensitive ? before : keyCaseInsensitive(before);
             records.add(new CdcRecord(RowKind.DELETE, before));
         }
 
         Map<String, String> after = extractRow(payload.get("after"));
         if (after.size() > 0) {
+            after = caseSensitive ? after : keyCaseInsensitive(after);
             records.add(new CdcRecord(RowKind.INSERT, after));
         }
 
-        return caseSensitive
-                ? records
-                : records.stream()
-                        .map(CdcRecord::toCaseInsensitiveForm)
-                        .collect(Collectors.toList());
+        return records;
     }
 
     private Map<String, String> extractRow(JsonNode recordRow) {
@@ -276,5 +275,18 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         }
 
         return recordMap;
+    }
+
+    private Map<String, String> keyCaseInsensitive(Map<String, String> origin) {
+        Map<String, String> keyCaseInsensitive = new HashMap<>();
+        for (Map.Entry<String, String> entry : origin.entrySet()) {
+            String fieldName = entry.getKey().toLowerCase();
+            checkArgument(
+                    !keyCaseInsensitive.containsKey(fieldName),
+                    "Duplicate key appears when converting map keys to case-insensitive form. Original map is:\n."
+                            + origin);
+            keyCaseInsensitive.put(fieldName, entry.getValue());
+        }
+        return keyCaseInsensitive;
     }
 }

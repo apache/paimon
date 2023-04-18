@@ -36,6 +36,8 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected static final String DB_SUFFIX = ".db";
 
+    protected static final String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
+
     protected final FileIO fileIO;
 
     protected final Map<String, String> tableDefaultOptions;
