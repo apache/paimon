@@ -20,7 +20,6 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.system.BucketsTable;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -51,11 +50,8 @@ public class CompactorSinkBuilder {
     }
 
     public DataStreamSink<?> build() {
-        OffsetRowDataHashStreamPartitioner partitioner =
-                new OffsetRowDataHashStreamPartitioner(
-                        BucketsTable.partitionWithBucketRowType(
-                                table.schema().logicalPartitionType()),
-                        1);
+        BucketingStreamPartitioner<RowData> partitioner =
+                new BucketingStreamPartitioner<>(new BucketsRowChannelComputer());
         PartitionTransformation<RowData> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
 

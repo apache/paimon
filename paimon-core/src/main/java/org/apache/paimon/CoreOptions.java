@@ -133,12 +133,6 @@ public class CoreOptions implements Serializable {
                             "To avoid frequent manifest merges, this parameter specifies the minimum number "
                                     + "of ManifestFileMeta to merge.");
 
-    public static final ConfigOption<MemorySize> MANIFEST_CACHE_SIZE =
-            key("manifest.cache-size")
-                    .memoryType()
-                    .defaultValue(MemorySize.ofMebiBytes(0))
-                    .withDescription("Cache size for reading manifest files.");
-
     public static final ConfigOption<String> PARTITION_DEFAULT_NAME =
             key("partition.default-name")
                     .stringType()
@@ -227,6 +221,13 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "Whether the write buffer can be spillable. Enabled by default when using object storage.");
+
+    public static final ConfigOption<MemorySize> WRITE_MANIFEST_CACHE =
+            key("write-manifest-cache")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(0))
+                    .withDescription(
+                            "Cache size for reading manifest files for write initialization.");
 
     public static final ConfigOption<Integer> LOCAL_SORT_MAX_NUM_FILE_HANDLES =
             key("local-sort.max-num-file-handles")
@@ -650,8 +651,8 @@ public class CoreOptions implements Serializable {
         return options.get(MANIFEST_TARGET_FILE_SIZE);
     }
 
-    public MemorySize manifestCacheSize() {
-        return options.get(MANIFEST_CACHE_SIZE);
+    public MemorySize writeManifestCache() {
+        return options.get(WRITE_MANIFEST_CACHE);
     }
 
     public String partitionDefaultName() {

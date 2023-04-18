@@ -56,7 +56,7 @@ It is recommended that the parallelism of sink should be less than or equal to t
 ## Write Initialize
 
 In the initialization of write, the writer of the bucket needs to read all historical files. If there is a bottleneck
-here (For example, writing a large number of partitions simultaneously), you can use `manifest.cache-size` to cache
+here (For example, writing a large number of partitions simultaneously), you can use `write-manifest-cache` to cache
 the read manifest data to accelerate initialization.
 
 ## Compaction

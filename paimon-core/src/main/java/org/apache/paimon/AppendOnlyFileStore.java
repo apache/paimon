@@ -85,7 +85,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 options);
     }
 
-    private AppendOnlyFileStoreScan newScan(boolean checkNumOfBuckets) {
+    private AppendOnlyFileStoreScan newScan(boolean forWrite) {
         return new AppendOnlyFileStoreScan(
                 partitionType,
                 bucketKeyType.getFieldCount() == 0 ? rowType : bucketKeyType,
@@ -93,10 +93,10 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 snapshotManager(),
                 schemaManager,
                 schemaId,
-                manifestFileFactory(),
-                manifestListFactory(),
+                manifestFileFactory(forWrite),
+                manifestListFactory(forWrite),
                 options.bucket(),
-                checkNumOfBuckets);
+                forWrite);
     }
 
     @Override

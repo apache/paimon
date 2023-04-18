@@ -109,7 +109,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 keyValueFieldsExtractor);
     }
 
-    private KeyValueFileStoreScan newScan(boolean checkNumOfBuckets) {
+    private KeyValueFileStoreScan newScan(boolean forWrite) {
         return new KeyValueFileStoreScan(
                 partitionType,
                 bucketKeyType,
@@ -118,10 +118,10 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 schemaManager,
                 schemaId,
                 keyValueFieldsExtractor,
-                manifestFileFactory(),
-                manifestListFactory(),
+                manifestFileFactory(forWrite),
+                manifestListFactory(forWrite),
                 options.bucket(),
-                checkNumOfBuckets);
+                forWrite);
     }
 
     @Override

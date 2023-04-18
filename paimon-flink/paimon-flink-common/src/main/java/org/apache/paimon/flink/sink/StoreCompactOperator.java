@@ -20,12 +20,9 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.OffsetRow;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
@@ -35,6 +32,8 @@ import org.apache.flink.table.data.RowData;
 
 import java.io.IOException;
 import java.util.List;
+
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
  * A dedicated operator for manual triggered compaction.
@@ -52,8 +51,6 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData> {
 
     private transient StoreSinkWriteState state;
     private transient StoreSinkWrite write;
-    private transient InternalRowSerializer partitionSerializer;
-    private transient OffsetRow reusedPartition;
     private transient DataFileMetaSerializer dataFileMetaSerializer;
 
     public StoreCompactOperator(
@@ -81,13 +78,14 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData> {
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
 
-        RowDataChannelComputer channelComputer = new RowDataChannelComputer(table.schema(), false);
-        channelComputer.setup(getRuntimeContext().getNumberOfParallelSubtasks());
         state =
                 new StoreSinkWriteState(
                         context,
                         (tableName, partition, bucket) ->
-                                channelComputer.channel(partition, bucket)
+                                ChannelComputer.select(
+                                                partition,
+                                                bucket,
+                                                getRuntimeContext().getNumberOfParallelSubtasks())
                                         == getRuntimeContext().getIndexOfThisSubtask());
 
         write =
@@ -101,8 +99,6 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData> {
     @Override
     public void open() throws Exception {
         super.open();
-        partitionSerializer = new InternalRowSerializer(table.schema().logicalPartitionType());
-        reusedPartition = new OffsetRow(partitionSerializer.getArity(), 1);
         dataFileMetaSerializer = new DataFileMetaSerializer();
     }
 
@@ -111,13 +107,9 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData> {
         RowData record = element.getValue();
 
         long snapshotId = record.getLong(0);
-
-        reusedPartition.replace(new FlinkRowWrapper(record));
-        BinaryRow partition = partitionSerializer.toBinaryRow(reusedPartition).copy();
-
-        int bucket = record.getInt(partitionSerializer.getArity() + 1);
-
-        byte[] serializedFiles = record.getBinary(partitionSerializer.getArity() + 2);
+        BinaryRow partition = deserializeBinaryRow(record.getBinary(1));
+        int bucket = record.getInt(2);
+        byte[] serializedFiles = record.getBinary(3);
         List<DataFileMeta> files = dataFileMetaSerializer.deserializeList(serializedFiles);
 
         if (isStreaming) {
