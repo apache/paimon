@@ -47,7 +47,14 @@ public class LoserTree<T> implements Closeable {
     private final int[] tree;
     private final int size;
     private final List<LeafIterator<T>> leaves;
+
+    /**
+     * if comparator.compare('a', 'b') > 0, then 'a' is the winner. In the following implementation,
+     * we always let 'a' represent the parent node.
+     */
     private final Comparator<T> firstComparator;
+
+    /** same as firstComparator, but mainly used to compare sequenceNumber. */
     private final Comparator<T> secondComparator;
 
     private boolean initialized;
@@ -59,6 +66,8 @@ public class LoserTree<T> implements Closeable {
         this.size = nextBatchReaders.size();
         this.leaves = new ArrayList<>(size);
         this.tree = new int[size];
+        // if e1 and e2 are both null, it doesn't matter who becomes the new winner. But if
+        // firstComparator returns 0, it means that secondComparator must be used to compare again.
         this.firstComparator =
                 (e1, e2) -> e1 == null ? -1 : (e2 == null ? 1 : firstComparator.compare(e1, e2));
         this.secondComparator =
@@ -225,6 +234,7 @@ public class LoserTree<T> implements Closeable {
                         "This is a bug. Please file an issue. A node in the WINNER_WITH_NEW_KEY "
                                 + "state cannot encounter a node in the LOSER_WITH_SAME_KEY state.");
             case LOSER_POPPED:
+                // this case will only happen during adjustForNextLoop.
                 parentNode.state = State.WINNER_POPPED;
                 parentNode.firstSameKeyIndex = -1;
                 winnerNode.state = State.LOSER_WITH_NEW_KEY;
