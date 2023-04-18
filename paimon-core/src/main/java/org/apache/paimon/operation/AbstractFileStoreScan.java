@@ -37,7 +37,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -51,6 +50,8 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Default implementation of {@link FileStoreScan}. */
 public abstract class AbstractFileStoreScan implements FileStoreScan {
@@ -89,8 +90,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             boolean checkNumOfBuckets) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
-        Preconditions.checkArgument(
-                bucketKeyType.getFieldCount() > 0, "The bucket keys should not be empty.");
+        checkArgument(bucketKeyType.getFieldCount() > 0, "The bucket keys should not be empty.");
         this.bucketKeyType = bucketKeyType;
         this.snapshotManager = snapshotManager;
         this.schemaManager = schemaManager;
@@ -140,6 +140,20 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withBucket(int bucket) {
         this.specifiedBucket = bucket;
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withPartitionBucket(BinaryRow partition, int bucket) {
+        if (manifestCacheFilter != null) {
+            checkArgument(
+                    manifestCacheFilter.test(partition, bucket),
+                    String.format(
+                            "This is a bug! The partition %s and bucket %s is filtered!",
+                            partition, bucket));
+        }
+        withPartitionFilter(Collections.singletonList(partition));
+        withBucket(bucket);
         return this;
     }
 

@@ -63,7 +63,7 @@ public class ObjectsCache<K, V> {
             try {
                 rowSerializer.mapFromPages(binaryRow, view);
                 if (readFilter.test(binaryRow)) {
-                    entries.add(serializer.fromRow(binaryRow.copy()));
+                    entries.add(serializer.fromRow(binaryRow));
                 }
             } catch (EOFException e) {
                 return entries;

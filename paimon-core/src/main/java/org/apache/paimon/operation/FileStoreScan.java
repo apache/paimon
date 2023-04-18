@@ -44,6 +44,8 @@ public interface FileStoreScan {
 
     FileStoreScan withBucket(int bucket);
 
+    FileStoreScan withPartitionBucket(BinaryRow partition, int bucket);
+
     FileStoreScan withSnapshot(long snapshotId);
 
     FileStoreScan withManifestList(List<ManifestFileMeta> manifests);

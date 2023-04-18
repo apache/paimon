@@ -19,11 +19,17 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.operation.AbstractFileStoreScan;
 
 import javax.annotation.concurrent.ThreadSafe;
 
-/** Filter for manifest cache. */
+/**
+ * Filter for manifest cache, this is used in {@link AbstractFileStoreScan} for improving cache
+ * utilization. NOTE: Please use this interface with caution and make sure that only filtered data
+ * is required, otherwise it will cause correctness issues.
+ */
 @ThreadSafe
+@FunctionalInterface
 public interface ManifestCacheFilter {
 
     boolean test(BinaryRow partition, int bucket);
