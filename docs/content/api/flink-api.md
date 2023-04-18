@@ -129,6 +129,12 @@ public class ReadFromTable {
 
         // use this datastream
         dataStream.executeAndCollect().forEachRemaining(System.out::println);
+
+        // prints:
+        // +I[Bob, 12]
+        // +I[Alice, 12]
+        // -U[Alice, 12]
+        // +U[Alice, 14]
     }
 }
 ```
