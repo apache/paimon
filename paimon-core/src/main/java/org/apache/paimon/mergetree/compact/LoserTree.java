@@ -40,8 +40,7 @@ import java.util.List;
  * that in the process of adjusting the tree, we need to record the index of the same key and the
  * state of the winner/loser for subsequent quick adjustment of the position of the winner.
  *
- * <p>Detailed design can refer to
- * https://docs.google.com/document/d/1OPyb9o9K226Fb4O-SzZpBYgwfsvNY7X0H5T3ivdu1ck/edit?usp=sharing
+ * <p>Detailed design can refer to https://cwiki.apache.org/confluence/x/9Ak0Dw.
  */
 public class LoserTree<T> implements Closeable {
     private final int[] tree;
