@@ -273,7 +273,7 @@ public class MySqlSyncTableAction implements Action {
         Map<String, String> mySqlConfig = getConfigMap(params, "mysql-conf");
         Map<String, String> catalogConfig = getConfigMap(params, "catalog-conf");
         Map<String, String> tableConfig = getConfigMap(params, "table-conf");
-        if (mySqlConfig == null || catalogConfig == null || tableConfig == null) {
+        if (mySqlConfig == null) {
             return Optional.empty();
         }
 
@@ -285,13 +285,16 @@ public class MySqlSyncTableAction implements Action {
                         tablePath.f2,
                         partitionKeys,
                         primaryKeys,
-                        catalogConfig,
-                        tableConfig));
+                        catalogConfig == null ? Collections.emptyMap() : catalogConfig,
+                        tableConfig == null ? Collections.emptyMap() : tableConfig));
     }
 
     private static Map<String, String> getConfigMap(MultipleParameterTool params, String key) {
-        Map<String, String> map = new HashMap<>();
+        if (!params.has(key)) {
+            return null;
+        }
 
+        Map<String, String> map = new HashMap<>();
         for (String param : params.getMultiParameter(key)) {
             String[] kv = param.split("=");
             if (kv.length == 2) {
