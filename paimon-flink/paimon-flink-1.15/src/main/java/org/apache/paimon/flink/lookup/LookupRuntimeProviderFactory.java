@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.flink.table.connector.source.AsyncTableFunctionProvider;
 import org.apache.flink.table.connector.source.LookupTableSource.LookupRuntimeProvider;
 import org.apache.flink.table.connector.source.TableFunctionProvider;
 
@@ -25,6 +26,9 @@ import org.apache.flink.table.connector.source.TableFunctionProvider;
 public class LookupRuntimeProviderFactory {
 
     public static LookupRuntimeProvider create(FileStoreLookupFunction function) {
+        if (function.isAsyncEnabled()) {
+            return AsyncTableFunctionProvider.of(new OldAsyncLookupFunction(function));
+        }
         return TableFunctionProvider.of(new OldLookupFunction(function));
     }
 }

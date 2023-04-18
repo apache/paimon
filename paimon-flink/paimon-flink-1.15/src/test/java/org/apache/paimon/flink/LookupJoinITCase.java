@@ -22,21 +22,39 @@ import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** ITCase for lookup join. */
+/** ITCase for (async) lookup join. */
+@RunWith(Parameterized.class)
 public class LookupJoinITCase extends CatalogITCaseBase {
+
+    @Parameterized.Parameter public boolean asyncLookup;
+
+    @Parameterized.Parameters(name = "asyncLookup={0}")
+    public static Object[] parameters() {
+        return new Object[] {true, false};
+    }
 
     @Override
     public List<String> ddl() {
-        return Arrays.asList(
-                "CREATE TABLE T (i INT, `proctime` AS PROCTIME())",
-                "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
-                        + " ('continuous.discovery-interval'='1 ms')");
+        List<String> ddls = new ArrayList<>();
+        ddls.add("CREATE TABLE T (i INT, `proctime` AS PROCTIME())");
+        if (asyncLookup) {
+            ddls.add(
+                    "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
+                            + " ('continuous.discovery-interval'='1 ms', 'lookup.async'='true')");
+        } else {
+            ddls.add(
+                    "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
+                            + " ('continuous.discovery-interval'='1 ms')");
+        }
+        return ddls;
     }
 
     @Override
@@ -50,27 +68,40 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+        try (BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(sEnv.executeSql(query).collect())) {
 
-        batchSql("INSERT INTO T VALUES (1), (2), (3)");
-        List<Row> result = iterator.collect(3);
-        assertThat(result)
-                .containsExactlyInAnyOrder(
-                        Row.of(1, 11, 111, 1111),
-                        Row.of(2, 22, 222, 2222),
-                        Row.of(3, null, null, null));
+            if (asyncLookup) {
+                // for async lookup, we have to wait for refresh each time to ensure we can get the
+                // correct results for testing.
+                batchSql("INSERT INTO T VALUES (1)");
+                Thread.sleep(2000); // wait refresh
 
-        batchSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
-        Thread.sleep(2000); // wait refresh
-        batchSql("INSERT INTO T VALUES (1), (2), (3), (4)");
-        result = iterator.collect(4);
-        assertThat(result)
-                .containsExactlyInAnyOrder(
-                        Row.of(1, 11, 111, 1111),
-                        Row.of(2, 44, 444, 4444),
-                        Row.of(3, 33, 333, 3333),
-                        Row.of(4, null, null, null));
+                batchSql("INSERT INTO T VALUES (2)");
+                Thread.sleep(2000); // wait refresh
 
-        iterator.close();
+                batchSql("INSERT INTO T VALUES (3)");
+            } else {
+                batchSql("INSERT INTO T VALUES (1), (2), (3)");
+            }
+
+            assertThat(iterator.collect(3))
+                    .containsExactlyInAnyOrder(
+                            Row.of(1, 11, 111, 1111),
+                            Row.of(2, 22, 222, 2222),
+                            Row.of(3, null, null, null));
+
+            batchSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+
+            Thread.sleep(2000); // wait refresh
+
+            batchSql("INSERT INTO T VALUES (1), (2), (3), (4)");
+            assertThat(iterator.collect(4))
+                    .containsExactlyInAnyOrder(
+                            Row.of(1, 11, 111, 1111),
+                            Row.of(2, 44, 444, 4444),
+                            Row.of(3, 33, 333, 3333),
+                            Row.of(4, null, null, null));
+        }
     }
 }
