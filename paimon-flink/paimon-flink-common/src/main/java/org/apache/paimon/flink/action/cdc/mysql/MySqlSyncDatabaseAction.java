@@ -42,6 +42,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -118,17 +119,17 @@ public class MySqlSyncDatabaseAction implements Action {
                         CatalogContext.create(
                                 new Options(catalogConfig)
                                         .set(CatalogOptions.WAREHOUSE, warehouse)));
-        List<MySqlSchema> mySqlSchemas;
-        if (catalog.caseSensitive()) {
-            mySqlSchemas = getMySqlSchemaList(true);
-        } else {
-            mySqlSchemas = getMySqlSchemaList(false);
+        boolean caseSensitive = catalog.caseSensitive();
+
+        if (!caseSensitive) {
             Preconditions.checkArgument(
                     database.equals(database.toLowerCase()),
                     String.format(
                             "Database name [%s] cannot contain upper case in case-insensitive catalog.",
                             database));
         }
+
+        List<MySqlSchema> mySqlSchemas = getMySqlSchemaList(caseSensitive);
         Preconditions.checkArgument(
                 mySqlSchemas.size() > 0,
                 "No tables found in MySQL database "
@@ -166,11 +167,10 @@ public class MySqlSyncDatabaseAction implements Action {
             fileStoreTables.add(table);
         }
 
+        String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
+        ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
         EventParser.Factory<String> parserFactory =
-                () ->
-                        new MySqlDebeziumJsonEventParser(
-                                mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE),
-                                catalog.caseSensitive());
+                () -> new MySqlDebeziumJsonEventParser(zoneId, caseSensitive);
 
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<String>()

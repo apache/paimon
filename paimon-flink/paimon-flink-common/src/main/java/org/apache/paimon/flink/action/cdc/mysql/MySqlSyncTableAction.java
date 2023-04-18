@@ -42,6 +42,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -123,17 +124,14 @@ public class MySqlSyncTableAction implements Action {
                         CatalogContext.create(
                                 new Options(catalogConfig)
                                         .set(CatalogOptions.WAREHOUSE, warehouse)));
+        boolean caseSensitive = catalog.caseSensitive();
 
-        List<MySqlSchema> mySqlSchemas;
-        if (catalog.caseSensitive()) {
-            mySqlSchemas = getMySqlSchemaList(true);
-        } else {
-            mySqlSchemas = getMySqlSchemaList(false);
+        if (!caseSensitive) {
             validateCaseInsensitive();
         }
 
         MySqlSchema mySqlSchema =
-                mySqlSchemas.stream()
+                getMySqlSchemaList(caseSensitive).stream()
                         .reduce(MySqlSchema::merge)
                         .orElseThrow(
                                 () ->
@@ -155,11 +153,10 @@ public class MySqlSyncTableAction implements Action {
             table = (FileStoreTable) catalog.getTable(identifier);
         }
 
+        String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
+        ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
         EventParser.Factory<String> parserFactory =
-                () ->
-                        new MySqlDebeziumJsonEventParser(
-                                mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE),
-                                catalog.caseSensitive());
+                () -> new MySqlDebeziumJsonEventParser(zoneId, caseSensitive);
 
         FlinkCdcSyncTableSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncTableSinkBuilder<String>()

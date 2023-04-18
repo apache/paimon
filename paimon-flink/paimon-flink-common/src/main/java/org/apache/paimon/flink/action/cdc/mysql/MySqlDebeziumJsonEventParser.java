@@ -33,8 +33,6 @@ import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -67,9 +65,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private Map<String, String> mySqlFieldTypes;
     private Map<String, String> fieldClassNames;
 
-    public MySqlDebeziumJsonEventParser(@Nullable String serverTimeZone, boolean caseSensitive) {
-        this.serverTimeZone =
-                serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
+    public MySqlDebeziumJsonEventParser(ZoneId serverTimeZone, boolean caseSensitive) {
+        this.serverTimeZone = serverTimeZone;
         this.caseSensitive = caseSensitive;
     }
 
