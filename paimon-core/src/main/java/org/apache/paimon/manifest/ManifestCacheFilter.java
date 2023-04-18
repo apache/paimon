@@ -16,29 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.manifest;
 
-import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.operation.AbstractFileStoreScan;
+
+import javax.annotation.concurrent.ThreadSafe;
 
 /**
- * Represents a filter (boolean-valued function) of one argument. This class is for avoiding name
- * conflicting to {@link Predicate}.
+ * Filter for manifest cache, this is used in {@link AbstractFileStoreScan} for improving cache
+ * utilization. NOTE: Please use this interface with caution and make sure that only filtered data
+ * is required, otherwise it will cause correctness issues.
  */
+@ThreadSafe
 @FunctionalInterface
-public interface Filter<T> {
+public interface ManifestCacheFilter {
 
-    Filter<?> ALWAYS_TRUE = t -> true;
-
-    /**
-     * Evaluates this predicate on the given argument.
-     *
-     * @param t the input argument
-     * @return {@code true} if the input argument matches the predicate, otherwise {@code false}
-     */
-    boolean test(T t);
-
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    static <T> Filter<T> alwaysTrue() {
-        return (Filter) ALWAYS_TRUE;
-    }
+    boolean test(BinaryRow partition, int bucket);
 }

@@ -46,6 +46,8 @@ import java.util.Map;
  */
 public class StoreSinkWriteState {
 
+    private final StateValueFilter stateValueFilter;
+
     private final ListState<Tuple5<String, String, byte[], Integer, byte[]>> listState;
     private final Map<String, Map<String, List<StateValue>>> map;
 
@@ -53,6 +55,7 @@ public class StoreSinkWriteState {
     public StoreSinkWriteState(
             StateInitializationContext context, StateValueFilter stateValueFilter)
             throws Exception {
+        this.stateValueFilter = stateValueFilter;
         TupleSerializer<Tuple5<String, String, byte[], Integer, byte[]>> listStateSerializer =
                 new TupleSerializer<>(
                         (Class<Tuple5<String, String, byte[], Integer, byte[]>>)
@@ -79,6 +82,10 @@ public class StoreSinkWriteState {
                         .add(new StateValue(partition, tuple.f3, tuple.f4));
             }
         }
+    }
+
+    public StateValueFilter stateValueFilter() {
+        return stateValueFilter;
     }
 
     public @Nullable List<StateValue> get(String tableName, String key) {

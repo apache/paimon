@@ -38,6 +38,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ContinuousCompactorFollowUpScanner}. */
@@ -117,7 +118,7 @@ public class ContinuousCompactorFollowUpScannerTest extends ScannerTestBase {
                 "%s %d|%d|%d|%d",
                 rowData.getRowKind().shortString(),
                 rowData.getLong(0),
-                rowData.getInt(1),
+                deserializeBinaryRow(rowData.getBinary(1)).getInt(0),
                 rowData.getInt(2),
                 numFiles);
     }

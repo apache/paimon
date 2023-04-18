@@ -427,7 +427,7 @@ public abstract class FileStoreTableTestBase {
                 createFileStoreTable(
                         conf ->
                                 conf.set(
-                                        CoreOptions.MANIFEST_CACHE_SIZE,
+                                        CoreOptions.WRITE_MANIFEST_CACHE,
                                         MemorySize.ofMebiBytes(1)));
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);

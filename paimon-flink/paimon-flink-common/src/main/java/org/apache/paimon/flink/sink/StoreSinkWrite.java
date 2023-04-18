@@ -30,7 +30,6 @@ import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.List;
-import java.util.function.Function;
 
 /** Helper class of {@link PrepareCommitOperator} for different types of paimon sinks. */
 public interface StoreSinkWrite {
@@ -59,7 +58,7 @@ public interface StoreSinkWrite {
      * changes. {@link TableWriteImpl} with the new schema will be provided by {@code
      * newWriteProvider}.
      */
-    void replace(Function<String, TableWriteImpl<?>> newWriteProvider) throws Exception;
+    void replace(FileStoreTable newTable) throws Exception;
 
     /** Provider of {@link StoreSinkWrite}. */
     @FunctionalInterface

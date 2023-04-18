@@ -51,7 +51,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final CoreOptions options;
     protected final RowType partitionType;
 
-    @Nullable private final SegmentsCache<String> manifestCache;
+    @Nullable private final SegmentsCache<String> writeManifestCache;
 
     public AbstractFileStore(
             FileIO fileIO,
@@ -64,11 +64,11 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
         this.schemaId = schemaId;
         this.options = options;
         this.partitionType = partitionType;
-        MemorySize manifestCacheSize = options.manifestCacheSize();
-        this.manifestCache =
-                manifestCacheSize.getBytes() == 0
+        MemorySize writeManifestCache = options.writeManifestCache();
+        this.writeManifestCache =
+                writeManifestCache.getBytes() == 0
                         ? null
-                        : new SegmentsCache<>(options.pageSize(), manifestCacheSize);
+                        : new SegmentsCache<>(options.pageSize(), writeManifestCache);
     }
 
     public FileStorePathFactory pathFactory() {
@@ -86,6 +86,10 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @VisibleForTesting
     public ManifestFile.Factory manifestFileFactory() {
+        return manifestFileFactory(false);
+    }
+
+    protected ManifestFile.Factory manifestFileFactory(boolean forWrite) {
         return new ManifestFile.Factory(
                 fileIO,
                 schemaManager,
@@ -93,13 +97,20 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestFormat(),
                 pathFactory(),
                 options.manifestTargetSize().getBytes(),
-                manifestCache);
+                forWrite ? writeManifestCache : null);
     }
 
     @VisibleForTesting
     public ManifestList.Factory manifestListFactory() {
+        return manifestListFactory(false);
+    }
+
+    protected ManifestList.Factory manifestListFactory(boolean forWrite) {
         return new ManifestList.Factory(
-                fileIO, options.manifestFormat(), pathFactory(), manifestCache);
+                fileIO,
+                options.manifestFormat(),
+                pathFactory(),
+                forWrite ? writeManifestCache : null);
     }
 
     @Override

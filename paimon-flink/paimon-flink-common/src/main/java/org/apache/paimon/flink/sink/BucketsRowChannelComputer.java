@@ -19,26 +19,31 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.table.system.BucketsTable;
 
-import java.io.Serializable;
+import org.apache.flink.table.data.RowData;
 
-/**
- * A utility class to compute which downstream channel a given record should be sent to.
- *
- * @param <T> type of record
- */
-public interface ChannelComputer<T> extends Serializable {
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
-    void setup(int numChannels);
+/** {@link ChannelComputer} to partition {@link RowData} from {@link BucketsTable}. */
+public class BucketsRowChannelComputer implements ChannelComputer<RowData> {
 
-    int channel(T record);
+    private transient int numberOfChannels;
 
-    static int select(BinaryRow partition, int bucket, int numChannels) {
-        int startChannel = Math.abs(partition.hashCode()) % numChannels;
-        return (startChannel + bucket) % numChannels;
+    @Override
+    public void setup(int numberOfChannels) {
+        this.numberOfChannels = numberOfChannels;
     }
 
-    static int select(int bucket, int numChannels) {
-        return bucket % numChannels;
+    @Override
+    public int channel(RowData rowData) {
+        BinaryRow partition = deserializeBinaryRow(rowData.getBinary(1));
+        int bucket = rowData.getInt(2);
+        return ChannelComputer.select(partition, bucket, numberOfChannels);
+    }
+
+    @Override
+    public String toString() {
+        return "compactor-partitioner";
     }
 }

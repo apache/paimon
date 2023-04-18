@@ -53,15 +53,11 @@ public class RowDataChannelComputer implements ChannelComputer<RowData> {
     }
 
     public int channel(BinaryRow partition, int bucket) {
-        int startChannel;
-        if (hasLogSink) {
-            // log sinks like Kafka only consider bucket and don't care about partition
-            // so same bucket, even from different partition, must go to the same channel
-            startChannel = 0;
-        } else {
-            startChannel = Math.abs(partition.hashCode()) % numChannels;
-        }
-        return (startChannel + bucket) % numChannels;
+        // log sinks like Kafka only consider bucket and don't care about partition
+        // so same bucket, even from different partition, must go to the same channel
+        return hasLogSink
+                ? ChannelComputer.select(bucket, numChannels)
+                : ChannelComputer.select(partition, bucket, numChannels);
     }
 
     @Override

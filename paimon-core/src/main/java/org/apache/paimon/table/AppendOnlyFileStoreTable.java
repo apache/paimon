@@ -24,6 +24,7 @@ import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendOnlyFileStoreRead;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.FileStoreScan;
@@ -123,8 +124,14 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<InternalRow> newWrite(String commitUser) {
+        return newWrite(commitUser, null);
+    }
+
+    @Override
+    public TableWriteImpl<InternalRow> newWrite(
+            String commitUser, ManifestCacheFilter manifestFilter) {
         return new TableWriteImpl<>(
-                store().newWrite(commitUser),
+                store().newWrite(commitUser, manifestFilter),
                 new InternalRowKeyAndBucketExtractor(tableSchema),
                 record -> {
                     Preconditions.checkState(

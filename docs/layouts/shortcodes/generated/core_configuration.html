@@ -159,12 +159,6 @@
             <td>The index load factor for lookup.</td>
         </tr>
         <tr>
-            <td><h5>manifest.cache-size</h5></td>
-            <td style="word-wrap: break-word;">0 bytes</td>
-            <td>MemorySize</td>
-            <td>Cache size for reading manifest files.</td>
-        </tr>
-        <tr>
             <td><h5>manifest.format</h5></td>
             <td style="word-wrap: break-word;">avro</td>
             <td><p>Enum</p></td>
@@ -373,6 +367,12 @@
             <td style="word-wrap: break-word;">(none)</td>
             <td>Boolean</td>
             <td>Whether the write buffer can be spillable. Enabled by default when using object storage.</td>
+        </tr>
+        <tr>
+            <td><h5>write-manifest-cache</h5></td>
+            <td style="word-wrap: break-word;">0 bytes</td>
+            <td>MemorySize</td>
+            <td>Cache size for reading manifest files for write initialization.</td>
         </tr>
         <tr>
             <td><h5>write-mode</h5></td>
