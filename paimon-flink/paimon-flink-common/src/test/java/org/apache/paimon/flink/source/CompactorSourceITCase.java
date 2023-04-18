@@ -57,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CompactorSourceBuilder}. */
@@ -272,18 +273,20 @@ public class CompactorSourceITCase extends AbstractTestBase {
     private String toString(RowData rowData) {
         int numFiles;
         try {
-            numFiles = dataFileMetaSerializer.deserializeList(rowData.getBinary(4)).size();
+            numFiles = dataFileMetaSerializer.deserializeList(rowData.getBinary(3)).size();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+
+        BinaryRow partition = deserializeBinaryRow(rowData.getBinary(1));
 
         return String.format(
                 "%s %d|%s|%d|%d|%d",
                 rowData.getRowKind().shortString(),
                 rowData.getLong(0),
-                rowData.getString(1).toString(),
+                partition.getString(0),
+                partition.getInt(1),
                 rowData.getInt(2),
-                rowData.getInt(3),
                 numFiles);
     }
 
