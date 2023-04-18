@@ -20,6 +20,7 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.utils.TableScanUtils;
@@ -32,10 +33,12 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.TypeUtils;
 
+import org.apache.flink.api.common.functions.RuntimeContext;
 import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.functions.FunctionContext;
 import org.apache.flink.table.functions.TableFunction;
+import org.apache.flink.util.concurrent.ExecutorThreadFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,7 +56,12 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -68,6 +76,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreLookupFunction.class);
 
+    private static final int ASYNC_THREAD_POOL_SIZE = 16;
+
     private final Table table;
     private final List<String> projectFields;
     private final List<String> joinKeys;
@@ -79,8 +89,17 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private transient LookupTable lookupTable;
 
     // timestamp when cache expires
-    private transient long nextLoadTime;
+    private transient volatile long nextLoadTime;
+
     private transient TableStreamingReader streamingReader;
+
+    private transient Boolean lookupAsync;
+
+    private transient Lock lock;
+
+    private transient ExecutorService asyncThreadPool;
+
+    private volatile long time = 0L;
 
     public FileStoreLookupFunction(
             Table table, int[] projection, int[] joinKeyIndex, @Nullable Predicate predicate) {
@@ -120,10 +139,20 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     }
 
     public void open(FunctionContext context) throws Exception {
-        String tmpDirectory = getTmpDirectory(context);
+        Options options = Options.fromMap(table.options());
+
+        this.lookupAsync = options.get(FlinkConnectorOptions.LOOKUP_ASYNC);
+        if (lookupAsync) {
+            this.lock = new ReentrantLock();
+            this.asyncThreadPool =
+                    Executors.newFixedThreadPool(
+                            ASYNC_THREAD_POOL_SIZE,
+                            new ExecutorThreadFactory("paimon-async-lookup-worker"));
+        }
+
+        String tmpDirectory = getTmpDirectory(context, lookupAsync);
         this.path = new File(tmpDirectory, "lookup-" + UUID.randomUUID());
 
-        Options options = Options.fromMap(table.options());
         this.refreshInterval = options.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL);
         this.stateFactory = new RocksDBStateFactory(path.toString(), options);
 
@@ -163,28 +192,62 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 TypeUtils.project(table.rowType(), projection), adjustedPredicate);
     }
 
+    public boolean isAsyncEnabled() {
+        if (lookupAsync == null) {
+            this.lookupAsync =
+                    Boolean.valueOf(table.options().get(FlinkConnectorOptions.LOOKUP_ASYNC.key()));
+        }
+        return lookupAsync;
+    }
+
     public Collection<RowData> lookup(RowData keyRow) {
         try {
             checkRefresh();
-            List<InternalRow> results = lookupTable.get(new FlinkRowWrapper(keyRow));
-            List<RowData> rows = new ArrayList<>(results.size());
-            for (InternalRow matchedRow : results) {
-                rows.add(new FlinkRowData(matchedRow));
-            }
-            return rows;
+            return convertRowData(lookupTable.get(new FlinkRowWrapper(keyRow)));
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    public CompletableFuture<Collection<RowData>> asyncLookup(RowData keyRow) {
+        return CompletableFuture.supplyAsync(
+                () -> {
+                    try {
+                        checkRefresh();
+                        // TODO introduce retry logic.
+                        return convertRowData(lookupTable.get(new FlinkRowWrapper(keyRow)));
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                },
+                asyncThreadPool);
     }
 
     private void checkRefresh() throws Exception {
         if (nextLoadTime > System.currentTimeMillis()) {
             return;
         }
+        if (isAsyncEnabled()) {
+            // since we would check asynchronously, introduce a lock here to avoid concurrent
+            // refresh.
+            lock.lock();
+            try {
+                if (nextLoadTime <= System.currentTimeMillis()) {
+                    refreshAndUpdateNextLoadTime();
+                }
+            } finally {
+                lock.unlock();
+            }
+        } else {
+            refreshAndUpdateNextLoadTime();
+        }
+    }
+
+    private void refreshAndUpdateNextLoadTime() throws Exception {
         if (nextLoadTime > 0) {
             LOG.info(
                     "Lookup table has refreshed after {} second(s), refreshing",
-                    refreshInterval.toMillis() / 1000);
+                    refreshInterval.toMillis() / 1000.0);
         }
 
         refresh();
@@ -202,6 +265,14 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
     }
 
+    private Collection<RowData> convertRowData(Collection<InternalRow> internalRows) {
+        List<RowData> rows = new ArrayList<>(internalRows.size());
+        for (InternalRow matchedRow : internalRows) {
+            rows.add(new FlinkRowData(matchedRow));
+        }
+        return rows;
+    }
+
     @Override
     public void close() throws IOException {
         if (stateFactory != null) {
@@ -214,15 +285,28 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
     }
 
-    private static String getTmpDirectory(FunctionContext context) {
+    private static String getTmpDirectory(FunctionContext context, boolean isAsyncContext) {
         try {
             Field field = context.getClass().getDeclaredField("context");
             field.setAccessible(true);
-            StreamingRuntimeContext runtimeContext = (StreamingRuntimeContext) field.get(context);
+            RuntimeContext runtimeContext = (RuntimeContext) field.get(context);
+            StreamingRuntimeContext streamingRuntimeContext;
+            // for async lookup, the runtimeContext is wrapped in RichAsyncFunctionRuntimeContext
+            if (isAsyncContext) {
+                Class<?> innerClass =
+                        Class.forName(
+                                "org.apache.flink.streaming.api.functions.async.RichAsyncFunction$RichAsyncFunctionRuntimeContext");
+                Field innerField = innerClass.getDeclaredField("runtimeContext");
+                innerField.setAccessible(true);
+                streamingRuntimeContext =
+                        (StreamingRuntimeContext) innerField.get(innerField.get(runtimeContext));
+            } else {
+                streamingRuntimeContext = (StreamingRuntimeContext) runtimeContext;
+            }
             String[] tmpDirectories =
-                    runtimeContext.getTaskManagerRuntimeInfo().getTmpDirectories();
+                    streamingRuntimeContext.getTaskManagerRuntimeInfo().getTmpDirectories();
             return tmpDirectories[ThreadLocalRandom.current().nextInt(tmpDirectories.length)];
-        } catch (NoSuchFieldException | IllegalAccessException e) {
+        } catch (ClassNotFoundException | NoSuchFieldException | IllegalAccessException e) {
             throw new RuntimeException(e);
         }
     }

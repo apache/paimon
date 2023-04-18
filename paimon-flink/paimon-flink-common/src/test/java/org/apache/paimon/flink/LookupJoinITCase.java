@@ -18,26 +18,50 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
+import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** ITCase for lookup join. */
+/** ITCase for (async) lookup join. */
+@ExtendWith(ParameterizedTestExtension.class)
 public class LookupJoinITCase extends CatalogITCaseBase {
+    private final boolean asyncLookup;
+
+    public LookupJoinITCase(boolean asyncLookup) {
+        this.asyncLookup = asyncLookup;
+    }
+
+    @Parameters(name = "asyncLookup={0}")
+    public static List<Boolean> parameters() {
+        return Arrays.asList(true, false);
+    }
 
     @Override
     public List<String> ddl() {
-        return Arrays.asList(
-                "CREATE TABLE T (i INT, `proctime` AS PROCTIME())",
-                "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
-                        + " ('continuous.discovery-interval'='1 ms')");
+        List<String> ddls = new ArrayList<>();
+        ddls.add("CREATE TABLE T (i INT, `proctime` AS PROCTIME())");
+        if (asyncLookup) {
+            ddls.add(
+                    "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
+                            + " ('continuous.discovery-interval'='1 ms', 'lookup.async'='true')");
+        } else {
+            ddls.add(
+                    "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
+                            + " ('continuous.discovery-interval'='1 ms')");
+        }
+        return ddls;
     }
 
     @Override
@@ -45,7 +69,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         return 1;
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testLookupEmptyTable() throws Exception {
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
@@ -72,37 +97,56 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testLookup() throws Exception {
-        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+        batchSql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
-        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+        try (BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(sEnv.executeSql(query).collect())) {
 
-        sql("INSERT INTO T VALUES (1), (2), (3)");
-        List<Row> result = iterator.collect(3);
-        assertThat(result)
-                .containsExactlyInAnyOrder(
-                        Row.of(1, 11, 111, 1111),
-                        Row.of(2, 22, 222, 2222),
-                        Row.of(3, null, null, null));
+            if (asyncLookup) {
+                // for async lookup, we have to wait for refresh each time to ensure we can get the
+                // correct results for testing.
+                batchSql("INSERT INTO T VALUES (1)");
+                Thread.sleep(2000); // wait refresh
 
-        sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
-        Thread.sleep(2000); // wait refresh
-        sql("INSERT INTO T VALUES (1), (2), (3), (4)");
-        result = iterator.collect(4);
-        assertThat(result)
-                .containsExactlyInAnyOrder(
-                        Row.of(1, 11, 111, 1111),
-                        Row.of(2, 44, 444, 4444),
-                        Row.of(3, 33, 333, 3333),
-                        Row.of(4, null, null, null));
+                batchSql("INSERT INTO T VALUES (2)");
+                Thread.sleep(2000); // wait refresh
 
-        iterator.close();
+                batchSql("INSERT INTO T VALUES (3)");
+            } else {
+                batchSql("INSERT INTO T VALUES (1), (2), (3)");
+            }
+
+            assertThat(iterator.collect(3))
+                    .containsExactlyInAnyOrder(
+                            Row.of(1, 11, 111, 1111),
+                            Row.of(2, 22, 222, 2222),
+                            Row.of(3, null, null, null));
+
+            batchSql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
+
+            if (asyncLookup) {
+                batchSql("INSERT INTO T VALUES (1), (2)");
+                Thread.sleep(2000); // wait refresh
+                batchSql("INSERT INTO T VALUES (3), (4)");
+            } else {
+                batchSql("INSERT INTO T VALUES (1), (2), (3), (4)");
+            }
+            assertThat(iterator.collect(4))
+                    .containsExactlyInAnyOrder(
+                            Row.of(1, 11, 111, 1111),
+                            Row.of(2, 44, 444, 4444),
+                            Row.of(3, 33, 333, 3333),
+                            Row.of(4, null, null, null));
+        }
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testLookupWithLatest() throws Exception {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
         String query =
@@ -110,7 +154,19 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         + " for system_time as of T.proctime AS D ON T.i = D.i";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        sql("INSERT INTO T VALUES (1), (2), (3)");
+        if (asyncLookup) {
+            // for async lookup, we have to wait for refresh each time to ensure we can get the
+            // correct results for testing.
+            sql("INSERT INTO T VALUES (1)");
+            Thread.sleep(2000); // wait refresh
+
+            sql("INSERT INTO T VALUES (2)");
+            Thread.sleep(2000); // wait refresh
+
+            sql("INSERT INTO T VALUES (3)");
+        } else {
+            sql("INSERT INTO T VALUES (1), (2), (3)");
+        }
         List<Row> result = iterator.collect(3);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -120,7 +176,21 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        sql("INSERT INTO T VALUES (1), (2), (3), (4)");
+
+        if (asyncLookup) {
+            sql("INSERT INTO T VALUES (1)");
+            Thread.sleep(2000); // wait refresh
+
+            sql("INSERT INTO T VALUES (2)");
+            Thread.sleep(2000); // wait refresh
+
+            sql("INSERT INTO T VALUES (3)");
+            Thread.sleep(2000); // wait refresh
+
+            sql("INSERT INTO T VALUES (4)");
+        } else {
+            sql("INSERT INTO T VALUES (1), (2), (3), (4)");
+        }
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -132,7 +202,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testLookupProjection() throws Exception {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
@@ -160,7 +231,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testLookupFilterPk() throws Exception {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
@@ -188,7 +260,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testLookupFilterSelect() throws Exception {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
@@ -216,7 +289,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testLookupFilterUnSelect() throws Exception {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
@@ -244,7 +318,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testLookupFilterUnSelectAndUpdate() throws Exception {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
@@ -272,7 +347,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testNonPkLookup() throws Exception {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
@@ -280,7 +356,19 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                 "SELECT D.i, T.i, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.j";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        sql("INSERT INTO T VALUES (11), (22), (33)");
+        if (asyncLookup) {
+            // for async lookup, we have to wait for refresh each time to ensure we can get the
+            // correct results for testing.
+            sql("INSERT INTO T VALUES (11)");
+            Thread.sleep(2000); // wait refresh
+
+            sql("INSERT INTO T VALUES (22)");
+            Thread.sleep(2000); // wait refresh
+
+            sql("INSERT INTO T VALUES (33)");
+        } else {
+            sql("INSERT INTO T VALUES (11), (22), (33)");
+        }
         List<Row> result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -291,7 +379,15 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        sql("INSERT INTO T VALUES (11), (22), (33), (44)");
+
+        if (asyncLookup) {
+            sql("INSERT INTO T VALUES (11), (22)");
+            Thread.sleep(2000); // wait refresh to ensure we can get the correct results for key-3.
+            sql("INSERT INTO T VALUES (33), (44)");
+        } else {
+            sql("INSERT INTO T VALUES (11), (22), (33), (44)");
+        }
+
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -303,7 +399,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testNonPkLookupProjection() throws Exception {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
@@ -311,7 +408,19 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                 "SELECT T.i, D.k1 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.j";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
-        sql("INSERT INTO T VALUES (11), (22), (33)");
+        if (asyncLookup) {
+            // for async lookup, we have to wait for refresh each time to ensure we can get the
+            // correct results for testing.
+            sql("INSERT INTO T VALUES (11)");
+            Thread.sleep(2000); // wait refresh
+
+            sql("INSERT INTO T VALUES (22)");
+            Thread.sleep(2000); // wait refresh
+
+            sql("INSERT INTO T VALUES (33)");
+        } else {
+            sql("INSERT INTO T VALUES (11), (22), (33)");
+        }
         List<Row> result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -319,7 +428,14 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         sql("INSERT INTO DIM VALUES (2, 44, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
-        sql("INSERT INTO T VALUES (11), (22), (33), (44)");
+
+        if (asyncLookup) {
+            sql("INSERT INTO T VALUES (11), (22)");
+            Thread.sleep(2000); // wait refresh to ensure we can get the correct results for key-3.
+            sql("INSERT INTO T VALUES (33), (44)");
+        } else {
+            sql("INSERT INTO T VALUES (11), (22), (33), (44)");
+        }
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
@@ -328,7 +444,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testNonPkLookupFilterPk() throws Exception {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
@@ -352,7 +469,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testNonPkLookupFilterSelect() throws Exception {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
@@ -377,7 +495,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testNonPkLookupFilterUnSelect() throws Exception {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
@@ -402,7 +521,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testNonPkLookupFilterUnSelectAndUpdate() throws Exception {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
@@ -427,7 +547,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testRepeatRefresh() throws Exception {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
@@ -456,7 +577,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testLookupPartialUpdateIllegal() {
         sql(
                 "CREATE TABLE DIM2 (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
@@ -470,7 +592,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                                 + "You can use 'lookup' or 'full-compaction' changelog producer to support streaming reading.");
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testLookupPartialUpdate() throws Exception {
         sql(
                 "CREATE TABLE DIM2 (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
@@ -493,7 +616,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
+    @TestTemplate
+    @Timeout(30)
     public void testRetryLookup() throws Exception {
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 

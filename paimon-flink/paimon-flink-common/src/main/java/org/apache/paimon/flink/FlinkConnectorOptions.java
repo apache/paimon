@@ -181,6 +181,12 @@ public class FlinkConnectorOptions {
                             "How many splits should assign to subtask per batch in StaticFileStoreSplitEnumerator "
                                     + "to avoid exceed `akka.framesize` limit.");
 
+    public static final ConfigOption<Boolean> LOOKUP_ASYNC =
+            key("lookup.async")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to set async lookup.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
