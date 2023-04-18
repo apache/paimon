@@ -63,7 +63,11 @@ public class PluginLoader {
     public PluginLoader(String jarName) {
         try {
             ClassLoader ownerClassLoader = PluginLoader.class.getClassLoader();
-            Path tmpDirectory = Paths.get(System.getProperty("java.io.tmpdir"));
+            String localDirs = System.getenv("LOCAL_DIRS");
+            if (null == localDirs || "".equals(localDirs)) {
+                localDirs = System.getProperty("java.io.tmpdir");
+            }
+            Path tmpDirectory = Paths.get(localDirs);
             Files.createDirectories(
                     LocalFileUtils.getTargetPathIfContainsSymbolicPath(tmpDirectory));
             Path delegateJar =
