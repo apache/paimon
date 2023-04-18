@@ -44,6 +44,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
  * {@link EventParser} for MySQL Debezium JSON.
  *
@@ -57,17 +59,15 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ZoneId serverTimeZone;
+    private final boolean caseSensitive;
 
     private JsonNode payload;
     private Map<String, String> mySqlFieldTypes;
     private Map<String, String> fieldClassNames;
 
-    public MySqlDebeziumJsonEventParser() {
-        this(ZoneId.systemDefault());
-    }
-
-    public MySqlDebeziumJsonEventParser(ZoneId serverTimeZone) {
+    public MySqlDebeziumJsonEventParser(ZoneId serverTimeZone, boolean caseSensitive) {
         this.serverTimeZone = serverTimeZone;
+        this.caseSensitive = caseSensitive;
     }
 
     @Override
@@ -92,7 +92,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
     @Override
     public String tableName() {
-        return payload.get("source").get("table").asText();
+        String tableName = payload.get("source").get("table").asText();
+        return caseSensitive ? tableName : tableName.toLowerCase();
     }
 
     private void updateFieldTypes(JsonNode schema) {
@@ -164,7 +165,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 type = type.notNull();
             }
 
-            result.add(new DataField(i, column.get("name").asText(), type));
+            String fieldName = column.get("name").asText();
+            result.add(new DataField(i, caseSensitive ? fieldName : fieldName.toLowerCase(), type));
         }
         return Optional.of(result);
     }
@@ -175,11 +177,13 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
         Map<String, String> before = extractRow(payload.get("before"));
         if (before.size() > 0) {
+            before = caseSensitive ? before : keyCaseInsensitive(before);
             records.add(new CdcRecord(RowKind.DELETE, before));
         }
 
         Map<String, String> after = extractRow(payload.get("after"));
         if (after.size() > 0) {
+            after = caseSensitive ? after : keyCaseInsensitive(after);
             records.add(new CdcRecord(RowKind.INSERT, after));
         }
 
@@ -263,5 +267,18 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         }
 
         return recordMap;
+    }
+
+    private Map<String, String> keyCaseInsensitive(Map<String, String> origin) {
+        Map<String, String> keyCaseInsensitive = new HashMap<>();
+        for (Map.Entry<String, String> entry : origin.entrySet()) {
+            String fieldName = entry.getKey().toLowerCase();
+            checkArgument(
+                    !keyCaseInsensitive.containsKey(fieldName),
+                    "Duplicate key appears when converting map keys to case-insensitive form. Original map is:\n."
+                            + origin);
+            keyCaseInsensitive.put(fieldName, entry.getValue());
+        }
+        return keyCaseInsensitive;
     }
 }

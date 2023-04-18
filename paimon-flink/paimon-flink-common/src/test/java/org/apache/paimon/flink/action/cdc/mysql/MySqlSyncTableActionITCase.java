@@ -66,9 +66,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         env.setRestartStrategy(RestartStrategies.noRestart());
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> paimonConfig = new HashMap<>();
-        paimonConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        paimonConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         MySqlSyncTableAction action =
                 new MySqlSyncTableAction(
                         mySqlConfig,
@@ -77,7 +77,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        paimonConfig);
+                        Collections.emptyMap(),
+                        tableConfig);
         action.build(env);
         JobClient client = env.executeAsync();
 
@@ -263,7 +264,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         tableName,
                         Collections.emptyList(),
                         Collections.singletonList("_id"),
-                        new HashMap<>());
+                        Collections.emptyMap(),
+                        Collections.emptyMap());
         action.build(env);
         JobClient client = env.executeAsync();
 
@@ -356,7 +358,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         tableName,
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        new HashMap<>());
+                        Collections.emptyMap(),
+                        Collections.emptyMap());
         action.build(env);
         env.executeAsync();
 
@@ -533,7 +536,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         tableName,
                         Collections.emptyList(),
                         Collections.singletonList("_id"),
-                        new HashMap<>());
+                        Collections.emptyMap(),
+                        Collections.emptyMap());
 
         IllegalArgumentException e =
                 assertThrows(
@@ -572,7 +576,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         tableName,
                         Collections.emptyList(),
                         Collections.singletonList("a"),
-                        new HashMap<>());
+                        Collections.emptyMap(),
+                        Collections.emptyMap());
 
         IllegalArgumentException e =
                 assertThrows(
@@ -597,7 +602,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         tableName,
                         Collections.emptyList(),
                         Collections.singletonList("pk"),
-                        new HashMap<>());
+                        Collections.emptyMap(),
+                        Collections.emptyMap());
 
         IllegalArgumentException e =
                 assertThrows(
@@ -622,7 +628,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         tableName,
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        new HashMap<>());
+                        Collections.emptyMap(),
+                        Collections.emptyMap());
 
         IllegalArgumentException e =
                 assertThrows(

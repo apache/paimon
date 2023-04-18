@@ -54,6 +54,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
  * An {@link Action} which synchronize one or multiple MySQL tables into one Paimon table.
  *
@@ -92,7 +94,8 @@ public class MySqlSyncTableAction implements Action {
     private final String table;
     private final List<String> partitionKeys;
     private final List<String> primaryKeys;
-    private final Map<String, String> paimonConfig;
+    private final Map<String, String> catalogConfig;
+    private final Map<String, String> tableConfig;
 
     MySqlSyncTableAction(
             Map<String, String> mySqlConfig,
@@ -101,30 +104,40 @@ public class MySqlSyncTableAction implements Action {
             String table,
             List<String> partitionKeys,
             List<String> primaryKeys,
-            Map<String, String> paimonConfig) {
+            Map<String, String> catalogConfig,
+            Map<String, String> tableConfig) {
         this.mySqlConfig = Configuration.fromMap(mySqlConfig);
         this.warehouse = warehouse;
         this.database = database;
         this.table = table;
         this.partitionKeys = partitionKeys;
         this.primaryKeys = primaryKeys;
-        this.paimonConfig = paimonConfig;
+        this.catalogConfig = catalogConfig;
+        this.tableConfig = tableConfig;
     }
 
     public void build(StreamExecutionEnvironment env) throws Exception {
         MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig);
+
+        Catalog catalog =
+                CatalogFactory.createCatalog(
+                        CatalogContext.create(
+                                new Options(catalogConfig)
+                                        .set(CatalogOptions.WAREHOUSE, warehouse)));
+        boolean caseSensitive = catalog.caseSensitive();
+
+        if (!caseSensitive) {
+            validateCaseInsensitive();
+        }
+
         MySqlSchema mySqlSchema =
-                getMySqlSchemaList().stream()
+                getMySqlSchemaList(caseSensitive).stream()
                         .reduce(MySqlSchema::merge)
                         .orElseThrow(
                                 () ->
                                         new RuntimeException(
                                                 "No table satisfies the given database name and table name"));
 
-        Catalog catalog =
-                CatalogFactory.createCatalog(
-                        CatalogContext.create(
-                                new Options().set(CatalogOptions.WAREHOUSE, warehouse)));
         catalog.createDatabase(database, true);
 
         Identifier identifier = new Identifier(database, table);
@@ -135,18 +148,15 @@ public class MySqlSyncTableAction implements Action {
         } catch (Catalog.TableNotExistException e) {
             Schema schema =
                     MySqlActionUtils.buildPaimonSchema(
-                            mySqlSchema, partitionKeys, primaryKeys, paimonConfig);
+                            mySqlSchema, partitionKeys, primaryKeys, tableConfig);
             catalog.createTable(identifier, schema, false);
             table = (FileStoreTable) catalog.getTable(identifier);
         }
 
-        EventParser.Factory<String> parserFactory;
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
-        if (serverTimeZone != null) {
-            parserFactory = () -> new MySqlDebeziumJsonEventParser(ZoneId.of(serverTimeZone));
-        } else {
-            parserFactory = MySqlDebeziumJsonEventParser::new;
-        }
+        ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
+        EventParser.Factory<String> parserFactory =
+                () -> new MySqlDebeziumJsonEventParser(zoneId, caseSensitive);
 
         FlinkCdcSyncTableSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncTableSinkBuilder<String>()
@@ -155,14 +165,41 @@ public class MySqlSyncTableAction implements Action {
                                         source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
                         .withParserFactory(parserFactory)
                         .withTable(table);
-        String sinkParallelism = paimonConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
+        String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
         }
         sinkBuilder.build();
     }
 
-    private List<MySqlSchema> getMySqlSchemaList() throws Exception {
+    private void validateCaseInsensitive() {
+        checkArgument(
+                database.equals(database.toLowerCase()),
+                String.format(
+                        "Database name [%s] cannot contain upper case in case-insensitive catalog.",
+                        database));
+        checkArgument(
+                table.equals(table.toLowerCase()),
+                String.format(
+                        "Table name [%s] cannot contain upper case in case-insensitive catalog.",
+                        table));
+        for (String part : partitionKeys) {
+            checkArgument(
+                    part.equals(part.toLowerCase()),
+                    String.format(
+                            "Partition keys [%s] cannot contain upper case in case-insensitive catalog.",
+                            partitionKeys));
+        }
+        for (String pk : primaryKeys) {
+            checkArgument(
+                    pk.equals(pk.toLowerCase()),
+                    String.format(
+                            "Primary keys [%s] cannot contain upper case in case-insensitive catalog.",
+                            primaryKeys));
+        }
+    }
+
+    private List<MySqlSchema> getMySqlSchemaList(boolean caseSensitive) throws Exception {
         Pattern databasePattern =
                 Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME));
         Pattern tablePattern = Pattern.compile(mySqlConfig.get(MySqlSourceOptions.TABLE_NAME));
@@ -180,7 +217,11 @@ public class MySqlSyncTableAction implements Action {
                                 Matcher tableMatcher = tablePattern.matcher(tableName);
                                 if (tableMatcher.matches()) {
                                     mySqlSchemaList.add(
-                                            new MySqlSchema(metaData, databaseName, tableName));
+                                            new MySqlSchema(
+                                                    metaData,
+                                                    databaseName,
+                                                    tableName,
+                                                    caseSensitive));
                                 }
                             }
                         }
@@ -223,8 +264,9 @@ public class MySqlSyncTableAction implements Action {
         }
 
         Map<String, String> mySqlConfig = getConfigMap(params, "mysql-conf");
-        Map<String, String> paimonConfig = getConfigMap(params, "paimon-conf");
-        if (mySqlConfig == null || paimonConfig == null) {
+        Map<String, String> catalogConfig = getConfigMap(params, "catalog-conf");
+        Map<String, String> tableConfig = getConfigMap(params, "table-conf");
+        if (mySqlConfig == null) {
             return Optional.empty();
         }
 
@@ -236,12 +278,16 @@ public class MySqlSyncTableAction implements Action {
                         tablePath.f2,
                         partitionKeys,
                         primaryKeys,
-                        paimonConfig));
+                        catalogConfig == null ? Collections.emptyMap() : catalogConfig,
+                        tableConfig == null ? Collections.emptyMap() : tableConfig));
     }
 
     private static Map<String, String> getConfigMap(MultipleParameterTool params, String key) {
-        Map<String, String> map = new HashMap<>();
+        if (!params.has(key)) {
+            return null;
+        }
 
+        Map<String, String> map = new HashMap<>();
         for (String param : params.getMultiParameter(key)) {
             String[] kv = param.split("=");
             if (kv.length == 2) {
@@ -269,7 +315,8 @@ public class MySqlSyncTableAction implements Action {
                         + "[--partition-keys <partition-keys>] "
                         + "[--primary-keys <primary-keys>] "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
-                        + "[--paimon-conf <paimon-table-sink-conf> [--paimon-conf <paimon-table-sink-conf> ...]]");
+                        + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
+                        + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
         System.out.println();
 
         System.out.println("Partition keys syntax:");
@@ -294,7 +341,7 @@ public class MySqlSyncTableAction implements Action {
                         + "see https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options");
         System.out.println();
 
-        System.out.println("Paimon table sink conf syntax:");
+        System.out.println("Paimon catalog and table sink conf syntax:");
         System.out.println("  key=value");
         System.out.println(
                 "For a complete list of supported configurations, "
@@ -314,9 +361,11 @@ public class MySqlSyncTableAction implements Action {
                         + "    --mysql-conf password=123456 \\\n"
                         + "    --mysql-conf database-name=source_db \\\n"
                         + "    --mysql-conf table-name='source_table_.*' \\\n"
-                        + "    --paimon-conf bucket=4 \\\n"
-                        + "    --paimon-conf changelog-producer=input \\\n"
-                        + "    --paimon-conf sink.parallelism=4");
+                        + "    --catalog-conf metastore=hive \\\n"
+                        + "    --catalog-conf uri=thrift://hive-metastore:9083 \\\n"
+                        + "    --table-conf bucket=4 \\\n"
+                        + "    --table-conf changelog-producer=input \\\n"
+                        + "    --table-conf sink.parallelism=4");
     }
 
     @Override

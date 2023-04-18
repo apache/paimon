@@ -49,13 +49,18 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
     private static final String PASSWORD = "paimonpw";
 
     private final MySqlVersion mySqlVersion;
-    private MySqlContainer mySqlContainer;
+    protected MySqlContainer mySqlContainer;
 
-    private String warehousePath;
+    protected String warehousePath;
     private String catalogDdl;
     private String useCatalogCmd;
 
     protected MySqlCdcE2eTestBase(MySqlVersion mySqlVersion) {
+        this(mySqlVersion, false);
+    }
+
+    protected MySqlCdcE2eTestBase(MySqlVersion mySqlVersion, boolean withHive) {
+        super(false, withHive);
         this.mySqlVersion = mySqlVersion;
     }
 
@@ -132,23 +137,16 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                         "database-name='paimon_sync_table'",
                         "--mysql-conf",
                         "table-name='schema_evolution_.+'",
-                        "--paimon-conf",
+                        "--table-conf",
                         "bucket=2");
         Container.ExecResult execResult =
                 jobManager.execInContainer("su", "flink", "-c", runActionCommand);
         LOG.info(execResult.getStdout());
         LOG.info(execResult.getStderr());
 
-        try (Connection conn =
-                DriverManager.getConnection(
-                        String.format(
-                                "jdbc:mysql://%s:%s/",
-                                mySqlContainer.getHost(), mySqlContainer.getDatabasePort()),
-                        mySqlContainer.getUsername(),
-                        mySqlContainer.getPassword())) {
-            try (Statement statement = conn.createStatement()) {
-                testSyncTableImpl(statement);
-            }
+        try (Connection conn = getMySqlConnection();
+                Statement statement = conn.createStatement()) {
+            testSyncTableImpl(statement);
         }
     }
 
@@ -168,7 +166,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                         createResultSink("result1", "pt INT, _id INT, v1 VARCHAR(10)"));
         checkResult("1, 1, one", "1, 2, two", "2, 4, four");
         clearCurrentResults();
-        jobManager.execInContainer("bin/flink", "cancel", jobId);
+        cancelJob(jobId);
 
         statement.executeUpdate("ALTER TABLE schema_evolution_1 ADD COLUMN v2 INT");
         statement.executeUpdate(
@@ -191,7 +189,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                 "1, 5, five, 50",
                 "1, 6, six, 60");
         clearCurrentResults();
-        jobManager.execInContainer("bin/flink", "cancel", jobId);
+        cancelJob(jobId);
 
         statement.executeUpdate("ALTER TABLE schema_evolution_1 MODIFY COLUMN v2 BIGINT");
         statement.executeUpdate(
@@ -218,7 +216,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                 "2, 7, seven, 70000000000",
                 "2, 8, eight, 80000000000");
         clearCurrentResults();
-        jobManager.execInContainer("bin/flink", "cancel", jobId);
+        cancelJob(jobId);
     }
 
     @Test
@@ -249,20 +247,13 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                         String.format("password='%s'", mySqlContainer.getPassword()),
                         "--mysql-conf",
                         "database-name='paimon_sync_database'",
-                        "--paimon-conf",
+                        "--table-conf",
                         "bucket=2");
         jobManager.execInContainer("su", "flink", "-c", runActionCommand);
 
-        try (Connection conn =
-                DriverManager.getConnection(
-                        String.format(
-                                "jdbc:mysql://%s:%s/",
-                                mySqlContainer.getHost(), mySqlContainer.getDatabasePort()),
-                        mySqlContainer.getUsername(),
-                        mySqlContainer.getPassword())) {
-            try (Statement statement = conn.createStatement()) {
-                testSyncDatabaseImpl(statement);
-            }
+        try (Connection conn = getMySqlConnection();
+                Statement statement = conn.createStatement()) {
+            testSyncDatabaseImpl(statement);
         }
     }
 
@@ -281,7 +272,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                         createResultSink("result1", "k INT, v INT"));
         checkResult("1, 10");
         clearCurrentResults();
-        jobManager.execInContainer("bin/flink", "cancel", jobId);
+        cancelJob(jobId);
 
         jobId =
                 runSql(
@@ -292,7 +283,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                         createResultSink("result2", "k1 INT, k2 VARCHAR(10), v1 INT"));
         checkResult("2, two, 20");
         clearCurrentResults();
-        jobManager.execInContainer("bin/flink", "cancel", jobId);
+        cancelJob(jobId);
 
         statement.executeUpdate("ALTER TABLE t1 MODIFY COLUMN v BIGINT");
         statement.executeUpdate("INSERT INTO t1 VALUES (3, 3000000000000)");
@@ -308,7 +299,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                         createResultSink("result3", "k INT, v BIGINT"));
         checkResult("1, 10", "3, 3000000000000");
         clearCurrentResults();
-        jobManager.execInContainer("bin/flink", "cancel", jobId);
+        cancelJob(jobId);
 
         jobId =
                 runSql(
@@ -319,10 +310,23 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                         createResultSink("result4", "k1 INT, k2 VARCHAR(10), v1 INT, v2 DOUBLE"));
         checkResult("2, two, 20, null", "4, four, 40, 40.5");
         clearCurrentResults();
-        jobManager.execInContainer("bin/flink", "cancel", jobId);
+        cancelJob(jobId);
     }
 
-    private String runSql(String sql, String... ddls) throws Exception {
+    protected Connection getMySqlConnection() throws Exception {
+        return DriverManager.getConnection(
+                String.format(
+                        "jdbc:mysql://%s:%s/",
+                        mySqlContainer.getHost(), mySqlContainer.getDatabasePort()),
+                mySqlContainer.getUsername(),
+                mySqlContainer.getPassword());
+    }
+
+    protected String runSql(String sql, String... ddls) throws Exception {
         return runSql(String.join("\n", ddls) + "\n" + sql);
+    }
+
+    protected void cancelJob(String jobId) throws Exception {
+        jobManager.execInContainer("bin/flink", "cancel", jobId);
     }
 }

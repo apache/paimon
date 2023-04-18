@@ -117,7 +117,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected void copyTableDefaultOptions(Map<String, String> options) {
-        tableDefaultOptions.forEach((k, v) -> options.putIfAbsent(k, v));
+        tableDefaultOptions.forEach(options::putIfAbsent);
     }
 
     private String[] tableAndSystemName(Identifier identifier) {

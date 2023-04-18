@@ -28,19 +28,26 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Utility class to load MySQL table schema with JDBC. */
 public class MySqlSchema {
 
+    // used for retrieving metadata and throwing error, do not convert to case-insensitive form
     private final String databaseName;
+    private final String originalTableName;
+    // might be converted to case-insensitive form
     private final String tableName;
 
-    private final Map<String, DataType> fields;
+    private final LinkedHashMap<String, DataType> fields;
     private final List<String> primaryKeys;
 
-    public MySqlSchema(DatabaseMetaData metaData, String databaseName, String tableName)
+    public MySqlSchema(
+            DatabaseMetaData metaData, String databaseName, String tableName, boolean caseSensitive)
             throws Exception {
         this.databaseName = databaseName;
-        this.tableName = tableName;
+        this.originalTableName = tableName;
+        this.tableName = caseSensitive ? tableName : tableName.toLowerCase();
 
         fields = new LinkedHashMap<>();
         try (ResultSet rs = metaData.getColumns(null, databaseName, tableName, null)) {
@@ -55,6 +62,12 @@ public class MySqlSchema {
                 if (rs.wasNull()) {
                     scale = null;
                 }
+                if (!caseSensitive) {
+                    fieldName = fieldName.toLowerCase();
+                    checkArgument(
+                            !fields.containsKey(fieldName),
+                            "Duplicate key appears when converting fields map keys to case-insensitive form.");
+                }
                 fields.put(fieldName, MySqlTypeUtils.toDataType(fieldType, precision, scale));
             }
         }
@@ -63,9 +76,16 @@ public class MySqlSchema {
         try (ResultSet rs = metaData.getPrimaryKeys(null, databaseName, tableName)) {
             while (rs.next()) {
                 String fieldName = rs.getString("COLUMN_NAME");
+                if (!caseSensitive) {
+                    fieldName = fieldName.toLowerCase();
+                }
                 primaryKeys.add(fieldName);
             }
         }
+    }
+
+    public String originalTableName() {
+        return originalTableName;
     }
 
     public String tableName() {

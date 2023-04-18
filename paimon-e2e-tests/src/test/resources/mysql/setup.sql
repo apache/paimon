@@ -60,3 +60,16 @@ CREATE TABLE t2 (
     v1 INT,
     PRIMARY KEY (k1, k2)
 );
+
+-- ################################################################################
+--  MySqlIgnoreCaseE2EeTest#testSyncDatabase
+-- ################################################################################
+
+CREATE DATABASE paimon_ignore_CASE;
+USE paimon_ignore_CASE;
+
+CREATE TABLE T (
+    k INT,
+    UPPERCASE_V0 VARCHAR(20),
+    PRIMARY KEY (k)
+);

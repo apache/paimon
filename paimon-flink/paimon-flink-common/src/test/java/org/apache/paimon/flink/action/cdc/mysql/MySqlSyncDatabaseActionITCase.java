@@ -65,11 +65,12 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         env.setRestartStrategy(RestartStrategies.noRestart());
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> paimonConfig = new HashMap<>();
-        paimonConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        paimonConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(mySqlConfig, warehouse, database, paimonConfig);
+                new MySqlSyncDatabaseAction(
+                        mySqlConfig, warehouse, database, Collections.emptyMap(), tableConfig);
         action.build(env);
         JobClient client = env.executeAsync();
 
@@ -213,7 +214,12 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(mySqlConfig, warehouse, database, new HashMap<>());
+                new MySqlSyncDatabaseAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        Collections.emptyMap(),
+                        Collections.emptyMap());
 
         IllegalArgumentException e =
                 assertThrows(
@@ -234,7 +240,12 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(mySqlConfig, warehouse, database, new HashMap<>());
+                new MySqlSyncDatabaseAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        Collections.emptyMap(),
+                        Collections.emptyMap());
 
         IllegalArgumentException e =
                 assertThrows(
