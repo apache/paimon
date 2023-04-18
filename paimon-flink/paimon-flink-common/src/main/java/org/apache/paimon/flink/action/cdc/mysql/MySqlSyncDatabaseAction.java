@@ -42,7 +42,6 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -167,13 +166,11 @@ public class MySqlSyncDatabaseAction implements Action {
             fileStoreTables.add(table);
         }
 
-        EventParser.Factory<String> parserFactory;
-        String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
-        if (serverTimeZone != null) {
-            parserFactory = () -> new MySqlDebeziumJsonEventParser(ZoneId.of(serverTimeZone));
-        } else {
-            parserFactory = MySqlDebeziumJsonEventParser::new;
-        }
+        EventParser.Factory<String> parserFactory =
+                () ->
+                        new MySqlDebeziumJsonEventParser(
+                                mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE),
+                                catalog.caseSensitive());
 
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<String>()
@@ -181,8 +178,7 @@ public class MySqlSyncDatabaseAction implements Action {
                                 env.fromSource(
                                         source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
                         .withParserFactory(parserFactory)
-                        .withTables(fileStoreTables)
-                        .withCaseSensitive(catalog.caseSensitive());
+                        .withTables(fileStoreTables);
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));

@@ -42,22 +42,18 @@ import java.util.Map;
 public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, Void> {
 
     private final EventParser.Factory<T> parserFactory;
-    private final boolean caseSensitive;
 
     private transient EventParser<T> parser;
     private transient Map<String, OutputTag<List<DataField>>> updatedDataFieldsOutputTags;
     private transient Map<String, OutputTag<CdcRecord>> recordOutputTags;
 
-    public CdcMultiTableParsingProcessFunction(
-            EventParser.Factory<T> parserFactory, boolean caseSensitive) {
+    public CdcMultiTableParsingProcessFunction(EventParser.Factory<T> parserFactory) {
         this.parserFactory = parserFactory;
-        this.caseSensitive = caseSensitive;
     }
 
     @Override
     public void open(Configuration parameters) throws Exception {
         parser = parserFactory.create();
-        parser.setCaseSensitive(caseSensitive);
         updatedDataFieldsOutputTags = new HashMap<>();
         recordOutputTags = new HashMap<>();
     }

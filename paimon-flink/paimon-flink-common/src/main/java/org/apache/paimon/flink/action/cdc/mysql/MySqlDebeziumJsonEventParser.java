@@ -33,6 +33,8 @@ import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -59,18 +61,16 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ZoneId serverTimeZone;
+    private final boolean caseSensitive;
 
-    private boolean caseSensitive = true;
     private JsonNode payload;
     private Map<String, String> mySqlFieldTypes;
     private Map<String, String> fieldClassNames;
 
-    public MySqlDebeziumJsonEventParser() {
-        this(ZoneId.systemDefault());
-    }
-
-    public MySqlDebeziumJsonEventParser(ZoneId serverTimeZone) {
-        this.serverTimeZone = serverTimeZone;
+    public MySqlDebeziumJsonEventParser(@Nullable String serverTimeZone, boolean caseSensitive) {
+        this.serverTimeZone =
+                serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
+        this.caseSensitive = caseSensitive;
     }
 
     @Override
@@ -91,11 +91,6 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-    }
-
-    @Override
-    public void setCaseSensitive(boolean caseSensitive) {
-        this.caseSensitive = caseSensitive;
     }
 
     @Override

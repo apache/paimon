@@ -50,7 +50,6 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     private EventParser.Factory<T> parserFactory = null;
     private List<FileStoreTable> tables = new ArrayList<>();
     private Lock.Factory lockFactory = Lock.emptyFactory();
-    private boolean caseSensitive = true;
 
     @Nullable private Integer parallelism;
 
@@ -75,11 +74,6 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         return this;
     }
 
-    public FlinkCdcSyncDatabaseSinkBuilder<T> withCaseSensitive(boolean caseSensitive) {
-        this.caseSensitive = caseSensitive;
-        return this;
-    }
-
     public FlinkCdcSyncDatabaseSinkBuilder<T> withParallelism(@Nullable Integer parallelism) {
         this.parallelism = parallelism;
         return this;
@@ -93,9 +87,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
         SingleOutputStreamOperator<Void> parsed =
                 input.forward()
-                        .process(
-                                new CdcMultiTableParsingProcessFunction<>(
-                                        parserFactory, caseSensitive))
+                        .process(new CdcMultiTableParsingProcessFunction<>(parserFactory))
                         .setParallelism(input.getParallelism());
 
         for (FileStoreTable table : tables) {

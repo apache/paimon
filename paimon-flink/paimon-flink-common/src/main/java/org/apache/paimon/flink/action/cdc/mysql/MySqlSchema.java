@@ -36,7 +36,7 @@ public class MySqlSchema {
     // used for retrieving metadata and throwing error, do not convert to case-insensitive form
     private final String databaseName;
     private final String originalTableName;
-    // maybe convert to case-insensitive form
+    // might be converted to case-insensitive form
     private final String tableName;
 
     private final LinkedHashMap<String, DataType> fields;

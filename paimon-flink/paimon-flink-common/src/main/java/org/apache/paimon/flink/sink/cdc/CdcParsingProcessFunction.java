@@ -43,19 +43,16 @@ public class CdcParsingProcessFunction<T> extends ProcessFunction<T, CdcRecord> 
             new OutputTag<>("new-data-field-list", new ListTypeInfo<>(DataField.class));
 
     private final EventParser.Factory<T> parserFactory;
-    private final boolean caseSensitive;
 
     private transient EventParser<T> parser;
 
-    public CdcParsingProcessFunction(EventParser.Factory<T> parserFactory, boolean caseSensitive) {
+    public CdcParsingProcessFunction(EventParser.Factory<T> parserFactory) {
         this.parserFactory = parserFactory;
-        this.caseSensitive = caseSensitive;
     }
 
     @Override
     public void open(Configuration parameters) throws Exception {
         parser = parserFactory.create();
-        parser.setCaseSensitive(caseSensitive);
     }
 
     @Override

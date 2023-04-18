@@ -33,8 +33,6 @@ public interface EventParser<T> {
 
     void setRawEvent(T rawEvent);
 
-    void setCaseSensitive(boolean caseSensitive);
-
     String tableName();
 
     boolean isUpdatedDataFields();
