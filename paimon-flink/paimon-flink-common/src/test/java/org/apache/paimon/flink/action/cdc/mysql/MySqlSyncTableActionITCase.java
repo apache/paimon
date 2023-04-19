@@ -415,9 +415,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.CHAR(10), // _char
                             DataTypes.VARCHAR(20), // _varchar
                             DataTypes.STRING(), // _text
+                            DataTypes.STRING(), // _longtext
                             DataTypes.BINARY(10), // _bin
                             DataTypes.VARBINARY(20), // _varbin
-                            DataTypes.BYTES() // _blob
+                            DataTypes.BYTES(), // _blob
+                            DataTypes.BYTES() // _longblob
                         },
                         new String[] {
                             "_id",
@@ -469,9 +471,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             "_char",
                             "_varchar",
                             "_text",
+                            "_longtext",
                             "_bin",
                             "_varbin",
-                            "_blob"
+                            "_blob",
+                            "_longblob"
                         });
         FileStoreTable table = getFileStoreTable();
         List<String> expected =
@@ -493,10 +497,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "2023-03-23T14:30:05, 2023-03-23T14:30:05.123, 2023-03-23T14:30:05.123456, "
                                 + "2023-03-24T14:30, 2023-03-24T14:30:05.120, "
                                 + "2023-03-23T15:00:10.123456, "
-                                + "Paimon, Apache Paimon, Apache Paimon MySQL Test Data, "
+                                + "Paimon, Apache Paimon, Apache Paimon MySQL Test Data, Apache Paimon MySQL Long Test Data, "
                                 + "[98, 121, 116, 101, 115, 0, 0, 0, 0, 0], "
                                 + "[109, 111, 114, 101, 32, 98, 121, 116, 101, 115], "
-                                + "[118, 101, 114, 121, 32, 108, 111, 110, 103, 32, 98, 121, 116, 101, 115, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97]"
+                                + "[118, 101, 114, 121, 32, 108, 111, 110, 103, 32, 98, 121, 116, 101, 115, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97], "
+                                + "[108, 111, 110, 103, 32, 98, 108, 111, 98, 32, 98, 121, 116, 101, 115, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97]"
                                 + "]",
                         "+I["
                                 + "2, NULL, NULL, NULL, NULL, "
@@ -515,8 +520,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, "
                                 + "NULL, "
-                                + "NULL, NULL, NULL, "
-                                + "NULL, NULL, NULL"
+                                + "NULL, NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, NULL"
                                 + "]");
         waitForResult(expected, table, rowType, Collections.singletonList("_id"));
     }
