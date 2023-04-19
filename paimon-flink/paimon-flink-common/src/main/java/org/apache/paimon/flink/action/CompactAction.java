@@ -26,8 +26,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -38,10 +36,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-
-import static org.apache.paimon.flink.action.Action.getPartitions;
-import static org.apache.paimon.flink.action.Action.getTablePath;
 
 /** Table compact action for Flink. */
 public class CompactAction extends ActionBase {
@@ -51,7 +45,7 @@ public class CompactAction extends ActionBase {
     private final CompactorSourceBuilder sourceBuilder;
     private final CompactorSinkBuilder sinkBuilder;
 
-    CompactAction(String warehouse, String database, String tableName) {
+    public CompactAction(String warehouse, String database, String tableName) {
         super(warehouse, database, tableName, new Options().set(CoreOptions.WRITE_ONLY, false));
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
@@ -88,60 +82,32 @@ public class CompactAction extends ActionBase {
     //  Flink run methods
     // ------------------------------------------------------------------------
 
-    public static Optional<Action> create(String[] args) {
-        LOG.info("Compact job args: {}", String.join(" ", args));
+    public static StringBuilder printHelp() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Action \"compact\" runs a dedicated job for compacting specified table.");
+        sb.append("/n");
 
-        MultipleParameterTool params = MultipleParameterTool.fromArgs(args);
-
-        if (params.has("help")) {
-            printHelp();
-            return Optional.empty();
-        }
-
-        Tuple3<String, String, String> tablePath = getTablePath(params);
-
-        if (tablePath == null) {
-            return Optional.empty();
-        }
-
-        CompactAction action = new CompactAction(tablePath.f0, tablePath.f1, tablePath.f2);
-
-        if (params.has("partition")) {
-            List<Map<String, String>> partitions = getPartitions(params);
-            if (partitions == null) {
-                return Optional.empty();
-            }
-
-            action.withPartitions(partitions);
-        }
-
-        return Optional.of(action);
-    }
-
-    private static void printHelp() {
-        System.out.println(
-                "Action \"compact\" runs a dedicated job for compacting specified table.");
-        System.out.println();
-
-        System.out.println("Syntax:");
-        System.out.println(
+        sb.append("Syntax:");
+        sb.append(
                 "  compact --warehouse <warehouse-path> --database <database-name> "
                         + "--table <table-name> [--partition <partition-name>]");
-        System.out.println("  compact --path <table-path> [--partition <partition-name>]");
-        System.out.println();
+        sb.append("  compact --path <table-path> [--partition <partition-name>]");
+        sb.append("/n");
 
-        System.out.println("Partition name syntax:");
-        System.out.println("  key1=value1,key2=value2,...");
-        System.out.println();
+        sb.append("Partition name syntax:");
+        sb.append("  key1=value1 key2=value2 ...");
+        sb.append("/n");
 
-        System.out.println("Examples:");
-        System.out.println(
+        sb.append("Examples:");
+        sb.append(
                 "  compact --warehouse hdfs:///path/to/warehouse --database test_db --table test_table");
-        System.out.println(
-                "  compact --path hdfs:///path/to/warehouse/test_db.db/test_table --partition dt=20221126,hh=08");
-        System.out.println(
+        sb.append(
+                "  compact --path hdfs:///path/to/warehouse/test_db.db/test_table --partition dt=20221126 hh=08");
+        sb.append(
                 "  compact --warehouse hdfs:///path/to/warehouse --database test_db --table test_table "
-                        + "--partition dt=20221126,hh=08 --partition dt=20221127,hh=09");
+                        + "--partition dt=20221126 hh=08 --partition dt=20221127 hh=09");
+
+        return sb;
     }
 
     @Override

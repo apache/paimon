@@ -124,6 +124,7 @@ under the License.
         <avro.version>1.11.1</avro.version>
         <kafka.version>3.2.3</kafka.version>
         <jacoco.version>0.8.8</jacoco.version>
+        <jcommander.version>1.81</jcommander.version>
     </properties>
 
     <dependencies>
@@ -263,6 +264,12 @@ under the License.
                 <groupId>net.minidev</groupId>
                 <artifactId>json-smart</artifactId>
                 <version>${json-smart.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.beust</groupId>
+                <artifactId>jcommander</artifactId>
+                <version>${jcommander.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

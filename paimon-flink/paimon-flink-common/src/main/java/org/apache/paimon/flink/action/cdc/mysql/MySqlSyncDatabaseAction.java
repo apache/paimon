@@ -35,7 +35,6 @@ import org.apache.paimon.utils.Preconditions;
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
@@ -45,10 +44,8 @@ import java.sql.ResultSet;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -94,7 +91,7 @@ public class MySqlSyncDatabaseAction implements Action {
     private final Map<String, String> catalogConfig;
     private final Map<String, String> tableConfig;
 
-    MySqlSyncDatabaseAction(
+    public MySqlSyncDatabaseAction(
             Map<String, String> mySqlConfig,
             String warehouse,
             String database,
@@ -211,93 +208,48 @@ public class MySqlSyncDatabaseAction implements Action {
     //  Flink run methods
     // ------------------------------------------------------------------------
 
-    public static Optional<Action> create(String[] args) {
-        MultipleParameterTool params = MultipleParameterTool.fromArgs(args);
+    public static StringBuilder printHelp() {
+        StringBuilder sb = new StringBuilder();
 
-        if (params.has("help")) {
-            printHelp();
-            return Optional.empty();
-        }
-
-        String warehouse = params.get("warehouse");
-        String database = params.get("database");
-
-        Map<String, String> mySqlConfig = getConfigMap(params, "mysql-conf");
-        Map<String, String> catalogConfig = getConfigMap(params, "catalog-conf");
-        Map<String, String> tableConfig = getConfigMap(params, "table-conf");
-        if (mySqlConfig == null) {
-            return Optional.empty();
-        }
-
-        return Optional.of(
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        catalogConfig == null ? Collections.emptyMap() : catalogConfig,
-                        tableConfig == null ? Collections.emptyMap() : tableConfig));
-    }
-
-    private static Map<String, String> getConfigMap(MultipleParameterTool params, String key) {
-        if (!params.has(key)) {
-            return null;
-        }
-
-        Map<String, String> map = new HashMap<>();
-        for (String param : params.getMultiParameter(key)) {
-            String[] kv = param.split("=");
-            if (kv.length == 2) {
-                map.put(kv[0], kv[1]);
-                continue;
-            }
-
-            System.err.println(
-                    "Invalid " + key + " " + param + ".\nRun mysql-sync-database --help for help.");
-            return null;
-        }
-        return map;
-    }
-
-    private static void printHelp() {
-        System.out.println(
+        sb.append(
                 "Action \"mysql-sync-database\" creates a streaming job "
                         + "with a Flink MySQL CDC source and multiple Paimon table sinks "
                         + "to synchronize a whole MySQL database into one Paimon database.\n"
                         + "Only MySQL tables with primary keys will be considered. "
                         + "Newly created MySQL tables after the job starts will not be included.");
-        System.out.println();
+        sb.append("/n");
 
-        System.out.println("Syntax:");
-        System.out.println(
+        sb.append("Syntax:");
+        sb.append(
                 "  mysql-sync-database --warehouse <warehouse-path> --database <database-name> "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
-        System.out.println();
+        sb.append("/n");
 
-        System.out.println("MySQL CDC source conf syntax:");
-        System.out.println("  key=value");
-        System.out.println(
+        sb.append("MySQL CDC source conf syntax:");
+        sb.append("  key=value");
+        sb.append(
                 "'hostname', 'username', 'password' and 'database-name' "
                         + "are required configurations, others are optional. "
                         + "Note that 'database-name' should be the exact name "
                         + "of the MySQL databse you want to synchronize. "
                         + "It can't be a regular expression.");
-        System.out.println(
+        sb.append(
                 "For a complete list of supported configurations, "
                         + "see https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options");
-        System.out.println();
+        sb.append("/n");
 
-        System.out.println("Paimon catalog and table sink conf syntax:");
-        System.out.println("  key=value");
-        System.out.println("All Paimon sink table will be applied the same set of configurations.");
-        System.out.println(
+        sb.append("Paimon catalog and table sink conf syntax:");
+        sb.append("  key=value");
+        sb.append("All Paimon sink table will be applied the same set of configurations.");
+        sb.append(
                 "For a complete list of supported configurations, "
                         + "see https://paimon.apache.org/docs/master/maintenance/configurations/");
-        System.out.println();
+        sb.append("/n");
 
-        System.out.println("Examples:");
-        System.out.println(
+        sb.append("Examples:");
+        sb.append(
                 "  mysql-sync-database \\\n"
                         + "    --warehouse hdfs:///path/to/warehouse \\\n"
                         + "    --database test_db \\\n"
@@ -310,6 +262,7 @@ public class MySqlSyncDatabaseAction implements Action {
                         + "    --table-conf bucket=4 \\\n"
                         + "    --table-conf changelog-producer=input \\\n"
                         + "    --table-conf sink.parallelism=4");
+        return sb;
     }
 
     @Override

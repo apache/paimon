@@ -19,8 +19,10 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.catalog.CatalogUtils;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncDatabaseAction;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableAction;
+import org.apache.paimon.flink.action.args.CompactActionArgs;
+import org.apache.paimon.flink.action.args.MySqlSyncDatabaseActionArgs;
+import org.apache.paimon.flink.action.args.MySqlSyncTableActionArgs;
+import org.apache.paimon.flink.utils.ActionLineUtils;
 
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
@@ -128,7 +130,7 @@ public interface Action {
 
             switch (action) {
                 case COMPACT:
-                    return CompactAction.create(actionArgs);
+                    return ActionLineUtils.parse(args, new CompactActionArgs()).buildAction();
                 case DROP_PARTITION:
                     return DropPartitionAction.create(actionArgs);
                 case DELETE:
@@ -136,9 +138,11 @@ public interface Action {
                 case MERGE_INTO:
                     return MergeIntoAction.create(actionArgs);
                 case MYSQL_SYNC_TABLE:
-                    return MySqlSyncTableAction.create(actionArgs);
+                    return ActionLineUtils.parse(args, new MySqlSyncTableActionArgs())
+                            .buildAction();
                 case MYSQL_SYNC_DATABASE:
-                    return MySqlSyncDatabaseAction.create(actionArgs);
+                    return ActionLineUtils.parse(args, new MySqlSyncDatabaseActionArgs())
+                            .buildAction();
                 default:
                     System.err.println("Unknown action \"" + action + "\"");
                     printHelp();
