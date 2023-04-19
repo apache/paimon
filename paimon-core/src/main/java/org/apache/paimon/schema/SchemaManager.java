@@ -485,4 +485,10 @@ public class SchemaManager implements Serializable {
                     String.format("Change '%s' is not supported yet.", key));
         }
     }
+
+    public static void checkAlterTablePath(String key) {
+        if (CoreOptions.PATH.key().equalsIgnoreCase(key)) {
+            throw new UnsupportedOperationException("Change path is not supported yet.");
+        }
+    }
 }

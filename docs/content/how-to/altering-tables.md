@@ -114,6 +114,14 @@ The following SQL adds two columns `c1` and `c2` to table `my_table`.
 
 {{< tabs "add-columns-example" >}}
 
+{{< tab "Flink" >}}
+
+```sql
+ALTER TABLE my_table ADD (c1 INT, c2 STRING);
+```
+
+{{< /tab >}}
+
 {{< tab "Spark3" >}}
 
 ```sql
@@ -133,6 +141,17 @@ To add a new column with specified position, use FIRST or AFTER col_name.
 
 {{< tabs "add-column-position" >}}
 
+
+{{< tab "Flink" >}}
+
+```sql
+ALTER TABLE my_table ADD c INT FIRST;
+
+ALTER TABLE my_table ADD c INT AFTER b;
+```
+
+{{< /tab >}}
+
 {{< tab "Spark3" >}}
 
 ```sql
@@ -150,6 +169,15 @@ The following SQL renames column `c0` in table `my_table` to `c1`.
 
 {{< tabs "rename-column-name-example" >}}
 
+{{< tab "Flink" >}}
+
+```sql
+ALTER TABLE my_table RENAME c0 TO c1;
+```
+
+{{< /tab >}}
+
+
 {{< tab "Spark3" >}}
 
 ```sql
@@ -166,6 +194,14 @@ The following SQL drops two columns `c1` and `c2` from table `my_table`.
 
 {{< tabs "drop-columns-example" >}}
 
+{{< tab "Flink" >}}
+
+```sql
+ALTER TABLE my_table DROP (c1, c2);
+```
+
+{{< /tab >}}
+
 {{< tab "Spark3" >}}
 
 ```sql
@@ -181,6 +217,16 @@ ALTER TABLE my_table DROP COLUMNS (c1, c2);
 The following SQL sets column `coupon_info` to be nullable.
 
 {{< tabs "change-nullability-example" >}}
+
+{{< tab "Flink" >}}
+
+```sql
+CREATE TABLE my_table (id INT PRIMARY KEY NOT ENFORCED, coupon_info FLOAT NOT NULL);
+ALTER TABLE my_table MODIFY coupon_info FLOAT;
+```
+
+{{< /tab >}}
+
 
 {{< tab "Spark3" >}}
 
@@ -216,6 +262,16 @@ To modify an existent column to a new position, use FIRST or AFTER col_name.
 
 {{< tabs "change-column-position" >}}
 
+{{< tab "Flink" >}}
+
+```sql
+ALTER TABLE my_table ALTER col_a FIRST;
+
+ALTER TABLE my_table ALTER col_a AFTER col_b;
+```
+
+{{< /tab >}}
+
 {{< tab "Spark3" >}}
 
 ```sql
@@ -227,12 +283,19 @@ ALTER TABLE my_table ALTER COLUMN col_a AFTER col_b;
 {{< /tab >}}
 
 {{< /tabs >}}
-
 ## Changing Column Type
 
 The following SQL changes type of column `col_a` to `DOUBLE`.
 
 {{< tabs "change-column-type" >}}
+
+{{< tab "Flink" >}}
+
+```sql
+ALTER TABLE my_table MODIFY col_a DOUBLE;
+```
+
+{{< /tab >}}
 
 {{< tab "Spark3" >}}
 

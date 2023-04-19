@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
@@ -42,6 +43,17 @@ import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.CatalogTableImpl;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.TableChange;
+import org.apache.flink.table.catalog.TableChange.AddColumn;
+import org.apache.flink.table.catalog.TableChange.After;
+import org.apache.flink.table.catalog.TableChange.ColumnPosition;
+import org.apache.flink.table.catalog.TableChange.DropColumn;
+import org.apache.flink.table.catalog.TableChange.First;
+import org.apache.flink.table.catalog.TableChange.ModifyColumnName;
+import org.apache.flink.table.catalog.TableChange.ModifyColumnPosition;
+import org.apache.flink.table.catalog.TableChange.ModifyPhysicalColumnType;
+import org.apache.flink.table.catalog.TableChange.ResetOption;
+import org.apache.flink.table.catalog.TableChange.SetOption;
 import org.apache.flink.table.catalog.exceptions.CatalogException;
 import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
@@ -237,6 +249,50 @@ public class FlinkCatalog extends AbstractCatalog {
         }
     }
 
+    private SchemaChange toSchemaChange(TableChange change) {
+        if (change instanceof AddColumn) {
+            AddColumn add = (AddColumn) change;
+            String comment = add.getColumn().getComment().orElse(null);
+            SchemaChange.Move move = getMove(add.getPosition(), add.getColumn().getName());
+            return SchemaChange.addColumn(
+                    add.getColumn().getName(),
+                    LogicalTypeConversion.toDataType(
+                            add.getColumn().getDataType().getLogicalType()),
+                    comment,
+                    move);
+        } else if (change instanceof DropColumn) {
+            DropColumn drop = (DropColumn) change;
+            return SchemaChange.dropColumn(drop.getColumnName());
+        } else if (change instanceof ModifyColumnName) {
+            ModifyColumnName modify = (ModifyColumnName) change;
+            return SchemaChange.renameColumn(modify.getOldColumnName(), modify.getNewColumnName());
+        } else if (change instanceof ModifyPhysicalColumnType) {
+            ModifyPhysicalColumnType modify = (ModifyPhysicalColumnType) change;
+            return SchemaChange.updateColumnType(
+                    modify.getOldColumn().getName(),
+                    LogicalTypeConversion.toDataType(modify.getNewType().getLogicalType()));
+        } else if (change instanceof ModifyColumnPosition) {
+            ModifyColumnPosition modify = (ModifyColumnPosition) change;
+            SchemaChange.Move move =
+                    getMove(modify.getNewPosition(), modify.getNewColumn().getName());
+            return SchemaChange.updateColumnPosition(move);
+        } else if (change instanceof SetOption) {
+            SetOption setOption = (SetOption) change;
+            String key = setOption.getKey();
+            String value = setOption.getValue();
+
+            SchemaManager.checkAlterTablePath(key);
+
+            return SchemaChange.setOption(key, value);
+        } else if (change instanceof ResetOption) {
+            ResetOption resetOption = (ResetOption) change;
+            return SchemaChange.removeOption(resetOption.getKey());
+        } else {
+            throw new UnsupportedOperationException(
+                    "Change is not supported: " + change.getClass());
+        }
+    }
+
     @Override
     public void alterTable(
             ObjectPath tablePath, CatalogBaseTable newTable, boolean ignoreIfNotExists)
@@ -283,6 +339,45 @@ public class FlinkCatalog extends AbstractCatalog {
         }
     }
 
+    @Override
+    public void alterTable(
+            ObjectPath tablePath,
+            CatalogBaseTable newTable,
+            List<TableChange> tableChanges,
+            boolean ignoreIfNotExists)
+            throws TableNotExistException, CatalogException {
+        if (ignoreIfNotExists && !tableExists(tablePath)) {
+            return;
+        }
+
+        CatalogTable table = getTable(tablePath);
+
+        validateAlterTable(table, (CatalogTable) newTable);
+
+        List<SchemaChange> changes = new ArrayList<>();
+        if (null != tableChanges) {
+            List<SchemaChange> schemaChanges =
+                    tableChanges.stream().map(this::toSchemaChange).collect(Collectors.toList());
+            changes.addAll(schemaChanges);
+        }
+
+        try {
+            catalog.alterTable(toIdentifier(tablePath), changes, ignoreIfNotExists);
+        } catch (Catalog.TableNotExistException e) {
+            throw new TableNotExistException(getName(), tablePath);
+        }
+    }
+
+    private SchemaChange.Move getMove(ColumnPosition columnPosition, String fieldName) {
+        SchemaChange.Move move = null;
+        if (columnPosition instanceof First) {
+            move = SchemaChange.Move.first(fieldName);
+        } else if (columnPosition instanceof After) {
+            move = SchemaChange.Move.after(fieldName, ((After) columnPosition).column());
+        }
+        return move;
+    }
+
     private static void validateAlterTable(CatalogTable ct1, CatalogTable ct2) {
         org.apache.flink.table.api.TableSchema ts1 = ct1.getSchema();
         org.apache.flink.table.api.TableSchema ts2 = ct2.getSchema();
@@ -300,10 +395,9 @@ public class FlinkCatalog extends AbstractCatalog {
             pkEquality = true;
         }
 
-        if (!(Objects.equals(ts1.getTableColumns(), ts2.getTableColumns())
-                && Objects.equals(ts1.getWatermarkSpecs(), ts2.getWatermarkSpecs())
-                && pkEquality)) {
-            throw new UnsupportedOperationException("Altering schema is not supported yet.");
+        if (!(Objects.equals(ts1.getWatermarkSpecs(), ts2.getWatermarkSpecs()) && pkEquality)) {
+            throw new UnsupportedOperationException(
+                    "Altering Watermark or primary key is not supported yet.");
         }
 
         if (!ct1.getPartitionKeys().equals(ct2.getPartitionKeys())) {
