@@ -100,6 +100,24 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
+    public void renameDatabase(String fromDatabase, String toDatabase, boolean ignoreIfNotExists)
+            throws DatabaseNotExistException, DatabaseAlreadyExistException {
+        if (!databaseExists(fromDatabase)) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+
+            throw new DatabaseNotExistException(fromDatabase);
+        }
+
+        if (databaseExists(toDatabase)) {
+            throw new DatabaseAlreadyExistException(toDatabase);
+        }
+
+        uncheck(() -> fileIO.rename(databasePath(fromDatabase), databasePath(toDatabase)));
+    }
+
+    @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         if (!databaseExists(databaseName)) {
             throw new DatabaseNotExistException(databaseName);

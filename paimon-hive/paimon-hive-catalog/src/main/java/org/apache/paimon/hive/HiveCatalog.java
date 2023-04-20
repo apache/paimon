@@ -178,6 +178,12 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    public void renameDatabase(String fromDatabase, String toDatabase, boolean ignoreIfNotExists)
+            throws DatabaseNotExistException, DatabaseAlreadyExistException {
+        throw new UnsupportedOperationException("Hive catalog does not support rename database.");
+    }
+
+    @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         try {
             return client.getAllTables(databaseName).stream()

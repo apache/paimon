@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,5 +44,12 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         // List databases returns an empty list when there are no databases
         List<String> databases = catalog.listDatabases();
         assertThat(databases).isEmpty();
+    }
+
+    @Test
+    public void testRenameDatabase() throws Exception {
+        catalog.createDatabase("db1", false);
+        catalog.renameDatabase("db1", "db2", false);
+        assertThat(catalog.listDatabases()).isEqualTo(Lists.newArrayList("db2"));
     }
 }

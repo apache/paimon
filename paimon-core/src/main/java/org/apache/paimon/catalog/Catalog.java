@@ -88,6 +88,19 @@ public interface Catalog extends AutoCloseable {
             throws DatabaseNotExistException, DatabaseNotEmptyException;
 
     /**
+     * Rename a database.
+     *
+     * @param fromDatabase the name of the database which need to rename
+     * @param toDatabase the new database
+     * @param ignoreIfNotExists Flag to specify behavior when the database does not exist: if set to
+     *     false, throw an exception, if set to true, do nothing.
+     * @throws DatabaseNotExistException if the fromDatabase does not exist
+     * @throws DatabaseAlreadyExistException if the toDatabase already exists
+     */
+    void renameDatabase(String fromDatabase, String toDatabase, boolean ignoreIfNotExists)
+            throws DatabaseNotExistException, DatabaseAlreadyExistException;
+
+    /**
      * Return a {@link Table} identified by the given {@link Identifier}.
      *
      * <p>System tables can be got by '$' splitter.
