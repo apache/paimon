@@ -39,5 +39,6 @@ Apache Spark and Apache Hive.
 | Spark  | 3.3/3.2/3.1                 | batch read, batch write, create/drop table, create/drop database                     | Projection, Filter |
 | Spark  | 2.4                         | batch read                                                                           | Projection, Filter |
 | Trino  | 388/358                     | batch read, create/drop table, create/drop database                                  | Projection, Filter |
+| Presto | 0.236 and above             | batch read                                                                           | Projection, Filter |
 
 [Download Link]({{< ref "project/download#engine-jars" >}})
