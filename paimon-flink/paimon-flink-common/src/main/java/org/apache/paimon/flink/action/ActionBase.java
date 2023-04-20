@@ -81,9 +81,8 @@ public abstract class ActionBase implements Action {
 
     ActionBase(String warehouse, String databaseName, String tableName, Options options) {
         identifier = new Identifier(databaseName, tableName);
-        CatalogContext catalogContext =
-                CatalogContext.create(new Options().set(CatalogOptions.WAREHOUSE, warehouse));
-        catalog = CatalogFactory.createCatalog(catalogContext);
+
+        catalog = CatalogFactory.createCatalog(CatalogContext.create(new Options().set(CatalogOptions.WAREHOUSE, warehouse)));
 
         flinkCatalog = FlinkCatalogFactory.createCatalog(catalog, catalogName, DEFAULT_DATABASE);
 
