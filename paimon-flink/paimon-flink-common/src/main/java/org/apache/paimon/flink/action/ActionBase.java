@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import static org.apache.paimon.catalog.Catalog.DEFAULT_DATABASE;
-
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -56,6 +54,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.catalog.Catalog.DEFAULT_DATABASE;
+
 /** Abstract base of {@link Action}. */
 public abstract class ActionBase implements Action {
 
@@ -85,11 +85,7 @@ public abstract class ActionBase implements Action {
                 CatalogContext.create(new Options().set(CatalogOptions.WAREHOUSE, warehouse));
         catalog = CatalogFactory.createCatalog(catalogContext);
 
-        flinkCatalog =
-                FlinkCatalogFactory.createCatalog(
-                        catalog,
-                        catalogName,
-                    DEFAULT_DATABASE);
+        flinkCatalog = FlinkCatalogFactory.createCatalog(catalog, catalogName, DEFAULT_DATABASE);
 
         env = StreamExecutionEnvironment.getExecutionEnvironment();
         tEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());

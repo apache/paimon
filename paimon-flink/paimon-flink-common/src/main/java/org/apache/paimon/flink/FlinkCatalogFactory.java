@@ -71,10 +71,7 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
     }
 
     public static FlinkCatalog createCatalog(
-        Catalog catalog, String catalogName, String defaultDatabase) {
-        return new FlinkCatalog(
-            catalog,
-            catalogName,
-            defaultDatabase);
+            Catalog catalog, String catalogName, String defaultDatabase) {
+        return new FlinkCatalog(catalog, catalogName, defaultDatabase);
     }
 }
