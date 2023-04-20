@@ -68,6 +68,7 @@ You can join the Paimon community on Slack. Paimon channel is in ASF Slack works
 Don’t forget to introduce yourself in channel.
 
 ## Building
+
 JDK 8/11 is required for building the project.
 
 - Run the `mvn clean package -DskipTests` command to build the project.
@@ -75,6 +76,10 @@ JDK 8/11 is required for building the project.
 - IDE: Mark `paimon-common/target/generated-sources/antlr4` as Sources Root.
 
 If you fail to download paimon-bundle snapshot files during the build, it is likely that your maven settings file does not include a snapshot repository. Uncomment the "repositories" tag in [pom.xml](pom.xml) file for a workaround.
+
+## How to Contribute
+
+[Contribution Guide](https://paimon.apache.org/docs/master/project/contributing/).
 
 ## License
 
