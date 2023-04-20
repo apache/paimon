@@ -341,6 +341,14 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     @Test
     @Timeout(30)
     public void testAllTypes() throws Exception {
+        // the first round checks for table creation
+        // the second round checks for running the action on an existing table
+        for (int i = 0; i < 2; i++) {
+            testAllTypesImpl();
+        }
+    }
+
+    private void testAllTypesImpl() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "all_types_table");
@@ -361,7 +369,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         Collections.emptyMap(),
                         Collections.emptyMap());
         action.build(env);
-        env.executeAsync();
+        JobClient jobClient = env.executeAsync();
 
         RowType rowType =
                 RowType.of(
@@ -519,6 +527,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "NULL, NULL, NULL"
                                 + "]");
         waitForResult(expected, table, rowType, Collections.singletonList("_id"));
+
+        jobClient.cancel().get();
     }
 
     @Test
