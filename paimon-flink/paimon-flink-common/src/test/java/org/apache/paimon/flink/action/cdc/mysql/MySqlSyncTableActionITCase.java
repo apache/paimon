@@ -505,9 +505,14 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "1.2345678987654322E32, 1.2345678987654322E32, 1.2345678987654322E32, "
                                 + "11111, 22222, 33333, "
                                 + "19439, "
+                                // display value of datetime is not affected by timezone
                                 + "2023-03-23T14:30:05, 2023-03-23T14:30:05.123, 2023-03-23T14:30:05.123456, "
                                 + "2023-03-24T14:30, 2023-03-24T14:30:05.120, "
-                                + "2023-03-23T15:00:10.123456, "
+                                // display value of timestamp is affected by timezone
+                                // we store 2023-03-23T15:00:10.123456 in UTC-8 system timezone
+                                // and query this timestamp in UTC-5 MySQL server timezone
+                                // so the display value should increase by 3 hour
+                                + "2023-03-23T18:00:10.123456, "
                                 + "Paimon, Apache Paimon, Apache Paimon MySQL Test Data, Apache Paimon MySQL Long Test Data, "
                                 + "[98, 121, 116, 101, 115, 0, 0, 0, 0, 0], "
                                 + "[109, 111, 114, 101, 32, 98, 121, 116, 101, 115], "
