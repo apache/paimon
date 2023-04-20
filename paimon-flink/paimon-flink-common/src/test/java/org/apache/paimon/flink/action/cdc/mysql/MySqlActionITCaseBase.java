@@ -72,6 +72,7 @@ public class MySqlActionITCaseBase extends ActionITCaseBase {
                         .withSetupSQL("mysql/setup.sql")
                         .withUsername(USER)
                         .withPassword(PASSWORD)
+                        .withEnv("TZ", "America/Los_Angeles")
                         .withLogConsumer(new Slf4jLogConsumer(LOG));
     }
 
@@ -124,7 +125,8 @@ public class MySqlActionITCaseBase extends ActionITCaseBase {
         config.put("port", String.valueOf(MYSQL_CONTAINER.getDatabasePort()));
         config.put("username", USER);
         config.put("password", PASSWORD);
-        config.put("server-time-zone", ZoneId.of("+00:00").toString());
+        // see mysql/my.cnf in test resources
+        config.put("server-time-zone", ZoneId.of("America/New_York").toString());
         return config;
     }
 }

@@ -37,6 +37,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -234,9 +235,14 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                     newValue = DateTimeUtils.toLocalDate(Integer.parseInt(oldValue)).toString();
                 } else if ("io.debezium.time.Timestamp".equals(className)) {
                     // MySQL datetime (precision 0-3)
+
+                    // display value of datetime is not affected by timezone, see
+                    // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
+                    // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
+                    // for implementation
                     LocalDateTime localDateTime =
                             Instant.ofEpochMilli(Long.parseLong(oldValue))
-                                    .atZone(serverTimeZone)
+                                    .atZone(ZoneOffset.UTC)
                                     .toLocalDateTime();
                     newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 3);
                 } else if ("io.debezium.time.MicroTimestamp".equals(className)) {
@@ -247,13 +253,23 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                     long seconds = microseconds / microsecondsPerSecond;
                     long nanoAdjustment =
                             (microseconds % microsecondsPerSecond) * nanosecondsPerMicros;
+
+                    // display value of datetime is not affected by timezone, see
+                    // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
+                    // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
+                    // for implementation
                     LocalDateTime localDateTime =
                             Instant.ofEpochSecond(seconds, nanoAdjustment)
-                                    .atZone(serverTimeZone)
+                                    .atZone(ZoneOffset.UTC)
                                     .toLocalDateTime();
                     newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 6);
                 } else if ("io.debezium.time.ZonedTimestamp".equals(className)) {
                     // MySQL timestamp
+
+                    // dispaly value of timestamp is affected by timezone, see
+                    // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
+                    // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
+                    // for implementation
                     newValue =
                             Instant.parse(oldValue)
                                     .atZone(serverTimeZone)
