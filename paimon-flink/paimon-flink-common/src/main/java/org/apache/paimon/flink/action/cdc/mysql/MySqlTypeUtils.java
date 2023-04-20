@@ -184,12 +184,14 @@ public class MySqlTypeUtils {
             case VARCHAR:
                 return DataTypes.VARCHAR(Preconditions.checkNotNull(length));
             case TEXT:
+            case LONGTEXT:
                 return DataTypes.STRING();
             case BINARY:
                 return DataTypes.BINARY(Preconditions.checkNotNull(length));
             case VARBINARY:
                 return DataTypes.VARBINARY(Preconditions.checkNotNull(length));
             case BLOB:
+            case LONGBLOB:
                 return DataTypes.BYTES();
             default:
                 throw new UnsupportedOperationException(

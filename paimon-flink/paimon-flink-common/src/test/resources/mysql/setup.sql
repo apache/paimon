@@ -117,10 +117,12 @@ CREATE TABLE all_types_table (
     _char CHAR(10),
     _varchar VARCHAR(20),
     _text TEXT,
+    _longtext LONGTEXT,
     -- BINARY
     _bin BINARY(10),
     _varbin VARBINARY(20),
     _blob BLOB,
+    _longblob LONGBLOB,
     PRIMARY KEY (_id)
 );
 
@@ -159,9 +161,9 @@ INSERT INTO all_types_table VALUES (
     -- TIMESTAMP
     '2023-03-23 15:00:10.123456',
     -- string
-    'Paimon', 'Apache Paimon', 'Apache Paimon MySQL Test Data',
+    'Paimon', 'Apache Paimon', 'Apache Paimon MySQL Test Data', 'Apache Paimon MySQL Long Test Data',
     -- BINARY
-    'bytes', 'more bytes', 'very long bytes test data'
+    'bytes', 'more bytes', 'very long bytes test data', 'long blob bytes test data'
 ), (
     2, 2.2,
     NULL, NULL, NULL, NULL,
@@ -180,8 +182,8 @@ INSERT INTO all_types_table VALUES (
     NULL, NULL, NULL,
     NULL, NULL,
     NULL,
-    NULL, NULL, NULL,
-    NULL, NULL, NULL
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL
 );
 
 CREATE TABLE incompatible_field_1 (
