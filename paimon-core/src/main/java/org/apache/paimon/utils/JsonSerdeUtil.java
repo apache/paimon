@@ -20,6 +20,10 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.schema.SchemaSerializer;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeJsonParser;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonParser;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -30,9 +34,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.Serialize
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.module.SimpleModule;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ser.std.StdSerializer;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeJsonParser;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

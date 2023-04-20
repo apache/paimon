@@ -797,7 +797,7 @@ under the License.
 
                             <!-- \# refers to the static imports -->
                             <importOrder>
-                                <order>org.apache.paimon,org.apache.paimon.shaded,,javax,java,scala,\#</order>
+                                <order>org.apache.paimon,org.apache.paimon.shade,,javax,java,scala,\#</order>
                             </importOrder>
 
                             <removeUnusedImports/>

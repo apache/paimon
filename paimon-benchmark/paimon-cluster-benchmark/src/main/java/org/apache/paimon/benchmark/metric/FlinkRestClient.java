@@ -19,6 +19,7 @@
 package org.apache.paimon.benchmark.metric;
 
 import org.apache.paimon.benchmark.utils.BenchmarkUtils;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 
