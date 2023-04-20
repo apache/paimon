@@ -164,7 +164,7 @@ Please feel free to ask questions at any time. Either send a mail to the Dev mai
       <div class="panel-body">
         <h2><span class="number">2</span><a href="#implement">Implement</a></h2>
         <p>Create the Pull Request and the approach agreed upon in the issue.</p>
-        <p><b>1.Only create the PR if you are assigned to the issue. 2.Please associate an issue (if any), e.g. fix #123. 3.Please enable the actions of your own clone project, show a screenshot of the test passing.</b></p>
+        <p><b>1.Only create the PR if you are assigned to the issue. 2.Please associate an issue (if any), e.g. fix #123. 3.Please enable the actions of your own clone project.</b></p>
       </div>
     </div>
   </div>
@@ -214,6 +214,8 @@ If the pull request needs specific attention, one of the tagged committers/contr
 - Are the changes performance aware, when changing a performance sensitive part?
 - Are the changes sufficiently covered by tests? Are the tests executing fast?
 - If dependencies have been changed, were the NOTICE files updated?
+
+Code guidelines can be found in the [Flink Java Code Style and Quality Guide](https://flink.apache.org/how-to-contribute/code-style-and-quality-java/).
 
 #### 4. Are the documentation updated?
 
