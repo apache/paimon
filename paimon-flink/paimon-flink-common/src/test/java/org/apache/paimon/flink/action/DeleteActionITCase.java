@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -150,8 +151,10 @@ public class DeleteActionITCase extends ActionITCaseBase {
                         hasPk ? Collections.singletonList("k") : Collections.emptyList(),
                         new HashMap<>());
         snapshotManager = table.snapshotManager();
-        write = table.newWrite(commitUser);
-        commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
 
         // prepare data
         writeData(
