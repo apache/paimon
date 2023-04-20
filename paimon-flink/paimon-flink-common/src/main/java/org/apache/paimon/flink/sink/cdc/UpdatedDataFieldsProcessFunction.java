@@ -172,6 +172,10 @@ public class UpdatedDataFieldsProcessFunction extends ProcessFunction<List<DataF
             Arrays.asList(DataTypeRoot.FLOAT, DataTypeRoot.DOUBLE);
 
     public static ConvertAction canConvert(DataType oldType, DataType newType) {
+        if (oldType.equalsIgnoreNullable(newType)) {
+            return ConvertAction.CONVERT;
+        }
+
         int oldIdx = STRING_TYPES.indexOf(oldType.getTypeRoot());
         int newIdx = STRING_TYPES.indexOf(newType.getTypeRoot());
         if (oldIdx >= 0 && newIdx >= 0) {

@@ -341,6 +341,14 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     @Test
     @Timeout(30)
     public void testAllTypes() throws Exception {
+        // the first round checks for table creation
+        // the second round checks for running the action on an existing table
+        for (int i = 0; i < 2; i++) {
+            testAllTypesImpl();
+        }
+    }
+
+    private void testAllTypesImpl() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "all_types_table");
@@ -356,17 +364,18 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         warehouse,
                         database,
                         tableName,
-                        Collections.emptyList(),
-                        Collections.emptyList(),
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "_id"),
                         Collections.emptyMap(),
                         Collections.emptyMap());
         action.build(env);
-        env.executeAsync();
+        JobClient jobClient = env.executeAsync();
 
         RowType rowType =
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(), // _id
+                            DataTypes.DECIMAL(2, 1).notNull(), // pt
                             DataTypes.BOOLEAN(), // _boolean
                             DataTypes.TINYINT(), // _tinyint
                             DataTypes.SMALLINT(), // _tinyint_unsigned
@@ -421,6 +430,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         },
                         new String[] {
                             "_id",
+                            "pt",
                             "_boolean",
                             "_tinyint",
                             "_tinyint_unsigned",
@@ -477,7 +487,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         List<String> expected =
                 Arrays.asList(
                         "+I["
-                                + "1, true, 1, 2, 3, "
+                                + "1, 1.1, "
+                                + "true, 1, 2, 3, "
                                 + "1000, 2000, 3000, "
                                 + "100000, 200000, 300000, "
                                 + "1000000, 2000000, 3000000, "
@@ -499,7 +510,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "[118, 101, 114, 121, 32, 108, 111, 110, 103, 32, 98, 121, 116, 101, 115, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97]"
                                 + "]",
                         "+I["
-                                + "2, NULL, NULL, NULL, NULL, "
+                                + "2, 2.2, "
+                                + "NULL, NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "
@@ -518,7 +530,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL"
                                 + "]");
-        waitForResult(expected, table, rowType, Collections.singletonList("_id"));
+        waitForResult(expected, table, rowType, Arrays.asList("pt", "_id"));
+
+        jobClient.cancel().get();
     }
 
     @Test
