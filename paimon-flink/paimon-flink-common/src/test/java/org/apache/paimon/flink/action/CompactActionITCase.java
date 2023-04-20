@@ -99,7 +99,9 @@ public class CompactActionITCase extends ActionITCaseBase {
         env.execute();
 
         snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
-        Assertions.assertEquals(3, snapshot.id());
+        // because StreamWriteBuilder#newCommit will not ignore the empty commit, so the snapshot id
+        // = 4
+        Assertions.assertEquals(4, snapshot.id());
         Assertions.assertEquals(Snapshot.CommitKind.COMPACT, snapshot.commitKind());
 
         List<DataSplit> splits = table.newSnapshotSplitReader().splits();

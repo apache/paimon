@@ -117,7 +117,9 @@ public class CompactorSinkITCase extends AbstractTestBase {
         env.execute();
 
         snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
-        assertEquals(3, snapshot.id());
+        // because StreamWriteBuilder#newCommit will not ignore the empty commit, so the snapshot id
+        // = 4
+        assertEquals(4, snapshot.id());
         assertEquals(Snapshot.CommitKind.COMPACT, snapshot.commitKind());
 
         TableScan.Plan plan = table.newReadBuilder().newScan().plan();
