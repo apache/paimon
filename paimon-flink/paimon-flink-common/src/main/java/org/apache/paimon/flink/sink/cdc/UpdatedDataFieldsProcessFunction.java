@@ -172,7 +172,7 @@ public class UpdatedDataFieldsProcessFunction extends ProcessFunction<List<DataF
             Arrays.asList(DataTypeRoot.FLOAT, DataTypeRoot.DOUBLE);
 
     public static ConvertAction canConvert(DataType oldType, DataType newType) {
-        if (oldType.equals(newType)) {
+        if (oldType.equalsIgnoreNullable(newType)) {
             return ConvertAction.CONVERT;
         }
 

@@ -51,6 +51,7 @@ CREATE TABLE schema_evolution_multiple (
 
 CREATE TABLE all_types_table (
     _id INT,
+    pt DECIMAL(2, 1),
     -- TINYINT
     _boolean TINYINT(1),
     _tinyint TINYINT,
@@ -124,7 +125,7 @@ CREATE TABLE all_types_table (
 );
 
 INSERT INTO all_types_table VALUES (
-    1,
+    1, 1.1,
     -- TINYINT
     true, 1, 2, 3,
     -- SMALLINT
@@ -162,7 +163,7 @@ INSERT INTO all_types_table VALUES (
     -- BINARY
     'bytes', 'more bytes', 'very long bytes test data'
 ), (
-    2,
+    2, 2.2,
     NULL, NULL, NULL, NULL,
     NULL, NULL, NULL,
     NULL, NULL, NULL,
