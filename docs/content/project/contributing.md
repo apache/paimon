@@ -27,7 +27,7 @@ under the License.
 # Contributing
 
 Apache Paimon (incubating) is developed by an open and friendly community. Everybody is cordially welcome to join
-the community and contribute to Apache Paimon. There are several ways to interact with the community and to contribute
+the community and contribute to Apache Paimon. There are several ways to interact with the community and contribute
 to Paimon including asking questions, filing bug reports, proposing new features, joining discussions on the mailing
 lists, contributing code or documentation, improving the website, or testing release candidates.
 
