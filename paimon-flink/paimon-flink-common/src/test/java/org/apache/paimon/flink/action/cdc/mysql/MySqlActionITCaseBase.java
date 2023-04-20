@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.action.ActionITCaseBase;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -101,10 +102,11 @@ public class MySqlActionITCaseBase extends ActionITCaseBase {
         List<String> sortedExpected = new ArrayList<>(expected);
         Collections.sort(sortedExpected);
         while (true) {
-            TableScan.Plan plan = table.newScan().plan();
+            ReadBuilder readBuilder = table.newReadBuilder();
+            TableScan.Plan plan = readBuilder.newScan().plan();
             List<String> result =
                     getResult(
-                            table.newRead(),
+                            readBuilder.newRead(),
                             plan == null ? Collections.emptyList() : plan.splits(),
                             rowType);
             List<String> sortedActual = new ArrayList<>(result);

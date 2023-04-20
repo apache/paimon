@@ -34,6 +34,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -89,8 +90,10 @@ public class CompactorSourceITCase extends AbstractTestBase {
             // change options to test whether CompactorSourceBuilder work normally
             table = table.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2"));
         }
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
 
         write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
         write.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));
@@ -138,8 +141,10 @@ public class CompactorSourceITCase extends AbstractTestBase {
             dynamicOptions.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "0");
             table = table.copy(dynamicOptions);
         }
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
 
         write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
         write.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));
@@ -234,8 +239,10 @@ public class CompactorSourceITCase extends AbstractTestBase {
             List<String> expected)
             throws Exception {
         FileStoreTable table = createFileStoreTable();
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
 
         write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
         write.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));

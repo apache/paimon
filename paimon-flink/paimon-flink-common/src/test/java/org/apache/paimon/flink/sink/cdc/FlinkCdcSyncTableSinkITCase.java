@@ -33,6 +33,7 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
@@ -122,9 +123,10 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
         SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
         TableSchema schema = schemaManager.latest().get();
 
-        TableScan.Plan plan = table.newScan().plan();
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().plan();
         try (RecordReaderIterator<InternalRow> it =
-                new RecordReaderIterator<>(table.newRead().createReader(plan))) {
+                new RecordReaderIterator<>(readBuilder.newRead().createReader(plan))) {
             testTable.assertResult(schema, it);
         }
     }
