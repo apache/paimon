@@ -92,7 +92,7 @@ public class WriteToTable {
 
         // create paimon catalog
         tableEnv.executeSql("CREATE CATALOG paimon WITH ('type' = 'paimon', 'warehouse'='...')");
-        tableEnv.executeSql("USE paimon");
+        tableEnv.executeSql("USE CATALOG paimon");
 
         // register the table under a name and perform an aggregation
         tableEnv.createTemporaryView("InputTable", table);
@@ -121,7 +121,7 @@ public class ReadFromTable {
 
         // create paimon catalog
         tableEnv.executeSql("CREATE CATALOG paimon WITH ('type' = 'paimon', 'warehouse'='...')");
-        tableEnv.executeSql("USE paimon");
+        tableEnv.executeSql("USE CATALOG paimon");
 
         // convert to DataStream
         Table table = tableEnv.sqlQuery("SELECT * FROM my_paimon_table");
