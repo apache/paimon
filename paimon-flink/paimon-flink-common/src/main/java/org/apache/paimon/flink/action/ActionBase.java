@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.action;
 
+import static org.apache.paimon.catalog.Catalog.DEFAULT_DATABASE;
+
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -85,9 +87,9 @@ public abstract class ActionBase implements Action {
 
         flinkCatalog =
                 FlinkCatalogFactory.createCatalog(
+                        catalog,
                         catalogName,
-                        catalogContext,
-                        Thread.currentThread().getContextClassLoader());
+                    DEFAULT_DATABASE);
 
         env = StreamExecutionEnvironment.getExecutionEnvironment();
         tEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
