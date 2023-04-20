@@ -20,7 +20,9 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.types.DataField;
 
+import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogTable;
@@ -30,6 +32,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /** A {@link CatalogTableImpl} to wrap {@link FileStoreTable}. */
 public class DataCatalogTable extends CatalogTableImpl {
@@ -48,6 +51,16 @@ public class DataCatalogTable extends CatalogTableImpl {
 
     public Table table() {
         return table;
+    }
+
+    @Override
+    public Schema getUnresolvedSchema() {
+        // add physical column comments
+        Map<String, String> columnComments =
+                table.rowType().getFields().stream()
+                        .filter(dataField -> dataField.description() != null)
+                        .collect(Collectors.toMap(DataField::name, DataField::description));
+        return getSchema().toSchema(columnComments);
     }
 
     @Override
