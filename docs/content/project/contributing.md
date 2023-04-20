@@ -196,7 +196,7 @@ the community to accept the change.**
 #### 1. Is the Contribution Well-Described?
 
 Check whether the contribution is sufficiently well-described to support a good review. Trivial changes and fixes
-do not need a long description. If the implementation is exactly according to a prior discussion on Issue or the
+do not need a long description. If the implementation is exactly according to a prior discussion on issue or the
 development mailing list, only a short reference to that discussion is needed.
 
 If the implementation is different from the agreed approach in the consensus discussion, a detailed description of
