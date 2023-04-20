@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.flink.utils.FlinkTableSchemaUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
@@ -60,7 +61,8 @@ public class DataCatalogTable extends CatalogTableImpl {
                 table.rowType().getFields().stream()
                         .filter(dataField -> dataField.description() != null)
                         .collect(Collectors.toMap(DataField::name, DataField::description));
-        return getSchema().toSchema(columnComments);
+
+        return FlinkTableSchemaUtils.toSchema(getSchema(), columnComments);
     }
 
     @Override
