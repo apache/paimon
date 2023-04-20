@@ -15,7 +15,6 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
 name: UTCase and ITCase Flink
 
 on:
@@ -29,7 +28,7 @@ env:
   JDK_VERSION: 8
 
 concurrency:
-  group: ut-flink-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:

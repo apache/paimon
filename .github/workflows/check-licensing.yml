@@ -18,7 +18,7 @@ name: Check licensing
 on: [push, pull_request]
 
 concurrency:
-  group: cl-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
