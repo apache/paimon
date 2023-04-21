@@ -53,7 +53,9 @@ CREATE TABLE all_types_table (
     _id INT,
     pt DECIMAL(2, 1),
     -- TINYINT
-    _boolean TINYINT(1),
+    _tinyint1 TINYINT(1),
+    _boolean BOOLEAN,
+    _bool BOOL,
     _tinyint TINYINT,
     _tinyint_unsigned TINYINT(2) UNSIGNED,
     _tinyint_unsigned_zerofill TINYINT(2) UNSIGNED ZEROFILL,
@@ -66,9 +68,9 @@ CREATE TABLE all_types_table (
     _mediumint_unsigned MEDIUMINT UNSIGNED,
     _mediumint_unsigned_zerofill MEDIUMINT(8) UNSIGNED ZEROFILL,
     -- INT
-    _int INT,
-    _int_unsigned INT UNSIGNED,
-    _int_unsigned_zerofill INT(8) UNSIGNED ZEROFILL,
+     _int INT,
+     _int_unsigned INT UNSIGNED,
+     _int_unsigned_zerofill INT(8) UNSIGNED ZEROFILL,
     -- BIGINT
     _bigint BIGINT,
     _bigint_unsigned BIGINT UNSIGNED,
@@ -116,20 +118,31 @@ CREATE TABLE all_types_table (
     -- string
     _char CHAR(10),
     _varchar VARCHAR(20),
+    _tinytext TINYTEXT,
     _text TEXT,
+    _mediumtext MEDIUMTEXT,
     _longtext LONGTEXT,
     -- BINARY
     _bin BINARY(10),
     _varbin VARBINARY(20),
+    _tinyblob TINYBLOB,
     _blob BLOB,
+    _mediumblob MEDIUMBLOB,
     _longblob LONGBLOB,
+    -- json
+    _json JSON,
+    -- enum
+    _enum ENUM ('value1','value2','value3'),
+    -- YEAR
+    _year YEAR,
     PRIMARY KEY (_id)
 );
+
 
 INSERT INTO all_types_table VALUES (
     1, 1.1,
     -- TINYINT
-    true, 1, 2, 3,
+    true, true, false, 1, 2, 3,
     -- SMALLINT
     1000, 2000, 3000,
     -- MEDIUMINT
@@ -161,12 +174,18 @@ INSERT INTO all_types_table VALUES (
     -- TIMESTAMP
     '2023-03-23 15:00:10.123456',
     -- string
-    'Paimon', 'Apache Paimon', 'Apache Paimon MySQL Test Data', 'Apache Paimon MySQL Long Test Data',
+    'Paimon', 'Apache Paimon','Apache Paimon MySQL TINYTEXT Test Data', 'Apache Paimon MySQL Test Data','Apache Paimon MySQL MEDIUMTEXT Test Data','Apache Paimon MySQL Long Test Data',
     -- BINARY
-    'bytes', 'more bytes', 'very long bytes test data', 'long blob bytes test data'
+    'bytes', 'more bytes', 'TINYBLOB type test data', 'BLOB type test data' , 'MEDIUMBLOB type test data' , 'LONGBLOB  bytes test data',
+    -- json
+    '{"a":"b"}',
+    -- enum
+    'value1',
+     -- YEAR
+     2023
 ), (
     2, 2.2,
-    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL, NULL, NULL,
     NULL, NULL, NULL,
     NULL, NULL, NULL,
     NULL, NULL, NULL,
@@ -182,8 +201,11 @@ INSERT INTO all_types_table VALUES (
     NULL, NULL, NULL,
     NULL, NULL,
     NULL,
-    NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL
+    NULL, NULL, NULL, NULL,NULL, NULL,
+    NULL, NULL, NULL, NULL,NULL, NULL,
+    NULL,
+    NULL,
+    NULL
 );
 
 CREATE TABLE incompatible_field_1 (

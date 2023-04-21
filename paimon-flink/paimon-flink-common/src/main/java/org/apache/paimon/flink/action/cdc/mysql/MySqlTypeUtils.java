@@ -37,6 +37,8 @@ public class MySqlTypeUtils {
     // ------ MySQL Type ------
     // https://dev.mysql.com/doc/refman/8.0/en/data-types.html
     private static final String BIT = "BIT";
+    private static final String BOOLEAN = "BOOLEAN";
+    private static final String BOOL = "BOOL";
     private static final String TINYINT = "TINYINT";
     private static final String TINYINT_UNSIGNED = "TINYINT UNSIGNED";
     private static final String TINYINT_UNSIGNED_ZEROFILL = "TINYINT UNSIGNED ZEROFILL";
@@ -107,6 +109,8 @@ public class MySqlTypeUtils {
             String type, @Nullable Integer length, @Nullable Integer scale) {
         switch (type.toUpperCase()) {
             case BIT:
+            case BOOLEAN:
+            case BOOL:
                 return DataTypes.BOOLEAN();
             case TINYINT:
                 // MySQL haven't boolean type, it uses tinyint(1) to represents boolean type
@@ -122,6 +126,7 @@ public class MySqlTypeUtils {
             case SMALLINT_UNSIGNED_ZEROFILL:
             case INT:
             case MEDIUMINT:
+            case YEAR:
                 return DataTypes.INT();
             case INT_UNSIGNED:
             case INT_UNSIGNED_ZEROFILL:
@@ -161,6 +166,8 @@ public class MySqlTypeUtils {
                         : DataTypes.STRING();
             case DATE:
                 return DataTypes.DATE();
+            case TIME:
+                return DataTypes.TIME();
             case DATETIME:
             case TIMESTAMP:
                 if (length == null) {
@@ -183,16 +190,24 @@ public class MySqlTypeUtils {
                 return DataTypes.CHAR(Preconditions.checkNotNull(length));
             case VARCHAR:
                 return DataTypes.VARCHAR(Preconditions.checkNotNull(length));
+            case TINYTEXT:
             case TEXT:
+            case MEDIUMTEXT:
             case LONGTEXT:
+            case JSON:
+            case ENUM:
                 return DataTypes.STRING();
             case BINARY:
                 return DataTypes.BINARY(Preconditions.checkNotNull(length));
             case VARBINARY:
                 return DataTypes.VARBINARY(Preconditions.checkNotNull(length));
+            case TINYBLOB:
             case BLOB:
+            case MEDIUMBLOB:
             case LONGBLOB:
                 return DataTypes.BYTES();
+            case SET:
+                return DataTypes.ARRAY(DataTypes.STRING());
             default:
                 throw new UnsupportedOperationException(
                         String.format("Don't support MySQL type '%s' yet.", type));
