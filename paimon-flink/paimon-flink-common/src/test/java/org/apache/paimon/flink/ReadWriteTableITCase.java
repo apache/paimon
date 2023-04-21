@@ -1350,6 +1350,22 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         "+I[b, INT, true, null, null, null, null]");
     }
 
+    @Test
+    public void testUnsupportedComputedColumnComments() {
+        String ddl = "CREATE TABLE T(a INT , b INT, c AS a + b COMMENT 'computed');";
+        bEnv.executeSql(ddl);
+
+        List<String> result =
+                CollectionUtil.iteratorToList(bEnv.executeSql("DESC T").collect()).stream()
+                        .map(Objects::toString)
+                        .collect(Collectors.toList());
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[a, INT, true, null, null, null]",
+                        "+I[b, INT, true, null, null, null]",
+                        "+I[c, INT, true, null, AS `a` + `b`, null]");
+    }
+
     // ----------------------------------------------------------------------------------------------------------------
     // Tools
     // ----------------------------------------------------------------------------------------------------------------

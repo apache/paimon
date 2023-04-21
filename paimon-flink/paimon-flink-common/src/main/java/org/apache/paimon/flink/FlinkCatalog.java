@@ -27,6 +27,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 
+import org.apache.flink.table.api.Schema.UnresolvedColumn;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
@@ -376,10 +377,7 @@ public class FlinkCatalog extends AbstractCatalog {
     private static Map<String, String> getColumnComments(CatalogTable catalogTable) {
         return catalogTable.getUnresolvedSchema().getColumns().stream()
                 .filter(c -> c.getComment().isPresent())
-                .collect(
-                        Collectors.toMap(
-                                org.apache.flink.table.api.Schema.UnresolvedColumn::getName,
-                                c -> c.getComment().get()));
+                .collect(Collectors.toMap(UnresolvedColumn::getName, c -> c.getComment().get()));
     }
 
     private static List<DataField> addColumnComments(
