@@ -84,8 +84,8 @@ public class WriteToTable {
                         Row.ofKind(RowKind.UPDATE_AFTER, "Alice", 100))
                         .returns(
                                 Types.ROW_NAMED(
-                                        new String[] {"name","age"},
-                                        Types.STRING,Types.INT));
+                                        new String[] {"name", "age"},
+                                        Types.STRING, Types.INT));
 
         // interpret the DataStream as a Table
         Schema schema = Schema.newBuilder()
