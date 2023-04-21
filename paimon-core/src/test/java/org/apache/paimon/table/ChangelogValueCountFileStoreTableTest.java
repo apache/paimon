@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
+import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -223,7 +224,8 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogValueCountFileStoreTable(LocalFileIO.create(), tablePath, tableSchema);
+        return new ChangelogValueCountFileStoreTable(
+                FileIOFinder.find(tablePath), tablePath, tableSchema);
     }
 
     @Override
@@ -240,6 +242,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
                                 Arrays.asList("pk", "pt0", "pt1"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogValueCountFileStoreTable(LocalFileIO.create(), tablePath, tableSchema);
+        return new ChangelogValueCountFileStoreTable(
+                FileIOFinder.find(tablePath), tablePath, tableSchema);
     }
 }

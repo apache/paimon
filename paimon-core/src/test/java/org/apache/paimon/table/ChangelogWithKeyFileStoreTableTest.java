@@ -24,6 +24,7 @@ import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.options.Options;
@@ -868,7 +869,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 Arrays.asList("pk", "pt0", "pt1"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogWithKeyFileStoreTable(LocalFileIO.create(), tablePath, tableSchema);
+        return new ChangelogWithKeyFileStoreTable(
+                FileIOFinder.find(tablePath), tablePath, tableSchema);
     }
 
     private FileStoreTable createFileStoreTable(Consumer<Options> configure, RowType rowType)
@@ -886,6 +888,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 Arrays.asList("pt", "a"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogWithKeyFileStoreTable(LocalFileIO.create(), tablePath, tableSchema);
+        return new ChangelogWithKeyFileStoreTable(
+                FileIOFinder.find(tablePath), tablePath, tableSchema);
     }
 }
