@@ -199,8 +199,11 @@ public class FlinkCatalog extends AbstractCatalog {
         if (options.containsKey(CONNECTOR.key())) {
             throw new CatalogException(
                     String.format(
-                            "Paimon Catalog only supports paimon tables, not '%s' connector."
-                                    + " You can create TEMPORARY table instead.",
+                            "Paimon Catalog only supports paimon tables ,"
+                                    + " and you don't need to specify  'connector'= '"
+                                    + FlinkCatalogFactory.IDENTIFIER
+                                    + "' when using Paimon Catalog\n"
+                                    + " You can create TEMPORARY table instead if you want to create the table of other connector.",
                             options.get(CONNECTOR.key())));
         }
 
