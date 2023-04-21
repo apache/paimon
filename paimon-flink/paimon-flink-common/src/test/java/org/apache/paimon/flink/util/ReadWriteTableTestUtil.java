@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.util;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.WriteMode;
 import org.apache.paimon.flink.ReadWriteTableITCase;
 import org.apache.paimon.flink.StreamingReadWriteTableWithKafkaLogITCase;
 import org.apache.paimon.utils.BlockingIterator;
@@ -47,6 +48,7 @@ import java.util.concurrent.TimeoutException;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.registerData;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
+import static org.apache.paimon.CoreOptions.WRITE_MODE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.paimon.flink.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.paimon.flink.kafka.KafkaLogOptions.TOPIC;
@@ -149,6 +151,7 @@ public class ReadWriteTableTestUtil {
                                 put(BOOTSTRAP_SERVERS.key(), getBootstrapServers());
                                 put(TOPIC.key(), topic);
                                 put(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false");
+                                put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
                             }
                         });
 
