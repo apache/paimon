@@ -376,7 +376,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         new DataType[] {
                             DataTypes.INT().notNull(), // _id
                             DataTypes.DECIMAL(2, 1).notNull(), // pt
+                            DataTypes.BOOLEAN(), // _tinyint1
                             DataTypes.BOOLEAN(), // _boolean
+                            DataTypes.BOOLEAN(), // _bool
                             DataTypes.TINYINT(), // _tinyint
                             DataTypes.SMALLINT(), // _tinyint_unsigned
                             DataTypes.SMALLINT(), // _tinyint_unsigned_zerofill
@@ -423,17 +425,26 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.TIMESTAMP(6), // _timestamp
                             DataTypes.CHAR(10), // _char
                             DataTypes.VARCHAR(20), // _varchar
+                            DataTypes.STRING(), // _tinytext
                             DataTypes.STRING(), // _text
+                            DataTypes.STRING(), // _mediumtext
                             DataTypes.STRING(), // _longtext
                             DataTypes.BINARY(10), // _bin
                             DataTypes.VARBINARY(20), // _varbin
+                            DataTypes.BYTES(), // _tinyblob
                             DataTypes.BYTES(), // _blob
-                            DataTypes.BYTES() // _longblob
+                            DataTypes.BYTES(), // _mediumblob
+                            DataTypes.BYTES(), // _longblob
+                            DataTypes.STRING(), // _json
+                            DataTypes.STRING(), // _enum
+                            DataTypes.INT() // _year
                         },
                         new String[] {
                             "_id",
                             "pt",
+                            "_tinyint1",
                             "_boolean",
+                            "_bool",
                             "_tinyint",
                             "_tinyint_unsigned",
                             "_tinyint_unsigned_zerofill",
@@ -480,19 +491,26 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             "_timestamp",
                             "_char",
                             "_varchar",
+                            "_tinytext",
                             "_text",
+                            "_mediumtext",
                             "_longtext",
                             "_bin",
                             "_varbin",
+                            "_tinyblob",
                             "_blob",
-                            "_longblob"
+                            "_mediumblob",
+                            "_longblob",
+                            "_json",
+                            "_enum",
+                            "_year"
                         });
         FileStoreTable table = getFileStoreTable();
         List<String> expected =
                 Arrays.asList(
                         "+I["
                                 + "1, 1.1, "
-                                + "true, 1, 2, 3, "
+                                + "true, true, false, 1, 2, 3, "
                                 + "1000, 2000, 3000, "
                                 + "100000, 200000, 300000, "
                                 + "1000000, 2000000, 3000000, "
@@ -513,15 +531,20 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 // and query this timestamp in UTC-5 MySQL server timezone
                                 // so the display value should increase by 3 hour
                                 + "2023-03-23T18:00:10.123456, "
-                                + "Paimon, Apache Paimon, Apache Paimon MySQL Test Data, Apache Paimon MySQL Long Test Data, "
+                                + "Paimon, Apache Paimon, Apache Paimon MySQL TINYTEXT Test Data, Apache Paimon MySQL Test Data, Apache Paimon MySQL MEDIUMTEXT Test Data, Apache Paimon MySQL Long Test Data, "
                                 + "[98, 121, 116, 101, 115, 0, 0, 0, 0, 0], "
                                 + "[109, 111, 114, 101, 32, 98, 121, 116, 101, 115], "
-                                + "[118, 101, 114, 121, 32, 108, 111, 110, 103, 32, 98, 121, 116, 101, 115, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97], "
-                                + "[108, 111, 110, 103, 32, 98, 108, 111, 98, 32, 98, 121, 116, 101, 115, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97]"
+                                + "[84, 73, 78, 89, 66, 76, 79, 66, 32, 116, 121, 112, 101, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97], "
+                                + "[66, 76, 79, 66, 32, 116, 121, 112, 101, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97], "
+                                + "[77, 69, 68, 73, 85, 77, 66, 76, 79, 66, 32, 116, 121, 112, 101, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97], "
+                                + "[76, 79, 78, 71, 66, 76, 79, 66, 32, 32, 98, 121, 116, 101, 115, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97], "
+                                + "{\"a\": \"b\"}, "
+                                + "value1, "
+                                + "2023"
                                 + "]",
                         "+I["
                                 + "2, 2.2, "
-                                + "NULL, NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "
@@ -537,8 +560,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, "
                                 + "NULL, "
-                                + "NULL, NULL, NULL, NULL, "
-                                + "NULL, NULL, NULL, NULL"
+                                + "NULL, NULL, NULL, NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, NULL, NULL, NULL, "
+                                + "NULL, "
+                                + "NULL, "
+                                + "NULL"
                                 + "]");
         waitForResult(expected, table, rowType, Arrays.asList("pt", "_id"));
 
