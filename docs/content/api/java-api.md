@@ -76,6 +76,70 @@ public class CreateCatalog {
 }
 ```
 
+## Create Database
+
+You can use the catalog to create databases. The created databases are persistence in the file system.
+
+```java
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.fs.Path;
+
+public class CreateDatabase {
+
+     public static void main(String[] args) {
+            try {
+                catalog.createDatabase("my_db", false);
+            } catch (Catalog.DatabaseAlreadyExistException e) {
+                // do something
+            }
+        }
+}
+```
+## List Databases
+
+You can use the catalog to list databases.
+
+```java
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.fs.Path;
+
+public class ListDatabases {
+
+     public static void main(String[] args) {
+            List<String> databases = catalog.listDatabases();
+            databases.forEach(System.out::println);
+        }
+}
+```
+
+## Drop Database
+
+You can use the catalog to drop databases.
+
+```java
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.fs.Path;
+
+public class DropDatabase {
+
+     public static void main(String[] args) {
+            try {
+                catalog.dropDatabase("my_db", false, true);
+            } catch (Catalog.DatabaseNotEmptyException e) {
+                // do something
+            } catch (Catalog.DatabaseNotExistException e) {
+                // do something
+            }
+        }
+}
+```
+
 ## Create Table
 
 You can use the catalog to create tables. The created tables are persistence in the file system.
@@ -96,6 +160,9 @@ public class CreateTable {
         schemaBuilder.partitionKeys("...");
         schemaBuilder.column("f0", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.STRING());
+        schemaBuilder.column("f3", DataTypes.STRING());
+        schemaBuilder.column("f4", DataTypes.STRING());
         Schema schema = schemaBuilder.build();
 
         Identifier identifier = Identifier.create("my_db", "my_table");
@@ -125,6 +192,116 @@ public class GetTable {
         Identifier identifier = Identifier.create("my_db", "my_table");
         try {
             Table table = catalog.getTable(identifier);
+        } catch (Catalog.TableNotExistException e) {
+            // do something
+        }
+    }
+}
+```
+
+## List Tables
+
+You can use the catalog to list tables.
+
+```java
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+
+public class ListTables {
+
+ public static void main(String[] args) {
+        try {
+            catalog.listTables("my_db");
+        } catch (Catalog.DatabaseNotExistException e) {
+            // do something
+        }
+    }
+}
+```
+
+## Alter Table
+
+You can use the catalog to alter a table.
+
+```java
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.types.DataTypes;
+import java.util.Arrays;
+import java.util.List;
+
+public class AlterTable {
+
+    public static void main(String[] args) {
+        Identifier identifier = Identifier.create("my_db", "my_table");
+
+        SchemaChange addOption = SchemaChange.setOption("snapshot.time-retained", "2h");
+        SchemaChange addColumn = SchemaChange.addColumn("f5", DataTypes.STRING());
+        SchemaChange.Move after = SchemaChange.Move.after("f6", "f0");
+        SchemaChange addColumnAfterField = 
+            SchemaChange.addColumn("f6", DataTypes.STRING(), "", after);
+        SchemaChange renameColumn = SchemaChange.renameColumn("f2", "f7");
+        SchemaChange dropColumn = SchemaChange.dropColumn("f4");
+        String[] fields = new String[]{"f3"};
+        SchemaChange updateColumnComment = SchemaChange.updateColumnComment(fields, "f3 field");
+        SchemaChange updateColumnType = SchemaChange.updateColumnType("f3", DataTypes.STRING());
+        SchemaChange updateColumnPosition = 
+            SchemaChange.updateColumnPosition(SchemaChange.Move.first("f3"));
+
+        SchemaChange[] schemaChanges = new SchemaChange[] {addOption, addColumn, addColumnAfterField,
+            renameColumn, dropColumn, updateColumnComment, updateColumnType, updateColumnPosition};
+        try {
+            catalog.alterTable(identifier, Arrays.asList(schemaChanges), false);
+        } catch (Catalog.TableNotExistException e) {
+            // do something
+        }
+    }
+}
+```
+
+## Drop Table
+
+You can use the catalog to drop table.
+
+```java
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+
+public class DropTable {
+
+    public static void main(String[] args) {
+        Identifier identifier = Identifier.create("my_db", "my_table");
+        try {
+            catalog.dropTable(identifier, false);
+        } catch (Catalog.TableNotExistException e) {
+            // do something
+        }
+    }
+}
+```
+
+## Rename Table
+
+You can use the catalog to rename a table.
+
+```java
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+
+public class RenameTable {
+
+    public static void main(String[] args) {
+        Identifier fromTableIdentifier = Identifier.create("my_db", "my_table");
+        Identifier toTableIdentifier = Identifier.create("my_db", "test_table");
+        try {
+            catalog.renameTable(fromTableIdentifier, toTableIdentifier, false);
+        } catch (Catalog.TableAlreadyExistException e) {
+            // do something
         } catch (Catalog.TableNotExistException e) {
             // do something
         }
