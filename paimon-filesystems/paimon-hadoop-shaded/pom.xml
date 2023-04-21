@@ -229,23 +229,23 @@
                                 <!-- we shade only the parts that are internal to Hadoop and not used / exposed downstream -->
                                 <relocation>
                                     <pattern>com.google.re2j</pattern>
-                                    <shadedPattern>org.apache.paimon.fs.shaded.hadoop3.com.google.re2j</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.fs.shade.hadoop3.com.google.re2j</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.apache.htrace</pattern>
-                                    <shadedPattern>org.apache.paimon.fs.shaded.hadoop3.org.apache.htrace</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.fs.shade.hadoop3.org.apache.htrace</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>com.fasterxml</pattern>
-                                    <shadedPattern>org.apache.paimon.fs.shaded.hadoop3.com.fasterxml</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.fs.shade.hadoop3.com.fasterxml</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.codehaus</pattern>
-                                    <shadedPattern>org.apache.paimon.fs.shaded.hadoop3.org.codehaus</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.fs.shade.hadoop3.org.codehaus</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>com.ctc</pattern>
-                                    <shadedPattern>org.apache.paimon.fs.shaded.hadoop3.com.ctc</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.fs.shade.hadoop3.com.ctc</shadedPattern>
                                 </relocation>
                             </relocations>
                             <filters>

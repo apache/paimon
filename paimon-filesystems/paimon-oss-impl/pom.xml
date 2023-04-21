@@ -124,11 +124,11 @@
                                 <!-- relocate the OSS dependencies -->
                                 <relocation>
                                     <pattern>com.aliyun</pattern>
-                                    <shadedPattern>org.apache.paimon.oss.shaded.com.aliyun</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.oss.shade.com.aliyun</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>com.aliyuncs</pattern>
-                                    <shadedPattern>org.apache.paimon.oss.shaded.com.aliyuncs</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.oss.shade.com.aliyuncs</shadedPattern>
                                 </relocation>
                             </relocations>
                             <filters>
