@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.data.Segments;
 import org.apache.paimon.options.MemorySize;
+
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
