@@ -29,9 +29,10 @@ import org.apache.paimon.types.RowType;
 import java.util.List;
 
 /**
- * SchemaVisitor to visitor the sourceInspector and writerInspector to get the FieldDeserializer.
+ * DataTypeDefaultVisitor to visitor the sourceInspector and writerInspector to get the
+ * FieldDeserializer.
  */
-public abstract class SchemaVisitor<P, R> {
+public abstract class DataTypeDefaultVisitor<P, R> {
 
     /** PartnerAccessors. */
     public interface PartnerAccessors<P> {
@@ -48,13 +49,16 @@ public abstract class SchemaVisitor<P, R> {
     public static <P, T> T visit(
             HiveSchema schema,
             P partner,
-            SchemaVisitor<P, T> visitor,
+            DataTypeDefaultVisitor<P, T> visitor,
             PartnerAccessors<P> accessors) {
         return visit(schema.rowType(), partner, visitor, accessors);
     }
 
     public static <P, T> T visit(
-            DataType type, P partner, SchemaVisitor<P, T> visitor, PartnerAccessors<P> accessors) {
+            DataType type,
+            P partner,
+            DataTypeDefaultVisitor<P, T> visitor,
+            PartnerAccessors<P> accessors) {
         switch (type.getTypeRoot()) {
             case ROW:
                 List<DataField> fields = ((RowType) type).getFields();

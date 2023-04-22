@@ -67,7 +67,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link PaimonStorageHandler} and {@link PaimonOutputFormat}. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
-public class TestPaimonStorageHandlerUseMR {
+public class HiveWriteITCase {
 
     @ClassRule public static TemporaryFolder folder = new TemporaryFolder();
 

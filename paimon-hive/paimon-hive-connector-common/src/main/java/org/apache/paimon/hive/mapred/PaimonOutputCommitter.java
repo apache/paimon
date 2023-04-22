@@ -138,14 +138,12 @@ public class PaimonOutputCommitter extends OutputCommitter {
 
         if (table != null) {
             BatchWriteBuilder batchWriteBuilder = table.newBatchWriteBuilder();
-            List<List<CommitMessage>> commitMessagesList =
+            List<CommitMessage> commitMessagesList =
                     getAllPreCommitMessage(table.location().getPath(), jobContext, table.fileIO());
-            for (List<CommitMessage> commitTables : commitMessagesList) {
-                try (BatchTableCommit batchTableCommit = batchWriteBuilder.newCommit()) {
-                    batchTableCommit.commit(commitTables);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
+            try (BatchTableCommit batchTableCommit = batchWriteBuilder.newCommit()) {
+                batchTableCommit.commit(commitMessagesList);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
             deleteTemporaryFile(
                     jobContext,
@@ -166,15 +164,13 @@ public class PaimonOutputCommitter extends OutputCommitter {
         if (table != null) {
 
             LOG.info("AbortJob {} has started", jobContext.getJobID());
-            List<List<CommitMessage>> commitMessagesList =
+            List<CommitMessage> commitMessagesList =
                     getAllPreCommitMessage(table.location().getPath(), jobContext, table.fileIO());
             BatchWriteBuilder batchWriteBuilder = table.newBatchWriteBuilder();
-            for (List<CommitMessage> commitTables : commitMessagesList) {
-                try (BatchTableCommit batchTableCommit = batchWriteBuilder.newCommit()) {
-                    batchTableCommit.abort(commitTables);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
+            try (BatchTableCommit batchTableCommit = batchWriteBuilder.newCommit()) {
+                batchTableCommit.abort(commitMessagesList);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
             deleteTemporaryFile(
                     jobContext,
@@ -214,20 +210,19 @@ public class PaimonOutputCommitter extends OutputCommitter {
      * @param io The FileIO used for reading a files generated for commit
      * @return The list of the committed data files
      */
-    private static List<List<CommitMessage>> getAllPreCommitMessage(
+    private static List<CommitMessage> getAllPreCommitMessage(
             String location, JobContext jobContext, FileIO io) {
         JobConf conf = jobContext.getJobConf();
 
         int totalCommitMessagesSize =
                 conf.getNumReduceTasks() > 0 ? conf.getNumReduceTasks() : conf.getNumMapTasks();
 
-        List<List<CommitMessage>> commitMessagesList =
-                Collections.synchronizedList(new ArrayList<>(totalCommitMessagesSize));
+        List<CommitMessage> commitMessagesList = Collections.synchronizedList(new ArrayList<>());
 
         for (int i = 0; i < totalCommitMessagesSize; i++) {
             String commitFileLocation =
                     generatePreCommitFileLocation(location, jobContext.getJobID(), i);
-            commitMessagesList.add(readPreCommitFile(commitFileLocation, io));
+            commitMessagesList.addAll(readPreCommitFile(commitFileLocation, io));
         }
 
         return commitMessagesList;

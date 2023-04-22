@@ -44,7 +44,7 @@ public class PaimonSerDe extends AbstractSerDe {
     private PaimonInternalRowObjectInspector inspector;
     private HiveSchema tableSchema;
 
-    private RowDataContainer rowData = new RowDataContainer();
+    private final RowDataContainer rowData = new RowDataContainer();
 
     private Map<ObjectInspector, HiveDeserializer> deserializers =
             Maps.newHashMapWithExpectedSize(1);

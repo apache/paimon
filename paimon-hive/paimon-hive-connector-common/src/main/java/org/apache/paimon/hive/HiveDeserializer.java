@@ -46,7 +46,7 @@ import java.util.Map;
 
 /** A deserializer to deserialize hive objects to {@link InternalRow}. */
 public class HiveDeserializer {
-    private FieldDeserializer fieldDeserializer;
+    private final FieldDeserializer fieldDeserializer;
 
     /**
      * Builder to create a HiveDeserializer instance. Requires a Paimon HiveSchema and the Hive
@@ -93,7 +93,7 @@ public class HiveDeserializer {
     }
 
     private static class DeserializerVisitor
-            extends SchemaVisitor<ObjectInspectorPair, FieldDeserializer> {
+            extends DataTypeDefaultVisitor<ObjectInspectorPair, FieldDeserializer> {
 
         public static FieldDeserializer visit(HiveSchema schema, ObjectInspectorPair pair) {
             return visit(
@@ -210,7 +210,7 @@ public class HiveDeserializer {
     }
 
     private static class PartnerObjectInspectorByNameAccessors
-            implements SchemaVisitor.PartnerAccessors<ObjectInspectorPair> {
+            implements DataTypeDefaultVisitor.PartnerAccessors<ObjectInspectorPair> {
 
         @Override
         public ObjectInspectorPair fieldPartner(ObjectInspectorPair pair, String name) {

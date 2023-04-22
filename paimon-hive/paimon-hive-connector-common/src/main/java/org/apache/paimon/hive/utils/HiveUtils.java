@@ -45,7 +45,6 @@ public class HiveUtils {
         PaimonJobConf wrapper = new PaimonJobConf(jobConf);
         Options options = PaimonJobConf.extractCatalogConfig(jobConf);
         options.set(CoreOptions.PATH, wrapper.getLocation());
-        options.set(CoreOptions.WRITE_ONLY, Boolean.TRUE);
         CatalogContext catalogContext = CatalogContext.create(options, jobConf);
         return FileStoreTableFactory.create(catalogContext);
     }
