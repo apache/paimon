@@ -686,7 +686,7 @@ public abstract class CatalogTestBase {
                     false))
             .hasMessageContaining("Can not find column: [non_existing_col]");
 
-        // Alter table update a column type throws Exception when column is pk columns
+        // Alter table update a column nullability throws Exception when column is pk columns
         assertThatThrownBy(
             () ->
                 catalog.alterTable(
