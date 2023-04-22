@@ -26,7 +26,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 /**
- * {@link StartingScanner} for the {@link StartupMode#COMPACTED_FULL} startup mode with
+ * {@link StartingScanner} for the {@link StartupMode#COMPACTED_LATEST} startup mode with
  * 'full-compaction.delta-commits'.
  */
 public class FullCompactedStartingScanner extends CompactedStartingScanner {

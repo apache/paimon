@@ -909,8 +909,8 @@ public class CoreOptions implements Serializable {
                         + "without producing a snapshot at the beginning. "
                         + "For batch sources, behaves the same as the \"latest-full\" startup mode."),
 
-        COMPACTED_FULL(
-                "compacted-full",
+        COMPACTED_LATEST(
+                "compacted-latest",
                 "For streaming sources, produces a snapshot after the latest compaction on the table "
                         + "upon first startup, and continue to read the latest changes. "
                         + "For batch sources, just produce a snapshot after the latest compaction "

@@ -146,7 +146,7 @@ public class StartupModeTest extends ScannerTestBase {
 
     @Test
     public void testStartFromCompactedFull() throws Exception {
-        initializeTable(StartupMode.COMPACTED_FULL);
+        initializeTable(StartupMode.COMPACTED_LATEST);
         initializeTestData(); // initialize 3 commits
 
         write.compact(binaryRow(1), 0, true);

@@ -815,10 +815,10 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
-    public void testFullCompactedRead() throws Exception {
+    public void testLatestCompactedRead() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "2");
-        options.put(CoreOptions.SCAN_MODE.key(), "compacted-full");
+        options.put(CoreOptions.SCAN_MODE.key(), "compacted-latest");
         options.put(BUCKET.key(), "1");
         FileStoreTable table = createFileStoreTable().copy(options);
 

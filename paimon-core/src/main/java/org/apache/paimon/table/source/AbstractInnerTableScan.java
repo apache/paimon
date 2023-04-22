@@ -73,7 +73,7 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                 return isStreaming
                         ? new ContinuousLatestStartingScanner()
                         : new FullStartingScanner();
-            case COMPACTED_FULL:
+            case COMPACTED_LATEST:
                 if (options.changelogProducer() == ChangelogProducer.FULL_COMPACTION
                         || options.toConfiguration().contains(FULL_COMPACTION_DELTA_COMMITS)) {
                     int deltaCommits =

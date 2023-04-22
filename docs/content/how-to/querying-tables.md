@@ -57,7 +57,7 @@ Produces the latest snapshot on the table upon first startup, and continues to r
 </td>
 </tr>
 <tr>
-<td>compacted-full</td>
+<td>compacted-latest</td>
 <td>
 Produces the snapshot after the latest <a href="{{< ref "concepts/file-layouts#lsm-trees#compactions" >}}">compaction</a>.
 </td>

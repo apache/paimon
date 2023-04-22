@@ -27,7 +27,9 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-/** {@link StartingScanner} for the {@link CoreOptions.StartupMode#COMPACTED_FULL} startup mode. */
+/**
+ * {@link StartingScanner} for the {@link CoreOptions.StartupMode#COMPACTED_LATEST} startup mode.
+ */
 public class CompactedStartingScanner implements StartingScanner {
 
     private static final Logger LOG = LoggerFactory.getLogger(CompactedStartingScanner.class);

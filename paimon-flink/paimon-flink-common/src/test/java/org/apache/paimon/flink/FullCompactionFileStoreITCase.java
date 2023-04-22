@@ -62,7 +62,7 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
                         streamSqlIter(
-                                "SELECT * FROM %s /*+ OPTIONS('scan.mode'='compacted-full') */",
+                                "SELECT * FROM %s /*+ OPTIONS('scan.mode'='compacted-latest') */",
                                 table));
 
         sql("INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table);
@@ -72,7 +72,7 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
         sql("INSERT INTO %s VALUES ('7', '8', '9')", table);
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("7", "8", "9"));
 
-        assertThat(sql("SELECT * FROM T /*+ OPTIONS('scan.mode'='compacted-full') */"))
+        assertThat(sql("SELECT * FROM T /*+ OPTIONS('scan.mode'='compacted-latest') */"))
                 .containsExactlyInAnyOrder(
                         Row.of("1", "2", "3"), Row.of("4", "5", "6"), Row.of("7", "8", "9"));
     }

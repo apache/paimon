@@ -57,7 +57,7 @@ public class TableStreamingReader {
 
     public TableStreamingReader(Table table, int[] projection, @Nullable Predicate predicate) {
         if (CoreOptions.fromMap(table.options()).startupMode()
-                != CoreOptions.StartupMode.COMPACTED_FULL) {
+                != CoreOptions.StartupMode.COMPACTED_LATEST) {
             table =
                     table.copy(
                             Collections.singletonMap(
