@@ -63,8 +63,16 @@ public interface SchemaChange extends Serializable {
         return new UpdateColumnType(fieldName, newDataType);
     }
 
+    static SchemaChange updateColumnNullability(String fieldName, boolean newNullability) {
+        return new UpdateColumnNullability(new String[] {fieldName}, newNullability);
+    }
+
     static SchemaChange updateColumnNullability(String[] fieldNames, boolean newNullability) {
         return new UpdateColumnNullability(fieldNames, newNullability);
+    }
+
+    static SchemaChange updateColumnComment(String fieldName, String comment) {
+        return new UpdateColumnComment(new String[] {fieldName}, comment);
     }
 
     static SchemaChange updateColumnComment(String[] fieldNames, String comment) {
