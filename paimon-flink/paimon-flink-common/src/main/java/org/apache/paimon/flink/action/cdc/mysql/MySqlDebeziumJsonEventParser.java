@@ -20,12 +20,15 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.EventParser;
-import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.Preconditions;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.Preconditions;
 
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
@@ -33,16 +36,17 @@ import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Optional;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * {@link EventParser} for MySQL Debezium JSON.
@@ -54,25 +58,18 @@ import java.util.regex.Pattern;
 public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlDebeziumJsonEventParser.class);
-    private static final String SCHEMA_CHANGE_REGEX =
-            "ALTER\\s+TABLE\\s+[^\\s]+\\s+(ADD|DROP|MODIFY)\\s+(COLUMN\\s+)?([^\\s]+)(\\s+([^\\s\\(]+))?\\s*(\\((.*?)\\))?.*";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final Pattern schemaChangePattern =
-            Pattern.compile(SCHEMA_CHANGE_REGEX, Pattern.CASE_INSENSITIVE);
-
     private final ZoneId serverTimeZone;
+    private final boolean caseSensitive;
 
     private JsonNode payload;
     private Map<String, String> mySqlFieldTypes;
     private Map<String, String> fieldClassNames;
 
-    public MySqlDebeziumJsonEventParser() {
-        this(ZoneId.systemDefault());
-    }
-
-    public MySqlDebeziumJsonEventParser(ZoneId serverTimeZone) {
+    public MySqlDebeziumJsonEventParser(ZoneId serverTimeZone, boolean caseSensitive) {
         this.serverTimeZone = serverTimeZone;
+        this.caseSensitive = caseSensitive;
     }
 
     @Override
@@ -87,12 +84,18 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                                     + "in the JsonDebeziumDeserializationSchema you created");
             payload = root.get("payload");
 
-            if (!isSchemaChange()) {
+            if (!isUpdatedDataFields()) {
                 updateFieldTypes(schema);
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public String tableName() {
+        String tableName = payload.get("source").get("table").asText();
+        return caseSensitive ? tableName : tableName.toLowerCase();
     }
 
     private void updateFieldTypes(JsonNode schema) {
@@ -119,45 +122,55 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     @Override
-    public boolean isSchemaChange() {
+    public boolean isUpdatedDataFields() {
         return payload.get("op") == null;
     }
 
     @Override
-    public List<SchemaChange> getSchemaChanges() {
+    public Optional<List<DataField>> getUpdatedDataFields() {
         JsonNode historyRecord = payload.get("historyRecord");
         if (historyRecord == null) {
-            return Collections.emptyList();
+            return Optional.empty();
         }
 
-        JsonNode ddlNode;
+        JsonNode columns;
         try {
-            ddlNode = objectMapper.readTree(historyRecord.asText()).get("ddl");
-        } catch (Exception e) {
-            LOG.debug("Failed to parse history record for schema changes", e);
-            return Collections.emptyList();
-        }
-        if (ddlNode == null) {
-            return Collections.emptyList();
-        }
-        String ddl = ddlNode.asText();
-
-        Matcher matcher = schemaChangePattern.matcher(ddl);
-        if (matcher.find()) {
-            String op = matcher.group(1);
-            String column = matcher.group(3);
-            String type = matcher.group(5);
-            String len = matcher.group(7);
-            if ("add".equalsIgnoreCase(op)) {
-                return Collections.singletonList(
-                        SchemaChange.addColumn(column, MySqlTypeUtils.toDataType(type, len)));
-            } else if ("modify".equalsIgnoreCase(op)) {
-                return Collections.singletonList(
-                        SchemaChange.updateColumnType(
-                                column, MySqlTypeUtils.toDataType(type, len)));
+            String historyRecordString = historyRecord.asText();
+            JsonNode tableChanges = objectMapper.readTree(historyRecordString).get("tableChanges");
+            if (tableChanges.size() != 1) {
+                throw new IllegalArgumentException(
+                        "Invalid historyRecord, because tableChanges should contain exactly 1 item.\n"
+                                + historyRecordString);
             }
+            columns = tableChanges.get(0).get("table").get("columns");
+        } catch (Exception e) {
+            LOG.info("Failed to parse history record for schema changes", e);
+            return Optional.empty();
         }
-        return Collections.emptyList();
+        if (columns == null) {
+            return Optional.empty();
+        }
+
+        List<DataField> result = new ArrayList<>();
+        for (int i = 0; i < columns.size(); i++) {
+            JsonNode column = columns.get(i);
+            JsonNode length = column.get("length");
+            JsonNode scale = column.get("scale");
+            DataType type =
+                    MySqlTypeUtils.toDataType(
+                            column.get("typeName").asText(),
+                            length == null ? null : length.asInt(),
+                            scale == null ? null : scale.asInt());
+            if (column.get("optional").asBoolean()) {
+                type = type.nullable();
+            } else {
+                type = type.notNull();
+            }
+
+            String fieldName = column.get("name").asText();
+            result.add(new DataField(i, caseSensitive ? fieldName : fieldName.toLowerCase(), type));
+        }
+        return Optional.of(result);
     }
 
     @Override
@@ -166,11 +179,13 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
         Map<String, String> before = extractRow(payload.get("before"));
         if (before.size() > 0) {
+            before = caseSensitive ? before : keyCaseInsensitive(before);
             records.add(new CdcRecord(RowKind.DELETE, before));
         }
 
         Map<String, String> after = extractRow(payload.get("after"));
         if (after.size() > 0) {
+            after = caseSensitive ? after : keyCaseInsensitive(after);
             records.add(new CdcRecord(RowKind.INSERT, after));
         }
 
@@ -196,6 +211,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                     continue;
                 }
 
+                // pay attention to the temporal types
+                // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-temporal-types
                 if ("bytes".equals(mySqlType) && className == null) {
                     // MySQL binary, varbinary, blob
                     newValue = new String(Base64.getDecoder().decode(oldValue));
@@ -216,17 +233,44 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                     }
                 } else if ("io.debezium.time.Date".equals(className)) {
                     // MySQL date
-                    newValue = LocalDate.ofEpochDay(Integer.parseInt(oldValue)).toString();
+                    newValue = DateTimeUtils.toLocalDate(Integer.parseInt(oldValue)).toString();
                 } else if ("io.debezium.time.Timestamp".equals(className)) {
-                    // MySQL datetime
-                    newValue =
+                    // MySQL datetime (precision 0-3)
+
+                    // display value of datetime is not affected by timezone, see
+                    // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
+                    // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
+                    // for implementation
+                    LocalDateTime localDateTime =
                             Instant.ofEpochMilli(Long.parseLong(oldValue))
-                                    .atZone(serverTimeZone)
-                                    .toLocalDateTime()
-                                    .toString()
-                                    .replace('T', ' ');
+                                    .atZone(ZoneOffset.UTC)
+                                    .toLocalDateTime();
+                    newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 3);
+                } else if ("io.debezium.time.MicroTimestamp".equals(className)) {
+                    // MySQL datetime (precision 4-6)
+                    long microseconds = Long.parseLong(oldValue);
+                    long microsecondsPerSecond = 1_000_000;
+                    long nanosecondsPerMicros = 1_000;
+                    long seconds = microseconds / microsecondsPerSecond;
+                    long nanoAdjustment =
+                            (microseconds % microsecondsPerSecond) * nanosecondsPerMicros;
+
+                    // display value of datetime is not affected by timezone, see
+                    // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
+                    // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
+                    // for implementation
+                    LocalDateTime localDateTime =
+                            Instant.ofEpochSecond(seconds, nanoAdjustment)
+                                    .atZone(ZoneOffset.UTC)
+                                    .toLocalDateTime();
+                    newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 6);
                 } else if ("io.debezium.time.ZonedTimestamp".equals(className)) {
                     // MySQL timestamp
+
+                    // dispaly value of timestamp is affected by timezone, see
+                    // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
+                    // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
+                    // for implementation
                     newValue =
                             Instant.parse(oldValue)
                                     .atZone(serverTimeZone)
@@ -240,5 +284,18 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         }
 
         return recordMap;
+    }
+
+    private Map<String, String> keyCaseInsensitive(Map<String, String> origin) {
+        Map<String, String> keyCaseInsensitive = new HashMap<>();
+        for (Map.Entry<String, String> entry : origin.entrySet()) {
+            String fieldName = entry.getKey().toLowerCase();
+            checkArgument(
+                    !keyCaseInsensitive.containsKey(fieldName),
+                    "Duplicate key appears when converting map keys to case-insensitive form. Original map is:\n."
+                            + origin);
+            keyCaseInsensitive.put(fieldName, entry.getValue());
+        }
+        return keyCaseInsensitive;
     }
 }

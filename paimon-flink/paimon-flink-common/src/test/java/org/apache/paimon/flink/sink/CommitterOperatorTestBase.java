@@ -61,9 +61,10 @@ public abstract class CommitterOperatorTestBase {
     }
 
     protected void assertResults(FileStoreTable table, String... expected) {
-        TableRead read = table.newRead();
+        TableRead read = table.newReadBuilder().newRead();
         List<String> actual = new ArrayList<>();
-        table.newScan()
+        table.newReadBuilder()
+                .newScan()
                 .plan()
                 .splits()
                 .forEach(

@@ -34,6 +34,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -57,6 +58,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CompactorSourceBuilder}. */
@@ -88,8 +90,10 @@ public class CompactorSourceITCase extends AbstractTestBase {
             // change options to test whether CompactorSourceBuilder work normally
             table = table.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2"));
         }
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
 
         write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
         write.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));
@@ -137,8 +141,10 @@ public class CompactorSourceITCase extends AbstractTestBase {
             dynamicOptions.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "0");
             table = table.copy(dynamicOptions);
         }
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
 
         write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
         write.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));
@@ -233,8 +239,10 @@ public class CompactorSourceITCase extends AbstractTestBase {
             List<String> expected)
             throws Exception {
         FileStoreTable table = createFileStoreTable();
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
 
         write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
         write.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));
@@ -272,18 +280,20 @@ public class CompactorSourceITCase extends AbstractTestBase {
     private String toString(RowData rowData) {
         int numFiles;
         try {
-            numFiles = dataFileMetaSerializer.deserializeList(rowData.getBinary(4)).size();
+            numFiles = dataFileMetaSerializer.deserializeList(rowData.getBinary(3)).size();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+
+        BinaryRow partition = deserializeBinaryRow(rowData.getBinary(1));
 
         return String.format(
                 "%s %d|%s|%d|%d|%d",
                 rowData.getRowKind().shortString(),
                 rowData.getLong(0),
-                rowData.getString(1).toString(),
+                partition.getString(0),
+                partition.getInt(1),
                 rowData.getInt(2),
-                rowData.getInt(3),
                 numFiles);
     }
 

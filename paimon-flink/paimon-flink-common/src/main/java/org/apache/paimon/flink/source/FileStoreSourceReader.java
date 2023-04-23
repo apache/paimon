@@ -69,7 +69,12 @@ public final class FileStoreSourceReader<T>
 
     @Override
     protected void onSplitFinished(Map<String, FileStoreSourceSplitState> finishedSplitIds) {
-        context.sendSplitRequest();
+        // this method is called each time when we consume one split
+        // it is possible that one response from the coordinator contains multiple splits
+        // we should only require for more splits after we've consumed all given splits
+        if (getNumberOfCurrentlyAssignedSplits() == 0) {
+            context.sendSplitRequest();
+        }
     }
 
     @Override

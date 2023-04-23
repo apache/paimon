@@ -21,22 +21,12 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.flink.BinaryRowTypeSerializer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.apache.flink.api.common.state.ListState;
-import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.base.IntSerializer;
-import org.apache.flink.api.common.typeutils.base.LongSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.typeutils.runtime.TupleSerializer;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
-import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -62,53 +52,41 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
 
     private final int deltaCommits;
 
+    private final String tableName;
     private final SnapshotManager snapshotManager;
 
     private final Set<Tuple2<BinaryRow, Integer>> currentWrittenBuckets;
     private final NavigableMap<Long, Set<Tuple2<BinaryRow, Integer>>> writtenBuckets;
-    private final ListState<Tuple3<Long, BinaryRow, Integer>> writtenBucketState;
+    private static final String WRITTEN_BUCKETS_STATE_NAME = "paimon_written_buckets";
 
     private final TreeSet<Long> commitIdentifiersToCheck;
 
     public GlobalFullCompactionSinkWrite(
             FileStoreTable table,
-            StateInitializationContext context,
-            String initialCommitUser,
+            String commitUser,
+            StoreSinkWriteState state,
             IOManager ioManager,
             boolean isOverwrite,
             boolean waitCompaction,
-            int deltaCommits)
-            throws Exception {
-        super(table, context, initialCommitUser, ioManager, isOverwrite, waitCompaction);
+            int deltaCommits) {
+        super(table, commitUser, state, ioManager, isOverwrite, waitCompaction);
 
         this.deltaCommits = deltaCommits;
 
+        this.tableName = table.name();
         this.snapshotManager = table.snapshotManager();
 
         currentWrittenBuckets = new HashSet<>();
-        @SuppressWarnings("unchecked")
-        TupleSerializer<Tuple3<Long, BinaryRow, Integer>> writtenBucketStateSerializer =
-                new TupleSerializer<>(
-                        (Class<Tuple3<Long, BinaryRow, Integer>>) (Class<?>) Tuple3.class,
-                        new TypeSerializer[] {
-                            LongSerializer.INSTANCE,
-                            new BinaryRowTypeSerializer(
-                                    table.schema().logicalPartitionType().getFieldCount()),
-                            IntSerializer.INSTANCE
-                        });
-        writtenBucketState =
-                context.getOperatorStateStore()
-                        .getListState(
-                                new ListStateDescriptor<>(
-                                        "paimon_written_buckets", writtenBucketStateSerializer));
         writtenBuckets = new TreeMap<>();
-        writtenBucketState
-                .get()
-                .forEach(
-                        t ->
-                                writtenBuckets
-                                        .computeIfAbsent(t.f0, k -> new HashSet<>())
-                                        .add(Tuple2.of(t.f1, t.f2)));
+        List<StoreSinkWriteState.StateValue> writtenBucketStateValues =
+                state.get(tableName, WRITTEN_BUCKETS_STATE_NAME);
+        if (writtenBucketStateValues != null) {
+            for (StoreSinkWriteState.StateValue stateValue : writtenBucketStateValues) {
+                writtenBuckets
+                        .computeIfAbsent(bytesToLong(stateValue.value()), k -> new HashSet<>())
+                        .add(Tuple2.of(stateValue.partition(), stateValue.bucket()));
+            }
+        }
 
         commitIdentifiersToCheck = new TreeSet<>();
     }
@@ -240,15 +218,35 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
     }
 
     @Override
-    public void snapshotState(StateSnapshotContext context) throws Exception {
-        super.snapshotState(context);
+    public void snapshotState() throws Exception {
+        super.snapshotState();
 
-        List<Tuple3<Long, BinaryRow, Integer>> writtenBucketList = new ArrayList<>();
+        List<StoreSinkWriteState.StateValue> writtenBucketList = new ArrayList<>();
         for (Map.Entry<Long, Set<Tuple2<BinaryRow, Integer>>> entry : writtenBuckets.entrySet()) {
             for (Tuple2<BinaryRow, Integer> bucket : entry.getValue()) {
-                writtenBucketList.add(Tuple3.of(entry.getKey(), bucket.f0, bucket.f1));
+                writtenBucketList.add(
+                        new StoreSinkWriteState.StateValue(
+                                bucket.f0, bucket.f1, longToBytes(entry.getKey())));
             }
         }
-        writtenBucketState.update(writtenBucketList);
+        state.put(tableName, WRITTEN_BUCKETS_STATE_NAME, writtenBucketList);
+    }
+
+    private static byte[] longToBytes(long l) {
+        byte[] result = new byte[8];
+        for (int i = 7; i >= 0; i--) {
+            result[i] = (byte) (l & 0xFF);
+            l >>= 8;
+        }
+        return result;
+    }
+
+    private static long bytesToLong(final byte[] b) {
+        long result = 0;
+        for (int i = 0; i < 8; i++) {
+            result <<= 8;
+            result |= (b[i] & 0xFF);
+        }
+        return result;
     }
 }

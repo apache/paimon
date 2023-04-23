@@ -265,15 +265,15 @@ under the License.
                             <relocations>
                                 <relocation>
                                     <pattern>org.antlr.v4.runtime</pattern>
-                                    <shadedPattern>org.apache.paimon.shaded.org.antlr.v4.runtime</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shade.org.antlr.v4.runtime</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.codehaus.janino</pattern>
-                                    <shadedPattern>org.apache.paimon.shaded.org.codehaus.janino</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shade.org.codehaus.janino</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.codehaus.commons</pattern>
-                                    <shadedPattern>org.apache.paimon.shaded.org.codehaus.commons</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shade.org.codehaus.commons</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>

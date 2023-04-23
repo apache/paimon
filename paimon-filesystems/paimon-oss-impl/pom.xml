@@ -119,16 +119,16 @@
                             <relocations>
                                 <relocation>
                                     <pattern>org.apache.hadoop</pattern>
-                                    <shadedPattern>org.apache.paimon.shaded.hadoop3.org.apache.hadoop</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shade.hadoop3.org.apache.hadoop</shadedPattern>
                                 </relocation>
                                 <!-- relocate the OSS dependencies -->
                                 <relocation>
                                     <pattern>com.aliyun</pattern>
-                                    <shadedPattern>org.apache.paimon.oss.shaded.com.aliyun</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.oss.shade.com.aliyun</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>com.aliyuncs</pattern>
-                                    <shadedPattern>org.apache.paimon.oss.shaded.com.aliyuncs</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.oss.shade.com.aliyuncs</shadedPattern>
                                 </relocation>
                             </relocations>
                             <filters>

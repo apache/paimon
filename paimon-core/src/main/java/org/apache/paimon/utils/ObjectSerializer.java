@@ -25,6 +25,7 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
 import java.io.ByteArrayInputStream;
@@ -48,6 +49,10 @@ public abstract class ObjectSerializer<T> implements Serializable {
     /** Get the number of fields. */
     public int numFields() {
         return rowSerializer.getArity();
+    }
+
+    public DataType[] fieldTypes() {
+        return rowSerializer.fieldTypes();
     }
 
     /**

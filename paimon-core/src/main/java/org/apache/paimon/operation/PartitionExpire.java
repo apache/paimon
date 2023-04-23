@@ -70,8 +70,8 @@ public class PartitionExpire {
         return this;
     }
 
-    public void expire() {
-        expire(LocalDateTime.now());
+    public void expire(long commitIdentifier) {
+        expire(LocalDateTime.now(), commitIdentifier);
     }
 
     @VisibleForTesting
@@ -80,14 +80,14 @@ public class PartitionExpire {
     }
 
     @VisibleForTesting
-    void expire(LocalDateTime now) {
+    void expire(LocalDateTime now, long commitIdentifier) {
         if (now.isAfter(lastCheck.plus(checkInterval))) {
-            doExpire(now.minus(expirationTime));
+            doExpire(now.minus(expirationTime), commitIdentifier);
             lastCheck = now;
         }
     }
 
-    private void doExpire(LocalDateTime expireDateTime) {
+    private void doExpire(LocalDateTime expireDateTime, long commitIdentifier) {
         List<BinaryRow> partitions = readPartitions();
         List<Map<String, String>> expired = new ArrayList<>();
         for (BinaryRow partition : partitions) {
@@ -99,7 +99,7 @@ public class PartitionExpire {
         }
 
         if (expired.size() > 0) {
-            commit.dropPartitions(expired);
+            commit.dropPartitions(expired, commitIdentifier);
         }
     }
 

@@ -21,6 +21,7 @@ package org.apache.paimon;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.KeyValueFileStoreRead;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
@@ -87,6 +88,11 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public KeyValueFileStoreWrite newWrite(String commitUser) {
+        return newWrite(commitUser, null);
+    }
+
+    @Override
+    public KeyValueFileStoreWrite newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
         return new KeyValueFileStoreWrite(
                 fileIO,
                 schemaManager,
@@ -98,12 +104,12 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 mfFactory,
                 pathFactory(),
                 snapshotManager(),
-                newScan(true),
+                newScan(true).withManifestCacheFilter(manifestFilter),
                 options,
                 keyValueFieldsExtractor);
     }
 
-    private KeyValueFileStoreScan newScan(boolean checkNumOfBuckets) {
+    private KeyValueFileStoreScan newScan(boolean forWrite) {
         return new KeyValueFileStoreScan(
                 partitionType,
                 bucketKeyType,
@@ -112,10 +118,10 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 schemaManager,
                 schemaId,
                 keyValueFieldsExtractor,
-                manifestFileFactory(),
-                manifestListFactory(),
+                manifestFileFactory(forWrite),
+                manifestListFactory(forWrite),
                 options.bucket(),
-                checkNumOfBuckets);
+                forWrite);
     }
 
     @Override

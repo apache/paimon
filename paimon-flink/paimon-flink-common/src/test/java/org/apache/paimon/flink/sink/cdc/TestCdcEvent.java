@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.types.DataField;
 
 import java.io.Serializable;
 import java.util.List;
@@ -28,21 +28,31 @@ public class TestCdcEvent implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private final SchemaChange schemaChange;
+    private final String tableName;
+    private final List<DataField> updatedDataFields;
     private final List<CdcRecord> records;
+    private final int keyHash;
 
-    public TestCdcEvent(SchemaChange schemaChange) {
-        this.schemaChange = schemaChange;
+    public TestCdcEvent(String tableName, List<DataField> updatedDataFields) {
+        this.tableName = tableName;
+        this.updatedDataFields = updatedDataFields;
         this.records = null;
+        this.keyHash = 0;
     }
 
-    public TestCdcEvent(List<CdcRecord> records) {
-        this.schemaChange = null;
+    public TestCdcEvent(String tableName, List<CdcRecord> records, int keyHash) {
+        this.tableName = tableName;
+        this.updatedDataFields = null;
         this.records = records;
+        this.keyHash = keyHash;
     }
 
-    public SchemaChange schemaChange() {
-        return schemaChange;
+    public String tableName() {
+        return tableName;
+    }
+
+    public List<DataField> updatedDataFields() {
+        return updatedDataFields;
     }
 
     public List<CdcRecord> records() {
@@ -50,7 +60,14 @@ public class TestCdcEvent implements Serializable {
     }
 
     @Override
+    public int hashCode() {
+        return keyHash;
+    }
+
+    @Override
     public String toString() {
-        return String.format("{schemChange = %s, records = %s}", schemaChange, records);
+        return String.format(
+                "{tableName = %s, updatedDataFields = %s, records = %s}",
+                tableName, updatedDataFields, records);
     }
 }

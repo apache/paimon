@@ -74,6 +74,14 @@ public class DataTypes {
         return new DateType();
     }
 
+    public static TimeType TIME() {
+        return new TimeType();
+    }
+
+    public static TimeType TIME(int precision) {
+        return new TimeType(precision);
+    }
+
     public static TimestampType TIMESTAMP() {
         return new TimestampType();
     }

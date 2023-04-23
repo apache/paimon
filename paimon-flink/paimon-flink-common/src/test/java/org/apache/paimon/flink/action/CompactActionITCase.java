@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
@@ -70,8 +71,10 @@ public class CompactActionITCase extends ActionITCaseBase {
                         Arrays.asList("dt", "hh", "k"),
                         options);
         snapshotManager = table.snapshotManager();
-        write = table.newWrite(commitUser);
-        commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
 
         writeData(
                 rowData(1, 100, 15, BinaryString.fromString("20221208")),
@@ -132,8 +135,10 @@ public class CompactActionITCase extends ActionITCaseBase {
                         Arrays.asList("dt", "hh", "k"),
                         options);
         snapshotManager = table.snapshotManager();
-        write = table.newWrite(commitUser);
-        commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
 
         // base records
         writeData(
@@ -146,7 +151,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         Assertions.assertEquals(Snapshot.CommitKind.APPEND, snapshot.commitKind());
 
         // no full compaction has happened, so plan should be empty
-        StreamTableScan scan = table.newStreamScan();
+        StreamTableScan scan = table.newReadBuilder().newStreamScan();
         TableScan.Plan plan = scan.plan();
         Assertions.assertTrue(plan.splits().isEmpty());
 
@@ -215,7 +220,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         long start = System.currentTimeMillis();
         while (actual.size() != expected.size()) {
             TableScan.Plan plan = scan.plan();
-            actual.addAll(getResult(table.newRead(), plan.splits(), ROW_TYPE));
+            actual.addAll(getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE));
 
             if (System.currentTimeMillis() - start > timeout) {
                 break;

@@ -69,6 +69,7 @@ under the License.
     </modules>
 
     <properties>
+        <project.build.outputTimestamp>${maven.build.timestamp}</project.build.outputTimestamp>
         <paimon.shade.jackson.version>2.14.2</paimon.shade.jackson.version>
         <paimon.shade.guava.version>30.1.1-jre</paimon.shade.guava.version>
         <paimon.shade.caffeine.version>2.9.3</paimon.shade.caffeine.version>
@@ -123,6 +124,7 @@ under the License.
         <json-smart.version>2.4.9</json-smart.version>
         <avro.version>1.11.1</avro.version>
         <kafka.version>3.2.3</kafka.version>
+        <jacoco.version>0.8.8</jacoco.version>
     </properties>
 
     <dependencies>
@@ -185,6 +187,14 @@ under the License.
             <groupId>org.awaitility</groupId>
             <artifactId>awaitility</artifactId>
             <version>${awaitility.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jacoco</groupId>
+            <artifactId>org.jacoco.agent</artifactId>
+            <version>${jacoco.version}</version>
+            <classifier>runtime</classifier>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -389,6 +399,7 @@ under the License.
                         <exclude>docs/static/js/anchor.min.js</exclude>
                         <exclude>docs/layouts/shortcodes/generated/**</exclude>
                         <exclude>**/*.svg</exclude>
+                        <exclude>**/dependency-reduced-pom.xml</exclude>
                         <!-- Bundled license files -->
                         <exclude>**/LICENSE*</exclude>
                         <!-- artifacts created during release process -->
@@ -423,6 +434,7 @@ under the License.
                         <test.randomization.seed>${test.randomization.seed}</test.randomization.seed>
                         <test.flink.main.version>${test.flink.main.version}</test.flink.main.version>
                         <test.flink.version>${test.flink.version}</test.flink.version>
+                        <jacoco-agent.destfile>${project.build.directory}/jacoco.exec</jacoco-agent.destfile>
                     </systemPropertyVariables>
                     <argLine>-Xms256m -Xmx2048m -Dmvn.forkNumber=${surefire.forkNumber} -XX:+UseG1GC</argLine>
                 </configuration>
@@ -585,8 +597,6 @@ under the License.
                             <shadeTestJar>true</shadeTestJar>
                             <shadedArtifactAttached>false</shadedArtifactAttached>
                             <createDependencyReducedPom>true</createDependencyReducedPom>
-                            <dependencyReducedPomLocation>${project.basedir}/target/dependency-reduced-pom.xml
-                            </dependencyReducedPomLocation>
                             <!-- Filters MUST be appended; merging filters does not work properly, see MSHADE-305 -->
                             <filters combine.children="append">
                                 <!-- Globally exclude log4j.properties from our JAR files. -->
@@ -642,6 +652,21 @@ under the License.
                 </executions>
             </plugin>
 
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <configuration>
+                    <filesets>
+                        <fileset>
+                            <directory>${project.basedir}</directory>
+                            <includes>
+                                <include>dependency-reduced-pom.xml</include>
+                            </includes>
+                        </fileset>
+                    </filesets>
+                </configuration>
+            </plugin>
+
             <!-- generate configuration docs -->
             <plugin>
                 <groupId>org.commonjava.maven.plugins</groupId>
@@ -661,6 +686,45 @@ under the License.
                                 <artifactId>paimon-parent</artifactId>
                             </project>
                         </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- add plugin jacoco report -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <configuration>
+                    <skip>false</skip>
+                    <dataFile>${project.build.directory}/jacoco.exec</dataFile>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>default-prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                        <configuration>
+                            <propertyName>surefireArgLine</propertyName>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>default-instrument</id>
+                        <goals>
+                            <goal>instrument</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>default-restore-instrumented-classes</id>
+                        <goals>
+                            <goal>restore-instrumented-classes</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>default-report</id>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
                     </execution>
                 </executions>
             </plugin>
@@ -733,7 +797,7 @@ under the License.
 
                             <!-- \# refers to the static imports -->
                             <importOrder>
-                                <order>org.apache.paimon,org.apache.paimon.shaded,,javax,java,scala,\#</order>
+                                <order>org.apache.paimon,org.apache.paimon.shade,,javax,java,scala,\#</order>
                             </importOrder>
 
                             <removeUnusedImports/>
@@ -842,7 +906,45 @@ under the License.
                         </dependency>
                     </dependencies>
                 </plugin>
+
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-remote-resources-plugin</artifactId>
+                    <version>1.7.0</version>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>process</goal>
+                            </goals>
+                            <configuration>
+                                <resourceBundles>
+                                    <resourceBundle>org.apache.apache.resources:apache-incubator-disclaimer-resource-bundle:1.5</resourceBundle>
+                                </resourceBundles>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
             </plugins>
         </pluginManagement>
     </build>
+
+    <!--
+    Uncomment the following "repositories" tag if your maven fails to download paimon-bundle snapshot files.
+    We comment these tags by default because downloading from apache repositories is very slow for both github and developers.
+    -->
+
+    <!--
+    <repositories>
+        <repository>
+            <id>apache-releases</id>
+            <name>apache releases</name>
+            <url>https://repository.apache.org/content/repositories/releases/</url>
+        </repository>
+        <repository>
+            <id>apache-snapshots</id>
+            <name>apache snapshots</name>
+            <url>https://repository.apache.org/content/repositories/snapshots/</url>
+        </repository>
+    </repositories>
+    -->
 </project>

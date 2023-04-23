@@ -32,7 +32,6 @@
     <packaging>jar</packaging>
 
     <properties>
-        <fs.s3.aws.version>1.12.319</fs.s3.aws.version>
         <japicmp.skip>true</japicmp.skip>
     </properties>
 

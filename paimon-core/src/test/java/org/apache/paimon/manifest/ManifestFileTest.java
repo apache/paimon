@@ -107,7 +107,8 @@ public class ManifestFileTest {
                         DEFAULT_PART_TYPE,
                         avro,
                         pathFactory,
-                        suggestedFileSize)
+                        suggestedFileSize,
+                        null)
                 .create();
     }
 

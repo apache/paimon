@@ -18,19 +18,23 @@
 
 package org.apache.paimon.fs;
 
+import org.apache.paimon.catalog.CatalogContext;
+
 import java.io.IOException;
 
 /** Utils for {@link FileIO}. */
 public class FileIOUtils {
 
-    public static FileIOLoader checkAccess(FileIOLoader fileIO, Path path) {
+    public static FileIOLoader checkAccess(FileIOLoader fileIO, Path path, CatalogContext config) {
         try {
             if (fileIO == null) {
                 return null;
             }
 
             // check access
-            fileIO.load(path).exists(path);
+            FileIO io = fileIO.load(path);
+            io.configure(config);
+            io.exists(path);
             return fileIO;
         } catch (IOException ignore) {
             return null;

@@ -22,8 +22,10 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.snapshot.ScannerTestBase;
 import org.apache.paimon.types.RowKind;
@@ -234,5 +236,22 @@ public class StreamTableScanTest extends ScannerTestBase {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testStartingFromNonExistingSnapshot() throws Exception {
+        Table table =
+                this.table.copy(
+                        Collections.singletonMap(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), "0"));
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        StreamTableWrite write = writeBuilder.newWrite();
+        StreamTableCommit commit = writeBuilder.newCommit();
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        StreamTableScan scan = table.newReadBuilder().newStreamScan();
+        TableScan.Plan plan = scan.plan();
+        assertThat(plan.splits()).isEmpty();
     }
 }

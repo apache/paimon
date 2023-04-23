@@ -52,13 +52,6 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCompactedScanModeEmpty() {
-        batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
-        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.mode'='compacted-full') */"))
-                .isEmpty();
-    }
-
-    @Test
     public void testTimeTravelRead() throws InterruptedException {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         long time1 = System.currentTimeMillis();

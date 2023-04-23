@@ -214,6 +214,32 @@ public class TestKeyValueGenerator {
                         rowSerializer.toBinaryRow(convertToRow(order)).copy());
     }
 
+    // used for FileStoreExpireDeleteDirTest to generate data in specified partition
+    public KeyValue nextPartitionedData(RowKind kind, Object... partitionSpec) {
+        Order order = new Order();
+        switch (mode) {
+            case MULTI_PARTITIONED:
+                assert partitionSpec.length == 2;
+                order.dt = (String) partitionSpec[0];
+                order.hr = (int) partitionSpec[1];
+                break;
+            case SINGLE_PARTITIONED:
+                assert partitionSpec.length == 1;
+                order.dt = (String) partitionSpec[0];
+                break;
+            default:
+                // do nothing
+        }
+        return new KeyValue()
+                .replace(
+                        KEY_SERIALIZER
+                                .toBinaryRow(GenericRow.of(order.shopId, order.orderId))
+                                .copy(),
+                        sequenceNumber++,
+                        kind,
+                        rowSerializer.toBinaryRow(convertToRow(order)).copy());
+    }
+
     private InternalRow convertToRow(Order order) {
         List<Object> values =
                 new ArrayList<>(
@@ -307,8 +333,8 @@ public class TestKeyValueGenerator {
     }
 
     private class Order {
-        private final String dt;
-        private final int hr;
+        private String dt;
+        private int hr;
         private final int shopId;
         private final long orderId;
         @Nullable private Long itemId;

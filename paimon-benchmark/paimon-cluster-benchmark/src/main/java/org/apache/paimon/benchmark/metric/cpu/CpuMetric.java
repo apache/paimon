@@ -19,6 +19,7 @@
 package org.apache.paimon.benchmark.metric.cpu;
 
 import org.apache.paimon.benchmark.utils.BenchmarkUtils;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;

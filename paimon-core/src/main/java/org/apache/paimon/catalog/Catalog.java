@@ -109,6 +109,20 @@ public interface Catalog extends AutoCloseable {
     List<String> listTables(String databaseName) throws DatabaseNotExistException;
 
     /**
+     * Check if a table exists in this catalog.
+     *
+     * @param identifier Path of the table
+     * @return true if the given table exists in the catalog false otherwise
+     */
+    default boolean tableExists(Identifier identifier) {
+        try {
+            return getTable(identifier) != null;
+        } catch (TableNotExistException e) {
+            return false;
+        }
+    }
+
+    /**
      * Drop a table.
      *
      * <p>NOTE: System tables can not be dropped.
@@ -167,6 +181,11 @@ public interface Catalog extends AutoCloseable {
      */
     void alterTable(Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException;
+
+    /** Return a boolean that indicates whether this catalog is case-sensitive. */
+    default boolean caseSensitive() {
+        return true;
+    }
 
     /** Exception for trying to drop on a database that is not empty. */
     class DatabaseNotEmptyException extends Exception {

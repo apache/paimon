@@ -20,9 +20,10 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.SnapshotManager;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
@@ -286,7 +287,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                                         "SELECT * FROM T1 /*+ OPTIONS('log.changelog-mode'='upsert') */"))
                 .hasCauseInstanceOf(ValidationException.class)
                 .hasRootCauseMessage(
-                        "File store continuous reading dose not support upsert changelog mode.");
+                        "File store continuous reading does not support upsert changelog mode.");
     }
 
     @TestTemplate
@@ -297,6 +298,6 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                                         "SELECT * FROM T1 /*+ OPTIONS('log.consistency'='eventual') */"))
                 .hasCauseInstanceOf(ValidationException.class)
                 .hasRootCauseMessage(
-                        "File store continuous reading dose not support eventual consistency mode.");
+                        "File store continuous reading does not support eventual consistency mode.");
     }
 }

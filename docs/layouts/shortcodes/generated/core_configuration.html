@@ -204,7 +204,7 @@
             <td><h5>orc.bloom.filter.columns</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>A comma-separated list of columns for which to create a bloon filter when writing.</td>
+            <td>A comma-separated list of columns for which to create a bloom filter when writing.</td>
         </tr>
         <tr>
             <td><h5>orc.bloom.filter.fpp</h5></td>
@@ -339,6 +339,12 @@
             <td>Target size of a source split when scanning a bucket.</td>
         </tr>
         <tr>
+            <td><h5>streaming-read-mode</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td><p>Enum</p></td>
+            <td>The mode of streaming read that specifies to read the data of table file or log<br /><br />Possible values:<br /><ul><li>file: Reads from the data of table file store.</li></ul><ul><li>log: Read from the data of table log store.</li></ul><br /><br />Possible values:<ul><li>"log": Reads from the log store.</li><li>"file": Reads from the file store.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>streaming-read-overwrite</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -361,6 +367,12 @@
             <td style="word-wrap: break-word;">(none)</td>
             <td>Boolean</td>
             <td>Whether the write buffer can be spillable. Enabled by default when using object storage.</td>
+        </tr>
+        <tr>
+            <td><h5>write-manifest-cache</h5></td>
+            <td style="word-wrap: break-word;">0 bytes</td>
+            <td>MemorySize</td>
+            <td>Cache size for reading manifest files for write initialization.</td>
         </tr>
         <tr>
             <td><h5>write-mode</h5></td>

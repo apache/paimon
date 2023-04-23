@@ -22,7 +22,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 import org.testcontainers.containers.Container;
-import org.testcontainers.containers.ContainerState;
 
 import java.util.UUID;
 
@@ -35,8 +34,6 @@ import java.util.UUID;
 @DisabledIfSystemProperty(named = "test.flink.version", matches = "1.14.*")
 public class HiveE2eTest extends E2eReaderTestBase {
 
-    private static final String PAIMON_HIVE_CONNECTOR_JAR_NAME = "paimon-hive-connector.jar";
-
     public HiveE2eTest() {
         super(false, true, false);
     }
@@ -45,13 +42,7 @@ public class HiveE2eTest extends E2eReaderTestBase {
     @Override
     public void before() throws Exception {
         super.before();
-        getHive()
-                .execInContainer(
-                        "/bin/bash",
-                        "-c",
-                        "mkdir /opt/hive/auxlib && cp /jars/"
-                                + PAIMON_HIVE_CONNECTOR_JAR_NAME
-                                + " /opt/hive/auxlib");
+        setupHiveConnector();
     }
 
     @Test
@@ -111,10 +102,6 @@ public class HiveE2eTest extends E2eReaderTestBase {
             throw new AssertionError("Failed when running hive sql.");
         }
         return execResult.getStdout();
-    }
-
-    private ContainerState getHive() {
-        return environment.getContainerByServiceName("hive-server_1").get();
     }
 
     private void runSql(String sql, String... ddls) throws Exception {

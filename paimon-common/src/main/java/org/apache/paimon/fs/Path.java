@@ -52,13 +52,14 @@ public class Path implements Comparable<Path>, Serializable {
     /** Whether the current host is a Windows machine. */
     public static final boolean WINDOWS = System.getProperty("os.name").startsWith("Windows");
 
-    /** Pre-org.apache.hadoop.shaded.com.iled regular expressions to detect path formats. */
+    /** A pre-compiled regex/state-machine to match the path formats pattern. */
     private static final Pattern HAS_DRIVE_LETTER_SPECIFIER = Pattern.compile("^/?[a-zA-Z]:");
 
-    /** Pre-org.apache.hadoop.shaded.com.iled regular expressions to detect duplicated slashes. */
+    /** A pre-compiled regex/state-machine to match the duplicated slashes pattern. */
     private static final Pattern SLASHES = Pattern.compile("/+");
 
-    private URI uri; // a hierarchical uri
+    /** A hierarchical URI. */
+    private URI uri;
 
     /**
      * Create a new Path based on the child path resolved against the parent path.
@@ -97,17 +98,16 @@ public class Path implements Comparable<Path>, Serializable {
      * @param child the child path
      */
     public Path(Path parent, Path child) {
-        // Add a slash to parent's path so resolution is org.apache.hadoop.shaded.com.atible with
-        // URI's
+        // Add a slash to parent's path so resolution is compatible with URI's
         URI parentUri = parent.uri;
         String parentPath = parentUri.getPath();
-        if (!(parentPath.equals("/") || parentPath.isEmpty())) {
+        if (!(parentPath.equals(SEPARATOR) || parentPath.isEmpty())) {
             try {
                 parentUri =
                         new URI(
                                 parentUri.getScheme(),
                                 parentUri.getAuthority(),
-                                parentUri.getPath() + "/",
+                                parentUri.getPath() + SEPARATOR,
                                 null,
                                 parentUri.getFragment());
             } catch (URISyntaxException e) {
@@ -122,7 +122,13 @@ public class Path implements Comparable<Path>, Serializable {
                 resolved.getFragment());
     }
 
-    private void checkPathArg(String path) throws IllegalArgumentException {
+    /**
+     * Checks if the provided path string is either null or has zero length and throws a {@link
+     * IllegalArgumentException} if any of the two conditions apply.
+     *
+     * @param path the path string to be checked
+     */
+    private void checkPathArg(String path) {
         // disallow construction of a Path from an empty string
         if (path == null) {
             throw new IllegalArgumentException("Can not create a Path from a null string");
@@ -138,18 +144,18 @@ public class Path implements Comparable<Path>, Serializable {
      *
      * @param pathString the path string
      */
-    public Path(String pathString) throws IllegalArgumentException {
+    public Path(String pathString) {
         checkPathArg(pathString);
 
         // We can't use 'new URI(String)' directly, since it assumes things are
         // escaped, which we don't require of Paths.
 
         // add a slash in front of paths with Windows drive letters
-        if (hasWindowsDrive(pathString) && pathString.charAt(0) != '/') {
-            pathString = "/" + pathString;
+        if (hasWindowsDrive(pathString) && pathString.charAt(0) != SEPARATOR_CHAR) {
+            pathString = SEPARATOR + pathString;
         }
 
-        // parse uri org.apache.hadoop.shaded.com.onents
+        // parse uri components
         String scheme = null;
         String authority = null;
 
@@ -157,7 +163,7 @@ public class Path implements Comparable<Path>, Serializable {
 
         // parse uri scheme, if any
         int colon = pathString.indexOf(':');
-        int slash = pathString.indexOf('/');
+        int slash = pathString.indexOf(SEPARATOR_CHAR);
         if ((colon != -1) && ((slash == -1) || (colon < slash))) { // has a scheme
             scheme = pathString.substring(0, colon);
             start = colon + 1;
@@ -166,7 +172,7 @@ public class Path implements Comparable<Path>, Serializable {
         // parse uri authority, if any
         if (pathString.startsWith("//", start)
                 && (pathString.length() - start > 2)) { // has authority
-            int nextSlash = pathString.indexOf('/', start + 2);
+            int nextSlash = pathString.indexOf(SEPARATOR_CHAR, start + 2);
             int authEnd = nextSlash > 0 ? nextSlash : pathString.length();
             authority = pathString.substring(start + 2, authEnd);
             start = authEnd;
@@ -188,7 +194,7 @@ public class Path implements Comparable<Path>, Serializable {
     }
 
     /**
-     * Construct a Path from org.apache.hadoop.shaded.com.onents.
+     * Construct a Path from a scheme, an authority and a path string.
      *
      * @param scheme the scheme
      * @param authority the authority
@@ -198,19 +204,27 @@ public class Path implements Comparable<Path>, Serializable {
         checkPathArg(path);
 
         // add a slash in front of paths with Windows drive letters
-        if (hasWindowsDrive(path) && path.charAt(0) != '/') {
-            path = "/" + path;
+        if (hasWindowsDrive(path) && path.charAt(0) != SEPARATOR_CHAR) {
+            path = SEPARATOR + path;
         }
 
         // add "./" in front of Linux relative paths so that a path containing
         // a colon e.q. "a:b" will not be interpreted as scheme "a".
-        if (!WINDOWS && path.charAt(0) != '/') {
-            path = "./" + path;
+        if (!WINDOWS && path.charAt(0) != SEPARATOR_CHAR) {
+            path = CUR_DIR + SEPARATOR + path;
         }
 
         initialize(scheme, authority, path, null);
     }
 
+    /**
+     * Initializes a path object given the scheme, authority, path and fragment string.
+     *
+     * @param scheme the scheme string.
+     * @param authority the authority string.
+     * @param path the path string.
+     * @param fragment the fragment string.
+     */
     private void initialize(String scheme, String authority, String path, String fragment) {
         try {
             this.uri =
@@ -231,7 +245,7 @@ public class Path implements Comparable<Path>, Serializable {
      */
     private static String normalizePath(String scheme, String path) {
         // Remove duplicated slashes.
-        path = SLASHES.matcher(path).replaceAll("/");
+        path = SLASHES.matcher(path).replaceAll(SEPARATOR);
 
         // Remove backslashes if this looks like a Windows path. Avoid
         // the substitution if it looks like a non-local URI.
@@ -240,7 +254,7 @@ public class Path implements Comparable<Path>, Serializable {
                         || (scheme == null)
                         || (scheme.isEmpty())
                         || (scheme.equals("file")))) {
-            path = StringUtils.replace(path, "\\", "/");
+            path = StringUtils.replace(path, "\\", SEPARATOR);
         }
 
         // trim trailing slash from non-root path (ignoring windows drive)
@@ -252,10 +266,21 @@ public class Path implements Comparable<Path>, Serializable {
         return path;
     }
 
+    /**
+     * Checks if the provided path string contains a windows drive letter.
+     *
+     * @return True, if the path string contains a windows drive letter, false otherwise.
+     */
     private static boolean hasWindowsDrive(String path) {
         return (WINDOWS && HAS_DRIVE_LETTER_SPECIFIER.matcher(path).find());
     }
 
+    /**
+     * Get start position without windows drive letter.
+     *
+     * @param path the path string.
+     * @return the start position of without windows drive letter.
+     */
     private static int startPositionWithoutWindowsDrive(String path) {
         if (hasWindowsDrive(path)) {
             return path.charAt(0) == SEPARATOR_CHAR ? 3 : 2;
@@ -283,9 +308,9 @@ public class Path implements Comparable<Path>, Serializable {
     }
 
     /**
-     * Returns the final org.apache.hadoop.shaded.com.onent of this path.
+     * Returns the final component of this path, i.e., everything that follows the last separator.
      *
-     * @return the final org.apache.hadoop.shaded.com.onent of this path
+     * @return the final component of the path
      */
     public String getName() {
         String path = uri.getPath();
@@ -300,7 +325,7 @@ public class Path implements Comparable<Path>, Serializable {
      */
     public Path getParent() {
         String path = uri.getPath();
-        int lastSlash = path.lastIndexOf('/');
+        int lastSlash = path.lastIndexOf(SEPARATOR_CHAR);
         int start = startPositionWithoutWindowsDrive(path);
         if ((path.length() == start)
                 || // empty path
@@ -329,7 +354,7 @@ public class Path implements Comparable<Path>, Serializable {
         }
         if (uri.getPath() != null) {
             String path = uri.getPath();
-            if (path.indexOf('/') == 0
+            if (path.indexOf(SEPARATOR_CHAR) == 0
                     && hasWindowsDrive(path)
                     && // has windows drive
                     uri.getScheme() == null

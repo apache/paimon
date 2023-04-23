@@ -121,6 +121,40 @@ public class DateTimeUtils {
                 + time.getNano() / 1000_000;
     }
 
+    /**
+     * Format a {@link LocalDateTime} to yyyy-MM-dd HH:mm:ss[.nano] string.
+     *
+     * @param precision how many digits of nanoseconds to be retained
+     */
+    public static String formatLocalDateTime(LocalDateTime localDateTime, int precision) {
+        // nanosecond is range in 0 ~ 999_999_999
+        Preconditions.checkArgument(
+                precision >= 0 && precision <= 9, "precision should be in range 0 ~ 9.");
+        // format year to second part
+        StringBuilder ymdhms =
+                ymdhms(
+                        new StringBuilder(),
+                        localDateTime.getYear(),
+                        localDateTime.getMonthValue(),
+                        localDateTime.getDayOfMonth(),
+                        localDateTime.getHour(),
+                        localDateTime.getMinute(),
+                        localDateTime.getSecond());
+
+        // format nanosecond part
+        StringBuilder fraction = new StringBuilder(Long.toString(localDateTime.getNano()));
+        while (fraction.length() < 9) {
+            fraction.insert(0, "0");
+        }
+        String nano = fraction.substring(0, precision);
+
+        if (nano.length() > 0) {
+            ymdhms.append(".").append(fraction);
+        }
+
+        return ymdhms.toString();
+    }
+
     // --------------------------------------------------------------------------------------------
     // Java 8 time conversion
     // --------------------------------------------------------------------------------------------
@@ -449,5 +483,43 @@ public class DateTimeUtils {
     private static long zeroLastDigits(long l, int n) {
         long tenToTheN = (long) Math.pow(10, n);
         return (l / tenToTheN) * tenToTheN;
+    }
+
+    /** Appends year-month-day and hour:minute:second to a buffer; assumes they are valid. */
+    private static StringBuilder ymdhms(
+            StringBuilder b, int year, int month, int day, int h, int m, int s) {
+        ymd(b, year, month, day);
+        b.append(' ');
+        return hms(b, h, m, s);
+    }
+
+    /** Appends year-month-day to a buffer; assumes they are valid. */
+    private static StringBuilder ymd(StringBuilder b, int year, int month, int day) {
+        int4(b, year);
+        b.append('-');
+        int2(b, month);
+        b.append('-');
+        return int2(b, day);
+    }
+
+    /** Appends hour:minute:second to a buffer; assumes they are valid. */
+    private static StringBuilder hms(StringBuilder b, int h, int m, int s) {
+        int2(b, h);
+        b.append(':');
+        int2(b, m);
+        b.append(':');
+        return int2(b, s);
+    }
+
+    private static StringBuilder int4(StringBuilder buf, int i) {
+        buf.append((char) ('0' + (i / 1000) % 10));
+        buf.append((char) ('0' + (i / 100) % 10));
+        buf.append((char) ('0' + (i / 10) % 10));
+        return buf.append((char) ('0' + i % 10));
+    }
+
+    private static StringBuilder int2(StringBuilder buf, int i) {
+        buf.append((char) ('0' + (i / 10) % 10));
+        return buf.append((char) ('0' + i % 10));
     }
 }

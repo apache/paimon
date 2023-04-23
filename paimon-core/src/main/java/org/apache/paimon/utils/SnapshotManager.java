@@ -100,10 +100,10 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Long latestCompactedSnapshotId() {
-        return pickSnapshot(s -> s.commitKind() == CommitKind.COMPACT);
+        return pickFromLatest(s -> s.commitKind() == CommitKind.COMPACT);
     }
 
-    public @Nullable Long pickSnapshot(Predicate<Snapshot> predicate) {
+    public @Nullable Long pickFromLatest(Predicate<Snapshot> predicate) {
         Long latestId = latestSnapshotId();
         Long earliestId = earliestSnapshotId();
         if (latestId == null || earliestId == null) {
@@ -239,6 +239,7 @@ public class SnapshotManager implements Serializable {
             try {
                 TimeUnit.MILLISECONDS.sleep(READ_HINT_RETRY_INTERVAL);
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 throw new RuntimeException(e);
             }
         }

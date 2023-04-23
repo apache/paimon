@@ -21,7 +21,6 @@ package org.apache.paimon.table.system;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
@@ -41,7 +40,6 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -50,6 +48,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+
+import static org.apache.paimon.utils.SerializationUtils.newBytesType;
+import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /**
  * A table to produce modified partitions and buckets for each snapshot.
@@ -85,21 +86,11 @@ public class BucketsTable implements DataTable, ReadonlyTable {
 
     @Override
     public RowType rowType() {
-        RowType partitionType = wrapped.schema().logicalPartitionType();
-
         List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "_SNAPSHOT_ID", new BigIntType()));
-        fields.addAll(partitionType.getFields());
-        // same with ManifestEntry.schema
-        fields.add(new DataField(1, "_BUCKET", new IntType()));
-        fields.add(new DataField(2, "_FILES", new VarBinaryType()));
-        return new RowType(fields);
-    }
-
-    public static RowType partitionWithBucketRowType(RowType partitionType) {
-        List<DataField> fields = new ArrayList<>(partitionType.getFields());
-        // same with ManifestEntry.schema
-        fields.add(new DataField(3, "_BUCKET", new IntType()));
+        fields.add(new DataField(0, "_SNAPSHOT_ID", new BigIntType(false)));
+        fields.add(new DataField(1, "_PARTITION", newBytesType(false)));
+        fields.add(new DataField(2, "_BUCKET", new IntType(false)));
+        fields.add(new DataField(3, "_FILES", newBytesType(false)));
         return new RowType(fields);
     }
 
@@ -171,10 +162,6 @@ public class BucketsTable implements DataTable, ReadonlyTable {
 
             DataSplit dataSplit = (DataSplit) split;
 
-            InternalRow row =
-                    new JoinedRow(GenericRow.of(dataSplit.snapshotId()), dataSplit.partition());
-            row = new JoinedRow(row, GenericRow.of(dataSplit.bucket()));
-
             List<DataFileMeta> files = Collections.emptyList();
             if (isContinuous) {
                 // Serialized files are only useful in streaming jobs.
@@ -182,10 +169,12 @@ public class BucketsTable implements DataTable, ReadonlyTable {
                 // be compacted and don't need to concern incremental new files.
                 files = dataSplit.files();
             }
-            row =
-                    new JoinedRow(
-                            row,
-                            GenericRow.of((Object) dataFileMetaSerializer.serializeList(files)));
+            InternalRow row =
+                    GenericRow.of(
+                            dataSplit.snapshotId(),
+                            serializeBinaryRow(dataSplit.partition()),
+                            dataSplit.bucket(),
+                            dataFileMetaSerializer.serializeList(files));
 
             return new IteratorRecordReader<>(Collections.singletonList(row).iterator());
         }

@@ -318,8 +318,8 @@ public abstract class AbstractFileStoreWrite<T>
         List<DataFileMeta> existingFileMetas = new ArrayList<>();
         if (snapshotId != null) {
             // Concat all the DataFileMeta of existing files into existingFileMetas.
-            scan.withSnapshot(snapshotId).withPartitionFilter(Collections.singletonList(partition))
-                    .withBucket(bucket).plan().files().stream()
+            scan.withSnapshot(snapshotId).withPartitionBucket(partition, bucket).plan().files()
+                    .stream()
                     .map(ManifestEntry::file)
                     .forEach(existingFileMetas::add);
         }

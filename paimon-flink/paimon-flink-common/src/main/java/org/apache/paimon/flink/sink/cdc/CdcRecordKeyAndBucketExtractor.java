@@ -65,6 +65,10 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
     @Override
     public void setRecord(CdcRecord record) {
         this.record = record;
+
+        this.partition = null;
+        this.bucketKey = null;
+        this.bucket = null;
     }
 
     @Override

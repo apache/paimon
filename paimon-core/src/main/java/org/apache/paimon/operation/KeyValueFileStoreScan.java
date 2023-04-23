@@ -60,7 +60,6 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 bucketKeyType,
                 snapshotManager,
                 schemaManager,
-                schemaId,
                 manifestFileFactory,
                 manifestListFactory,
                 numOfBuckets,

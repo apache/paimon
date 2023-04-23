@@ -19,6 +19,7 @@
 package org.apache.paimon.benchmark.metric;
 
 import org.apache.paimon.benchmark.utils.BenchmarkUtils;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 
@@ -107,22 +108,18 @@ public class FlinkRestClient {
         }
     }
 
-    public void waitUntilNumberOfRows(String jobId, long numberOfRows) {
+    public void waitUntilNumberOfRows(String jobId, long numberOfRows) throws InterruptedException {
         while (true) {
             String sourceVertexId = getSourceVertexId(jobId);
             double actualNumRecords = getTotalNumRecords(jobId, sourceVertexId);
             if (actualNumRecords >= numberOfRows) {
                 return;
             }
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                // ignore
-            }
+            Thread.sleep(1000);
         }
     }
 
-    public long waitUntilJobFinished(String jobId) {
+    public long waitUntilJobFinished(String jobId) throws InterruptedException {
         while (true) {
             String url = String.format("http://%s/jobs/%s", jmEndpoint, jobId);
             String response = executeAsString(url);
@@ -136,11 +133,7 @@ public class FlinkRestClient {
                 throw new RuntimeException(
                         "The response is not a valid JSON string:\n" + response, e);
             }
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                // ignore
-            }
+            Thread.sleep(1000);
         }
     }
 

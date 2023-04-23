@@ -20,6 +20,7 @@ package org.apache.paimon.codegen;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import org.codehaus.janino.SimpleCompiler;
 import org.slf4j.Logger;
@@ -50,6 +51,7 @@ public final class CompileUtils {
                     // estimated cache size
                     .maximumSize(300)
                     .softValues()
+                    .executor(MoreExecutors.directExecutor())
                     .build();
 
     /**
