@@ -21,17 +21,24 @@ package org.apache.paimon.flink.action.cdc.mysql;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.types.DataType;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utility class to load MySQL table schema with JDBC. */
 public class MySqlSchema {
+
+    private static final Logger LOG = LoggerFactory.getLogger(MySqlSchema.class);
 
     // used for retrieving metadata and throwing error, do not convert to case-insensitive form
     private final String databaseName;
@@ -49,12 +56,25 @@ public class MySqlSchema {
         this.originalTableName = tableName;
         this.tableName = caseSensitive ? tableName : tableName.toLowerCase();
 
+        Set<String> originalFields = new HashSet<>();
         fields = new LinkedHashMap<>();
         try (ResultSet rs = metaData.getColumns(null, databaseName, tableName, null)) {
             while (rs.next()) {
                 String fieldName = rs.getString("COLUMN_NAME");
                 String fieldType = rs.getString("TYPE_NAME");
                 Integer precision = rs.getInt("COLUMN_SIZE");
+
+                // in some cases the #getColumns will return primary keys twice (unknown issue)
+                if (originalFields.contains(fieldName)) {
+                    LOG.warn(
+                            "Duplicate field found: '{}'.\nDebug information: MySQL version is {}; JDBC Driver version is {}",
+                            fieldName,
+                            metaData.getDatabaseProductVersion(),
+                            metaData.getDriverVersion());
+                    continue;
+                }
+                originalFields.add(fieldName);
+
                 if (rs.wasNull()) {
                     precision = null;
                 }
@@ -63,10 +83,12 @@ public class MySqlSchema {
                     scale = null;
                 }
                 if (!caseSensitive) {
-                    fieldName = fieldName.toLowerCase();
                     checkArgument(
-                            !fields.containsKey(fieldName),
-                            "Duplicate key appears when converting fields map keys to case-insensitive form.");
+                            !fields.containsKey(fieldName.toLowerCase()),
+                            String.format(
+                                    "Duplicate key '%s' in table '%s.%s' appears when converting fields map keys to case-insensitive form.",
+                                    fieldName, databaseName, originalTableName));
+                    fieldName = fieldName.toLowerCase();
                 }
                 fields.put(fieldName, MySqlTypeUtils.toDataType(fieldType, precision, scale));
             }
