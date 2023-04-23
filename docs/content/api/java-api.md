@@ -580,3 +580,24 @@ public class StreamWriteTable {
     }
 }
 ```
+
+## Data Types
+
+| Java         | Paimon                    | 
+|:-------------|:--------------------------|
+| boolean      | boolean                   |
+| byte         | byte                      |
+| short        | short                     |
+| int          | int                       |
+| long         | long                      |
+| float        | float                     |
+| double       | double                    |
+| string       | BinaryString              |
+| decimal      | decimal                   |
+| timestamp    | timestamp                 |
+| byte[]       | byte[]                    |
+| array        | InternalArray             |
+| map          | InternalMap               |
+| InternalRow  | InternalRow               |
+
+
