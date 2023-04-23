@@ -240,3 +240,19 @@ ALTER TABLE my_table ALTER COLUMN col_a AFTER col_b;
 {{< /tab >}}
 
 {{< /tabs >}}
+
+## Changing Column Type
+
+The following SQL changes type of column `col_a` to `DOUBLE`.
+
+{{< tabs "change-column-type" >}}
+
+{{< tab "Spark3" >}}
+
+```sql
+ALTER TABLE my_table ALTER COLUMN col_a TYPE 'DOUBLE';
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
