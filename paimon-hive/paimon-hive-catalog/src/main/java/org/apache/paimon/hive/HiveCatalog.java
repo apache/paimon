@@ -305,6 +305,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         try {
+            checkIdentifierUpperCase(toTable);
             String fromDB = fromTable.getDatabaseName();
             String fromTableName = fromTable.getObjectName();
             Table table = client.getTable(fromDB, fromTableName);
@@ -334,6 +335,8 @@ public class HiveCatalog extends AbstractCatalog {
             // first commit changes to underlying files
             TableSchema schema = schemaManager.commitChanges(changes);
 
+            // flink can alter table column since version 1.17
+            checkFieldNamesUpperCase(schema.fieldNames());
             try {
                 // sync to hive hms
                 Table table =
@@ -368,12 +371,13 @@ public class HiveCatalog extends AbstractCatalog {
         checkState(
                 identifier.getDatabaseName().equals(identifier.getDatabaseName().toLowerCase()),
                 String.format(
-                        "Database name[%s] cannot contain upper case",
+                        "Database name[%s] cannot contain upper case in hive catalog",
                         identifier.getDatabaseName()));
         checkState(
                 identifier.getObjectName().equals(identifier.getObjectName().toLowerCase()),
                 String.format(
-                        "Table name[%s] cannot contain upper case", identifier.getObjectName()));
+                        "Table name[%s] cannot contain upper case in hive catalog",
+                        identifier.getObjectName()));
     }
 
     private void checkFieldNamesUpperCase(List<String> fieldNames) {
@@ -383,7 +387,9 @@ public class HiveCatalog extends AbstractCatalog {
                         .collect(Collectors.toList());
         checkState(
                 illegalFieldNames.isEmpty(),
-                String.format("Field names %s cannot contain upper case", illegalFieldNames));
+                String.format(
+                        "Field names %s cannot contain upper case in hive catalog",
+                        illegalFieldNames));
     }
 
     private Database convertToDatabase(String name) {

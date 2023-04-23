@@ -80,6 +80,8 @@ USE paimon.default;
 
 By using Paimon Hive catalog, changes to the catalog will directly affect the corresponding Hive metastore. Tables created in such catalog can also be accessed directly from Hive.
 
+To use Hive catalog, Database name、Table name and Field names should be lower case.
+
 {{< tabs "hive-metastore-example" >}}
 
 {{< tab "Flink" >}}

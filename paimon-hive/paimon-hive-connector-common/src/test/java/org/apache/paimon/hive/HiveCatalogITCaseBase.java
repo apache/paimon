@@ -439,6 +439,11 @@ public abstract class HiveCatalogITCaseBase {
                 .hasMessage(
                         "Could not execute ALTER TABLE my_hive.test_db.t1 RENAME TO my_hive.test_db.t2");
 
+        // the target table name has upper case.
+        assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t1 RENAME TO T1"))
+                .hasMessage(
+                        "Could not execute ALTER TABLE my_hive.test_db.t1 RENAME TO my_hive.test_db.T1");
+
         tEnv.executeSql("ALTER TABLE t1 RENAME TO t3").await();
         List<String> tables = hiveShell.executeQuery("SHOW TABLES");
         Assert.assertTrue(tables.contains("t3"));
