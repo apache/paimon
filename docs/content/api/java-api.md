@@ -82,8 +82,6 @@ You can use the catalog to create databases. The created databases are persisten
 
 ```java
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.fs.Path;
 
 public class CreateDatabase {
@@ -97,21 +95,35 @@ public class CreateDatabase {
         }
 }
 ```
+
+## Determine Whether Database Exists
+
+You can use the catalog to determine whether the database exists
+
+```java
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.fs.Path;
+
+public class DatabaseExists {
+
+     public static void main(String[] args) {
+             boolean exists = catalog.databaseExists("my_db");
+        }
+}
+```
+
 ## List Databases
 
 You can use the catalog to list databases.
 
 ```java
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.fs.Path;
 
 public class ListDatabases {
 
      public static void main(String[] args) {
             List<String> databases = catalog.listDatabases();
-            databases.forEach(System.out::println);
         }
 }
 ```
@@ -196,6 +208,24 @@ public class GetTable {
 }
 ```
 
+## Determine Whether Table Exists
+
+You can use the catalog to determine whether the table exists
+
+```java
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+
+public class TableExists {
+
+ public static void main(String[] args) {
+        Identifier identifier = Identifier.create("my_db", "my_table");
+        boolean exists = catalog.tableExists(identifier);
+    }
+}
+```
+
 ## List Tables
 
 You can use the catalog to list tables.
@@ -203,7 +233,6 @@ You can use the catalog to list tables.
 ```java
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
 
 public class ListTables {
 
@@ -284,7 +313,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import com.google.common.collect.Lists;
 import java.util.Arrays;
-import java.util.List;
 
 public class AlterTable {
 
