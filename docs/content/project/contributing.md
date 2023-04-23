@@ -173,7 +173,7 @@ Please feel free to ask questions at any time. Either send a mail to the Dev mai
       <div class="panel-body">
         <h2><span class="number">3</span><a href="#review">Review</a></h2>
         <p>Work with the reviewer.</p><br />
-        <p><b>1.Make sure no unrelated or unnecessary reformatting changes are included. 2.Make sure your change has been rebased to the latest commits in your base branch.</b></p>
+        <p><b>1.Make sure no unrelated or unnecessary reformatting changes are included. 2.Please ensure that the test passing. 3.Please don't resolve conversation.</b></p>
       </div>
     </div>
   </div>
