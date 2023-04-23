@@ -330,6 +330,7 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
 
+        checkFieldNamesUpperCaseInSchemaChange(changes);
         try {
             final SchemaManager schemaManager = schemaManager(identifier);
             // first commit changes to underlying files
@@ -378,16 +379,32 @@ public class HiveCatalog extends AbstractCatalog {
                         identifier.getObjectName()));
     }
 
+    private void checkFieldNamesUpperCaseInSchemaChange(List<SchemaChange> changes) {
+        List<String> fieldNames = new ArrayList<>();
+        for (SchemaChange change : changes) {
+            if (change instanceof SchemaChange.AddColumn) {
+                SchemaChange.AddColumn addColumn = (SchemaChange.AddColumn) change;
+                fieldNames.add(addColumn.fieldName());
+            } else if (change instanceof SchemaChange.RenameColumn) {
+                SchemaChange.RenameColumn rename = (SchemaChange.RenameColumn) change;
+                fieldNames.add(rename.newName());
+            } else {
+                // do nothing
+            }
+        }
+        checkFieldNamesUpperCase(fieldNames);
+    }
+
     private void checkFieldNamesUpperCase(List<String> fieldNames) {
         List<String> illegalFieldNames =
-                fieldNames.stream()
-                        .filter(f -> !f.equals(f.toLowerCase()))
-                        .collect(Collectors.toList());
+            fieldNames.stream()
+                .filter(f -> !f.equals(f.toLowerCase()))
+                .collect(Collectors.toList());
         checkState(
-                illegalFieldNames.isEmpty(),
-                String.format(
-                        "Field names %s cannot contain upper case in hive catalog",
-                        illegalFieldNames));
+            illegalFieldNames.isEmpty(),
+            String.format(
+                "Field names %s cannot contain upper case in hive catalog",
+                illegalFieldNames));
     }
 
     private Database convertToDatabase(String name) {
