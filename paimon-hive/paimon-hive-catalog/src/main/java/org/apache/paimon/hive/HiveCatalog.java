@@ -335,8 +335,6 @@ public class HiveCatalog extends AbstractCatalog {
             // first commit changes to underlying files
             TableSchema schema = schemaManager.commitChanges(changes);
 
-            // flink can alter table column since version 1.17
-            checkFieldNamesUpperCase(schema.fieldNames());
             try {
                 // sync to hive hms
                 Table table =
