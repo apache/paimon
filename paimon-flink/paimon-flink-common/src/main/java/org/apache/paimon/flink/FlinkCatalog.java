@@ -26,9 +26,12 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.table.api.Schema.UnresolvedColumn;
+import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.TableSchema;
+import org.apache.flink.table.api.WatermarkSpec;
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
@@ -52,7 +55,10 @@ import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
+import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.logical.utils.LogicalTypeParser;
+import org.apache.flink.table.types.utils.TypeConversions;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -61,8 +67,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import static org.apache.flink.table.descriptors.DescriptorProperties.DATA_TYPE;
+import static org.apache.flink.table.descriptors.DescriptorProperties.EXPR;
+import static org.apache.flink.table.descriptors.DescriptorProperties.METADATA;
+import static org.apache.flink.table.descriptors.DescriptorProperties.NAME;
+import static org.apache.flink.table.descriptors.DescriptorProperties.VIRTUAL;
+import static org.apache.flink.table.descriptors.DescriptorProperties.WATERMARK;
+import static org.apache.flink.table.descriptors.DescriptorProperties.WATERMARK_ROWTIME;
+import static org.apache.flink.table.descriptors.DescriptorProperties.WATERMARK_STRATEGY_DATA_TYPE;
+import static org.apache.flink.table.descriptors.DescriptorProperties.WATERMARK_STRATEGY_EXPR;
 import static org.apache.flink.table.descriptors.Schema.SCHEMA;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
@@ -201,13 +218,11 @@ public class FlinkCatalog extends AbstractCatalog {
         Map<String, String> options = table.getOptions();
         if (options.containsKey(CONNECTOR.key())) {
             throw new CatalogException(
-                    String.format(
-                            "Paimon Catalog only supports paimon tables ,"
-                                    + " and you don't need to specify  'connector'= '"
-                                    + FlinkCatalogFactory.IDENTIFIER
-                                    + "' when using Paimon Catalog\n"
-                                    + " You can create TEMPORARY table instead if you want to create the table of other connector.",
-                            options.get(CONNECTOR.key())));
+                    "Paimon Catalog only supports paimon tables ,"
+                            + " and you don't need to specify  'connector'= '"
+                            + FlinkCatalogFactory.IDENTIFIER
+                            + "' when using Paimon Catalog\n"
+                            + " You can create TEMPORARY table instead if you want to create the table of other connector.");
         }
 
         // remove table path
@@ -316,37 +331,116 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     private CatalogTableImpl toCatalogTable(Table table) {
-        TableSchema schema;
         Map<String, String> newOptions = new HashMap<>(table.options());
 
-        // try to read schema from options
-        // in the case of virtual columns and watermark
-        DescriptorProperties tableSchemaProps = new DescriptorProperties(true);
-        tableSchemaProps.putProperties(newOptions);
-        Optional<TableSchema> optional =
-                tableSchemaProps.getOptionalTableSchema(
-                        org.apache.flink.table.descriptors.Schema.SCHEMA);
-        if (optional.isPresent()) {
-            schema = optional.get();
+        TableSchema.Builder builder = TableSchema.builder();
 
-            // remove schema from options
-            DescriptorProperties removeProperties = new DescriptorProperties(false);
-            removeProperties.putTableSchema(SCHEMA, schema);
-            removeProperties.asMap().keySet().forEach(newOptions::remove);
-        } else {
-            TableSchema.Builder builder = TableSchema.builder();
-            for (RowType.RowField field : toLogicalType(table.rowType()).getFields()) {
+        // add columns
+        List<RowType.RowField> rowFields = toLogicalType(table.rowType()).getFields();
+        int count = nonPhysicalColumnsCount(newOptions);
+        int physicalColumnIndex = 0;
+        for (int i = 0; i < rowFields.size() + count; i++) {
+            if (newOptions.containsKey(compoundKey(SCHEMA, i, NAME))) {
+                // build non-physical column definition from schema options
+                builder.add(deserializeNonPhysicalColumn(newOptions, i));
+            } else {
+                // build physical column from table row
+                RowType.RowField field = rowFields.get(physicalColumnIndex++);
                 builder.field(field.getName(), fromLogicalToDataType(field.getType()));
             }
-            if (table.primaryKeys().size() > 0) {
-                builder.primaryKey(table.primaryKeys().toArray(new String[0]));
-            }
+        }
 
-            schema = builder.build();
+        // extract watermark information
+        if (newOptions.keySet().stream()
+                .anyMatch(key -> key.startsWith(compoundKey(SCHEMA, WATERMARK)))) {
+            builder.watermark(deserializeWatermarkSpec(newOptions));
+        }
+
+        // extract watermark information
+        if (table.primaryKeys().size() > 0) {
+            builder.primaryKey(table.primaryKeys().toArray(new String[0]));
         }
 
         return new DataCatalogTable(
-                table, schema, table.partitionKeys(), newOptions, table.comment().orElse(""));
+                table,
+                builder.build(),
+                table.partitionKeys(),
+                newOptions,
+                table.comment().orElse(""));
+    }
+
+    private static final Pattern SCHEMA_COLUMN_NAME_SUFFIX = Pattern.compile("\\d+\\.name");
+
+    private static int nonPhysicalColumnsCount(Map<String, String> tableOptions) {
+        return tableOptions.keySet().stream()
+                .filter(
+                        k ->
+                                k.startsWith(SCHEMA)
+                                        && SCHEMA_COLUMN_NAME_SUFFIX
+                                                .matcher(k.substring(SCHEMA.length() + 1))
+                                                .matches())
+                .mapToInt(k -> 1)
+                .sum();
+    }
+
+    private static TableColumn deserializeNonPhysicalColumn(
+            Map<String, String> options, int index) {
+        String nameKey = compoundKey(SCHEMA, index, NAME);
+        String dataTypeKey = compoundKey(SCHEMA, index, DATA_TYPE);
+        String exprKey = compoundKey(SCHEMA, index, EXPR);
+        String metadataKey = compoundKey(SCHEMA, index, METADATA);
+        String virtualKey = compoundKey(SCHEMA, index, VIRTUAL);
+
+        String name = options.get(nameKey);
+        DataType dataType =
+                TypeConversions.fromLogicalToDataType(
+                        LogicalTypeParser.parse(options.get(dataTypeKey)));
+
+        TableColumn column;
+        if (options.containsKey(exprKey)) {
+            column = TableColumn.computed(name, dataType, options.get(exprKey));
+        } else if (options.containsKey(metadataKey)) {
+            String metadataAlias = options.get(metadataKey);
+            boolean isVirtual = Boolean.parseBoolean(options.get(virtualKey));
+            column =
+                    metadataAlias.equals(name)
+                            ? TableColumn.metadata(name, dataType, isVirtual)
+                            : TableColumn.metadata(name, dataType, metadataAlias, isVirtual);
+        } else {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to build non-physical column. Current index is %s, options are %s",
+                            index, options));
+        }
+
+        options.remove(nameKey);
+        options.remove(dataTypeKey);
+        options.remove(exprKey);
+        options.remove(metadataKey);
+        options.remove(virtualKey);
+
+        return column;
+    }
+
+    private static WatermarkSpec deserializeWatermarkSpec(Map<String, String> options) {
+        String watermarkPrefixKey = compoundKey(SCHEMA, WATERMARK);
+
+        String rowtimeKey = compoundKey(watermarkPrefixKey, 0, WATERMARK_ROWTIME);
+        String exprKey = compoundKey(watermarkPrefixKey, 0, WATERMARK_STRATEGY_EXPR);
+        String dataTypeKey = compoundKey(watermarkPrefixKey, 0, WATERMARK_STRATEGY_DATA_TYPE);
+
+        String rowtimeAttribute = options.get(rowtimeKey);
+        String watermarkExpressionString = options.get(exprKey);
+        DataType watermarkExprOutputType =
+                TypeConversions.fromLogicalToDataType(
+                        LogicalTypeParser.parse(options.get(dataTypeKey)));
+
+        options.remove(rowtimeKey);
+        options.remove(exprKey);
+        options.remove(dataTypeKey);
+
+        return new WatermarkSpec(
+                rowtimeAttribute, watermarkExpressionString, watermarkExprOutputType);
     }
 
     public static Schema fromCatalogTable(CatalogTable catalogTable) {
@@ -361,13 +455,7 @@ public class FlinkCatalog extends AbstractCatalog {
 
         // Serialize virtual columns and watermark to the options
         // This is what Flink SQL needs, the storage itself does not need them
-        if (schema.getTableColumns().stream().anyMatch(c -> !c.isPhysical())
-                || schema.getWatermarkSpecs().size() > 0) {
-            DescriptorProperties tableSchemaProps = new DescriptorProperties(true);
-            tableSchemaProps.putTableSchema(
-                    org.apache.flink.table.descriptors.Schema.SCHEMA, schema);
-            options.putAll(tableSchemaProps.asMap());
-        }
+        options.putAll(columnOptions(schema));
 
         return new Schema(
                 addColumnComments(toDataType(rowType).getFields(), getColumnComments(catalogTable)),
@@ -392,6 +480,80 @@ public class FlinkCatalog extends AbstractCatalog {
                             return comment == null ? field : field.newDescription(comment);
                         })
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Modified from {@link DescriptorProperties#putTableSchema} to only reserve necessary options.
+     */
+    private static Map<String, String> columnOptions(TableSchema schema) {
+        Map<String, String> columnOptions = new HashMap<>();
+        // field name -> index
+        final Map<String, Integer> indexMap = new HashMap<>();
+        List<TableColumn> tableColumns = schema.getTableColumns();
+        for (int i = 0; i < tableColumns.size(); i++) {
+            indexMap.put(tableColumns.get(i).getName(), i);
+        }
+
+        // non-physical columns
+        List<TableColumn> nonPhysicalColumns =
+                tableColumns.stream().filter(c -> !c.isPhysical()).collect(Collectors.toList());
+        if (!nonPhysicalColumns.isEmpty()) {
+            columnOptions.putAll(serializeNonPhysicalColumns(indexMap, nonPhysicalColumns));
+        }
+
+        // watermark
+        List<WatermarkSpec> watermarkSpecs = schema.getWatermarkSpecs();
+        if (!watermarkSpecs.isEmpty()) {
+            Preconditions.checkArgument(watermarkSpecs.size() == 1);
+            columnOptions.putAll(serializeWatermarkSpec(watermarkSpecs.get(0)));
+        }
+
+        return columnOptions;
+    }
+
+    private static Map<String, String> serializeNonPhysicalColumns(
+            Map<String, Integer> indexMap, List<TableColumn> nonPhysicalColumns) {
+        Map<String, String> serialized = new HashMap<>();
+        for (TableColumn c : nonPhysicalColumns) {
+            int index = indexMap.get(c.getName());
+            serialized.put(compoundKey(SCHEMA, index, NAME), c.getName());
+            serialized.put(
+                    compoundKey(SCHEMA, index, DATA_TYPE),
+                    c.getType().getLogicalType().asSerializableString());
+            if (c instanceof TableColumn.ComputedColumn) {
+                TableColumn.ComputedColumn computedColumn = (TableColumn.ComputedColumn) c;
+                serialized.put(compoundKey(SCHEMA, index, EXPR), computedColumn.getExpression());
+            } else {
+                TableColumn.MetadataColumn metadataColumn = (TableColumn.MetadataColumn) c;
+                serialized.put(
+                        compoundKey(SCHEMA, index, METADATA),
+                        metadataColumn.getMetadataAlias().orElse(metadataColumn.getName()));
+                serialized.put(
+                        compoundKey(SCHEMA, index, VIRTUAL),
+                        Boolean.toString(metadataColumn.isVirtual()));
+            }
+        }
+        return serialized;
+    }
+
+    private static Map<String, String> serializeWatermarkSpec(WatermarkSpec watermarkSpec) {
+        Map<String, String> serializedWatermarkSpec = new HashMap<>();
+        String watermarkPrefix = compoundKey(SCHEMA, WATERMARK, 0);
+        serializedWatermarkSpec.put(
+                compoundKey(watermarkPrefix, WATERMARK_ROWTIME),
+                watermarkSpec.getRowtimeAttribute());
+        serializedWatermarkSpec.put(
+                compoundKey(watermarkPrefix, WATERMARK_STRATEGY_EXPR),
+                watermarkSpec.getWatermarkExpr());
+        serializedWatermarkSpec.put(
+                compoundKey(watermarkPrefix, WATERMARK_STRATEGY_DATA_TYPE),
+                watermarkSpec.getWatermarkExprOutputType().getLogicalType().asSerializableString());
+
+        return serializedWatermarkSpec;
+    }
+
+    private static String compoundKey(Object... components) {
+        return Stream.of(components).map(Object::toString).collect(Collectors.joining("."));
     }
 
     public static Identifier toIdentifier(ObjectPath path) {
