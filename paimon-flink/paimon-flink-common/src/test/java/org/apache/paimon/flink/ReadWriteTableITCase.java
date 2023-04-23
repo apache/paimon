@@ -24,6 +24,7 @@ import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.utils.BlockingIterator;
 
@@ -1364,6 +1365,60 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         "+I[a, INT, true, null, null, null]",
                         "+I[b, INT, true, null, null, null]",
                         "+I[c, INT, true, null, AS `a` + `b`, null]");
+    }
+
+    @Test
+    public void testCleanedSchemaOptions() {
+        String ddl =
+                "CREATE TABLE T (\n"
+                        + "id INT,\n"
+                        + "record_time TIMESTAMP_LTZ(3) METADATA FROM 'timestamp' VIRTUAL,\n"
+                        + "comp AS id + 1,\n"
+                        + "order_time TIMESTAMP(3),\n"
+                        + "WATERMARK FOR order_time AS order_time - INTERVAL '5' SECOND\n"
+                        + ");";
+        bEnv.executeSql(ddl);
+
+        // validate schema options
+        SchemaManager schemaManager =
+                new SchemaManager(LocalFileIO.create(), new Path(warehouse, "default.db/T"));
+        TableSchema schema = schemaManager.latest().get();
+        Map<String, String> expected = new HashMap<>();
+        // metadata column
+        expected.put("schema.1.name", "record_time");
+        expected.put("schema.1.data-type", "TIMESTAMP(3) WITH LOCAL TIME ZONE");
+        expected.put("schema.1.metadata", "timestamp");
+        expected.put("schema.1.virtual", "true");
+        // computed column
+        expected.put("schema.2.name", "comp");
+        expected.put("schema.2.data-type", "INT");
+        expected.put("schema.2.expr", "`id` + 1");
+        // watermark
+        expected.put("schema.watermark.0.rowtime", "order_time");
+        expected.put("schema.watermark.0.strategy.expr", "`order_time` - INTERVAL '5' SECOND");
+        expected.put("schema.watermark.0.strategy.data-type", "TIMESTAMP(3)");
+
+        assertThat(schema.options()).containsExactlyInAnyOrderEntriesOf(expected);
+
+        // show create table
+        String actual =
+                CollectionUtil.iteratorToList(bEnv.executeSql("SHOW CREATE TABLE T").collect())
+                        .get(0)
+                        .toString();
+        assertThat(actual)
+                .isEqualTo(
+                        String.format(
+                                "+I[CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                        + "  `id` INT,\n"
+                                        + "  `record_time` TIMESTAMP(3) WITH LOCAL TIME ZONE METADATA FROM 'timestamp' VIRTUAL,\n"
+                                        + "  `comp` AS `id` + 1,\n"
+                                        + "  `order_time` TIMESTAMP(3),\n"
+                                        + "  WATERMARK FOR `order_time` AS `order_time` - INTERVAL '5' SECOND\n"
+                                        + ") WITH (\n"
+                                        + "  'path' = '%s'\n"
+                                        + ")\n"
+                                        + "]",
+                                warehouse + "/default.db/T"));
     }
 
     // ----------------------------------------------------------------------------------------------------------------
