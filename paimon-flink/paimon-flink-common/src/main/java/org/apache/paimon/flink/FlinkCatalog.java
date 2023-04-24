@@ -38,7 +38,9 @@ import org.apache.flink.table.catalog.CatalogPartition;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.CatalogTableImpl;
+import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectPath;
+import org.apache.flink.table.catalog.TableChange;
 import org.apache.flink.table.catalog.exceptions.CatalogException;
 import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
@@ -52,6 +54,7 @@ import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.ArrayList;
@@ -274,6 +277,20 @@ public class FlinkCatalog extends AbstractCatalog {
         }
     }
 
+    @Override
+    public void alterTable(
+            ObjectPath tablePath, CatalogBaseTable newTable, List<TableChange> tableChanges, boolean ignoreIfNotExists)
+            throws TableNotExistException, CatalogException {
+        List<SchemaChange> schemaChanges =
+                tableChanges.stream().flatMap(
+                        tableChange -> (toSchemaChange(tableChange).stream())).collect(Collectors.toList());
+        try {
+            catalog.alterTable(toIdentifier(tablePath), schemaChanges, ignoreIfNotExists);
+        } catch (Catalog.TableNotExistException e) {
+            throw new TableNotExistException(getName(), tablePath);
+        }
+    }
+
     private static void validateAlterTable(CatalogTable ct1, CatalogTable ct2) {
         org.apache.flink.table.api.TableSchema ts1 = ct1.getSchema();
         org.apache.flink.table.api.TableSchema ts2 = ct2.getSchema();
@@ -301,6 +318,72 @@ public class FlinkCatalog extends AbstractCatalog {
             throw new UnsupportedOperationException(
                     "Altering partition keys is not supported yet.");
         }
+    }
+
+    private List<SchemaChange> toSchemaChange(TableChange change) {
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+        if (change instanceof TableChange.SetOption) {
+            TableChange.SetOption set = (TableChange.SetOption) change;
+            schemaChanges.add(SchemaChange.setOption(set.getKey(), set.getValue()));
+        } else if (change instanceof TableChange.ResetOption) {
+            TableChange.ResetOption resetChange = (TableChange.ResetOption) change;
+            schemaChanges.add(SchemaChange.removeOption(resetChange.getKey()));
+        } else if (change instanceof TableChange.AddColumn) {
+            TableChange.AddColumn addColumn = (TableChange.AddColumn) change;
+            SchemaChange.Move move = getMove(addColumn.getPosition(), addColumn.getColumn().getName());
+            Column column = addColumn.getColumn();
+            LogicalType logicalType = column.getDataType().getLogicalType();
+            schemaChanges.add(SchemaChange.addColumn(
+                    column.getName(),
+                    LogicalTypeConversion.toDataType(logicalType).copy(logicalType.isNullable()),
+                    column.getComment().orElse(null),
+                    move));
+        } else if (change instanceof TableChange.ModifyColumnName) {
+            TableChange.ModifyColumnName modifyColumnName =
+                    (TableChange.ModifyColumnName) change;
+            schemaChanges.add(SchemaChange.renameColumn(
+                    modifyColumnName.getOldColumnName(), modifyColumnName.getNewColumnName()));
+        } else if (change instanceof TableChange.DropColumn) {
+            TableChange.DropColumn dropColumn = (TableChange.DropColumn) change;
+            schemaChanges.add(SchemaChange.dropColumn(dropColumn.getColumnName()));
+        } else if (change instanceof TableChange.ModifyPhysicalColumnType) {
+            TableChange.ModifyPhysicalColumnType modifyPhysicalColumnType =
+                    (TableChange.ModifyPhysicalColumnType) change;
+            LogicalType newLogicalType = modifyPhysicalColumnType.getNewType().getLogicalType();
+            schemaChanges.add(SchemaChange.updateColumnNullability(
+                    new String[]{modifyPhysicalColumnType.getNewColumn().getName()},
+                    newLogicalType.isNullable()));
+            schemaChanges.add(SchemaChange.updateColumnType(
+                    modifyPhysicalColumnType.getNewColumn().getName(),
+                    LogicalTypeConversion.toDataType(newLogicalType)));
+        } else if (change instanceof TableChange.ModifyColumnComment) {
+            TableChange.ModifyColumnComment modifyColumnComment =
+                    (TableChange.ModifyColumnComment) change;
+            schemaChanges.add(SchemaChange.updateColumnComment(
+                    new String[]{modifyColumnComment.getNewColumn().getName()}, modifyColumnComment.getNewComment()));
+        } else if (change instanceof TableChange.ModifyColumnPosition) {
+            TableChange.ModifyColumnPosition modifyColumnPosition =
+                    (TableChange.ModifyColumnPosition) change;
+            SchemaChange.Move move = getMove(modifyColumnPosition.getNewPosition(), modifyColumnPosition.getNewColumn().getName());
+            schemaChanges.add(SchemaChange.updateColumnPosition(move));
+        } else {
+            throw new UnsupportedOperationException(
+                    "Change is not supported: " + change.getClass());
+        }
+        return schemaChanges;
+    }
+
+    private static SchemaChange.Move getMove(
+            TableChange.ColumnPosition columnPosition, String fieldName) {
+        SchemaChange.Move move = null;
+        if (columnPosition instanceof TableChange.First) {
+            move = SchemaChange.Move.first(fieldName);
+        } else if (columnPosition instanceof TableChange.After) {
+            move =
+                    SchemaChange.Move.after(
+                            fieldName, ((TableChange.After) columnPosition).column());
+        }
+        return move;
     }
 
     @Override
