@@ -135,11 +135,12 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         // TODO: add test case for hive catalog table
         assertThatThrownBy(() -> spark.sql("ALTER TABLE t3 RENAME TO t4"))
                 .isInstanceOf(AnalysisException.class)
-                .hasMessageContaining("Table or view not found: t3");
+                .hasMessageContaining("The table or view `t3` cannot be found");
 
         assertThatThrownBy(() -> spark.sql("ALTER TABLE t1 RENAME TO t2"))
                 .isInstanceOf(AnalysisException.class)
-                .hasMessageContaining("Table default.t2 already exists");
+                .hasMessageContaining(
+                        "Cannot create table or view default.t2 because it already exists");
 
         spark.sql("ALTER TABLE t1 RENAME TO t3");
         List<Row> tables = spark.sql("SHOW TABLES").collectAsList();
@@ -176,8 +177,8 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         assertThatThrownBy(() -> table.select("a", "c"))
                 .isInstanceOf(AnalysisException.class)
                 .hasMessageContaining(
-                        "Column 'a' does not exist. Did you mean one of the following? "
-                                + "[paimon.default.testRenameColumn.b, paimon.default.testRenameColumn.c, paimon.default.testRenameColumn.aa]");
+                        "A column or function parameter with name `a` cannot be resolved. Did you mean one of the following? "
+                                + "[`paimon`.`default`.`testRenameColumn`.`b`, `paimon`.`default`.`testRenameColumn`.`c`, `paimon`.`default`.`testRenameColumn`.`aa`]");
     }
 
     @Test

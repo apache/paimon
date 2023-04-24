@@ -23,21 +23,25 @@ under the License.
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <artifactId>paimon-spark</artifactId>
         <groupId>org.apache.paimon</groupId>
+        <artifactId>paimon-spark</artifactId>
         <version>0.4-SNAPSHOT</version>
     </parent>
 
-    <packaging>jar</packaging>
-
-    <artifactId>paimon-spark-common</artifactId>
-    <name>Paimon : Spark : Common</name>
+    <artifactId>paimon-spark-3.4</artifactId>
+    <name>Paimon : Spark : 3.4</name>
 
     <properties>
         <spark.version>3.4.0</spark.version>
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-spark-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-sql_2.12</artifactId>
@@ -50,36 +54,6 @@ under the License.
                 <exclusion>
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-log4j12</artifactId>
-                </exclusion>
-                <!-- SPARK-40511 upgrades SLF4J2, which is not compatible w/ SLF4J1 -->
-                <exclusion>
-                    <groupId>org.apache.logging.log4j</groupId>
-                    <artifactId>log4j-slf4j2-impl</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.orc</groupId>
-                    <artifactId>orc-core</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.spark</groupId>
-            <artifactId>spark-hive_2.12</artifactId>
-            <version>${spark.version}</version>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>log4j</groupId>
-                    <artifactId>log4j</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-log4j12</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.orc</groupId>
-                    <artifactId>orc-core</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -100,7 +74,7 @@ under the License.
                         <configuration>
                             <artifactSet>
                                 <includes combine.children="append">
-                                    <include>org.apache.paimon:paimon-bundle</include>
+                                    <include>org.apache.paimon:paimon-spark-common</include>
                                 </includes>
                             </artifactSet>
                         </configuration>
