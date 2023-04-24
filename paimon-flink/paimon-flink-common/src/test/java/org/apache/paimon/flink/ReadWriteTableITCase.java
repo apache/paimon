@@ -1446,7 +1446,11 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         DynamicTableSink tableSink =
                 new FlinkTableSink(
-                        context.getObjectIdentifier(), buildPaimonTable(context), context, null);
+                        context.getObjectIdentifier(),
+                        buildPaimonTable(context),
+                        context,
+                        null,
+                        Collections.emptyList());
         assertThat(tableSink).isInstanceOf(FlinkTableSink.class);
 
         // 2. get sink provider

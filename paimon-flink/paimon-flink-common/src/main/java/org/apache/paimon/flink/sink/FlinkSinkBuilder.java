@@ -30,6 +30,7 @@ import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.Map;
 
 /** Builder for {@link FileStoreSink}. */
@@ -44,6 +45,7 @@ public class FlinkSinkBuilder {
     @Nullable private Integer parallelism;
     @Nullable private String commitUser;
     @Nullable private StoreSinkWrite.Provider sinkProvider;
+    private Map<Integer, RowData.FieldGetter> updatedColumns = Collections.emptyMap();
 
     public FlinkSinkBuilder(FileStoreTable table) {
         this.table = table;
@@ -74,6 +76,11 @@ public class FlinkSinkBuilder {
         return this;
     }
 
+    public FlinkSinkBuilder withUpdatedColumns(Map<Integer, RowData.FieldGetter> updatedColumns) {
+        this.updatedColumns = updatedColumns;
+        return this;
+    }
+
     @VisibleForTesting
     public FlinkSinkBuilder withSinkProvider(
             String commitUser, StoreSinkWrite.Provider sinkProvider) {
@@ -94,7 +101,8 @@ public class FlinkSinkBuilder {
 
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         FileStoreSink sink =
-                new FileStoreSink(table, lockFactory, overwritePartition, logSinkFunction);
+                new FileStoreSink(
+                        table, lockFactory, overwritePartition, logSinkFunction, updatedColumns);
         return commitUser != null && sinkProvider != null
                 ? sink.sinkFrom(new DataStream<>(env, partitioned), commitUser, sinkProvider)
                 : sink.sinkFrom(new DataStream<>(env, partitioned));

@@ -39,22 +39,26 @@ public class FileStoreSink extends FlinkSink<RowData> {
     private final Lock.Factory lockFactory;
     @Nullable private final Map<String, String> overwritePartition;
     @Nullable private final LogSinkFunction logSinkFunction;
+    private final Map<Integer, RowData.FieldGetter> updatedColumns;
 
     public FileStoreSink(
             FileStoreTable table,
             Lock.Factory lockFactory,
             @Nullable Map<String, String> overwritePartition,
-            @Nullable LogSinkFunction logSinkFunction) {
+            @Nullable LogSinkFunction logSinkFunction,
+            Map<Integer, RowData.FieldGetter> updatedColumns) {
         super(table, overwritePartition != null);
         this.lockFactory = lockFactory;
         this.overwritePartition = overwritePartition;
         this.logSinkFunction = logSinkFunction;
+        this.updatedColumns = updatedColumns;
     }
 
     @Override
     protected OneInputStreamOperator<RowData, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, boolean isStreaming, String commitUser) {
-        return new RowDataStoreWriteOperator(table, logSinkFunction, writeProvider, commitUser);
+        return new RowDataStoreWriteOperator(
+                table, logSinkFunction, writeProvider, commitUser, updatedColumns);
     }
 
     @Override
