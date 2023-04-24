@@ -161,19 +161,6 @@ ALTER TABLE my_table RENAME COLUMN c0 TO c1;
 {{< /tabs >}}
 
 ## Dropping Columns
-The syntax is:
-
-{{< tabs "drop-columns-syntax" >}}
-
-{{< tab "Spark3" >}}
-
-```sql
-ALTER TABLE table_identifier DROP { COLUMN | COLUMNS } [(] col_name [, ... ] [)]
-```
-
-{{< /tab >}}
-
-{{< /tabs >}}
 
 The following SQL drops tow columns `c1` and `c2` from table `my_table`.
 
