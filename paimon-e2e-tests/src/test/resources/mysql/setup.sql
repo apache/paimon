@@ -61,12 +61,39 @@ CREATE TABLE t2 (
     PRIMARY KEY (k1, k2)
 );
 
+-- to make sure we use JDBC Driver correctly
+CREATE DATABASE paimon_sync_database1;
+USE paimon_sync_database1;
+
+CREATE TABLE t1 (
+    k INT,
+    v INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k1 INT,
+    k2 VARCHAR(10),
+    v1 INT,
+    PRIMARY KEY (k1, k2)
+);
+
 -- ################################################################################
 --  MySqlIgnoreCaseE2EeTest#testSyncDatabase
 -- ################################################################################
 
 CREATE DATABASE paimon_ignore_CASE;
 USE paimon_ignore_CASE;
+
+CREATE TABLE T (
+    k INT,
+    UPPERCASE_V0 VARCHAR(20),
+    PRIMARY KEY (k)
+);
+
+-- to make sure we use JDBC Driver correctly
+CREATE DATABASE paimon_ignore_CASE1;
+USE paimon_ignore_CASE1;
 
 CREATE TABLE T (
     k INT,
