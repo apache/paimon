@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.Partition;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
@@ -377,6 +378,12 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public boolean caseSensitive() {
         return false;
+    }
+
+    @Override
+    public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
+        checkNotSystemTable(identifier, "listPartitions");
+        throw new UnsupportedOperationException("not support yet");
     }
 
     @Override

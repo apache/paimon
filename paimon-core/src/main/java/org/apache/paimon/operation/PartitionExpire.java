@@ -113,6 +113,8 @@ public class PartitionExpire {
 
     private List<BinaryRow> readPartitions() {
         // TODO optimize this to read partition only
+        // NOTE: avro projection push down can't reach expected cause row-oriented design, see pull
+        // request #1114
         return scan.plan().files().stream()
                 .map(ManifestEntry::partition)
                 .distinct()
