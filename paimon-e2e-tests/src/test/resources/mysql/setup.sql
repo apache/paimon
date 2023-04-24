@@ -90,3 +90,13 @@ CREATE TABLE T (
     UPPERCASE_V0 VARCHAR(20),
     PRIMARY KEY (k)
 );
+
+-- to make sure we use JDBC Driver correctly
+CREATE DATABASE paimon_ignore_CASE1;
+USE paimon_ignore_CASE1;
+
+CREATE TABLE T (
+    k INT,
+    UPPERCASE_V0 VARCHAR(20),
+    PRIMARY KEY (k)
+);
