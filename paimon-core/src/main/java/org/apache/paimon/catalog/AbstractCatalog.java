@@ -83,7 +83,8 @@ public abstract class AbstractCatalog implements Catalog {
         return FileStoreTableFactory.create(fileIO, getDataTableLocation(identifier), tableSchema);
     }
 
-    protected Path databasePath(String database) {
+    @VisibleForTesting
+    public Path databasePath(String database) {
         return new Path(warehouse(), database + DB_SUFFIX);
     }
 

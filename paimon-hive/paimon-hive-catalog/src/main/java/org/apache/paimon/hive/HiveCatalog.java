@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.Identifier;
@@ -72,6 +73,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
+import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -96,19 +98,36 @@ public class HiveCatalog extends AbstractCatalog {
     private final HiveConf hiveConf;
     private final String clientClassName;
     private final IMetaStoreClient client;
+    private final String warehouse;
 
-    public HiveCatalog(FileIO fileIO, HiveConf hiveConf, String clientClassName) {
-        super(fileIO);
-        this.hiveConf = hiveConf;
-        this.clientClassName = clientClassName;
-        this.client = createClient(hiveConf, clientClassName);
+    private LocationHelper locationHelper;
+
+    public HiveCatalog(FileIO fileIO, HiveConf hiveConf, String clientClassName, String warehouse) {
+        this(fileIO, hiveConf, clientClassName, Collections.emptyMap(), warehouse);
     }
 
     public HiveCatalog(
-            FileIO fileIO, HiveConf hiveConf, String clientClassName, Map<String, String> options) {
+            FileIO fileIO,
+            HiveConf hiveConf,
+            String clientClassName,
+            Map<String, String> options,
+            String warehouse) {
         super(fileIO, options);
         this.hiveConf = hiveConf;
         this.clientClassName = clientClassName;
+        this.warehouse = warehouse;
+
+        boolean needLocationInProperties =
+                hiveConf.getBoolean(
+                        LOCATION_IN_PROPERTIES.key(), LOCATION_IN_PROPERTIES.defaultValue());
+        if (needLocationInProperties) {
+            locationHelper = new TBPropertiesLocationHelper();
+        } else {
+            // set the warehouse location to the hiveConf
+            hiveConf.set(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouse);
+            locationHelper = new StorageLocationHelper();
+        }
+
         this.client = createClient(hiveConf, clientClassName);
     }
 
@@ -151,11 +170,13 @@ public class HiveCatalog extends AbstractCatalog {
             throws DatabaseAlreadyExistException {
         try {
             client.createDatabase(convertToDatabase(name));
+
+            locationHelper.createPathIfRequired(databasePath(name), fileIO);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
                 throw new DatabaseAlreadyExistException(name, e);
             }
-        } catch (TException e) {
+        } catch (TException | IOException e) {
             throw new RuntimeException("Failed to create database " + name, e);
         }
     }
@@ -167,12 +188,14 @@ public class HiveCatalog extends AbstractCatalog {
             if (!cascade && client.getAllTables(name).size() > 0) {
                 throw new DatabaseNotEmptyException(name);
             }
+
+            locationHelper.dropPathIfRequired(databasePath(name), fileIO);
             client.dropDatabase(name, true, false, true);
         } catch (NoSuchObjectException | UnknownDBException e) {
             if (!ignoreIfNotExists) {
                 throw new DatabaseNotExistException(name, e);
             }
-        } catch (TException e) {
+        } catch (TException | IOException e) {
             throw new RuntimeException("Failed to drop database " + name, e);
         }
     }
@@ -361,7 +384,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     protected String warehouse() {
-        return hiveConf.get(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
+        return warehouse;
     }
 
     private void checkIdentifierUpperCase(Identifier identifier) {
@@ -389,7 +412,7 @@ public class HiveCatalog extends AbstractCatalog {
     private Database convertToDatabase(String name) {
         Database database = new Database();
         database.setName(name);
-        database.setLocationUri(databasePath(name).toString());
+        locationHelper.specifyDatabaseLocation(databasePath(name), database);
         return database;
     }
 
@@ -423,19 +446,20 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private void updateHmsTable(Table table, Identifier identifier, TableSchema schema) {
-        StorageDescriptor sd = convertToStorageDescriptor(identifier, schema);
+        StorageDescriptor sd = convertToStorageDescriptor(schema);
         table.setSd(sd);
+
+        // update location
+        locationHelper.specifyTableLocation(table, getDataTableLocation(identifier).toString());
     }
 
-    private StorageDescriptor convertToStorageDescriptor(
-            Identifier identifier, TableSchema schema) {
+    private StorageDescriptor convertToStorageDescriptor(TableSchema schema) {
         StorageDescriptor sd = new StorageDescriptor();
 
         sd.setCols(
                 schema.fields().stream()
                         .map(this::convertToFieldSchema)
                         .collect(Collectors.toList()));
-        sd.setLocation(getDataTableLocation(identifier).toString());
 
         sd.setInputFormat(INPUT_FORMAT_CLASS_NAME);
         sd.setOutputFormat(OUTPUT_FORMAT_CLASS_NAME);
@@ -446,6 +470,11 @@ public class HiveCatalog extends AbstractCatalog {
         sd.setSerdeInfo(serDeInfo);
 
         return sd;
+    }
+
+    @VisibleForTesting
+    IMetaStoreClient getHmsClient() {
+        return client;
     }
 
     private FieldSchema convertToFieldSchema(DataField dataField) {

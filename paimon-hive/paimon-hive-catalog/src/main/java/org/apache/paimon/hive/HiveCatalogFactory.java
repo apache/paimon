@@ -69,10 +69,14 @@ public class HiveCatalogFactory implements CatalogFactory {
         // always using user-set parameters overwrite hive-site.xml parameters
         context.options().toMap().forEach(hiveConf::set);
         hiveConf.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
-        hiveConf.set(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouse.toUri().toString());
 
         String clientClassName = context.options().get(METASTORE_CLIENT_CLASS);
 
-        return new HiveCatalog(fileIO, hiveConf, clientClassName, context.options().toMap());
+        return new HiveCatalog(
+                fileIO,
+                hiveConf,
+                clientClassName,
+                context.options().toMap(),
+                warehouse.toUri().toString());
     }
 }
