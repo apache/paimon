@@ -210,14 +210,24 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         readerFactory,
                         writerFactory,
                         keyComparator,
-                        mfFactory);
+                        mfFactory,
+                        options.sortEngine());
             case LOOKUP:
                 LookupLevels lookupLevels = createLookupLevels(levels, readerFactory);
                 return new LookupMergeTreeCompactRewriter(
-                        lookupLevels, readerFactory, writerFactory, keyComparator, mfFactory);
+                        lookupLevels,
+                        readerFactory,
+                        writerFactory,
+                        keyComparator,
+                        mfFactory,
+                        options.sortEngine());
             default:
                 return new MergeTreeCompactRewriter(
-                        readerFactory, writerFactory, keyComparator, mfFactory);
+                        readerFactory,
+                        writerFactory,
+                        keyComparator,
+                        mfFactory,
+                        options.sortEngine());
         }
     }
 

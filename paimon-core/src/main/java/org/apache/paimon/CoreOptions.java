@@ -186,6 +186,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether to ignore delete records in partial-update mode.");
 
+    public static final ConfigOption<SortEngine> SORT_ENGINE =
+            key("sort-engine")
+                    .enumType(SortEngine.class)
+                    .defaultValue(SortEngine.LOSER_TREE)
+                    .withDescription("Specify the sort engine for table with primary key.");
+
     @Immutable
     public static final ConfigOption<WriteMode> WRITE_MODE =
             key("write-mode")
@@ -706,6 +712,10 @@ public class CoreOptions implements Serializable {
         return options.get(MERGE_ENGINE);
     }
 
+    public SortEngine sortEngine() {
+        return options.get(SORT_ENGINE);
+    }
+
     public long splitTargetSize() {
         return options.get(SOURCE_SPLIT_TARGET_SIZE).getBytes();
     }
@@ -1190,5 +1200,31 @@ public class CoreOptions implements Serializable {
             }
         }
         return immutableKeys;
+    }
+
+    /** Specifies the sort engine for table with primary key. */
+    public enum SortEngine implements DescribedEnum {
+        MIN_HEAP("min-heap", "Use min-heap for multiway sorting."),
+        LOSER_TREE(
+                "loser-tree",
+                "Use loser-tree for multiway sorting. Compared with heapsort, loser-tree has fewer comparisons and is more efficient.");
+
+        private final String value;
+        private final String description;
+
+        SortEngine(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
     }
 }

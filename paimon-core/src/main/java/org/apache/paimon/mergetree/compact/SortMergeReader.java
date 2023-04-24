@@ -21,13 +21,11 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.utils.Preconditions;
 
-import javax.annotation.Nullable;
-
-import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
+
+import static org.apache.paimon.CoreOptions.SortEngine;
 
 /**
  * This reader is to read a list of {@link RecordReader}, which is already sorted by key and
@@ -36,72 +34,28 @@ import java.util.List;
  *
  * <p>NOTE: {@link KeyValue}s from the same {@link RecordReader} must not contain the same key.
  */
-public class SortMergeReader<T> implements RecordReader<T> {
+public abstract class SortMergeReader<T> implements RecordReader<T> {
 
-    private final MergeFunctionWrapper<T> mergeFunctionWrapper;
-    private final LoserTree<KeyValue> loserTree;
+    protected final MergeFunctionWrapper<T> mergeFunctionWrapper;
 
-    public SortMergeReader(
+    public SortMergeReader(MergeFunctionWrapper<T> mergeFunctionWrapper) {
+        this.mergeFunctionWrapper = mergeFunctionWrapper;
+    }
+
+    public static <T> SortMergeReader<T> createSortMergeReader(
             List<RecordReader<KeyValue>> readers,
             Comparator<InternalRow> userKeyComparator,
-            MergeFunctionWrapper<T> mergeFunctionWrapper) {
-        this.mergeFunctionWrapper = mergeFunctionWrapper;
-        this.loserTree =
-                new LoserTree<>(
-                        readers,
-                        (e1, e2) -> userKeyComparator.compare(e2.key(), e1.key()),
-                        (e1, e2) -> Long.compare(e2.sequenceNumber(), e1.sequenceNumber()));
-    }
-
-    @Nullable
-    @Override
-    public RecordIterator<T> readBatch() throws IOException {
-        loserTree.initializeIfNeeded();
-        return loserTree.peekWinner() == null ? null : new SortMergeIterator();
-    }
-
-    @Override
-    public void close() throws IOException {
-        loserTree.close();
-    }
-
-    /** The iterator iterates on {@link SortMergeReader}. */
-    private class SortMergeIterator implements RecordIterator<T> {
-
-        private boolean released = false;
-
-        @Nullable
-        @Override
-        public T next() throws IOException {
-            while (true) {
-                loserTree.adjustForNextLoop();
-                KeyValue winner = loserTree.popWinner();
-                if (winner == null) {
-                    return null;
-                }
-                mergeFunctionWrapper.reset();
-                mergeFunctionWrapper.add(winner);
-
-                T result = merge();
-                if (result != null) {
-                    return result;
-                }
-            }
-        }
-
-        private T merge() {
-            Preconditions.checkState(
-                    !released, "SortMergeIterator#nextImpl is called after release");
-
-            while (loserTree.peekWinner() != null) {
-                mergeFunctionWrapper.add(loserTree.popWinner());
-            }
-            return mergeFunctionWrapper.getResult();
-        }
-
-        @Override
-        public void releaseBatch() {
-            released = true;
+            MergeFunctionWrapper<T> mergeFunctionWrapper,
+            SortEngine sortEngine) {
+        switch (sortEngine) {
+            case MIN_HEAP:
+                return new SortMergeReaderWithMinHeap<>(
+                        readers, userKeyComparator, mergeFunctionWrapper);
+            case LOSER_TREE:
+                return new SortMergeReaderWithLoserTree<>(
+                        readers, userKeyComparator, mergeFunctionWrapper);
+            default:
+                throw new UnsupportedOperationException("Unsupported sort engine: " + sortEngine);
         }
     }
 }

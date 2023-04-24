@@ -35,6 +35,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
+import static org.apache.paimon.CoreOptions.SORT_ENGINE;
+import static org.apache.paimon.CoreOptions.SortEngine;
+
 /** Utility class to create commonly used {@link RecordReader}s for merge trees. */
 public class MergeTreeReaders {
 
@@ -47,6 +50,23 @@ public class MergeTreeReaders {
             Comparator<InternalRow> userKeyComparator,
             MergeFunction<KeyValue> mergeFunction)
             throws IOException {
+        return readerForMergeTree(
+                sections,
+                dropDelete,
+                readerFactory,
+                userKeyComparator,
+                mergeFunction,
+                SORT_ENGINE.defaultValue());
+    }
+
+    public static RecordReader<KeyValue> readerForMergeTree(
+            List<List<SortedRun>> sections,
+            boolean dropDelete,
+            KeyValueFileReaderFactory readerFactory,
+            Comparator<InternalRow> userKeyComparator,
+            MergeFunction<KeyValue> mergeFunction,
+            SortEngine sortEngine)
+            throws IOException {
         List<ConcatRecordReader.ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (List<SortedRun> section : sections) {
             readers.add(
@@ -55,7 +75,8 @@ public class MergeTreeReaders {
                                     section,
                                     readerFactory,
                                     userKeyComparator,
-                                    new ReducerMergeFunctionWrapper(mergeFunction)));
+                                    new ReducerMergeFunctionWrapper(mergeFunction),
+                                    sortEngine));
         }
         RecordReader<KeyValue> reader = ConcatRecordReader.create(readers);
         if (dropDelete) {
@@ -68,13 +89,15 @@ public class MergeTreeReaders {
             List<SortedRun> section,
             KeyValueFileReaderFactory readerFactory,
             Comparator<InternalRow> userKeyComparator,
-            MergeFunctionWrapper<KeyValue> mergeFunctionWrapper)
+            MergeFunctionWrapper<KeyValue> mergeFunctionWrapper,
+            SortEngine sortEngine)
             throws IOException {
         List<RecordReader<KeyValue>> readers = readerForSection(section, readerFactory);
         if (readers.size() == 1) {
             return readers.get(0);
         } else {
-            return new SortMergeReader<>(readers, userKeyComparator, mergeFunctionWrapper);
+            return SortMergeReader.createSortMergeReader(
+                    readers, userKeyComparator, mergeFunctionWrapper, sortEngine);
         }
     }
 

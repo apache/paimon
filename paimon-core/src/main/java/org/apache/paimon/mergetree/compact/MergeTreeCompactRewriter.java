@@ -33,6 +33,8 @@ import org.apache.paimon.reader.RecordReaderIterator;
 import java.util.Comparator;
 import java.util.List;
 
+import static org.apache.paimon.CoreOptions.SortEngine;
+
 /** Default {@link CompactRewriter} for merge trees. */
 public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
 
@@ -40,16 +42,19 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     protected final KeyValueFileWriterFactory writerFactory;
     protected final Comparator<InternalRow> keyComparator;
     protected final MergeFunctionFactory<KeyValue> mfFactory;
+    protected final SortEngine sortEngine;
 
     public MergeTreeCompactRewriter(
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
-            MergeFunctionFactory<KeyValue> mfFactory) {
+            MergeFunctionFactory<KeyValue> mfFactory,
+            SortEngine sortEngine) {
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
         this.keyComparator = keyComparator;
         this.mfFactory = mfFactory;
+        this.sortEngine = sortEngine;
     }
 
     @Override
@@ -64,7 +69,12 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
                 writerFactory.createRollingMergeTreeFileWriter(outputLevel);
         RecordReader<KeyValue> sectionsReader =
                 MergeTreeReaders.readerForMergeTree(
-                        sections, dropDelete, readerFactory, keyComparator, mfFactory.create());
+                        sections,
+                        dropDelete,
+                        readerFactory,
+                        keyComparator,
+                        mfFactory.create(),
+                        sortEngine);
         writer.write(new RecordReaderIterator<>(sectionsReader));
         writer.close();
         return new CompactResult(extractFilesFromSections(sections), writer.result());
