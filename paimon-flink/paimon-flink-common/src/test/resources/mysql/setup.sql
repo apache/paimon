@@ -259,3 +259,26 @@ CREATE TABLE t2 (
 CREATE TABLE t3 (
     v1 INT
 );
+
+-- to make sure we use JDBC Driver correctly
+CREATE DATABASE paimon_sync_database1;
+USE paimon_sync_database1;
+
+CREATE TABLE t1 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k1 INT,
+    k2 VARCHAR(10),
+    v1 INT,
+    v2 BIGINT,
+    PRIMARY KEY (k1, k2)
+);
+
+-- no primary key, should be ignored
+CREATE TABLE t3 (
+    v1 INT
+);
