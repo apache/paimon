@@ -268,10 +268,10 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     @Test
     @Timeout(60)
     public void testIgnoreIncompatibleTables() throws Exception {
-        // create an incompatible table t1
+        // create an incompatible table
         Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
         catalog.createDatabase(database, true);
-        Identifier identifier = Identifier.create(database, "t1");
+        Identifier identifier = Identifier.create(database, "incompatible");
         Schema schema =
                 Schema.newBuilder()
                         .column("k", DataTypes.STRING())
@@ -282,7 +282,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         // try synchronization
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("database-name", "paimon_sync_database_ignore_incompatible");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(2);
@@ -312,18 +312,18 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             Thread.sleep(1000);
         }
 
-        // validate t2 can be synchronized
+        // validate `compatible` can be synchronized
         try (Connection conn =
                         DriverManager.getConnection(
                                 MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
                                 MYSQL_CONTAINER.getUsername(),
                                 MYSQL_CONTAINER.getPassword());
                 Statement statement = conn.createStatement()) {
-            FileStoreTable table = getFileStoreTable("t2");
+            FileStoreTable table = getFileStoreTable("compatible");
 
-            statement.executeUpdate("USE paimon_sync_database");
-            statement.executeUpdate("INSERT INTO t2 VALUES (2, 'two', 20, 200)");
-            statement.executeUpdate("INSERT INTO t2 VALUES (4, 'four', 40, 400)");
+            statement.executeUpdate("USE paimon_sync_database_ignore_incompatible");
+            statement.executeUpdate("INSERT INTO compatible VALUES (2, 'two', 20, 200)");
+            statement.executeUpdate("INSERT INTO compatible VALUES (4, 'four', 40, 400)");
 
             RowType rowType =
                     RowType.of(

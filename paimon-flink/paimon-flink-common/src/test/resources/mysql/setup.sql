@@ -282,3 +282,24 @@ CREATE TABLE t2 (
 CREATE TABLE t3 (
     v1 INT
 );
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testIgnoreIncompatibleTables
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database_ignore_incompatible;
+USE paimon_sync_database_ignore_incompatible;
+
+CREATE TABLE incompatible (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE compatible (
+    k1 INT,
+    k2 VARCHAR(10),
+    v1 INT,
+    v2 BIGINT,
+    PRIMARY KEY (k1, k2)
+);
