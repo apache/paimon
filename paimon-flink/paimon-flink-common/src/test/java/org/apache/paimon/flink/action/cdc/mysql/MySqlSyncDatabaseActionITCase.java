@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -70,7 +71,12 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(
-                        mySqlConfig, warehouse, database, Collections.emptyMap(), tableConfig);
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        false,
+                        Collections.emptyMap(),
+                        tableConfig);
         action.build(env);
         JobClient client = env.executeAsync();
 
@@ -218,6 +224,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         mySqlConfig,
                         warehouse,
                         database,
+                        false,
                         Collections.emptyMap(),
                         Collections.emptyMap());
 
@@ -244,6 +251,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         mySqlConfig,
                         warehouse,
                         database,
+                        false,
                         Collections.emptyMap(),
                         Collections.emptyMap());
 
@@ -255,6 +263,81 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         assertThat(e)
                 .hasMessage(
                         "No tables found in MySQL database invalid, or MySQL database does not exist.");
+    }
+
+    @Test
+    @Timeout(60)
+    public void testIgnoreIncompatibleTables() throws Exception {
+        // create an incompatible table t1
+        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        catalog.createDatabase(database, true);
+        Identifier identifier = Identifier.create(database, "t1");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.STRING())
+                        .column("v1", DataTypes.STRING())
+                        .primaryKey("k")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        // try synchronization
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        MySqlSyncDatabaseAction action =
+                new MySqlSyncDatabaseAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        true,
+                        Collections.emptyMap(),
+                        tableConfig);
+        action.build(env);
+        JobClient client = env.executeAsync();
+
+        while (true) {
+            JobStatus status = client.getJobStatus().get();
+            if (status == JobStatus.RUNNING) {
+                break;
+            }
+            Thread.sleep(1000);
+        }
+
+        // validate t2 can be synchronized
+        try (Connection conn =
+                        DriverManager.getConnection(
+                                MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
+                                MYSQL_CONTAINER.getUsername(),
+                                MYSQL_CONTAINER.getPassword());
+                Statement statement = conn.createStatement()) {
+            FileStoreTable table = getFileStoreTable("t2");
+
+            statement.executeUpdate("USE paimon_sync_database");
+            statement.executeUpdate("INSERT INTO t2 VALUES (2, 'two', 20, 200)");
+            statement.executeUpdate("INSERT INTO t2 VALUES (4, 'four', 40, 400)");
+
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(),
+                                DataTypes.VARCHAR(10).notNull(),
+                                DataTypes.INT(),
+                                DataTypes.BIGINT()
+                            },
+                            new String[] {"k1", "k2", "v1", "v2"});
+            List<String> primaryKeys2 = Arrays.asList("k1", "k2");
+            List<String> expected = Arrays.asList("+I[2, two, 20, 200]", "+I[4, four, 40, 400]");
+            waitForResult(expected, table, rowType, primaryKeys2);
+        }
     }
 
     private FileStoreTable getFileStoreTable(String tableName) throws Exception {
