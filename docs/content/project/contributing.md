@@ -83,7 +83,7 @@ lists, contributing code or documentation, improving website, testing release ca
 
 ## Code Contribution Guide
 
-Apache Paimon is maintained, improved, and extended by code contributions of volunteers. We welcome contributions to Paimpn.
+Apache Paimon is maintained, improved, and extended by code contributions of volunteers. We welcome contributions to Paimon.
 
 Please feel free to ask questions at any time. Either send a mail to the Dev mailing list or comment on the issue you are working on.
 
