@@ -40,6 +40,13 @@ public class AvroBulkFormatTestUtils {
                             .build()
                             .notNull();
 
+    public static final RowType SINGLE_ROW_TYPE =
+            (RowType)
+                    RowType.builder()
+                            .fields(new DataType[] {DataTypes.STRING()}, new String[] {"b"})
+                            .build()
+                            .notNull();
+
     /** {@link AbstractAvroBulkFormat} for tests. */
     public static class TestingAvroBulkFormat extends AbstractAvroBulkFormat<GenericRecord> {
 
@@ -56,6 +63,26 @@ public class AvroBulkFormatTestUtils {
         protected Function<GenericRecord, InternalRow> createConverter() {
             AvroToRowDataConverters.AvroToRowDataConverter converter =
                     AvroToRowDataConverters.createRowConverter(ROW_TYPE);
+            return record -> record == null ? null : (InternalRow) converter.convert(record);
+        }
+    }
+
+    /** {@link AbstractAvroBulkFormat} for tests. */
+    public static class TestingAvroPartBulkFormat extends AbstractAvroBulkFormat<GenericRecord> {
+
+        protected TestingAvroPartBulkFormat() {
+            super(AvroSchemaConverter.convertToSchema(SINGLE_ROW_TYPE));
+        }
+
+        @Override
+        protected GenericRecord createReusedAvroRecord() {
+            return new GenericData.Record(readerSchema);
+        }
+
+        @Override
+        protected Function<GenericRecord, InternalRow> createConverter() {
+            AvroToRowDataConverters.AvroToRowDataConverter converter =
+                    AvroToRowDataConverters.createRowConverter(SINGLE_ROW_TYPE);
             return record -> record == null ? null : (InternalRow) converter.convert(record);
         }
     }

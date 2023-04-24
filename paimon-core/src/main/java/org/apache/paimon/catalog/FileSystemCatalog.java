@@ -200,6 +200,19 @@ public class FileSystemCatalog extends AbstractCatalog {
                                 .commitChanges(changes));
     }
 
+    @Override
+    public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
+        checkNotSystemTable(identifier, "listPartitions");
+        return getTable(identifier).newReadBuilder().newScan().partitions();
+    }
+
+    @Override
+    public void dropPartitions(Identifier identifier, List<Partition> partitions)
+            throws TableNotExistException {
+        // todo realize drop partition method
+        throw new UnsupportedOperationException("not support yet, will commit this soon");
+    }
+
     private static <T> T uncheck(Callable<T> callable) {
         try {
             return callable.call();

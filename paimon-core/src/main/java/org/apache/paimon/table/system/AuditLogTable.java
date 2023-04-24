@@ -19,6 +19,7 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Partition;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
@@ -222,6 +223,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         public List<DataSplit> overwriteSplits() {
             return snapshotSplitReader.overwriteSplits();
         }
+
+        @Override
+        public List<Partition> partitions() {
+            return snapshotSplitReader.partitions();
+        }
     }
 
     private class AuditLogBatchScan implements InnerTableScan {
@@ -242,6 +248,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         public Plan plan() {
             return batchScan.plan();
         }
+
+        @Override
+        public List<Partition> partitions() {
+            return batchScan.partitions();
+        }
     }
 
     private class AuditLogStreamScan implements InnerStreamTableScan {
@@ -261,6 +272,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public Plan plan() {
             return streamScan.plan();
+        }
+
+        @Override
+        public List<Partition> partitions() {
+            return streamScan.partitions();
         }
 
         @Nullable

@@ -36,6 +36,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -59,6 +60,18 @@ public abstract class CatalogTestBase {
                             new DataField(2, "col2", DataTypes.STRING())),
                     Collections.emptyList(),
                     Collections.emptyList(),
+                    Maps.newHashMap(),
+                    "");
+
+    protected static final Schema PARTITION_SCHEMA =
+            new Schema(
+                    Lists.newArrayList(
+                            new DataField(0, "pk1", DataTypes.INT()),
+                            new DataField(1, "pk2", DataTypes.STRING()),
+                            new DataField(3, "pk3", DataTypes.STRING()),
+                            new DataField(4, "col", DataTypes.STRING())),
+                    Arrays.asList("pk1", "pk2"),
+                    Arrays.asList("pk1", "pk2", "pk3"),
                     Maps.newHashMap(),
                     "");
 

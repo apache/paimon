@@ -56,6 +56,10 @@ public abstract class AbstractManifestEntry {
         return kind;
     }
 
+    public String fileName() {
+        return fileName;
+    }
+
     public BinaryRow partition() {
         return partition;
     }

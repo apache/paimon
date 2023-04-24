@@ -28,6 +28,7 @@ import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.manifest.SimpleManifestEntry;
 import org.apache.paimon.predicate.BucketSelector;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -202,18 +203,39 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
         Pair<Long, List<ManifestEntry>> planResult = doPlan(this::readManifestFileMeta);
 
-        final Long readSnapshotId = planResult.getLeft();
+        final Long snapshotId = planResult.getLeft();
         final List<ManifestEntry> files = planResult.getRight();
 
         return new Plan() {
             @Nullable
             @Override
             public Long snapshotId() {
-                return readSnapshotId;
+                return snapshotId;
             }
 
             @Override
             public List<ManifestEntry> files() {
+                return files;
+            }
+        };
+    }
+
+    @Override
+    public SimplePlan simplePlan() {
+        Pair<Long, List<SimpleManifestEntry>> planResult = doPlan(this::readSimpleManifestEntries);
+
+        final Long snapshotId = planResult.getLeft();
+        final List<SimpleManifestEntry> files = planResult.getRight();
+
+        return new SimplePlan() {
+            @Nullable
+            @Override
+            public Long snapshotId() {
+                return snapshotId;
+            }
+
+            @Override
+            public List<SimpleManifestEntry> files() {
                 return files;
             }
         };
@@ -399,6 +421,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
             return manifestCacheFilter.test(partitionGetter.apply(row), bucketGetter.apply(row));
         };
+    }
+
+    /** Note: Keep this thread-safe. */
+    private List<SimpleManifestEntry> readSimpleManifestEntries(ManifestFileMeta manifestFile) {
+        return manifestFileFactory.createSimpleManifestReader().read(manifestFile.fileName());
     }
 
     // ------------------------------------------------------------------------

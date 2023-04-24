@@ -188,5 +188,19 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     suggestedFileSize,
                     cache);
         }
+
+        // this reader read simple manifest information, would be faster.
+        public SimpleManifestReader createSimpleManifestReader() {
+            RowType partitionEntryType =
+                    VersionedObjectSerializer.versionType(SimpleManifestEntry.schema());
+            return new SimpleManifestReader(
+                    fileIO,
+                    new SimpleManifestEntrySerializer(),
+                    partitionType,
+                    fileFormat.createReaderFactory(partitionEntryType),
+                    pathFactory.manifestFileFactory(),
+                    null // do not use cache for now
+                    );
+        }
     }
 }

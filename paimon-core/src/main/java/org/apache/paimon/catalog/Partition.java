@@ -16,31 +16,41 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source;
+package org.apache.paimon.catalog;
 
-import org.apache.paimon.catalog.Partition;
+import org.apache.paimon.annotation.Public;
 
-import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Objects;
 
-/** An {@link InnerTableScan} for reading only once, this is for batch scan. */
-public abstract class ReadOnceTableScan implements InnerTableScan {
+/**
+ * Partition with the specified values.
+ *
+ * @since 0.4.0
+ */
+@Public
+public class Partition {
+    private final LinkedHashMap<String, String> partitionSpec;
 
-    private boolean hasNext = true;
-
-    @Override
-    public Plan plan() {
-        if (hasNext) {
-            hasNext = false;
-            return innerPlan();
-        } else {
-            throw new EndOfScanException();
-        }
+    public Partition(LinkedHashMap<String, String> partitionSpec) {
+        this.partitionSpec = partitionSpec;
     }
 
-    protected abstract Plan innerPlan();
+    public LinkedHashMap<String, String> partitionSpec() {
+        return partitionSpec;
+    }
 
     @Override
-    public List<Partition> partitions() {
-        throw new UnsupportedOperationException();
+    public int hashCode() {
+        return Objects.hash(partitionSpec);
+    }
+
+    @Override
+    public String toString() {
+        return "Partition{" + partitionSpec + '}';
+    }
+
+    public static Partition of(LinkedHashMap<String, String> spec) {
+        return new Partition(spec);
     }
 }

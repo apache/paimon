@@ -20,10 +20,12 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.AbstractManifestEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.SimpleManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.utils.Filter;
 
@@ -59,9 +61,11 @@ public interface FileStoreScan {
     /** Produce a {@link Plan}. */
     Plan plan();
 
-    /** Result plan of this scan. */
-    interface Plan {
+    /** Get a simple plan of manifest files, this plan does not contain data file details. */
+    SimplePlan simplePlan();
 
+    /** The base plan of scan. */
+    interface BasePlan {
         /**
          * Snapshot id of this plan, return null if the table is empty or the manifest list is
          * specified.
@@ -69,6 +73,19 @@ public interface FileStoreScan {
         @Nullable
         Long snapshotId();
 
+        /**
+         * Get files of this scan plan.
+         *
+         * @return scan files
+         */
+        List<? extends AbstractManifestEntry> files();
+
+        /** Result {@link AbstractManifestEntry} files with specific file kind. */
+        List<? extends AbstractManifestEntry> files(FileKind kind);
+    }
+
+    /** Result plan of this scan. */
+    interface Plan extends BasePlan {
         /** Result {@link ManifestEntry} files. */
         List<ManifestEntry> files();
 
@@ -87,6 +104,17 @@ public interface FileStoreScan {
                         .add(entry.file());
             }
             return groupBy;
+        }
+    }
+
+    /** Result scan plan of this simplified scan. */
+    interface SimplePlan extends BasePlan {
+        /** Result {@link SimpleManifestEntry} files. */
+        List<SimpleManifestEntry> files();
+
+        /** Result {@link SimpleManifestEntry} files with specific file kind. */
+        default List<SimpleManifestEntry> files(FileKind kind) {
+            return files().stream().filter(e -> e.kind() == kind).collect(Collectors.toList());
         }
     }
 }

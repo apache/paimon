@@ -20,7 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.SimpleManifestEntry;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
@@ -112,10 +112,8 @@ public class PartitionExpire {
     }
 
     private List<BinaryRow> readPartitions() {
-        // TODO optimize this to read partition only
-        return scan.plan().files().stream()
-                .map(ManifestEntry::partition)
-                .distinct()
+        return scan.simplePlan().files().stream()
+                .map(SimpleManifestEntry::partition)
                 .collect(Collectors.toList());
     }
 }

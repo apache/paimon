@@ -128,4 +128,19 @@ class AvroBulkFormatTest {
         reader.forEachRemaining(
                 rowData -> assertThat(rowData).isEqualTo(TEST_DATA.get(i.getAndIncrement())));
     }
+
+    @Test
+    void testReadPartRecord() throws IOException {
+        AvroBulkFormatTestUtils.TestingAvroPartBulkFormat bulkFormat =
+                new AvroBulkFormatTestUtils.TestingAvroPartBulkFormat();
+        RecordReader<InternalRow> reader =
+                bulkFormat.createReader(new LocalFileIO(), new Path(tmpFile.toString()));
+        AtomicInteger i = new AtomicInteger(0);
+        reader.forEachRemaining(
+                rowData ->
+                        assertThat(((GenericRow) rowData).getField(0))
+                                .isEqualTo(
+                                        ((GenericRow) TEST_DATA.get(i.getAndIncrement()))
+                                                .getField(1)));
+    }
 }
