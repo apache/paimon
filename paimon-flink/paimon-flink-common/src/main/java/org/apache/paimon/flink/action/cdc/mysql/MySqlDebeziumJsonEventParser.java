@@ -46,6 +46,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
  * {@link EventParser} for MySQL Debezium JSON.
  *
@@ -288,11 +290,10 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         Map<String, String> keyCaseInsensitive = new HashMap<>();
         for (Map.Entry<String, String> entry : origin.entrySet()) {
             String fieldName = entry.getKey().toLowerCase();
-            if (keyCaseInsensitive.containsKey(fieldName)) {
-                LOG.warn(
-                        "Duplicate key appears when converting map keys to case-insensitive form. Original map is:\n{}",
-                        origin);
-            }
+            checkArgument(
+                    !keyCaseInsensitive.containsKey(fieldName),
+                    "Duplicate key appears when converting map keys to case-insensitive form. Original map is:\n"
+                            + origin);
             keyCaseInsensitive.put(fieldName, entry.getValue());
         }
         return keyCaseInsensitive;
