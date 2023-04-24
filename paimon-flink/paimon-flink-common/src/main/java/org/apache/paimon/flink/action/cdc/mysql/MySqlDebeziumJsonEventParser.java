@@ -292,8 +292,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             String fieldName = entry.getKey().toLowerCase();
             checkArgument(
                     !keyCaseInsensitive.containsKey(fieldName),
-                    "Duplicate key appears when converting map keys to case-insensitive form. Original map is:\n"
-                            + origin);
+                    "Duplicate key appears when converting map keys to case-insensitive form. Original map is:\n%s",
+                    origin);
             keyCaseInsensitive.put(fieldName, entry.getValue());
         }
         return keyCaseInsensitive;
