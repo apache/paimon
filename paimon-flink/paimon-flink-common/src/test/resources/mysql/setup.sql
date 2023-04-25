@@ -308,3 +308,23 @@ CREATE TABLE compatible (
     v2 BIGINT,
     PRIMARY KEY (k1, k2)
 );
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testTableAffix
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database_affix;
+USE paimon_sync_database_affix;
+
+CREATE TABLE t1 (
+    k1 INT,
+    v0 VARCHAR(10),
+    PRIMARY KEY (k1)
+);
+
+CREATE TABLE t2 (
+    k2 INT,
+    v0 VARCHAR(10),
+    PRIMARY KEY (k2)
+);
+
