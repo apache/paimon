@@ -353,10 +353,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "all_types_table");
 
-        // orc format do not support time type, so we use parquet format.
-        Map<String, String> paimonConfig = getBasicMySqlConfig();
-        paimonConfig.put("file.format", "parquet");
-
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(1);
         env.enableCheckpointing(1000);
@@ -371,7 +367,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
                         Collections.emptyMap(),
-                        paimonConfig);
+                        Collections.emptyMap());
         action.build(env);
         JobClient jobClient = env.executeAsync();
 
