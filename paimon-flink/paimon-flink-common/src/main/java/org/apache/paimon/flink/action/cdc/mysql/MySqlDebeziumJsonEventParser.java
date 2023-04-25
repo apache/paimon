@@ -29,12 +29,15 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectWriter;
 
+import com.esri.core.geometry.ogc.OGCGeometry;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -200,23 +203,25 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     private Map<String, String> extractRow(JsonNode recordRow) {
-        Map<String, String> recordMap =
-                objectMapper.convertValue(recordRow, new TypeReference<Map<String, String>>() {});
-        if (recordMap == null) {
+
+        // the geometry,point type can not be converted to string, so we convert it to Object first.
+        Map<String, Object> jsonMap =
+                objectMapper.convertValue(recordRow, new TypeReference<Map<String, Object>>() {});
+
+        if (jsonMap == null) {
             return new HashMap<>();
         }
+
+        Map<String, String> resultMap = new HashMap<>();
 
         for (Map.Entry<String, String> field : mySqlFieldTypes.entrySet()) {
             String fieldName = field.getKey();
             String mySqlType = field.getValue();
-            if (recordMap.containsKey(fieldName)) {
+            String newValue = null;
+            if (jsonMap.containsKey(fieldName) && null != jsonMap.get(fieldName)) {
                 String className = fieldClassNames.get(fieldName);
-                String oldValue = recordMap.get(fieldName);
-                String newValue = oldValue;
-
-                if (newValue == null) {
-                    continue;
-                }
+                String oldValue = jsonMap.get(fieldName).toString();
+                newValue = oldValue;
 
                 // pay attention to the temporal types
                 // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-temporal-types
@@ -294,13 +299,41 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                                     .atZone(ZoneOffset.UTC)
                                     .toLocalTime()
                                     .toString();
-                }
+                } else if ("io.debezium.data.geometry.Point".equals(className)
+                        || "io.debezium.data.geometry.Geometry".equals(className)) {
+                    JsonNode jsonNode = recordRow.get(fieldName);
+                    try {
+                        byte[] wkb = jsonNode.get("wkb").binaryValue();
+                        String geoJson = OGCGeometry.fromBinary(ByteBuffer.wrap(wkb)).asGeoJson();
+                        JsonNode originGeoNode = objectMapper.readTree(geoJson);
 
-                recordMap.put(fieldName, newValue);
+                        Optional<Integer> srid =
+                                Optional.ofNullable(
+                                        originGeoNode.has("srid")
+                                                ? originGeoNode.get("srid").intValue()
+                                                : null);
+                        Map<String, Object> geometryInfo = new HashMap<>();
+                        String geometryType = originGeoNode.get("type").asText();
+                        geometryInfo.put("type", geometryType);
+                        if (geometryType.equalsIgnoreCase("GeometryCollection")) {
+                            geometryInfo.put("geometries", originGeoNode.get("geometries"));
+                        } else {
+                            geometryInfo.put("coordinates", originGeoNode.get("coordinates"));
+                        }
+                        geometryInfo.put("srid", srid.orElse(0));
+                        ObjectWriter objectWriter = objectMapper.writer();
+                        newValue = objectWriter.writeValueAsString(geometryInfo);
+                    } catch (Exception e) {
+                        throw new IllegalArgumentException(
+                                String.format("Failed to convert %s to geometry JSON.", jsonNode),
+                                e);
+                    }
+                }
             }
+            resultMap.put(fieldName, newValue);
         }
 
-        return recordMap;
+        return resultMap;
     }
 
     private Map<String, String> keyCaseInsensitive(Map<String, String> origin) {

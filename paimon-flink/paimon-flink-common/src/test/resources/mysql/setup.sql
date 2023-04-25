@@ -137,6 +137,14 @@ CREATE TABLE all_types_table (
     -- YEAR
     _year YEAR,
     _time TIME,
+    _point POINT,
+    _geometry GEOMETRY,
+    _linestring LINESTRING,
+    _polygon  POLYGON,
+    _multipoint  MULTIPOINT,
+    _multiline  MULTILINESTRING,
+    _multipolygon  MULTIPOLYGON,
+    _geometrycollection GEOMETRYCOLLECTION,
     PRIMARY KEY (_id)
 );
 
@@ -186,7 +194,15 @@ INSERT INTO all_types_table VALUES (
      -- YEAR
      2023,
      -- TIME,
-     '10:13:23'
+     '10:13:23',
+    ST_GeomFromText('POINT(1 1)'),
+    ST_GeomFromText('POLYGON((1 1, 2 1, 2 2,  1 2, 1 1))'),
+    ST_GeomFromText('LINESTRING(3 0, 3 3, 3 5)'),
+    ST_GeomFromText('POLYGON((1 1, 2 1, 2 2,  1 2, 1 1))'),
+    ST_GeomFromText('MULTIPOINT((1 1),(2 2))'),
+    ST_GeomFromText('MultiLineString((1 1,2 2,3 3),(4 4,5 5))'),
+    ST_GeomFromText('MULTIPOLYGON(((0 0,10 0,10 10,0 10,0 0)),((5 5,7 5,7 7,5 7, 5 5)))'),
+    ST_GeomFromText('GEOMETRYCOLLECTION(POINT(10 10), POINT(30 30), LINESTRING(15 15, 20 20))')
 ), (
     2, 2.2,
     NULL, NULL, NULL, NULL, NULL, NULL,
@@ -207,6 +223,14 @@ INSERT INTO all_types_table VALUES (
     NULL, NULL,
     NULL, NULL, NULL, NULL,NULL, NULL,
     NULL, NULL, NULL, NULL,NULL, NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
     NULL,
     NULL,
     NULL,
