@@ -68,8 +68,6 @@ public abstract class HiveCatalogITCaseBase {
     @HiveSQL(files = {})
     protected static HiveShell hiveShell;
 
-    public static final String HIVE_CONF = "/hive-conf";
-
     @Before
     public void before() throws Exception {
         hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
@@ -88,10 +86,6 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'type' = 'paimon',",
                                 "  'metastore' = 'hive',",
                                 "  'uri' = '',",
-                                "  'hive-conf-dir' = '"
-                                        + hiveShell.getBaseDir().getRoot().getPath()
-                                        + HIVE_CONF
-                                        + "',",
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true'",
                                 ")"))
@@ -235,10 +229,6 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'metastore' = 'hive',",
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",
-                                "  'hive-conf-dir' = '"
-                                        + hiveShell.getBaseDir().getRoot().getPath()
-                                        + HIVE_CONF
-                                        + "',",
                                 "  'lock.enabled' = 'true',",
                                 "  'table.type' = 'EXTERNAL'",
                                 ")"))
@@ -538,10 +528,6 @@ public abstract class HiveCatalogITCaseBase {
                                 "  'type' = 'paimon',",
                                 "  'metastore' = 'hive',",
                                 "  'uri' = '',",
-                                "  'hive-conf-dir' = '"
-                                        + hiveShell.getBaseDir().getRoot().getPath()
-                                        + HIVE_CONF
-                                        + "',",
                                 "  'warehouse' = '" + path + "',",
                                 "  'lock.enabled' = 'true',",
                                 "  'table-default.opt1' = 'value1',",
