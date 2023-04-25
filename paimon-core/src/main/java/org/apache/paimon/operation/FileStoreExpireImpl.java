@@ -142,9 +142,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private void expireUntil(long earliestId, long endExclusiveId) {
         OptionalLong minNextSnapshot = consumerManager.minNextSnapshot();
         if (minNextSnapshot.isPresent()) {
-            // Keep the current snapshot being read
-            // So endExclusiveId should be next snapshot - 1
-            endExclusiveId = Math.min(minNextSnapshot.getAsLong() - 1, endExclusiveId);
+            endExclusiveId = Math.min(minNextSnapshot.getAsLong(), endExclusiveId);
         }
 
         if (endExclusiveId <= earliestId) {

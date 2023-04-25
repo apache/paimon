@@ -29,7 +29,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import java.io.IOException;
 import java.util.Optional;
 
-/** Consumer for a group. */
+/** Consumer which contains next snapshot. */
 public class Consumer {
 
     private static final String FIELD_NEXT_SNAPSHOT = "nextSnapshot";
