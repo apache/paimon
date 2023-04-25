@@ -133,6 +133,7 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
                         (short) shortStats.getMaximum(),
                         nullCount);
             case INTEGER:
+            case TIME_WITHOUT_TIME_ZONE:
                 assertStatsClass(field, stats, IntegerColumnStatistics.class);
                 IntegerColumnStatistics intStats = (IntegerColumnStatistics) stats;
                 return new FieldStats(
