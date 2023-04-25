@@ -583,15 +583,15 @@ public class HiveCatalog extends AbstractCatalog {
         if (hadoopConf == null) {
             hadoopConf = new Configuration();
         }
-        // ignore all the static conf file URLs that HiveConf may have set
-        HiveConf.setHiveSiteLocation(null);
-        HiveConf.setLoadMetastoreConfig(false);
-        HiveConf.setLoadHiveServer2Config(false);
-        HiveConf hiveConf = new HiveConf(hadoopConf, HiveConf.class);
 
         LOG.info("Setting hive conf dir as {}", hiveConfDir);
-
         if (hiveConfDir != null) {
+            // ignore all the static conf file URLs that HiveConf may have set
+            HiveConf.setHiveSiteLocation(null);
+            HiveConf.setLoadMetastoreConfig(false);
+            HiveConf.setLoadHiveServer2Config(false);
+            HiveConf hiveConf = new HiveConf(hadoopConf, HiveConf.class);
+
             org.apache.hadoop.fs.Path hiveSite =
                     new org.apache.hadoop.fs.Path(hiveConfDir, HIVE_SITE_FILE);
             if (!hiveSite.toUri().isAbsolute()) {
@@ -606,9 +606,11 @@ public class HiveCatalog extends AbstractCatalog {
                         "Failed to load hive-site.xml from specified path:" + hiveSite, e);
             }
             hiveConf.addResource(hiveSite);
-        }
 
-        return hiveConf;
+            return hiveConf;
+        } else {
+            return new HiveConf(hadoopConf, HiveConf.class);
+        }
     }
 
     public static boolean isEmbeddedMetastore(HiveConf hiveConf) {
