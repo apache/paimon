@@ -427,6 +427,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.TIMESTAMP(0), // _datetime_p
                             DataTypes.TIMESTAMP(2), // _datetime_p2
                             DataTypes.TIMESTAMP(6), // _timestamp
+                            DataTypes.TIMESTAMP(0), // _timestamp0
                             DataTypes.CHAR(10), // _char
                             DataTypes.VARCHAR(20), // _varchar
                             DataTypes.STRING(), // _tinytext
@@ -494,6 +495,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             "_datetime_p",
                             "_datetime_p2",
                             "_timestamp",
+                            "_timestamp0",
                             "_char",
                             "_varchar",
                             "_tinytext",
@@ -536,7 +538,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 // we store 2023-03-23T15:00:10.123456 in UTC-8 system timezone
                                 // and query this timestamp in UTC-5 MySQL server timezone
                                 // so the display value should increase by 3 hour
-                                + "2023-03-23T18:00:10.123456, "
+                                + "2023-03-23T18:00:10.123456, 2023-03-23T03:10, "
                                 + "Paimon, Apache Paimon, Apache Paimon MySQL TINYTEXT Test Data, Apache Paimon MySQL Test Data, Apache Paimon MySQL MEDIUMTEXT Test Data, Apache Paimon MySQL Long Test Data, "
                                 + "[98, 121, 116, 101, 115, 0, 0, 0, 0, 0], "
                                 + "[109, 111, 114, 101, 32, 98, 121, 116, 101, 115], "
@@ -566,7 +568,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "NULL, "
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, "
-                                + "NULL, "
+                                + "NULL, NULL, "
                                 + "NULL, NULL, NULL, NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, NULL, NULL, NULL, "
                                 + "NULL, "
