@@ -277,6 +277,19 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                                     .toLocalDateTime()
                                     .toString()
                                     .replace('T', ' ');
+                } else if ("io.debezium.time.MicroTime".equals(className)) {
+                    long microseconds = Long.parseLong(oldValue);
+                    long microsecondsPerSecond = 1_000_000;
+                    long nanosecondsPerMicros = 1_000;
+                    long seconds = microseconds / microsecondsPerSecond;
+                    long nanoAdjustment =
+                            (microseconds % microsecondsPerSecond) * nanosecondsPerMicros;
+
+                    newValue =
+                            Instant.ofEpochSecond(seconds, nanoAdjustment)
+                                    .atZone(ZoneOffset.UTC)
+                                    .toLocalTime()
+                                    .toString();
                 }
 
                 recordMap.put(fieldName, newValue);
