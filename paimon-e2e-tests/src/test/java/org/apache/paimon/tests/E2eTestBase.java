@@ -91,6 +91,7 @@ public abstract class E2eTestBase {
         services.add("taskmanager");
 
         network = Network.newNetwork();
+        LOG.info("Network {} created", network.getId());
         environment =
                 new DockerComposeContainer<>(
                                 new File(
@@ -98,7 +99,7 @@ public abstract class E2eTestBase {
                                                 .getClassLoader()
                                                 .getResource("docker-compose.yaml")
                                                 .toURI()))
-                        .withEnv("NETWORK_ID", network.getId())
+                        .withEnv("NETWORK_ID", ((Network.NetworkImpl) network).getName())
                         .withLogConsumer("jobmanager_1", new LogConsumer(LOG))
                         .withLogConsumer("taskmanager_1", new LogConsumer(LOG))
                         .withLocalCompose(true);
@@ -209,6 +210,22 @@ public abstract class E2eTestBase {
                 String.format(
                         "kafka-console-producer --bootstrap-server kafka:29092 --topic %s < %s/%s",
                         topicName, tmpDir, filename));
+    }
+
+    private static final String PAIMON_HIVE_CONNECTOR_JAR_NAME = "paimon-hive-connector.jar";
+
+    protected void setupHiveConnector() throws Exception {
+        getHive()
+                .execInContainer(
+                        "/bin/bash",
+                        "-c",
+                        "mkdir /opt/hive/auxlib && cp /jars/"
+                                + PAIMON_HIVE_CONNECTOR_JAR_NAME
+                                + " /opt/hive/auxlib");
+    }
+
+    protected ContainerState getHive() {
+        return environment.getContainerByServiceName("hive-server_1").get();
     }
 
     private static final Pattern JOB_ID_PATTERN =

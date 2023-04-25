@@ -32,6 +32,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
@@ -80,8 +81,10 @@ public class CompactorSinkITCase extends AbstractTestBase {
     public void testCompact() throws Exception {
         FileStoreTable table = createFileStoreTable();
         SnapshotManager snapshotManager = table.snapshotManager();
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
 
         write.write(rowData(1, 100, 15, BinaryString.fromString("20221208")));
         write.write(rowData(1, 100, 16, BinaryString.fromString("20221208")));
@@ -117,7 +120,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
         assertEquals(3, snapshot.id());
         assertEquals(Snapshot.CommitKind.COMPACT, snapshot.commitKind());
 
-        TableScan.Plan plan = table.newScan().plan();
+        TableScan.Plan plan = table.newReadBuilder().newScan().plan();
         assertEquals(3, plan.splits().size());
         for (Split split : plan.splits()) {
             DataSplit dataSplit = (DataSplit) split;

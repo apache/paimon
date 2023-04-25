@@ -18,17 +18,19 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.types.DataField;
 
-import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.java.typeutils.ListTypeInfo;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
 
+import java.util.List;
+
 /**
- * A {@link ProcessFunction} to parse CDC change event to either {@link SchemaChange} or {@link
- * CdcRecord} and send them to different downstreams.
+ * A {@link ProcessFunction} to parse CDC change event to either a list of {@link DataField}s or
+ * {@link CdcRecord} and send them to different downstreams.
  *
  * <p>This {@link ProcessFunction} can only handle records for a single constant table. To handle
  * records for different tables, see {@link CdcMultiTableParsingProcessFunction}.
@@ -37,8 +39,8 @@ import org.apache.flink.util.OutputTag;
  */
 public class CdcParsingProcessFunction<T> extends ProcessFunction<T, CdcRecord> {
 
-    public static final OutputTag<SchemaChange> SCHEMA_CHANGE_OUTPUT_TAG =
-            new OutputTag<>("schema-change", TypeInformation.of(SchemaChange.class));
+    public static final OutputTag<List<DataField>> NEW_DATA_FIELD_LIST_OUTPUT_TAG =
+            new OutputTag<>("new-data-field-list", new ListTypeInfo<>(DataField.class));
 
     private final EventParser.Factory<T> parserFactory;
 
@@ -57,10 +59,9 @@ public class CdcParsingProcessFunction<T> extends ProcessFunction<T, CdcRecord> 
     public void processElement(T raw, Context context, Collector<CdcRecord> collector)
             throws Exception {
         parser.setRawEvent(raw);
-        if (parser.isSchemaChange()) {
-            for (SchemaChange schemaChange : parser.getSchemaChanges()) {
-                context.output(SCHEMA_CHANGE_OUTPUT_TAG, schemaChange);
-            }
+        if (parser.isUpdatedDataFields()) {
+            parser.getUpdatedDataFields()
+                    .ifPresent(t -> context.output(NEW_DATA_FIELD_LIST_OUTPUT_TAG, t));
         } else {
             for (CdcRecord record : parser.getRecords()) {
                 collector.collect(record);

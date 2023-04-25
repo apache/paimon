@@ -18,14 +18,14 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.RandomAccessInputView;
 import org.apache.paimon.data.Segments;
 import org.apache.paimon.data.SimpleCollectingOutputView;
-import org.apache.paimon.data.serializer.RowCompactedSerializer;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentSource;
-import org.apache.paimon.types.RowType;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -38,7 +38,7 @@ public class ObjectsCache<K, V> {
 
     private final SegmentsCache<K> cache;
     private final ObjectSerializer<V> serializer;
-    private final RowCompactedSerializer compactedSerializer;
+    private final InternalRowSerializer rowSerializer;
     private final Function<K, CloseableIterator<InternalRow>> reader;
 
     public ObjectsCache(
@@ -47,26 +47,31 @@ public class ObjectsCache<K, V> {
             Function<K, CloseableIterator<InternalRow>> reader) {
         this.cache = cache;
         this.serializer = serializer;
-        this.compactedSerializer = new RowCompactedSerializer(RowType.of(serializer.fieldTypes()));
+        this.rowSerializer = new InternalRowSerializer(serializer.fieldTypes());
         this.reader = reader;
     }
 
-    public List<V> read(K key) throws IOException {
-        Segments segments = cache.getSegments(key, this::readSegments);
+    public List<V> read(K key, Filter<InternalRow> loadFilter, Filter<InternalRow> readFilter)
+            throws IOException {
+        Segments segments = cache.getSegments(key, k -> readSegments(k, loadFilter));
         List<V> entries = new ArrayList<>();
         RandomAccessInputView view =
                 new RandomAccessInputView(
                         segments.segments(), cache.pageSize(), segments.limitInLastSegment());
+        BinaryRow binaryRow = new BinaryRow(rowSerializer.getArity());
         while (true) {
             try {
-                entries.add(serializer.fromRow(compactedSerializer.deserialize(view)));
+                rowSerializer.mapFromPages(binaryRow, view);
+                if (readFilter.test(binaryRow)) {
+                    entries.add(serializer.fromRow(binaryRow));
+                }
             } catch (EOFException e) {
                 return entries;
             }
         }
     }
 
-    private Segments readSegments(K key) {
+    private Segments readSegments(K key, Filter<InternalRow> loadFilter) {
         try (CloseableIterator<InternalRow> iterator = reader.apply(key)) {
             ArrayList<MemorySegment> segments = new ArrayList<>();
             MemorySegmentSource segmentSource =
@@ -74,7 +79,10 @@ public class ObjectsCache<K, V> {
             SimpleCollectingOutputView output =
                     new SimpleCollectingOutputView(segments, segmentSource, cache.pageSize());
             while (iterator.hasNext()) {
-                compactedSerializer.serialize(iterator.next(), output);
+                InternalRow row = iterator.next();
+                if (loadFilter.test(row)) {
+                    rowSerializer.serializeToPages(row, output);
+                }
             }
             return new Segments(segments, output.getCurrentPositionInSegment());
         } catch (Exception e) {

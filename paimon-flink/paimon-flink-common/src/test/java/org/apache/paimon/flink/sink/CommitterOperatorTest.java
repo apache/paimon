@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.api.common.ExecutionConfig;
@@ -62,8 +63,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
                 createRecoverableTestHarness(table);
         testHarness.open();
-
-        StreamTableWrite write = table.newWrite(initialCommitUser);
+        StreamTableWrite write =
+                table.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite();
         write.write(GenericRow.of(1, 10L));
         write.write(GenericRow.of(2, 20L));
 
@@ -111,7 +112,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         long cpId = 0;
         for (int i = 0; i < 10; i++) {
             cpId++;
-            StreamTableWrite write = table.newWrite(initialCommitUser);
+            StreamTableWrite write =
+                    table.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite();
             write.write(GenericRow.of(1, 10L));
             write.write(GenericRow.of(2, 20L));
             for (CommitMessage committable : write.prepareCommit(false, cpId)) {
@@ -144,8 +146,10 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
         long timestamp = 1;
 
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(initialCommitUser);
         // this checkpoint is notified, should be committed
-        StreamTableWrite write = table.newWrite(initialCommitUser);
+        StreamTableWrite write = streamWriteBuilder.newWrite();
         write.write(GenericRow.of(1, 10L));
         write.write(GenericRow.of(2, 20L));
         for (CommitMessage committable : write.prepareCommit(false, 1)) {
@@ -173,7 +177,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness.open();
 
         // this checkpoint is notified, should be committed
-        write = table.newWrite(initialCommitUser);
+        write = streamWriteBuilder.newWrite();
         write.write(GenericRow.of(5, 50L));
         write.write(GenericRow.of(6, 60L));
         for (CommitMessage committable : write.prepareCommit(false, 3)) {
@@ -197,7 +201,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 createRecoverableTestHarness(table);
         testHarness.open();
         long timestamp = 0;
-        StreamTableWrite write = table.newWrite(initialCommitUser);
+        StreamTableWrite write =
+                table.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite();
 
         long cpId = 1;
         write.write(GenericRow.of(1, 10L));
@@ -232,7 +237,11 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 new CommitterOperator(
                         true,
                         initialCommitUser,
-                        user -> new StoreCommitter(table.newCommit(user)),
+                        user ->
+                                new StoreCommitter(
+                                        table.newStreamWriteBuilder()
+                                                .withCommitUser(user)
+                                                .newCommit()),
                         new RestoreAndFailCommittableStateManager(
                                 () ->
                                         new VersionedSerializerWrapper<>(
@@ -246,7 +255,11 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 new CommitterOperator(
                         true,
                         initialCommitUser,
-                        user -> new StoreCommitter(table.newCommit(user)),
+                        user ->
+                                new StoreCommitter(
+                                        table.newStreamWriteBuilder()
+                                                .withCommitUser(user)
+                                                .newCommit()),
                         new NoopCommittableStateManager());
         return createTestHarness(operator);
     }

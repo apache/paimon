@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -106,7 +107,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
                                 Arrays.asList("pt", "a"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogWithKeyFileStoreTable(LocalFileIO.create(), tablePath, schema);
+        return new ChangelogWithKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, schema);
     }
 
     @Override
@@ -128,6 +129,6 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
                                 Arrays.asList("pk", "pt0", "pt1"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogWithKeyFileStoreTable(LocalFileIO.create(), tablePath, schema);
+        return new ChangelogWithKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, schema);
     }
 }

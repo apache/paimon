@@ -20,8 +20,9 @@
 package org.apache.paimon.hive.mapred;
 
 import org.apache.paimon.hive.RowDataContainer;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.table.sink.BatchTableWrite;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.apache.hadoop.hive.ql.exec.FileSinkOperator;
 import org.apache.hadoop.io.NullWritable;

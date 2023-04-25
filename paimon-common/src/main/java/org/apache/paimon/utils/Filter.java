@@ -27,6 +27,8 @@ import org.apache.paimon.predicate.Predicate;
 @FunctionalInterface
 public interface Filter<T> {
 
+    Filter<?> ALWAYS_TRUE = t -> true;
+
     /**
      * Evaluates this predicate on the given argument.
      *
@@ -34,4 +36,9 @@ public interface Filter<T> {
      * @return {@code true} if the input argument matches the predicate, otherwise {@code false}
      */
     boolean test(T t);
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    static <T> Filter<T> alwaysTrue() {
+        return (Filter) ALWAYS_TRUE;
+    }
 }

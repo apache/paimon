@@ -58,7 +58,6 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 bucketKeyType,
                 snapshotManager,
                 schemaManager,
-                schemaId,
                 manifestFileFactory,
                 manifestListFactory,
                 numOfBuckets,

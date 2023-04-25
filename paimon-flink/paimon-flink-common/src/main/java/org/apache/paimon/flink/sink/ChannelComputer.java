@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.data.BinaryRow;
+
 import java.io.Serializable;
 
 /**
@@ -30,4 +32,13 @@ public interface ChannelComputer<T> extends Serializable {
     void setup(int numChannels);
 
     int channel(T record);
+
+    static int select(BinaryRow partition, int bucket, int numChannels) {
+        int startChannel = Math.abs(partition.hashCode()) % numChannels;
+        return (startChannel + bucket) % numChannels;
+    }
+
+    static int select(int bucket, int numChannels) {
+        return bucket % numChannels;
+    }
 }

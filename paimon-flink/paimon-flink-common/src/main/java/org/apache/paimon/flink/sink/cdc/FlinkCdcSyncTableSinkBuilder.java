@@ -84,9 +84,9 @@ public class FlinkCdcSyncTableSinkBuilder<T> {
 
         DataStream<Void> schemaChangeProcessFunction =
                 SingleOutputStreamOperatorUtils.getSideOutput(
-                                parsed, CdcParsingProcessFunction.SCHEMA_CHANGE_OUTPUT_TAG)
+                                parsed, CdcParsingProcessFunction.NEW_DATA_FIELD_LIST_OUTPUT_TAG)
                         .process(
-                                new SchemaChangeProcessFunction(
+                                new UpdatedDataFieldsProcessFunction(
                                         new SchemaManager(table.fileIO(), table.location())));
         schemaChangeProcessFunction.getTransformation().setParallelism(1);
         schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);

@@ -222,7 +222,7 @@ All Hive's data types are available in package `org.apache.hadoop.hive.serde2.ty
     <thead>
     <tr>
       <th class="text-left" style="width: 10%">Hive Data Type</th>
-      <th class="text-left" style="width: 10%">Flink Data Type</th>
+      <th class="text-left" style="width: 10%">Paimon Data Type</th>
       <th class="text-left" style="width: 5%">Atomic Type</th>
     </tr>
     </thead>

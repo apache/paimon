@@ -19,6 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.hive.objectinspector.PaimonInternalRowObjectInspector;
+
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.apache.hadoop.conf.Configuration;

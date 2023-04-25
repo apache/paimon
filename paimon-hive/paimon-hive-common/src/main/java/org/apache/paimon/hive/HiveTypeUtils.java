@@ -20,6 +20,7 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.MapType;
@@ -81,14 +82,20 @@ public class HiveTypeUtils {
                 return TypeInfoFactory.getMapTypeInfo(
                         logicalTypeToTypeInfo(mapType.getKeyType()),
                         logicalTypeToTypeInfo(mapType.getValueType()));
+
             case ROW:
+                RowType rowType = (RowType) logicalType;
+                List<String> fieldNames =
+                        rowType.getFields().stream()
+                                .map(DataField::name)
+                                .collect(Collectors.toList());
                 List<TypeInfo> typeInfos =
-                        ((RowType) logicalType)
-                                .getFieldTypes().stream()
-                                        .map(HiveTypeUtils::logicalTypeToTypeInfo)
-                                        .collect(Collectors.toList());
-                return TypeInfoFactory.getStructTypeInfo(
-                        ((RowType) logicalType).getFieldNames(), typeInfos);
+                        rowType.getFields().stream()
+                                .map(DataField::type)
+                                .map(HiveTypeUtils::logicalTypeToTypeInfo)
+                                .collect(Collectors.toList());
+                return TypeInfoFactory.getStructTypeInfo(fieldNames, typeInfos);
+
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported logical type " + logicalType.asSQLString());

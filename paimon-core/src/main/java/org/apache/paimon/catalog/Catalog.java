@@ -182,6 +182,11 @@ public interface Catalog extends AutoCloseable {
     void alterTable(Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException;
 
+    /** Return a boolean that indicates whether this catalog is case-sensitive. */
+    default boolean caseSensitive() {
+        return true;
+    }
+
     /** Exception for trying to drop on a database that is not empty. */
     class DatabaseNotEmptyException extends Exception {
         private static final String MSG = "Database %s is not empty.";

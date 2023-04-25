@@ -45,6 +45,7 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.logical.VarCharType;
 import org.apache.flink.types.Row;
+import org.apache.flink.util.CollectionUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -54,7 +55,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.CoreOptions.BUCKET;
@@ -1329,6 +1332,38 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                                 table)))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Paimon doesn't support streaming INSERT OVERWRITE.");
+    }
+
+    @Test
+    public void testPhysicalColumnComments() {
+        String ddl = "CREATE TABLE T(a INT COMMENT 'comment of a', b INT);";
+        bEnv.executeSql(ddl);
+
+        List<String> result =
+                CollectionUtil.iteratorToList(bEnv.executeSql("DESC T").collect()).stream()
+                        .map(Objects::toString)
+                        .collect(Collectors.toList());
+
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[a, INT, true, null, null, null, comment of a]",
+                        "+I[b, INT, true, null, null, null, null]");
+    }
+
+    @Test
+    public void testUnsupportedComputedColumnComments() {
+        String ddl = "CREATE TABLE T(a INT , b INT, c AS a + b COMMENT 'computed');";
+        bEnv.executeSql(ddl);
+
+        List<String> result =
+                CollectionUtil.iteratorToList(bEnv.executeSql("DESC T").collect()).stream()
+                        .map(Objects::toString)
+                        .collect(Collectors.toList());
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[a, INT, true, null, null, null]",
+                        "+I[b, INT, true, null, null, null]",
+                        "+I[c, INT, true, null, AS `a` + `b`, null]");
     }
 
     // ----------------------------------------------------------------------------------------------------------------

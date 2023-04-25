@@ -161,19 +161,6 @@ ALTER TABLE my_table RENAME COLUMN c0 TO c1;
 {{< /tabs >}}
 
 ## Dropping Columns
-The syntax is:
-
-{{< tabs "drop-columns-syntax" >}}
-
-{{< tab "Spark3" >}}
-
-```sql
-ALTER TABLE table_identifier DROP { COLUMN | COLUMNS } [(] col_name [, ... ] [)]
-```
-
-{{< /tab >}}
-
-{{< /tabs >}}
 
 The following SQL drops tow columns `c1` and `c2` from table `my_table`.
 
@@ -235,6 +222,22 @@ To modify an existent column to a new position, use FIRST or AFTER col_name.
 ALTER TABLE my_table ALTER COLUMN col_a FIRST;
 
 ALTER TABLE my_table ALTER COLUMN col_a AFTER col_b;
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+## Changing Column Type
+
+The following SQL changes type of column `col_a` to `DOUBLE`.
+
+{{< tabs "change-column-type" >}}
+
+{{< tab "Spark3" >}}
+
+```sql
+ALTER TABLE my_table ALTER COLUMN col_a TYPE 'DOUBLE';
 ```
 
 {{< /tab >}}

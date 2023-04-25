@@ -24,8 +24,6 @@ import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateFilter;
 import org.apache.paimon.reader.RecordReaderIterator;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
-import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -34,6 +32,9 @@ import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.TypeUtils;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 
 import javax.annotation.Nullable;
 

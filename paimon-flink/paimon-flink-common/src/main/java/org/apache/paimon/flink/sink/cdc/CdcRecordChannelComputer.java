@@ -50,8 +50,7 @@ public class CdcRecordChannelComputer implements ChannelComputer<CdcRecord> {
     }
 
     public int channel(BinaryRow partition, int bucket) {
-        int startChannel = Math.abs(partition.hashCode()) % numChannels;
-        return (startChannel + bucket) % numChannels;
+        return ChannelComputer.select(partition, bucket, numChannels);
     }
 
     @Override

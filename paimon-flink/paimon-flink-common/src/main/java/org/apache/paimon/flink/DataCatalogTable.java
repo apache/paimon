@@ -20,8 +20,12 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.types.DataField;
 
+import org.apache.flink.table.api.Schema;
+import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.TableSchema;
+import org.apache.flink.table.api.constraints.UniqueConstraint;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.CatalogTableImpl;
@@ -30,6 +34,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /** A {@link CatalogTableImpl} to wrap {@link FileStoreTable}. */
 public class DataCatalogTable extends CatalogTableImpl {
@@ -48,6 +53,66 @@ public class DataCatalogTable extends CatalogTableImpl {
 
     public Table table() {
         return table;
+    }
+
+    @Override
+    public Schema getUnresolvedSchema() {
+        // add physical column comments
+        Map<String, String> columnComments =
+                table.rowType().getFields().stream()
+                        .filter(dataField -> dataField.description() != null)
+                        .collect(Collectors.toMap(DataField::name, DataField::description));
+
+        return toSchema(getSchema(), columnComments);
+    }
+
+    /** Copied from {@link TableSchema#toSchema(Map)} to support versions lower than 1.17. */
+    private Schema toSchema(TableSchema tableSchema, Map<String, String> comments) {
+        final Schema.Builder builder = Schema.newBuilder();
+
+        tableSchema
+                .getTableColumns()
+                .forEach(
+                        column -> {
+                            if (column instanceof TableColumn.PhysicalColumn) {
+                                final TableColumn.PhysicalColumn c =
+                                        (TableColumn.PhysicalColumn) column;
+                                builder.column(c.getName(), c.getType());
+                            } else if (column instanceof TableColumn.MetadataColumn) {
+                                final TableColumn.MetadataColumn c =
+                                        (TableColumn.MetadataColumn) column;
+                                builder.columnByMetadata(
+                                        c.getName(),
+                                        c.getType(),
+                                        c.getMetadataAlias().orElse(null),
+                                        c.isVirtual());
+                            } else if (column instanceof TableColumn.ComputedColumn) {
+                                final TableColumn.ComputedColumn c =
+                                        (TableColumn.ComputedColumn) column;
+                                builder.columnByExpression(c.getName(), c.getExpression());
+                            } else {
+                                throw new IllegalArgumentException(
+                                        "Unsupported column type: " + column);
+                            }
+                            String colName = column.getName();
+                            if (comments.containsKey(colName)) {
+                                builder.withComment(comments.get(colName));
+                            }
+                        });
+
+        tableSchema
+                .getWatermarkSpecs()
+                .forEach(
+                        spec ->
+                                builder.watermark(
+                                        spec.getRowtimeAttribute(), spec.getWatermarkExpr()));
+
+        if (tableSchema.getPrimaryKey().isPresent()) {
+            UniqueConstraint primaryKey = tableSchema.getPrimaryKey().get();
+            builder.primaryKeyNamed(primaryKey.getName(), primaryKey.getColumns());
+        }
+
+        return builder.build();
     }
 
     @Override

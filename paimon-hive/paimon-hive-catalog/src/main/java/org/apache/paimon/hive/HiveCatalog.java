@@ -350,6 +350,11 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    public boolean caseSensitive() {
+        return false;
+    }
+
+    @Override
     public void close() throws Exception {
         client.close();
     }

@@ -69,6 +69,7 @@ under the License.
     </modules>
 
     <properties>
+        <project.build.outputTimestamp>${maven.build.timestamp}</project.build.outputTimestamp>
         <paimon.shade.jackson.version>2.14.2</paimon.shade.jackson.version>
         <paimon.shade.guava.version>30.1.1-jre</paimon.shade.guava.version>
         <paimon.shade.caffeine.version>2.9.3</paimon.shade.caffeine.version>
@@ -433,6 +434,7 @@ under the License.
                         <test.randomization.seed>${test.randomization.seed}</test.randomization.seed>
                         <test.flink.main.version>${test.flink.main.version}</test.flink.main.version>
                         <test.flink.version>${test.flink.version}</test.flink.version>
+                        <jacoco-agent.destfile>${project.build.directory}/jacoco.exec</jacoco-agent.destfile>
                     </systemPropertyVariables>
                     <argLine>-Xms256m -Xmx2048m -Dmvn.forkNumber=${surefire.forkNumber} -XX:+UseG1GC</argLine>
                 </configuration>
@@ -795,7 +797,7 @@ under the License.
 
                             <!-- \# refers to the static imports -->
                             <importOrder>
-                                <order>org.apache.paimon,org.apache.paimon.shaded,,javax,java,scala,\#</order>
+                                <order>org.apache.paimon,org.apache.paimon.shade,,javax,java,scala,\#</order>
                             </importOrder>
 
                             <removeUnusedImports/>
@@ -904,10 +906,34 @@ under the License.
                         </dependency>
                     </dependencies>
                 </plugin>
+
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-remote-resources-plugin</artifactId>
+                    <version>1.7.0</version>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>process</goal>
+                            </goals>
+                            <configuration>
+                                <resourceBundles>
+                                    <resourceBundle>org.apache.apache.resources:apache-incubator-disclaimer-resource-bundle:1.5</resourceBundle>
+                                </resourceBundles>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
             </plugins>
         </pluginManagement>
     </build>
 
+    <!--
+    Uncomment the following "repositories" tag if your maven fails to download paimon-bundle snapshot files.
+    We comment these tags by default because downloading from apache repositories is very slow for both github and developers.
+    -->
+
+    <!--
     <repositories>
         <repository>
             <id>apache-releases</id>
@@ -920,4 +946,5 @@ under the License.
             <url>https://repository.apache.org/content/repositories/snapshots/</url>
         </repository>
     </repositories>
+    -->
 </project>

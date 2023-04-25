@@ -21,6 +21,7 @@ package org.apache.paimon;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendOnlyFileStoreRead;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
@@ -66,6 +67,12 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     @Override
     public AppendOnlyFileStoreWrite newWrite(String commitUser) {
+        return newWrite(commitUser, null);
+    }
+
+    @Override
+    public AppendOnlyFileStoreWrite newWrite(
+            String commitUser, ManifestCacheFilter manifestFilter) {
         return new AppendOnlyFileStoreWrite(
                 fileIO,
                 newRead(),
@@ -74,11 +81,11 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 rowType,
                 pathFactory(),
                 snapshotManager(),
-                newScan(true),
+                newScan(true).withManifestCacheFilter(manifestFilter),
                 options);
     }
 
-    private AppendOnlyFileStoreScan newScan(boolean checkNumOfBuckets) {
+    private AppendOnlyFileStoreScan newScan(boolean forWrite) {
         return new AppendOnlyFileStoreScan(
                 partitionType,
                 bucketKeyType.getFieldCount() == 0 ? rowType : bucketKeyType,
@@ -86,10 +93,10 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 snapshotManager(),
                 schemaManager,
                 schemaId,
-                manifestFileFactory(),
-                manifestListFactory(),
+                manifestFileFactory(forWrite),
+                manifestListFactory(forWrite),
                 options.bucket(),
-                checkNumOfBuckets);
+                forWrite);
     }
 
     @Override

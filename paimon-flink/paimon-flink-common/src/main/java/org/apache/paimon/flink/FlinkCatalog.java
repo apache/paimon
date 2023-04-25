@@ -25,7 +25,9 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.types.DataField;
 
+import org.apache.flink.table.api.Schema.UnresolvedColumn;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
@@ -59,6 +61,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.table.descriptors.Schema.SCHEMA;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
@@ -199,8 +202,11 @@ public class FlinkCatalog extends AbstractCatalog {
         if (options.containsKey(CONNECTOR.key())) {
             throw new CatalogException(
                     String.format(
-                            "Paimon Catalog only supports paimon tables, not '%s' connector."
-                                    + " You can create TEMPORARY table instead.",
+                            "Paimon Catalog only supports paimon tables ,"
+                                    + " and you don't need to specify  'connector'= '"
+                                    + FlinkCatalogFactory.IDENTIFIER
+                                    + "' when using Paimon Catalog\n"
+                                    + " You can create TEMPORARY table instead if you want to create the table of other connector.",
                             options.get(CONNECTOR.key())));
         }
 
@@ -364,11 +370,28 @@ public class FlinkCatalog extends AbstractCatalog {
         }
 
         return new Schema(
-                toDataType(rowType).getFields(),
+                addColumnComments(toDataType(rowType).getFields(), getColumnComments(catalogTable)),
                 catalogTable.getPartitionKeys(),
                 primaryKeys,
                 options,
                 catalogTable.getComment());
+    }
+
+    private static Map<String, String> getColumnComments(CatalogTable catalogTable) {
+        return catalogTable.getUnresolvedSchema().getColumns().stream()
+                .filter(c -> c.getComment().isPresent())
+                .collect(Collectors.toMap(UnresolvedColumn::getName, c -> c.getComment().get()));
+    }
+
+    private static List<DataField> addColumnComments(
+            List<DataField> fields, Map<String, String> columnComments) {
+        return fields.stream()
+                .map(
+                        field -> {
+                            String comment = columnComments.get(field.name());
+                            return comment == null ? field : field.newDescription(comment);
+                        })
+                .collect(Collectors.toList());
     }
 
     public static Identifier toIdentifier(ObjectPath path) {

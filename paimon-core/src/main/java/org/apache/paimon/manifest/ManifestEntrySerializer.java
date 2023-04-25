@@ -18,10 +18,13 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.utils.VersionedObjectSerializer;
+
+import java.util.function.Function;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
@@ -71,5 +74,17 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
                 row.getInt(2),
                 row.getInt(3),
                 dataFileMetaSerializer.fromRow(row.getRow(4, dataFileMetaSerializer.numFields())));
+    }
+
+    public static Function<InternalRow, BinaryRow> partitionGetter() {
+        return row -> deserializeBinaryRow(row.getBinary(2));
+    }
+
+    public static Function<InternalRow, Integer> bucketGetter() {
+        return row -> row.getInt(3);
+    }
+
+    public static Function<InternalRow, Integer> totalBucketGetter() {
+        return row -> row.getInt(4);
     }
 }
