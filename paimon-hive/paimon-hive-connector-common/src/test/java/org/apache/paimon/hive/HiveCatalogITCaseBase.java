@@ -512,7 +512,8 @@ public abstract class HiveCatalogITCaseBase {
                                                 "CREATE TABLE T ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
                                         .await())
                 .hasRootCauseMessage(
-                        String.format("Table name[%s] cannot contain upper case", "T"));
+                        String.format(
+                                "Table name[%s] cannot contain upper case in hive catalog", "T"));
 
         assertThatThrownBy(
                         () ->
@@ -520,7 +521,9 @@ public abstract class HiveCatalogITCaseBase {
                                                 "CREATE TABLE t (A INT, b STRING, C STRING) WITH ( 'file.format' = 'avro')")
                                         .await())
                 .hasRootCauseMessage(
-                        String.format("Field names %s cannot contain upper case", "[A, C]"));
+                        String.format(
+                                "Field names %s cannot contain upper case in hive catalog",
+                                "[A, C]"));
     }
 
     @Test
