@@ -33,10 +33,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Utility class to load MySQL table schema with JDBC. */
 public class MySqlSchema {
 
-    // used for retrieving metadata and throwing error, do not convert to case-insensitive form
     private final String databaseName;
-    private final String originalTableName;
-    // might be converted to case-insensitive form
     private final String tableName;
 
     private final LinkedHashMap<String, DataType> fields;
@@ -46,8 +43,7 @@ public class MySqlSchema {
             DatabaseMetaData metaData, String databaseName, String tableName, boolean caseSensitive)
             throws Exception {
         this.databaseName = databaseName;
-        this.originalTableName = tableName;
-        this.tableName = caseSensitive ? tableName : tableName.toLowerCase();
+        this.tableName = tableName;
 
         fields = new LinkedHashMap<>();
         try (ResultSet rs = metaData.getColumns(databaseName, null, tableName, null)) {
@@ -68,7 +64,7 @@ public class MySqlSchema {
                             !fields.containsKey(fieldName.toLowerCase()),
                             String.format(
                                     "Duplicate key '%s' in table '%s.%s' appears when converting fields map keys to case-insensitive form.",
-                                    fieldName, databaseName, originalTableName));
+                                    fieldName, databaseName, tableName));
                     fieldName = fieldName.toLowerCase();
                 }
                 fields.put(fieldName, MySqlTypeUtils.toDataType(fieldType, precision, scale));
@@ -89,10 +85,6 @@ public class MySqlSchema {
 
     public String databaseName() {
         return databaseName;
-    }
-
-    public String originalTableName() {
-        return originalTableName;
     }
 
     public String tableName() {
