@@ -135,6 +135,7 @@ CREATE TABLE all_types_table (
     _enum ENUM ('value1','value2','value3'),
     -- YEAR
     _year YEAR,
+    _time TIME,
     PRIMARY KEY (_id)
 );
 
@@ -182,7 +183,9 @@ INSERT INTO all_types_table VALUES (
     -- enum
     'value1',
      -- YEAR
-     2023
+     2023,
+     -- TIME,
+     '10:13:23'
 ), (
     2, 2.2,
     NULL, NULL, NULL, NULL, NULL, NULL,
@@ -203,6 +206,7 @@ INSERT INTO all_types_table VALUES (
     NULL,
     NULL, NULL, NULL, NULL,NULL, NULL,
     NULL, NULL, NULL, NULL,NULL, NULL,
+    NULL,
     NULL,
     NULL,
     NULL

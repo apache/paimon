@@ -353,6 +353,10 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "all_types_table");
 
+        // orc format do not support time type, so we use parquet format.
+        Map<String, String> paimonConfig = getBasicMySqlConfig();
+        paimonConfig.put("file.format", "parquet");
+
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(1);
         env.enableCheckpointing(1000);
@@ -367,7 +371,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
                         Collections.emptyMap(),
-                        Collections.emptyMap());
+                        paimonConfig);
         action.build(env);
         JobClient jobClient = env.executeAsync();
 
@@ -437,7 +441,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.BYTES(), // _longblob
                             DataTypes.STRING(), // _json
                             DataTypes.STRING(), // _enum
-                            DataTypes.INT() // _year
+                            DataTypes.INT(), // _year
+                            DataTypes.TIME() // _time
                         },
                         new String[] {
                             "_id",
@@ -503,7 +508,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             "_longblob",
                             "_json",
                             "_enum",
-                            "_year"
+                            "_year",
+                            "_time"
                         });
         FileStoreTable table = getFileStoreTable();
         List<String> expected =
@@ -540,7 +546,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "[76, 79, 78, 71, 66, 76, 79, 66, 32, 32, 98, 121, 116, 101, 115, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97], "
                                 + "{\"a\": \"b\"}, "
                                 + "value1, "
-                                + "2023"
+                                + "2023, "
+                                + "36803000"
                                 + "]",
                         "+I["
                                 + "2, 2.2, "
@@ -562,6 +569,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "NULL, "
                                 + "NULL, NULL, NULL, NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, NULL, NULL, NULL, "
+                                + "NULL, "
                                 + "NULL, "
                                 + "NULL, "
                                 + "NULL"
