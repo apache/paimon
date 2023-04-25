@@ -271,12 +271,9 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                     // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
                     // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
                     // for implementation
-                    newValue =
-                            Instant.parse(oldValue)
-                                    .atZone(serverTimeZone)
-                                    .toLocalDateTime()
-                                    .toString()
-                                    .replace('T', ' ');
+                    LocalDateTime localDateTime =
+                            Instant.parse(oldValue).atZone(serverTimeZone).toLocalDateTime();
+                    newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 6);
                 } else if ("io.debezium.time.MicroTime".equals(className)) {
                     long microseconds = Long.parseLong(oldValue);
                     long microsecondsPerSecond = 1_000_000;

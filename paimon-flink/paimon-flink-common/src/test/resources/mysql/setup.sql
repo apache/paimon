@@ -115,6 +115,7 @@ CREATE TABLE all_types_table (
     _datetime_p2 DATETIME(2),
     -- TIMESTAMP
     _timestamp TIMESTAMP(6) DEFAULT NULL,
+    _timestamp0 TIMESTAMP,
     -- string
     _char CHAR(10),
     _varchar VARCHAR(20),
@@ -173,7 +174,7 @@ INSERT INTO all_types_table VALUES (
     -- DATETIME precision test
     '2023-03-24 14:30', '2023-03-24 14:30:05.12',
     -- TIMESTAMP
-    '2023-03-23 15:00:10.123456',
+    '2023-03-23 15:00:10.123456', '2023-03-23 00:10',
     -- string
     'Paimon', 'Apache Paimon','Apache Paimon MySQL TINYTEXT Test Data', 'Apache Paimon MySQL Test Data','Apache Paimon MySQL MEDIUMTEXT Test Data','Apache Paimon MySQL Long Test Data',
     -- BINARY
@@ -203,7 +204,7 @@ INSERT INTO all_types_table VALUES (
     NULL,
     NULL, NULL, NULL,
     NULL, NULL,
-    NULL,
+    NULL, NULL,
     NULL, NULL, NULL, NULL,NULL, NULL,
     NULL, NULL, NULL, NULL,NULL, NULL,
     NULL,
