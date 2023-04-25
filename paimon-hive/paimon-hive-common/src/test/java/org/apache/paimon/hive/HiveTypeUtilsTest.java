@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 /** Test for {@link HiveTypeUtils}. */
-public class HiveTypeUtilTest {
+public class HiveTypeUtilsTest {
 
     @Test
     public void testLogicalTypeToTypeInfo() {
