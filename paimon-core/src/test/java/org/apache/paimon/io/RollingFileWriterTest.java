@@ -75,7 +75,8 @@ public class RollingFileWriterTest {
                                         SCHEMA,
                                         fileFormat.createStatsExtractor(SCHEMA).orElse(null),
                                         0L,
-                                        new LongCounter(0)),
+                                        new LongCounter(0),
+                                        CoreOptions.FILE_COMPRESSION.defaultValue()),
                         TARGET_FILE_SIZE);
     }
 

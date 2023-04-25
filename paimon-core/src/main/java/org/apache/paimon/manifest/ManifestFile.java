@@ -18,6 +18,7 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FieldStatsCollector;
 import org.apache.paimon.format.FileFormat;
@@ -82,7 +83,11 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     public List<ManifestFileMeta> write(List<ManifestEntry> entries) {
         RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
                 new RollingFileWriter<>(
-                        () -> new ManifestEntryWriter(writerFactory, pathFactory.newPath()),
+                        () ->
+                                new ManifestEntryWriter(
+                                        writerFactory,
+                                        pathFactory.newPath(),
+                                        CoreOptions.FILE_COMPRESSION.defaultValue()),
                         suggestedFileSize);
         try {
             writer.write(entries);
@@ -102,8 +107,8 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private long numDeletedFiles = 0;
         private long schemaId = Long.MIN_VALUE;
 
-        ManifestEntryWriter(FormatWriterFactory factory, Path path) {
-            super(ManifestFile.this.fileIO, factory, path, serializer::toRow, null);
+        ManifestEntryWriter(FormatWriterFactory factory, Path path, String fileCompression) {
+            super(ManifestFile.this.fileIO, factory, path, serializer::toRow, fileCompression);
 
             this.partitionStatsCollector = new FieldStatsCollector(partitionType);
             this.partitionStatsSerializer = new FieldStatsArraySerializer(partitionType);
