@@ -117,10 +117,6 @@
                                 </includes>
                             </artifactSet>
                             <relocations>
-                                <relocation>
-                                    <pattern>org.apache.hadoop</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.hadoop3.org.apache.hadoop</shadedPattern>
-                                </relocation>
                                 <!-- relocate the OSS dependencies -->
                                 <relocation>
                                     <pattern>com.aliyun</pattern>
