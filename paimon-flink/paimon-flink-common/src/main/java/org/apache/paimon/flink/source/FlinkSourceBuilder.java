@@ -24,16 +24,20 @@ import org.apache.paimon.CoreOptions.StreamingReadMode;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.Projection;
 import org.apache.paimon.flink.log.LogSourceProvider;
+import org.apache.paimon.flink.source.operator.MonitorFunction;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.connector.base.source.hybrid.HybridSource;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -122,23 +126,55 @@ public class FlinkSourceBuilder {
         return this;
     }
 
-    private StaticFileStoreSource buildStaticFileSource() {
-        return new StaticFileStoreSource(
-                table.newReadBuilder().withProjection(projectedFields).withFilter(predicate),
-                limit,
-                Options.fromMap(table.options())
-                        .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
-                splits);
+    private ReadBuilder createReadBuilder() {
+        return table.newReadBuilder().withProjection(projectedFields).withFilter(predicate);
     }
 
-    private ContinuousFileStoreSource buildContinuousFileSource() {
-        return new ContinuousFileStoreSource(
-                table.newReadBuilder().withProjection(projectedFields).withFilter(predicate),
-                table.options(),
-                limit);
+    private DataStream<RowData> buildStaticFileSource() {
+        return toDataStream(
+                new StaticFileStoreSource(
+                        createReadBuilder(),
+                        limit,
+                        Options.fromMap(table.options())
+                                .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
+                        splits));
     }
 
-    public Source<RowData, ?, ?> buildSource() {
+    private DataStream<RowData> buildContinuousFileSource() {
+        return toDataStream(
+                new ContinuousFileStoreSource(createReadBuilder(), table.options(), limit));
+    }
+
+    private DataStream<RowData> toDataStream(Source<RowData, ?, ?> source) {
+        DataStreamSource<RowData> dataStream =
+                env.fromSource(
+                        source,
+                        watermarkStrategy == null
+                                ? WatermarkStrategy.noWatermarks()
+                                : watermarkStrategy,
+                        tableIdentifier.asSummaryString(),
+                        produceTypeInfo());
+        if (parallelism != null) {
+            dataStream.setParallelism(parallelism);
+        }
+        return dataStream;
+    }
+
+    private TypeInformation<RowData> produceTypeInfo() {
+        RowType rowType = toLogicalType(table.rowType());
+        LogicalType produceType =
+                Optional.ofNullable(projectedFields)
+                        .map(Projection::of)
+                        .map(p -> p.project(rowType))
+                        .orElse(rowType);
+        return InternalTypeInfo.of(produceType);
+    }
+
+    public DataStream<RowData> build() {
+        if (env == null) {
+            throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
+        }
+
         if (isContinuous) {
             TableScanUtils.streamingReadingValidate(table);
 
@@ -148,44 +184,47 @@ public class FlinkSourceBuilder {
 
             if (logSourceProvider != null && streamingReadMode != FILE) {
                 if (startupMode != StartupMode.LATEST_FULL) {
-                    return logSourceProvider.createSource(null);
+                    return toDataStream(logSourceProvider.createSource(null));
+                } else {
+                    return toDataStream(
+                            HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
+                                            LogHybridSourceFactory.buildHybridFirstSource(
+                                                    table, projectedFields, predicate))
+                                    .addSource(
+                                            new LogHybridSourceFactory(logSourceProvider),
+                                            Boundedness.CONTINUOUS_UNBOUNDED)
+                                    .build());
                 }
-                return HybridSource.<RowData, StaticFileStoreSplitEnumerator>builder(
-                                LogHybridSourceFactory.buildHybridFirstSource(
-                                        table, projectedFields, predicate))
-                        .addSource(
-                                new LogHybridSourceFactory(logSourceProvider),
-                                Boundedness.CONTINUOUS_UNBOUNDED)
-                        .build();
             } else {
-                return buildContinuousFileSource();
+                if (conf.contains(CoreOptions.CONSUMER_ID)) {
+                    return buildContinuousStreamOperator();
+                } else {
+                    return buildContinuousFileSource();
+                }
             }
         } else {
             return buildStaticFileSource();
         }
     }
 
-    public DataStreamSource<RowData> build() {
-        if (env == null) {
-            throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
+    private DataStream<RowData> buildContinuousStreamOperator() {
+        DataStream<RowData> dataStream;
+        if (limit != null) {
+            throw new IllegalArgumentException(
+                    "Cannot limit streaming source, please use batch execution mode.");
         }
-
-        RowType rowType = toLogicalType(table.rowType());
-        LogicalType produceType =
-                Optional.ofNullable(projectedFields)
-                        .map(Projection::of)
-                        .map(p -> p.project(rowType))
-                        .orElse(rowType);
-        DataStreamSource<RowData> dataStream =
-                env.fromSource(
-                        buildSource(),
-                        watermarkStrategy == null
-                                ? WatermarkStrategy.noWatermarks()
-                                : watermarkStrategy,
+        dataStream =
+                MonitorFunction.buildSource(
+                        env,
                         tableIdentifier.asSummaryString(),
-                        InternalTypeInfo.of(produceType));
+                        produceTypeInfo(),
+                        createReadBuilder(),
+                        conf.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis());
         if (parallelism != null) {
-            dataStream.setParallelism(parallelism);
+            dataStream.getTransformation().setParallelism(parallelism);
+        }
+        if (watermarkStrategy != null) {
+            dataStream = dataStream.assignTimestampsAndWatermarks(watermarkStrategy);
         }
         return dataStream;
     }
