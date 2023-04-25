@@ -93,7 +93,7 @@ public class HiveDeserializer {
     }
 
     private static class DeserializerVisitor
-            extends DataTypeDefaultVisitor<ObjectInspectorPair, FieldDeserializer> {
+            extends SchemaVisitor<ObjectInspectorPair, FieldDeserializer> {
 
         public static FieldDeserializer visit(HiveSchema schema, ObjectInspectorPair pair) {
             return visit(
@@ -210,7 +210,7 @@ public class HiveDeserializer {
     }
 
     private static class PartnerObjectInspectorByNameAccessors
-            implements DataTypeDefaultVisitor.PartnerAccessors<ObjectInspectorPair> {
+            implements SchemaVisitor.PartnerAccessors<ObjectInspectorPair> {
 
         @Override
         public ObjectInspectorPair fieldPartner(ObjectInspectorPair pair, String name) {

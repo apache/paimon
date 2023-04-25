@@ -35,6 +35,8 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -207,6 +209,97 @@ public class HiveWriteITCase {
                 "insert into " + outputTableName + " values (1,2,3,'Hello'),(4,5,6,'Fine')");
         List<String> select = hiveShell.executeQuery("select * from " + outputTableName);
         Assert.assertEquals(select, Arrays.asList("1\t2\t3\tHello", "4\t5\t6\tFine"));
+    }
+
+    @Test
+    public void testWriteOnlyWithChangeLogTableOption() throws Exception {
+
+        String innerName = "hive_test_table_output";
+
+        String path = folder.newFolder().toURI().toString();
+        String tablePath = String.format("%s/default.db/%s", path, innerName);
+        Options conf = new Options();
+        conf.set(CatalogOptions.WAREHOUSE, path);
+        conf.set(CoreOptions.BUCKET, 1);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
+        Identifier identifier = Identifier.create(DATABASE_NAME, innerName);
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        RowType.of(
+                                new DataType[] {
+                                    DataTypes.INT(),
+                                    DataTypes.INT(),
+                                    DataTypes.INT(),
+                                    DataTypes.STRING(),
+                                },
+                                new String[] {"pt", "a", "b", "c"}),
+                        Collections.singletonList("pt"),
+                        Arrays.asList("a", "pt"),
+                        identifier);
+        String tableName = "test_table_" + (UUID.randomUUID().toString().substring(0, 4));
+        hiveShell.execute(
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE EXTERNAL TABLE " + tableName + " ",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
+                                "LOCATION '" + tablePath + "'")));
+        for (int i = 0; i < 5; i++) {
+            hiveShell.execute(
+                    "insert into " + tableName + " values (1,2,3,'Hello'),(4,5,6,'Fine')");
+        }
+        TableScan scan = table.newReadBuilder().newStreamScan();
+        DataSplit split = (DataSplit) scan.plan().splits().get(0);
+        // no compact snapshot
+        Assert.assertEquals(split.snapshotId(), 5L);
+    }
+
+    @Test
+    public void testWriteOnlyWithAppendOnlyTableOption() throws Exception {
+
+        String innerName = "hive_test_table_output";
+        int maxCompact = 3;
+        String path = folder.newFolder().toURI().toString();
+        String tablePath = String.format("%s/default.db/%s", path, innerName);
+        Options conf = new Options();
+        conf.set(CatalogOptions.WAREHOUSE, path);
+        conf.set(CoreOptions.BUCKET, 1);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
+        conf.set(CoreOptions.COMPACTION_MAX_FILE_NUM, maxCompact);
+        Identifier identifier = Identifier.create(DATABASE_NAME, innerName);
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        RowType.of(
+                                new DataType[] {
+                                    DataTypes.INT(),
+                                    DataTypes.INT(),
+                                    DataTypes.INT(),
+                                    DataTypes.STRING(),
+                                },
+                                new String[] {"pt", "a", "b", "c"}),
+                        Collections.singletonList("pt"),
+                        Collections.emptyList(),
+                        identifier);
+        String tableName = "test_table_" + (UUID.randomUUID().toString().substring(0, 4));
+        hiveShell.execute(
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE EXTERNAL TABLE " + tableName + " ",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
+                                "LOCATION '" + tablePath + "'")));
+        for (int i = 0; i < maxCompact; i++) {
+            hiveShell.execute(
+                    "insert into " + tableName + " values (1,2,3,'Hello'),(4,5,6,'Fine')");
+        }
+        TableScan scan = table.newReadBuilder().newStreamScan();
+        DataSplit split = (DataSplit) scan.plan().splits().get(0);
+        // no compact snapshot
+        Assert.assertEquals(split.snapshotId(), maxCompact);
     }
 
     @Test

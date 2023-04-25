@@ -46,7 +46,7 @@ public class PaimonSerDe extends AbstractSerDe {
 
     private final RowDataContainer rowData = new RowDataContainer();
 
-    private Map<ObjectInspector, HiveDeserializer> deserializers =
+    private final Map<ObjectInspector, HiveDeserializer> deserializers =
             Maps.newHashMapWithExpectedSize(1);
 
     @Override

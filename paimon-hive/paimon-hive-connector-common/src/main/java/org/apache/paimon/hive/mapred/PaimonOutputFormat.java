@@ -20,7 +20,6 @@ package org.apache.paimon.hive.mapred;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.hive.RowDataContainer;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -38,6 +37,7 @@ import org.apache.hadoop.mapred.TaskAttemptID;
 import org.apache.hadoop.util.Progressable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Properties;
 
@@ -75,13 +75,13 @@ public class PaimonOutputFormat
     private static PaimonRecordWriter writer(JobConf jobConf) {
         TaskAttemptID taskAttemptID = TaskAttemptID.forName(jobConf.get(TASK_ATTEMPT_ID_KEY));
         FileStoreTable table = createFileStoreTable(jobConf);
-        Map<String, String> newOptions = Maps.newHashMapWithExpectedSize(1);
         // force write-only = true
-        newOptions.put(CoreOptions.WRITE_ONLY.key(), Boolean.TRUE.toString());
+        Map<String, String> newOptions =
+                Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), Boolean.TRUE.toString());
         FileStoreTable copy = table.copy(newOptions);
         BatchWriteBuilder batchWriteBuilder = copy.newBatchWriteBuilder();
         BatchTableWrite batchTableWrite = batchWriteBuilder.newWrite();
 
-        return new PaimonRecordWriter(batchTableWrite, taskAttemptID, table.name());
+        return new PaimonRecordWriter(batchTableWrite, taskAttemptID, copy.name());
     }
 }
