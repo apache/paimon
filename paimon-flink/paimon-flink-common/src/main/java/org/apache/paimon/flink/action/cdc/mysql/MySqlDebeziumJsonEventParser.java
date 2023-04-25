@@ -62,23 +62,21 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ZoneId serverTimeZone;
     private final boolean caseSensitive;
-    private final String tablePrefix;
-    private final String tableSuffix;
+    private final TableNameConverter tableNameConverter;
 
     private JsonNode payload;
     private Map<String, String> mySqlFieldTypes;
     private Map<String, String> fieldClassNames;
 
     public MySqlDebeziumJsonEventParser(ZoneId serverTimeZone, boolean caseSensitive) {
-        this(serverTimeZone, caseSensitive, "", "");
+        this(serverTimeZone, caseSensitive, new TableNameConverter(caseSensitive));
     }
 
     public MySqlDebeziumJsonEventParser(
-            ZoneId serverTimeZone, boolean caseSensitive, String tablePrefix, String tableSuffix) {
+            ZoneId serverTimeZone, boolean caseSensitive, TableNameConverter tableNameConverter) {
         this.serverTimeZone = serverTimeZone;
         this.caseSensitive = caseSensitive;
-        this.tablePrefix = tablePrefix;
-        this.tableSuffix = tableSuffix;
+        this.tableNameConverter = tableNameConverter;
     }
 
     @Override
@@ -104,8 +102,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     @Override
     public String tableName() {
         String tableName = payload.get("source").get("table").asText();
-        tableName = caseSensitive ? tableName : tableName.toLowerCase();
-        return tablePrefix + tableName + tableSuffix;
+        return tableNameConverter.convert(tableName);
     }
 
     private void updateFieldTypes(JsonNode schema) {

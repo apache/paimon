@@ -168,17 +168,19 @@ public class MySqlSyncDatabaseAction implements Action {
                         + ", or MySQL database does not exist.");
 
         catalog.createDatabase(database, true);
+        TableNameConverter tableNameConverter =
+                new TableNameConverter(caseSensitive, tablePrefix, tableSuffix);
 
         List<FileStoreTable> fileStoreTables = new ArrayList<>();
         List<String> monitoredTables = new ArrayList<>();
         for (MySqlSchema mySqlSchema : mySqlSchemas) {
-            String paimonTableName = tablePrefix + mySqlSchema.tableName() + tableSuffix;
+            String paimonTableName = tableNameConverter.convert(mySqlSchema.tableName());
             Identifier identifier = new Identifier(database, paimonTableName);
             FileStoreTable table;
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
                 if (shouldMonitorTable(table.schema(), mySqlSchema, identifier)) {
-                    monitoredTables.add(mySqlSchema.originalTableName());
+                    monitoredTables.add(mySqlSchema.tableName());
                 }
             } catch (Catalog.TableNotExistException e) {
                 Schema schema =
@@ -189,7 +191,7 @@ public class MySqlSyncDatabaseAction implements Action {
                                 tableConfig);
                 catalog.createTable(identifier, schema, false);
                 table = (FileStoreTable) catalog.getTable(identifier);
-                monitoredTables.add(mySqlSchema.originalTableName());
+                monitoredTables.add(mySqlSchema.tableName());
             }
             fileStoreTables.add(table);
         }
@@ -203,12 +205,17 @@ public class MySqlSyncDatabaseAction implements Action {
                 MySqlSourceOptions.TABLE_NAME, "(" + String.join("|", monitoredTables) + ")");
         MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig);
 
+        String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
+        ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
+        EventParser.Factory<String> parserFactory =
+                () -> new MySqlDebeziumJsonEventParser(zoneId, caseSensitive, tableNameConverter);
+
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<String>()
                         .withInput(
                                 env.fromSource(
                                         source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
-                        .withParserFactory(getParserFactory(caseSensitive))
+                        .withParserFactory(parserFactory)
                         .withTables(fileStoreTables);
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
@@ -268,7 +275,7 @@ public class MySqlSyncDatabaseAction implements Action {
                     identifier.getFullName(),
                     tableSchema.fields(),
                     mySqlSchema.databaseName(),
-                    mySqlSchema.originalTableName(),
+                    mySqlSchema.tableName(),
                     mySqlSchema.fields());
             return false;
         } else {
@@ -282,19 +289,9 @@ public class MySqlSyncDatabaseAction implements Action {
                             identifier.getFullName(),
                             tableSchema.fields(),
                             mySqlSchema.databaseName(),
-                            mySqlSchema.originalTableName(),
+                            mySqlSchema.tableName(),
                             mySqlSchema.fields()));
         }
-    }
-
-    private EventParser.Factory<String> getParserFactory(boolean caseSensitive) {
-        // do not pass fields of this class to lambda directly to avoid NotSerializableException
-        String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
-        ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
-        String tablePrefix = this.tablePrefix;
-        String tableSuffix = this.tableSuffix;
-        return () ->
-                new MySqlDebeziumJsonEventParser(zoneId, caseSensitive, tablePrefix, tableSuffix);
     }
 
     // ------------------------------------------------------------------------
