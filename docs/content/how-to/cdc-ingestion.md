@@ -112,6 +112,7 @@ To use this feature through `flink run`, run the following shell command.
     mysql-sync-database
     --warehouse <warehouse-path> \
     --database <database-name> \
+    [--ignore-incompatible <true/false>] \
     [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
@@ -119,6 +120,8 @@ To use this feature through `flink run`, run the following shell command.
 
 * `--warehouse` is the path to Paimon warehouse.
 * `--database` is the database name in Paimon catalog.
+* `--ignore-incompatible` is default false, in this case, if MySQL table name exists in Paimon and their schema is incompatible, 
+an exception will be thrown. You can specify it to true explicitly to ignore the incompatible tables and exception.
 * `--mysql-conf` is the configuration for Flink CDC MySQL table sources. Each configuration should be specified in the format `key=value`. `hostname`, `username`, `password` and `database-name` are required configurations, others are optional. Note that `database-name` should be the exact name of the MySQL databse you want to synchronize. It can't be a regular expression. See its [document](https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options) for a complete list of configurations.
 * `--catalog-conf` is the configuration for Paimon catalog. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of catalog configurations.
 * `--table-conf` is the configuration for Paimon table sink. Each configuration should be specified in the format `key=value`. All Paimon sink table will be applied the same set of configurations. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of table configurations.

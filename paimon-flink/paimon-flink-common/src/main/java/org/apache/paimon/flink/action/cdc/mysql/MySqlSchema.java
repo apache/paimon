@@ -87,6 +87,10 @@ public class MySqlSchema {
         }
     }
 
+    public String databaseName() {
+        return databaseName;
+    }
+
     public String originalTableName() {
         return originalTableName;
     }
