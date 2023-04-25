@@ -29,6 +29,7 @@ import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
@@ -38,6 +39,8 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -49,7 +52,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 /**
  * An {@link Action} which synchronize the whole MySQL database into one Paimon database.
@@ -88,9 +90,12 @@ import java.util.stream.Collectors;
  */
 public class MySqlSyncDatabaseAction implements Action {
 
+    private static final Logger LOG = LoggerFactory.getLogger(MySqlSyncDatabaseAction.class);
+
     private final Configuration mySqlConfig;
     private final String warehouse;
     private final String database;
+    private final boolean ignoreIncompatible;
     private final Map<String, String> catalogConfig;
     private final Map<String, String> tableConfig;
 
@@ -98,11 +103,13 @@ public class MySqlSyncDatabaseAction implements Action {
             Map<String, String> mySqlConfig,
             String warehouse,
             String database,
+            boolean ignoreIncompatible,
             Map<String, String> catalogConfig,
             Map<String, String> tableConfig) {
         this.mySqlConfig = Configuration.fromMap(mySqlConfig);
         this.warehouse = warehouse;
         this.database = database;
+        this.ignoreIncompatible = ignoreIncompatible;
         this.catalogConfig = catalogConfig;
         this.tableConfig = tableConfig;
     }
@@ -136,24 +143,18 @@ public class MySqlSyncDatabaseAction implements Action {
                         + mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME)
                         + ", or MySQL database does not exist.");
 
-        mySqlConfig.set(
-                MySqlSourceOptions.TABLE_NAME,
-                "("
-                        + mySqlSchemas.stream()
-                                .map(MySqlSchema::originalTableName)
-                                .collect(Collectors.joining("|"))
-                        + ")");
-        MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig);
-
         catalog.createDatabase(database, true);
 
         List<FileStoreTable> fileStoreTables = new ArrayList<>();
+        List<String> monitoredTables = new ArrayList<>();
         for (MySqlSchema mySqlSchema : mySqlSchemas) {
             Identifier identifier = new Identifier(database, mySqlSchema.tableName());
             FileStoreTable table;
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
-                MySqlActionUtils.assertSchemaCompatible(table.schema(), mySqlSchema);
+                if (shouldMonitorTable(table.schema(), mySqlSchema, identifier)) {
+                    monitoredTables.add(mySqlSchema.originalTableName());
+                }
             } catch (Catalog.TableNotExistException e) {
                 Schema schema =
                         MySqlActionUtils.buildPaimonSchema(
@@ -163,9 +164,19 @@ public class MySqlSyncDatabaseAction implements Action {
                                 tableConfig);
                 catalog.createTable(identifier, schema, false);
                 table = (FileStoreTable) catalog.getTable(identifier);
+                monitoredTables.add(mySqlSchema.originalTableName());
             }
             fileStoreTables.add(table);
         }
+
+        Preconditions.checkState(
+                !monitoredTables.isEmpty(),
+                "No tables to be synchronized. Possible cause is the schemas of all tables in specified "
+                        + "MySQL database are not compatible with those of existed Paimon tables. Please check the log.");
+
+        mySqlConfig.set(
+                MySqlSourceOptions.TABLE_NAME, "(" + String.join("|", monitoredTables) + ")");
+        MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig);
 
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
@@ -207,6 +218,37 @@ public class MySqlSyncDatabaseAction implements Action {
         return mySqlSchemaList;
     }
 
+    private boolean shouldMonitorTable(
+            TableSchema tableSchema, MySqlSchema mySqlSchema, Identifier identifier) {
+        if (MySqlActionUtils.schemaCompatible(tableSchema, mySqlSchema)) {
+            return true;
+        } else if (ignoreIncompatible) {
+            LOG.warn(
+                    "Incompatible schema found. This table will be ignored.\n"
+                            + "Paimon table is: {}, fields are: {}.\n"
+                            + "MySQL table is: {}.{}, fields are: {}.",
+                    identifier.getFullName(),
+                    tableSchema.fields(),
+                    mySqlSchema.databaseName(),
+                    mySqlSchema.originalTableName(),
+                    mySqlSchema.fields());
+            return false;
+        } else {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Incompatible schema found.\n"
+                                    + "Paimon table is: %s, fields are: %s.\n"
+                                    + "MySQL table is: %s.%s, fields are: %s.\n"
+                                    + "If you want to ignore the incompatible tables, "
+                                    + "please specify --ignore-incompatible to true.",
+                            identifier.getFullName(),
+                            tableSchema.fields(),
+                            mySqlSchema.databaseName(),
+                            mySqlSchema.originalTableName(),
+                            mySqlSchema.fields()));
+        }
+    }
+
     // ------------------------------------------------------------------------
     //  Flink run methods
     // ------------------------------------------------------------------------
@@ -221,6 +263,7 @@ public class MySqlSyncDatabaseAction implements Action {
 
         String warehouse = params.get("warehouse");
         String database = params.get("database");
+        boolean ignoreIncompatible = Boolean.parseBoolean(params.get("ignore-incompatible"));
 
         Map<String, String> mySqlConfig = getConfigMap(params, "mysql-conf");
         Map<String, String> catalogConfig = getConfigMap(params, "catalog-conf");
@@ -234,6 +277,7 @@ public class MySqlSyncDatabaseAction implements Action {
                         mySqlConfig,
                         warehouse,
                         database,
+                        ignoreIncompatible,
                         catalogConfig == null ? Collections.emptyMap() : catalogConfig,
                         tableConfig == null ? Collections.emptyMap() : tableConfig));
     }
@@ -270,10 +314,16 @@ public class MySqlSyncDatabaseAction implements Action {
         System.out.println("Syntax:");
         System.out.println(
                 "  mysql-sync-database --warehouse <warehouse-path> --database <database-name> "
+                        + "[--ignore-incompatible <true/false>]"
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
         System.out.println();
+
+        System.out.println(
+                "--ignore-incompatible is default false, in this case, if MySQL table name exists in Paimon "
+                        + "and their schema is incompatible, an exception will be thrown. "
+                        + "You can specify it to true explicitly to ignore the incompatible tables and exception.");
 
         System.out.println("MySQL CDC source conf syntax:");
         System.out.println("  key=value");
