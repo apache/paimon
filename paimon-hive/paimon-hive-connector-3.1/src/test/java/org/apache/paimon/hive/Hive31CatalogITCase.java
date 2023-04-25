@@ -72,10 +72,6 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                                 "  'metastore' = 'hive',",
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",
-                                "  'hive-conf-dir' = '"
-                                        + hiveShell.getBaseDir().getRoot().getPath()
-                                        + HIVE_CONF
-                                        + "',",
                                 "  'metastore.client.class' = '"
                                         + TestHiveMetaStoreClient.class.getName()
                                         + "'",
@@ -100,10 +96,6 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                         "  'metastore' = 'hive',",
                         "  'uri' = '',",
                         "  'warehouse' = '" + path + "',",
-                        "  'hive-conf-dir' = '"
-                                + hiveShell.getBaseDir().getRoot().getPath()
-                                + HIVE_CONF
-                                + "',",
                         "  'metastore.client.class' = '"
                                 + CreateFailHiveMetaStoreClient.class.getName()
                                 + "'",
@@ -135,10 +127,6 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                                 "  'metastore' = 'hive',",
                                 "  'uri' = '',",
                                 "  'warehouse' = '" + path + "',",
-                                "  'hive-conf-dir' = '"
-                                        + hiveShell.getBaseDir().getRoot().getPath()
-                                        + HIVE_CONF
-                                        + "',",
                                 "  'metastore.client.class' = '"
                                         + AlterFailHiveMetaStoreClient.class.getName()
                                         + "'",
