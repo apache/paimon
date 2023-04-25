@@ -340,6 +340,162 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         }
     }
 
+    @Test
+    public void testTableAffix() throws Exception {
+        // create table t1
+        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        catalog.createDatabase(database, true);
+        Identifier identifier = Identifier.create(database, "test_prefix_t1_test_suffix");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k1", DataTypes.INT().notNull())
+                        .column("v0", DataTypes.VARCHAR(10))
+                        .primaryKey("k1")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        // try synchronization
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "paimon_sync_database_affix");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        MySqlSyncDatabaseAction action =
+                new MySqlSyncDatabaseAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        false,
+                        "test_prefix_",
+                        "_test_suffix",
+                        Collections.emptyMap(),
+                        tableConfig);
+        action.build(env);
+        JobClient client = env.executeAsync();
+
+        while (true) {
+            JobStatus status = client.getJobStatus().get();
+            if (status == JobStatus.RUNNING) {
+                break;
+            }
+            Thread.sleep(1000);
+        }
+
+        try (Connection conn =
+                        DriverManager.getConnection(
+                                MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
+                                MYSQL_CONTAINER.getUsername(),
+                                MYSQL_CONTAINER.getPassword());
+                Statement statement = conn.createStatement()) {
+            testTableAffixImpl(statement);
+        }
+    }
+
+    private void testTableAffixImpl(Statement statement) throws Exception {
+        FileStoreTable table1 = getFileStoreTable("test_prefix_t1_test_suffix");
+        FileStoreTable table2 = getFileStoreTable("test_prefix_t2_test_suffix");
+
+        statement.executeUpdate("USE paimon_sync_database_affix");
+
+        statement.executeUpdate("INSERT INTO t1 VALUES (1, 'one')");
+        statement.executeUpdate("INSERT INTO t2 VALUES (2, 'two')");
+        statement.executeUpdate("INSERT INTO t1 VALUES (3, 'three')");
+        statement.executeUpdate("INSERT INTO t2 VALUES (4, 'four')");
+
+        RowType rowType1 =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new String[] {"k1", "v0"});
+        List<String> primaryKeys1 = Collections.singletonList("k1");
+        List<String> expected = Arrays.asList("+I[1, one]", "+I[3, three]");
+        waitForResult(expected, table1, rowType1, primaryKeys1);
+
+        RowType rowType2 =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new String[] {"k2", "v0"});
+        List<String> primaryKeys2 = Collections.singletonList("k2");
+        expected = Arrays.asList("+I[2, two]", "+I[4, four]");
+        waitForResult(expected, table2, rowType2, primaryKeys2);
+
+        statement.executeUpdate("ALTER TABLE t1 ADD COLUMN v1 INT");
+        statement.executeUpdate("INSERT INTO t1 VALUES (5, 'five', 50)");
+        statement.executeUpdate("ALTER TABLE t2 ADD COLUMN v1 VARCHAR(10)");
+        statement.executeUpdate("INSERT INTO t2 VALUES (6, 'six', 's_6')");
+        statement.executeUpdate("INSERT INTO t1 VALUES (7, 'seven', 70)");
+        statement.executeUpdate("INSERT INTO t2 VALUES (8, 'eight', 's_8')");
+
+        rowType1 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                        },
+                        new String[] {"k1", "v0", "v1"});
+        expected =
+                Arrays.asList(
+                        "+I[1, one, NULL]",
+                        "+I[3, three, NULL]",
+                        "+I[5, five, 50]",
+                        "+I[7, seven, 70]");
+        waitForResult(expected, table1, rowType1, primaryKeys1);
+
+        rowType2 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.VARCHAR(10)
+                        },
+                        new String[] {"k2", "v0", "v1"});
+        expected =
+                Arrays.asList(
+                        "+I[2, two, NULL]",
+                        "+I[4, four, NULL]",
+                        "+I[6, six, s_6]",
+                        "+I[8, eight, s_8]");
+        waitForResult(expected, table2, rowType2, primaryKeys2);
+
+        statement.executeUpdate("ALTER TABLE t1 MODIFY COLUMN v1 BIGINT");
+        statement.executeUpdate("INSERT INTO t1 VALUES (9, 'nine', 9000000000000)");
+        statement.executeUpdate("ALTER TABLE t2 MODIFY COLUMN v1 VARCHAR(20)");
+        statement.executeUpdate("INSERT INTO t2 VALUES (10, 'ten', 'long_s_10')");
+
+        rowType1 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.BIGINT()
+                        },
+                        new String[] {"k1", "v0", "v1"});
+        expected =
+                Arrays.asList(
+                        "+I[1, one, NULL]",
+                        "+I[3, three, NULL]",
+                        "+I[5, five, 50]",
+                        "+I[7, seven, 70]",
+                        "+I[9, nine, 9000000000000]");
+        waitForResult(expected, table1, rowType1, primaryKeys1);
+
+        rowType2 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.VARCHAR(20)
+                        },
+                        new String[] {"k2", "v0", "v1"});
+        expected =
+                Arrays.asList(
+                        "+I[2, two, NULL]",
+                        "+I[4, four, NULL]",
+                        "+I[6, six, s_6]",
+                        "+I[8, eight, s_8]",
+                        "+I[10, ten, long_s_10]");
+        waitForResult(expected, table2, rowType2, primaryKeys2);
+    }
+
     private FileStoreTable getFileStoreTable(String tableName) throws Exception {
         Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
         Identifier identifier = Identifier.create(database, tableName);
