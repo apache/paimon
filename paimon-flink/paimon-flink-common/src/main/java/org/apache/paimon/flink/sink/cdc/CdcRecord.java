@@ -86,7 +86,7 @@ public class CdcRecord implements Serializable {
      *     returned
      */
     public Optional<GenericRow> toGenericRow(List<DataField> dataFields) {
-        GenericRow genericRow = new GenericRow(kind, dataFields.size());
+        GenericRow genericRow = new GenericRow(this.kind, dataFields.size());
         List<String> fieldNames =
                 dataFields.stream().map(DataField::name).collect(Collectors.toList());
 
