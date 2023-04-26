@@ -79,4 +79,9 @@ public class OrcFileStatsExtractorTest extends FileStatsExtractorTestBase {
                         new MultisetType(new VarCharType(8)))
                 .build();
     }
+
+    @Override
+    protected String fileCompression() {
+        return "LZ4";
+    }
 }

@@ -177,10 +177,16 @@ public class MergeTreeTest {
                         options.targetFileSize());
         writerFactory =
                 writerFactoryBuilder.build(
-                        BinaryRow.EMPTY_ROW, 0, options.fileCompressionPerLevel());
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        options.fileCompressionPerLevel(),
+                        options.fileCompression());
         compactWriterFactory =
                 writerFactoryBuilder.build(
-                        BinaryRow.EMPTY_ROW, 0, options.fileCompressionPerLevel());
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        options.fileCompressionPerLevel(),
+                        options.fileCompression());
         writer = createMergeTreeWriter(Collections.emptyList());
     }
 

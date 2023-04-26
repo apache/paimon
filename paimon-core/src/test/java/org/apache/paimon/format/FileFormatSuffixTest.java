@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.AppendOnlyCompactManager;
 import org.apache.paimon.append.AppendOnlyWriter;
 import org.apache.paimon.data.BinaryString;
@@ -72,7 +73,8 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                                 null, toCompact, 4, 10, 10, null, false), // not used
                         false,
                         dataFilePathFactory,
-                        null);
+                        null,
+                        CoreOptions.FILE_COMPRESSION.defaultValue());
         appendOnlyWriter.write(
                 GenericRow.of(1, BinaryString.fromString("aaa"), BinaryString.fromString("1")));
         CommitIncrement increment = appendOnlyWriter.prepareCommit(true);
