@@ -36,6 +36,8 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import javax.annotation.Nullable;
+
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
@@ -501,54 +503,47 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testIncludingTable() throws Exception {
-        // try synchronization
-        Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "paimon_sync_database_including");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
-        MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        false,
-                        null,
-                        null,
-                        "flink|paimon.+",
-                        null,
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        while (true) {
-            JobStatus status = client.getJobStatus().get();
-            if (status == JobStatus.RUNNING) {
-                break;
-            }
-            Thread.sleep(1000);
-        }
-
-        // check paimon tables
-        assertTableExists("flink", "paimon_1", "paimon_2");
-        assertTableNotExists("ignored");
+    public void testIncludingTables() throws Exception {
+        includingAndExcludingTablesImpl(
+                "paimon_sync_database_including",
+                "flink|paimon.+",
+                null,
+                Arrays.asList("flink", "paimon_1", "paimon_2"),
+                Collections.singletonList("ignored"));
     }
 
     @Test
     @Timeout(60)
-    public void testExcludingTable() throws Exception {
+    public void testExcludingTables() throws Exception {
+        includingAndExcludingTablesImpl(
+                "paimon_sync_database_excluding",
+                null,
+                "flink|paimon.+",
+                Collections.singletonList("sync"),
+                Arrays.asList("flink", "paimon_1", "paimon_2"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testIncludingAndExcludingTables() throws Exception {
+        includingAndExcludingTablesImpl(
+                "paimon_sync_database_in_excluding",
+                "flink|paimon.+",
+                "paimon_1",
+                Arrays.asList("flink", "paimon_2"),
+                Arrays.asList("paimon_1", "test"));
+    }
+
+    private void includingAndExcludingTablesImpl(
+            String databaseName,
+            @Nullable String includingTables,
+            @Nullable String excludingTables,
+            List<String> existedTables,
+            List<String> notExistedTables)
+            throws Exception {
         // try synchronization
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "paimon_sync_database_excluding");
+        mySqlConfig.put("database-name", databaseName);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(2);
@@ -567,8 +562,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         false,
                         null,
                         null,
-                        null,
-                        "flink|paimon.+",
+                        includingTables,
+                        excludingTables,
                         Collections.emptyMap(),
                         tableConfig);
         action.build(env);
@@ -583,8 +578,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         }
 
         // check paimon tables
-        assertTableExists("sync");
-        assertTableNotExists("flink", "paimon_1", "paimon_2");
+        assertTableExists(existedTables);
+        assertTableNotExists(notExistedTables);
     }
 
     private FileStoreTable getFileStoreTable(String tableName) throws Exception {
@@ -593,7 +588,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         return (FileStoreTable) catalog.getTable(identifier);
     }
 
-    private void assertTableExists(String... tableNames) {
+    private void assertTableExists(List<String> tableNames) {
         Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
         for (String tableName : tableNames) {
             Identifier identifier = Identifier.create(database, tableName);
@@ -601,7 +596,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         }
     }
 
-    private void assertTableNotExists(String... tableNames) {
+    private void assertTableNotExists(List<String> tableNames) {
         Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
         for (String tableName : tableNames) {
             Identifier identifier = Identifier.create(database, tableName);

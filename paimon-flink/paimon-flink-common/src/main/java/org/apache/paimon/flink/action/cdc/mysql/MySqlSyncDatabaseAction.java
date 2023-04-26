@@ -54,7 +54,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -146,13 +145,8 @@ public class MySqlSyncDatabaseAction implements Action {
         this.ignoreIncompatible = ignoreIncompatible;
         this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
         this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
-
-        checkArgument(
-                includingTables == null || excludingTables == null,
-                "Cannot specify including tables and excluding tables at the same time.");
         this.includingPattern = includingTables == null ? null : Pattern.compile(includingTables);
         this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
-
         this.catalogConfig = catalogConfig;
         this.tableConfig = tableConfig;
     }
@@ -266,7 +260,7 @@ public class MySqlSyncDatabaseAction implements Action {
                     metaData.getTables(databaseName, null, "%", new String[] {"TABLE"})) {
                 while (tables.next()) {
                     String tableName = tables.getString("TABLE_NAME");
-                    if (excludeTable(tableName)) {
+                    if (!shouldMonitorTable(tableName)) {
                         continue;
                     }
                     MySqlSchema mySqlSchema =
@@ -281,15 +275,16 @@ public class MySqlSyncDatabaseAction implements Action {
         return mySqlSchemaList;
     }
 
-    private boolean excludeTable(String tableName) {
+    private boolean shouldMonitorTable(String mySqlTableName) {
+        boolean shouldMonitor = true;
         if (includingPattern != null) {
-            return !includingPattern.matcher(tableName).matches();
-        } else if (excludingPattern != null) {
-            Matcher tableMatcher = excludingPattern.matcher(tableName);
-            return tableMatcher.matches();
+            shouldMonitor = includingPattern.matcher(mySqlTableName).matches();
         }
-
-        return false;
+        if (excludingPattern != null) {
+            shouldMonitor = shouldMonitor && !excludingPattern.matcher(mySqlTableName).matches();
+        }
+        LOG.debug("Source table {} is monitored? {}", mySqlTableName, shouldMonitor);
+        return shouldMonitor;
     }
 
     private boolean shouldMonitorTable(
@@ -342,12 +337,6 @@ public class MySqlSyncDatabaseAction implements Action {
         String tableSuffix = params.get("table-suffix");
         String includingTables = params.get("including-tables");
         String excludingTables = params.get("excluding-tables");
-
-        if (includingTables != null && excludingTables != null) {
-            System.err.println(
-                    "Cannot specify including tables and excluding tables at the same time.");
-            return Optional.empty();
-        }
 
         Map<String, String> mySqlConfig = getConfigMap(params, "mysql-conf");
         Map<String, String> catalogConfig = getConfigMap(params, "catalog-conf");
@@ -431,7 +420,7 @@ public class MySqlSyncDatabaseAction implements Action {
                 "--excluding-tables is used to specify which source tables are not to be synchronized. "
                         + "The usage is same as --including-tables.");
         System.out.println(
-                "You cannot use --including-table and --excluding-table at the same time.");
+                "--excluding-tables has higher priority than --including-tables if you specified both.");
         System.out.println();
 
         System.out.println("MySQL CDC source conf syntax:");
