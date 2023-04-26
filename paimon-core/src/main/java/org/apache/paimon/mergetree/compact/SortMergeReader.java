@@ -18,14 +18,13 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
 
 import java.util.Comparator;
 import java.util.List;
-
-import static org.apache.paimon.CoreOptions.SortEngine;
 
 /**
  * This reader is to read a list of {@link RecordReader}, which is already sorted by key and

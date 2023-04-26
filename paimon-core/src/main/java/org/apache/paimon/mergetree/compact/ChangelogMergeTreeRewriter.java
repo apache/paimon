@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.InternalRow;
@@ -34,8 +35,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-
-import static org.apache.paimon.CoreOptions.SortEngine;
 
 /** A {@link MergeTreeCompactRewriter} which produces changelog files for the compaction. */
 public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewriter {
@@ -75,7 +74,10 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
                         List<RecordReader<KeyValue>> runReaders =
                                 MergeTreeReaders.readerForSection(section, readerFactory);
                         return SortMergeReader.createSortMergeReader(
-                                runReaders, keyComparator, createMergeWrapper(outputLevel), sortEngine);
+                                runReaders,
+                                keyComparator,
+                                createMergeWrapper(outputLevel),
+                                sortEngine);
                     });
         }
 

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree;
 
+import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
@@ -34,8 +35,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-
-import static org.apache.paimon.CoreOptions.SortEngine;
 
 /** Utility class to create commonly used {@link RecordReader}s for merge trees. */
 public class MergeTreeReaders {
