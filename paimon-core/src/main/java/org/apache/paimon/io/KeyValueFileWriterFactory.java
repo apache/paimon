@@ -18,7 +18,6 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
 import org.apache.paimon.annotation.VisibleForTesting;
@@ -164,15 +163,6 @@ public class KeyValueFileWriterFactory {
             this.fileFormat = fileFormat;
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
-        }
-
-        public KeyValueFileWriterFactory build(
-                BinaryRow partition, int bucket, Map<Integer, String> levelCompressions) {
-            return build(
-                    partition,
-                    bucket,
-                    levelCompressions,
-                    CoreOptions.FILE_COMPRESSION.defaultValue());
         }
 
         public KeyValueFileWriterFactory build(
