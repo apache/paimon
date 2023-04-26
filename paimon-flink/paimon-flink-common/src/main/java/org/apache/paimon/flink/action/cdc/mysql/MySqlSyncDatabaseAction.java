@@ -54,6 +54,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -102,6 +103,8 @@ public class MySqlSyncDatabaseAction implements Action {
     private final boolean ignoreIncompatible;
     private final String tablePrefix;
     private final String tableSuffix;
+    @Nullable private final Pattern includingPattern;
+    @Nullable private final Pattern excludingPattern;
     private final Map<String, String> catalogConfig;
     private final Map<String, String> tableConfig;
 
@@ -119,6 +122,8 @@ public class MySqlSyncDatabaseAction implements Action {
                 ignoreIncompatible,
                 null,
                 null,
+                null,
+                null,
                 catalogConfig,
                 tableConfig);
     }
@@ -130,6 +135,8 @@ public class MySqlSyncDatabaseAction implements Action {
             boolean ignoreIncompatible,
             @Nullable String tablePrefix,
             @Nullable String tableSuffix,
+            @Nullable String includingTables,
+            @Nullable String excludingTables,
             Map<String, String> catalogConfig,
             Map<String, String> tableConfig) {
         this.mySqlConfig = Configuration.fromMap(mySqlConfig);
@@ -138,6 +145,8 @@ public class MySqlSyncDatabaseAction implements Action {
         this.ignoreIncompatible = ignoreIncompatible;
         this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
         this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
+        this.includingPattern = includingTables == null ? null : Pattern.compile(includingTables);
+        this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
         this.catalogConfig = catalogConfig;
         this.tableConfig = tableConfig;
     }
@@ -251,6 +260,9 @@ public class MySqlSyncDatabaseAction implements Action {
                     metaData.getTables(databaseName, null, "%", new String[] {"TABLE"})) {
                 while (tables.next()) {
                     String tableName = tables.getString("TABLE_NAME");
+                    if (!shouldMonitorTable(tableName)) {
+                        continue;
+                    }
                     MySqlSchema mySqlSchema =
                             new MySqlSchema(metaData, databaseName, tableName, caseSensitive);
                     if (mySqlSchema.primaryKeys().size() > 0) {
@@ -261,6 +273,18 @@ public class MySqlSyncDatabaseAction implements Action {
             }
         }
         return mySqlSchemaList;
+    }
+
+    private boolean shouldMonitorTable(String mySqlTableName) {
+        boolean shouldMonitor = true;
+        if (includingPattern != null) {
+            shouldMonitor = includingPattern.matcher(mySqlTableName).matches();
+        }
+        if (excludingPattern != null) {
+            shouldMonitor = shouldMonitor && !excludingPattern.matcher(mySqlTableName).matches();
+        }
+        LOG.debug("Source table {} is monitored? {}", mySqlTableName, shouldMonitor);
+        return shouldMonitor;
     }
 
     private boolean shouldMonitorTable(
@@ -311,6 +335,8 @@ public class MySqlSyncDatabaseAction implements Action {
         boolean ignoreIncompatible = Boolean.parseBoolean(params.get("ignore-incompatible"));
         String tablePrefix = params.get("table-prefix");
         String tableSuffix = params.get("table-suffix");
+        String includingTables = params.get("including-tables");
+        String excludingTables = params.get("excluding-tables");
 
         Map<String, String> mySqlConfig = getConfigMap(params, "mysql-conf");
         Map<String, String> catalogConfig = getConfigMap(params, "catalog-conf");
@@ -327,6 +353,8 @@ public class MySqlSyncDatabaseAction implements Action {
                         ignoreIncompatible,
                         tablePrefix,
                         tableSuffix,
+                        includingTables,
+                        excludingTables,
                         catalogConfig == null ? Collections.emptyMap() : catalogConfig,
                         tableConfig == null ? Collections.emptyMap() : tableConfig));
     }
@@ -366,6 +394,8 @@ public class MySqlSyncDatabaseAction implements Action {
                         + "[--ignore-incompatible <true/false>] "
                         + "[--table-prefix <paimon-table-prefix>] "
                         + "[--table-suffix <paimon-table-suffix>] "
+                        + "[--including-tables <mysql-table-name|name-regular-expr>] "
+                        + "[--excluding-tables <mysql-table-name|name-regular-expr>] "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
@@ -381,6 +411,16 @@ public class MySqlSyncDatabaseAction implements Action {
                 "--table-prefix is the prefix of all Paimon tables to be synchronized. For example, if you want all "
                         + "synchronized tables to have \"ods_\" as prefix, you can specify `--table-prefix ods_`.");
         System.out.println("The usage of --table-suffix is same as `--table-prefix`");
+        System.out.println();
+
+        System.out.println(
+                "--including-tables is used to specify which source tables are to be synchronized. "
+                        + "You must use '|' to separate multiple tables. Regular expression is supported.");
+        System.out.println(
+                "--excluding-tables is used to specify which source tables are not to be synchronized. "
+                        + "The usage is same as --including-tables.");
+        System.out.println(
+                "--excluding-tables has higher priority than --including-tables if you specified both.");
         System.out.println();
 
         System.out.println("MySQL CDC source conf syntax:");

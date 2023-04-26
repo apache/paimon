@@ -328,3 +328,83 @@ CREATE TABLE t2 (
     PRIMARY KEY (k2)
 );
 
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testIncludingTables
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database_including;
+USE paimon_sync_database_including;
+
+CREATE TABLE paimon_1 (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE paimon_2 (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE flink (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE ignored (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testExcludingTables
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database_excluding;
+USE paimon_sync_database_excluding;
+
+CREATE TABLE paimon_1 (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE paimon_2 (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE flink (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE sync (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testIncludingAndExcludingTables
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database_in_excluding;
+USE paimon_sync_database_in_excluding;
+
+CREATE TABLE paimon_1 (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE paimon_2 (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE flink (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE test (
+    k INT,
+    PRIMARY KEY (k)
+);
