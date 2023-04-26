@@ -234,7 +234,7 @@ public class LookupLevelsTest {
                         new FlushingFileFormat("avro"),
                         new FileStorePathFactory(path),
                         TARGET_FILE_SIZE.defaultValue().getBytes())
-                .build(BinaryRow.EMPTY_ROW, 0, null);
+                .build(BinaryRow.EMPTY_ROW, 0, null, null);
     }
 
     private KeyValueFileReaderFactory createReaderFactory() {

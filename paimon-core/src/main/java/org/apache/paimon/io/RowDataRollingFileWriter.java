@@ -35,7 +35,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             long targetFileSize,
             RowType writeSchema,
             DataFilePathFactory pathFactory,
-            LongCounter seqNumCounter) {
+            LongCounter seqNumCounter,
+            String fileCompression) {
         super(
                 () ->
                         new RowDataFileWriter(
@@ -45,7 +46,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 writeSchema,
                                 fileFormat.createStatsExtractor(writeSchema).orElse(null),
                                 schemaId,
-                                seqNumCounter),
+                                seqNumCounter,
+                                fileCompression),
                 targetFileSize);
     }
 }

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
@@ -64,7 +65,8 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
         Path path = pathFactory.newPath();
         try {
             try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
-                FormatWriter writer = writerFactory.create(out);
+                FormatWriter writer =
+                        writerFactory.create(out, CoreOptions.FILE_COMPRESSION.defaultValue());
                 try {
                     for (ManifestFileMeta record : metas) {
                         writer.addElement(serializer.toRow(record));
