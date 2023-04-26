@@ -153,6 +153,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         statement.executeUpdate("ALTER TABLE schema_evolution_1 MODIFY COLUMN v2 BIGINT");
         statement.executeUpdate(
                 "INSERT INTO schema_evolution_1 VALUES (2, 7, 'seven', 70000000000)");
+        statement.executeUpdate("DELETE FROM schema_evolution_1 WHERE _id = 5");
         statement.executeUpdate("UPDATE schema_evolution_1 SET v2 = 30000000000 WHERE _id = 3");
         statement.executeUpdate("ALTER TABLE schema_evolution_2 MODIFY COLUMN v2 BIGINT");
         statement.executeUpdate(
@@ -172,7 +173,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "+I[1, 2, second, NULL]",
                         "+I[2, 3, three, 30000000000]",
                         "+I[2, 4, four, NULL]",
-                        "+I[1, 5, five, 50]",
                         "+I[1, 6, six, 60]",
                         "+I[2, 7, seven, 70000000000]",
                         "+I[2, 8, eight, 80000000000]");
@@ -208,7 +208,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "+I[1, 2, second, NULL, NULL, NULL, NULL]",
                         "+I[2, 3, three, 30000000000, NULL, NULL, NULL]",
                         "+I[2, 4, four, NULL, NULL, NULL, NULL]",
-                        "+I[1, 5, five, 50, NULL, NULL, NULL]",
                         "+I[1, 6, six, 60, NULL, NULL, NULL]",
                         "+I[2, 7, seven, 70000000000, NULL, NULL, NULL]",
                         "+I[2, 8, very long string, 80000000000, NULL, NULL, NULL]",
@@ -241,7 +240,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "+I[1, 2, second, NULL, NULL, NULL, NULL]",
                         "+I[2, 3, three, 30000000000, NULL, NULL, NULL]",
                         "+I[2, 4, four, NULL, NULL, [102, 111, 117, 114, 46, 98, 105, 110, 46, 108, 111, 110, 103], 4.00000000004]",
-                        "+I[1, 5, five, 50, NULL, NULL, NULL]",
                         "+I[1, 6, six, 60, NULL, NULL, NULL]",
                         "+I[2, 7, seven, 70000000000, NULL, NULL, NULL]",
                         "+I[2, 8, very long string, 80000000000, NULL, NULL, NULL]",
