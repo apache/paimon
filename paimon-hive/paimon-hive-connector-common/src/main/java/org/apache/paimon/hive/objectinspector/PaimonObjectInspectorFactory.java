@@ -21,14 +21,19 @@ package org.apache.paimon.hive.objectinspector;
 import org.apache.paimon.hive.HiveTypeUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
 import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
+
+import java.util.List;
+import java.util.stream.Collectors;
 
 /** Factory to create {@link ObjectInspector}s according to the given {@link DataType}. */
 public class PaimonObjectInspectorFactory {
@@ -70,6 +75,15 @@ public class PaimonObjectInspectorFactory {
             case MAP:
                 MapType mapType = (MapType) logicalType;
                 return new PaimonMapObjectInspector(mapType.getKeyType(), mapType.getValueType());
+            case ROW:
+                List<String> fieldComments =
+                        ((RowType) logicalType)
+                                .getFields().stream()
+                                        .map(DataField::description)
+                                        .collect(Collectors.toList());
+                List<DataType> fieldTypes = ((RowType) logicalType).getFieldTypes();
+                List<String> fieldNames = ((RowType) logicalType).getFieldNames();
+                return new PaimonInternalRowObjectInspector(fieldNames, fieldTypes, fieldComments);
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported logical type " + logicalType.asSQLString());

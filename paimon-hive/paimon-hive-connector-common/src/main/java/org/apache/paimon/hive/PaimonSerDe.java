@@ -20,15 +20,19 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.hive.objectinspector.PaimonInternalRowObjectInspector;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.serde2.AbstractSerDe;
 import org.apache.hadoop.hive.serde2.SerDeException;
 import org.apache.hadoop.hive.serde2.SerDeStats;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
 import org.apache.hadoop.io.Writable;
 
 import javax.annotation.Nullable;
 
+import java.util.Map;
 import java.util.Properties;
 
 /**
@@ -39,11 +43,18 @@ import java.util.Properties;
 public class PaimonSerDe extends AbstractSerDe {
 
     private PaimonInternalRowObjectInspector inspector;
+    private HiveSchema tableSchema;
+
+    private final RowDataContainer rowData = new RowDataContainer();
+
+    private final Map<ObjectInspector, HiveDeserializer> deserializers =
+            Maps.newHashMapWithExpectedSize(1);
 
     @Override
     public void initialize(@Nullable Configuration configuration, Properties properties)
             throws SerDeException {
         HiveSchema schema = HiveSchema.extract(configuration, properties);
+        this.tableSchema = schema;
         inspector =
                 new PaimonInternalRowObjectInspector(
                         schema.fieldNames(), schema.fieldTypes(), schema.fieldComments());
@@ -56,8 +67,19 @@ public class PaimonSerDe extends AbstractSerDe {
 
     @Override
     public Writable serialize(Object o, ObjectInspector objectInspector) throws SerDeException {
-        throw new UnsupportedOperationException(
-                "PaimonSerDe currently only supports deserialization.");
+        HiveDeserializer deserializer = deserializers.get(objectInspector);
+        if (deserializer == null) {
+            deserializer =
+                    new HiveDeserializer.Builder()
+                            .schema(tableSchema)
+                            .sourceInspector((StructObjectInspector) objectInspector)
+                            .writerInspector(inspector)
+                            .build();
+            deserializers.put(objectInspector, deserializer);
+        }
+
+        rowData.set(deserializer.deserialize(o));
+        return rowData;
     }
 
     @Override
