@@ -35,7 +35,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -96,7 +95,22 @@ public class Schema {
     private static List<DataField> normalizeFields(
             List<DataField> fields, List<String> primaryKeys, List<String> partitionKeys) {
         List<String> fieldNames = fields.stream().map(DataField::name).collect(Collectors.toList());
+
+        Set<String> duplicateColumns = duplicate(fieldNames);
+        Preconditions.checkState(
+                duplicateColumns.isEmpty(),
+                "Table column %s must not contain duplicate fields. Found: %s",
+                fieldNames,
+                duplicateColumns);
+
         Set<String> allFields = new HashSet<>(fieldNames);
+
+        duplicateColumns = duplicate(partitionKeys);
+        Preconditions.checkState(
+                duplicateColumns.isEmpty(),
+                "Partition key constraint %s must not contain duplicate columns. Found: %s",
+                partitionKeys,
+                duplicateColumns);
         Preconditions.checkState(
                 allFields.containsAll(partitionKeys),
                 "Table column %s should include all partition fields %s",
@@ -106,6 +120,12 @@ public class Schema {
         if (primaryKeys.isEmpty()) {
             return fields;
         }
+        duplicateColumns = duplicate(primaryKeys);
+        Preconditions.checkArgument(
+                duplicateColumns.isEmpty(),
+                "Primary key constraint %s must not contain duplicate columns. Found: %s",
+                primaryKeys,
+                duplicateColumns);
         Preconditions.checkState(
                 allFields.containsAll(primaryKeys),
                 "Table column %s should include all primary key constraint %s",
@@ -133,6 +153,12 @@ public class Schema {
             }
         }
         return newFields;
+    }
+
+    private static Set<String> duplicate(List<String> names) {
+        return names.stream()
+                .filter(name -> Collections.frequency(names, name) > 1)
+                .collect(Collectors.toSet());
     }
 
     @Override
@@ -272,74 +298,7 @@ public class Schema {
 
         /** Returns an instance of an unresolved {@link Schema}. */
         public Schema build() {
-            validateColumns();
-            validatePrimaryKeys();
-            validatePartitionKeys();
             return new Schema(columns, partitionKeys, primaryKeys, options, comment);
-        }
-
-        private void validateColumns() {
-            Preconditions.checkArgument(!columns.isEmpty(), "Columns must not be empty.");
-
-            Set<String> duplicateColumns =
-                    duplicate(columns.stream().map(DataField::name).collect(Collectors.toList()));
-
-            Preconditions.checkArgument(
-                    duplicateColumns.isEmpty(),
-                    "Columns must not contain duplicate names. Found: %s",
-                    duplicateColumns);
-        }
-
-        private void validatePrimaryKeys() {
-            Map<String, DataField> columnsByNameLookup =
-                    columns.stream()
-                            .collect(Collectors.toMap(DataField::name, Function.identity()));
-
-            Set<String> duplicateColumns = duplicate(primaryKeys);
-
-            Preconditions.checkArgument(
-                    duplicateColumns.isEmpty(),
-                    "Primary keys must not contain duplicate columns. Found: %s",
-                    duplicateColumns);
-
-            for (String pk : primaryKeys) {
-                DataField column = columnsByNameLookup.get(pk);
-                Preconditions.checkNotNull(
-                        column, "Invalid primary keys definition. Column '%s' does not exist.", pk);
-
-                DataType columnType = column.type();
-                Preconditions.checkArgument(
-                        !columnType.isNullable(),
-                        "Invalid primary keys definition. Column '%s' is nullable.",
-                        pk);
-            }
-        }
-
-        private void validatePartitionKeys() {
-            Map<String, DataField> columnsByNameLookup =
-                    columns.stream()
-                            .collect(Collectors.toMap(DataField::name, Function.identity()));
-
-            Set<String> duplicateColumns = duplicate(partitionKeys);
-
-            Preconditions.checkArgument(
-                    duplicateColumns.isEmpty(),
-                    "Partition keys must not contain duplicate columns. Found: %s",
-                    duplicateColumns);
-
-            for (String part : partitionKeys) {
-                DataField column = columnsByNameLookup.get(part);
-                Preconditions.checkNotNull(
-                        column,
-                        "Invalid partition keys definition. Column '%s' does not exist.",
-                        part);
-            }
-        }
-
-        private Set<String> duplicate(List<String> names) {
-            return names.stream()
-                    .filter(name -> Collections.frequency(names, name) > 1)
-                    .collect(Collectors.toSet());
         }
     }
 }
