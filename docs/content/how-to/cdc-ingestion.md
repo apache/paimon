@@ -115,8 +115,8 @@ To use this feature through `flink run`, run the following shell command.
     [--ignore-incompatible <true/false>] \
     [--table-prefix <paimon-table-prefix>] \
     [--table-suffix <paimon-table-suffix>] \
-    [--including-table <mysql-table-name|name-regular-expr>] \
-    [--excluding-table <mysql-table-name|name-regular-expr>] \
+    [--including-tables <mysql-table-name|name-regular-expr>] \
+    [--excluding-tables <mysql-table-name|name-regular-expr>] \
     [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
@@ -129,10 +129,10 @@ an exception will be thrown. You can specify it to true explicitly to ignore the
 * `--table-prefix` is the prefix of all Paimon tables to be synchronized. For example, if you want all synchronized tables 
 to have "ods_" as prefix, you can specify `--table-prefix ods_`.
 * `--table-suffix` is the suffix of all Paimon tables to be synchronized. The usage is same as `--table-prefix`.
-* `--including-table` is used to specify which source tables are to be synchronized. You must use '|' to separate multiple
-tables. Regular expression is supported, for example, specifying `--including-table test|paimon.*` means to synchronize
-table 'test' and all tables start with 'paimon'. This argument can not be used with `--excluding-table` at the same time.
-* `--excluding-table` is used to specify which source tables are not to be synchronized. The usage is same as `--including-table`.
+* `--including-tables` is used to specify which source tables are to be synchronized. You must use '|' to separate multiple
+tables. Regular expression is supported, for example, specifying `--including-tables test|paimon.*` means to synchronize
+table 'test' and all tables start with 'paimon'. This argument can not be used with `--excluding-tables` at the same time.
+* `--excluding-tables` is used to specify which source tables are not to be synchronized. The usage is same as `--including-tables`.
 * `--mysql-conf` is the configuration for Flink CDC MySQL table sources. Each configuration should be specified in the format `key=value`. `hostname`, `username`, `password` and `database-name` are required configurations, others are optional. Note that `database-name` should be the exact name of the MySQL databse you want to synchronize. It can't be a regular expression. See its [document](https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options) for a complete list of configurations.
 * `--catalog-conf` is the configuration for Paimon catalog. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of catalog configurations.
 * `--table-conf` is the configuration for Paimon table sink. Each configuration should be specified in the format `key=value`. All Paimon sink table will be applied the same set of configurations. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of table configurations.
