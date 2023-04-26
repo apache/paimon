@@ -330,17 +330,18 @@ public class FlinkCatalog extends AbstractCatalog {
         TableSchema.Builder builder = TableSchema.builder();
 
         // add columns
-        List<RowType.RowField> rowFields = toLogicalType(table.rowType()).getFields();
-        int count = nonPhysicalColumnsCount(newOptions, table.rowType().getFieldNames());
+        List<RowType.RowField> physicalRowFields = toLogicalType(table.rowType()).getFields();
+        List<String> physicalColumns = table.rowType().getFieldNames();
+        int columnCount =
+                physicalRowFields.size() + nonPhysicalColumnsCount(newOptions, physicalColumns);
         int physicalColumnIndex = 0;
-        for (int i = 0; i < rowFields.size() + count; i++) {
+        for (int i = 0; i < columnCount; i++) {
             String optionalName = newOptions.get(compoundKey(SCHEMA, i, NAME));
             // to check old style physical column option
-            RowType.RowField field = rowFields.get(physicalColumnIndex);
-            if (optionalName == null || optionalName.equals(field.getName())) {
-                // build physical column from table row
+            if (optionalName == null || physicalColumns.contains(optionalName)) {
+                // build physical column from table row field
+                RowType.RowField field = physicalRowFields.get(physicalColumnIndex++);
                 builder.field(field.getName(), fromLogicalToDataType(field.getType()));
-                physicalColumnIndex++;
             } else {
                 // build non-physical column from options
                 builder.add(deserializeNonPhysicalColumn(newOptions, i));
