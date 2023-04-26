@@ -156,6 +156,7 @@ public interface Action {
             System.out.println("  " + DELETE);
             System.out.println("  " + MERGE_INTO);
             System.out.println("  " + MYSQL_SYNC_TABLE);
+            System.out.println("  " + MYSQL_SYNC_DATABASE);
 
             System.out.println("For detailed options of each action, run <action> --help");
         }
