@@ -69,10 +69,8 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
         for (List<SortedRun> section : sections) {
             sectionReaders.add(
                     () -> {
-                        List<RecordReader<KeyValue>> runReaders = new ArrayList<>();
-                        for (SortedRun run : section) {
-                            runReaders.add(MergeTreeReaders.readerForRun(run, readerFactory));
-                        }
+                        List<RecordReader<KeyValue>> runReaders =
+                                MergeTreeReaders.readerForSection(section, readerFactory);
                         return new SortMergeReader<>(
                                 runReaders, keyComparator, createMergeWrapper(outputLevel));
                     });
