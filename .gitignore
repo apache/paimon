@@ -18,3 +18,4 @@ target
 *.iws
 test/coverage
 dependency-reduced-pom.xml
+jacoco.exec
