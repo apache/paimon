@@ -252,10 +252,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
             long splitStart,
             long splitLength)
             throws IOException {
-        org.apache.orc.Reader orcReader = null;
+        org.apache.orc.Reader orcReader = createReader(conf, fileIO, path);
         try {
-            orcReader = createReader(conf, fileIO, path);
-
             // get offset and length for the stripes that start in the split
             Pair<Long, Long> offsetAndLength =
                     getOffsetAndLengthForSplit(splitStart, splitLength, orcReader.getStripes());
@@ -293,9 +291,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             return orcRowsReader;
         } catch (IOException e) {
             // exception happened, we need to close the reader
-            if (orcReader != null) {
-                IOUtils.closeQuietly(orcReader);
-            }
+            IOUtils.closeQuietly(orcReader);
             throw e;
         }
     }

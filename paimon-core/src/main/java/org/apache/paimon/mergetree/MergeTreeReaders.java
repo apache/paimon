@@ -76,9 +76,9 @@ public class MergeTreeReaders {
             for (SortedRun run : section) {
                 readers.add(readerForRun(run, readerFactory));
             }
-        } catch (IOException e1) {
+        } catch (IOException e) {
             readers.forEach(IOUtils::closeQuietly);
-            throw e1;
+            throw e;
         }
         if (readers.size() == 1) {
             return readers.get(0);
