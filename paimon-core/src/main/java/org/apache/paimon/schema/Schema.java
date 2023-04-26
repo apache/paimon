@@ -28,12 +28,14 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -270,7 +272,74 @@ public class Schema {
 
         /** Returns an instance of an unresolved {@link Schema}. */
         public Schema build() {
+            validateColumns();
+            validatePrimaryKeys();
+            validatePartitionKeys();
             return new Schema(columns, partitionKeys, primaryKeys, options, comment);
+        }
+
+        private void validateColumns() {
+            Preconditions.checkArgument(!columns.isEmpty(), "Columns must not be empty.");
+
+            Set<String> duplicateColumns =
+                    duplicate(columns.stream().map(DataField::name).collect(Collectors.toList()));
+
+            Preconditions.checkArgument(
+                    duplicateColumns.isEmpty(),
+                    "Columns must not contain duplicate names. Found: %s",
+                    duplicateColumns);
+        }
+
+        private void validatePrimaryKeys() {
+            Map<String, DataField> columnsByNameLookup =
+                    columns.stream()
+                            .collect(Collectors.toMap(DataField::name, Function.identity()));
+
+            Set<String> duplicateColumns = duplicate(primaryKeys);
+
+            Preconditions.checkArgument(
+                    duplicateColumns.isEmpty(),
+                    "Primary keys must not contain duplicate columns. Found: %s",
+                    duplicateColumns);
+
+            for (String pk : primaryKeys) {
+                DataField column = columnsByNameLookup.get(pk);
+                Preconditions.checkNotNull(
+                        column, "Invalid primary keys definition. Column '%s' does not exist.", pk);
+
+                DataType columnType = column.type();
+                Preconditions.checkArgument(
+                        !columnType.isNullable(),
+                        "Invalid primary keys definition. Column '%s' is nullable.",
+                        pk);
+            }
+        }
+
+        private void validatePartitionKeys() {
+            Map<String, DataField> columnsByNameLookup =
+                    columns.stream()
+                            .collect(Collectors.toMap(DataField::name, Function.identity()));
+
+            Set<String> duplicateColumns = duplicate(partitionKeys);
+
+            Preconditions.checkArgument(
+                    duplicateColumns.isEmpty(),
+                    "Partition keys must not contain duplicate columns. Found: %s",
+                    duplicateColumns);
+
+            for (String part : partitionKeys) {
+                DataField column = columnsByNameLookup.get(part);
+                Preconditions.checkNotNull(
+                        column,
+                        "Invalid partition keys definition. Column '%s' does not exist.",
+                        part);
+            }
+        }
+
+        private Set<String> duplicate(List<String> names) {
+            return names.stream()
+                    .filter(name -> Collections.frequency(names, name) > 1)
+                    .collect(Collectors.toSet());
         }
     }
 }
