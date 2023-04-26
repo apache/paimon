@@ -23,11 +23,8 @@ import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.api.dag.Transformation;
@@ -1369,90 +1366,6 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         "+I[c, INT, true, null, AS `a` + `b`, null]");
     }
 
-    @Test
-    public void testCleanedSchemaOptions() {
-        String ddl =
-                "CREATE TABLE T (\n"
-                        + "id INT,\n"
-                        + "price INT,\n"
-                        + "record_time TIMESTAMP_LTZ(3) METADATA FROM 'timestamp' VIRTUAL,\n"
-                        + "comp AS price * 2,\n"
-                        + "order_time TIMESTAMP(3),\n"
-                        + "WATERMARK FOR order_time AS order_time - INTERVAL '5' SECOND,\n"
-                        + "PRIMARY KEY (id) NOT ENFORCED\n"
-                        + ");";
-        bEnv.executeSql(ddl);
-
-        // validate schema options
-        SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(warehouse, "default.db/T"));
-        TableSchema schema = schemaManager.latest().get();
-        Map<String, String> expected = new HashMap<>();
-        // metadata column
-        expected.put("schema.2.name", "record_time");
-        expected.put("schema.2.data-type", "TIMESTAMP(3) WITH LOCAL TIME ZONE");
-        expected.put("schema.2.metadata", "timestamp");
-        expected.put("schema.2.virtual", "true");
-        // computed column
-        expected.put("schema.3.name", "comp");
-        expected.put("schema.3.data-type", "INT");
-        expected.put("schema.3.expr", "`price` * 2");
-        // watermark
-        expected.put("schema.watermark.0.rowtime", "order_time");
-        expected.put("schema.watermark.0.strategy.expr", "`order_time` - INTERVAL '5' SECOND");
-        expected.put("schema.watermark.0.strategy.data-type", "TIMESTAMP(3)");
-
-        assertThat(schema.options()).containsExactlyInAnyOrderEntriesOf(expected);
-
-        validateSchemaOptionResult();
-    }
-
-    @Test
-    public void testReadFromOldStyleSchemaOptions() throws Exception {
-        Map<String, String> oldStyleOptions = new HashMap<>();
-        oldStyleOptions.put("schema.0.name", "id");
-        oldStyleOptions.put("schema.0.data-type", "INT NOT NULL");
-
-        oldStyleOptions.put("schema.1.name", "price");
-        oldStyleOptions.put("schema.1.data-type", "INT");
-
-        oldStyleOptions.put("schema.2.name", "record_time");
-        oldStyleOptions.put("schema.2.data-type", "TIMESTAMP(3) WITH LOCAL TIME ZONE");
-        oldStyleOptions.put("schema.2.metadata", "timestamp");
-        oldStyleOptions.put("schema.2.virtual", "true");
-
-        oldStyleOptions.put("schema.3.name", "comp");
-        oldStyleOptions.put("schema.3.data-type", "INT");
-        oldStyleOptions.put("schema.3.expr", "`price` * 2");
-
-        oldStyleOptions.put("schema.4.name", "order_time");
-        oldStyleOptions.put("schema.4.data-type", "TIMESTAMP(3)");
-
-        oldStyleOptions.put("schema.watermark.0.rowtime", "order_time");
-        oldStyleOptions.put(
-                "schema.watermark.0.strategy.expr", "`order_time` - INTERVAL '5' SECOND");
-        oldStyleOptions.put("schema.watermark.0.strategy.data-type", "TIMESTAMP(3)");
-
-        oldStyleOptions.put("schema.primary-key.name", "constrain_pk");
-        oldStyleOptions.put("schema.primary-key.columns", "id");
-
-        // create corresponding table
-        Schema schema =
-                Schema.newBuilder()
-                        .column("id", DataTypes.INT().notNull())
-                        .column("price", DataTypes.INT())
-                        .column("order_time", DataTypes.TIMESTAMP(3))
-                        .options(oldStyleOptions)
-                        .primaryKey("id")
-                        .build();
-
-        SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(warehouse, "default.db/T"));
-        schemaManager.createTable(schema);
-
-        validateSchemaOptionResult();
-    }
-
     // ----------------------------------------------------------------------------------------------------------------
     // Tools
     // ----------------------------------------------------------------------------------------------------------------
@@ -1569,28 +1482,5 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                 "Try to write partition {dt=2022-06-20} with a new bucket num %d, but the previous bucket num is 2. "
                                         + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
                                 bucketNum));
-    }
-
-    private void validateSchemaOptionResult() {
-        // validate columns
-        List<String> descResults =
-                CollectionUtil.iteratorToList(bEnv.executeSql("DESC T").collect()).stream()
-                        .map(Object::toString)
-                        .collect(Collectors.toList());
-        assertThat(descResults)
-                .isEqualTo(
-                        Arrays.asList(
-                                "+I[id, INT, false, PRI(id), null, null]",
-                                "+I[price, INT, true, null, null, null]",
-                                "+I[record_time, TIMESTAMP_LTZ(3), true, null, METADATA FROM 'timestamp' VIRTUAL, null]",
-                                "+I[comp, INT, true, null, AS `price` * 2, null]",
-                                "+I[order_time, TIMESTAMP(3), true, null, null, `order_time` - INTERVAL '5' SECOND]"));
-
-        // validate WITH options doesn't contains 'schema.'
-        String showResult =
-                CollectionUtil.iteratorToList(bEnv.executeSql("SHOW CREATE TABLE T").collect())
-                        .get(0)
-                        .toString();
-        assertThat(showResult.contains("schema.")).isFalse();
     }
 }
