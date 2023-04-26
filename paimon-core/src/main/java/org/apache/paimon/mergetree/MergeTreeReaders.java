@@ -28,6 +28,7 @@ import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.SortMergeReader;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.IOUtils;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -70,8 +71,14 @@ public class MergeTreeReaders {
             MergeFunctionWrapper<KeyValue> mergeFunctionWrapper)
             throws IOException {
         List<RecordReader<KeyValue>> readers = new ArrayList<>();
-        for (SortedRun run : section) {
-            readers.add(readerForRun(run, readerFactory));
+        // if one of the readers creating failed, we need to close them all.
+        try {
+            for (SortedRun run : section) {
+                readers.add(readerForRun(run, readerFactory));
+            }
+        } catch (IOException e1) {
+            readers.forEach(IOUtils::closeQuietly);
+            throw e1;
         }
         if (readers.size() == 1) {
             return readers.get(0);
