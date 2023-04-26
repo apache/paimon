@@ -32,7 +32,7 @@ Paimon supports synchronizing changes from different databases using change data
 
 ### Synchronizing Tables
 
-By using [MySqlSyncTableAction](/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction) in a Flink DataStream job or directly through `flink run`, users can synchronize one or multiple tables from MySQL into one Paimon table.
+By using [MySqlSyncTableAction](/docs/{{ .Site.Params.Branch }}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction) in a Flink DataStream job or directly through `flink run`, users can synchronize one or multiple tables from MySQL into one Paimon table.
 
 To use this feature through `flink run`, run the following shell command.
 
@@ -101,7 +101,7 @@ Example
 
 ### Synchronizing Databases
 
-By using [MySqlSyncDatabaseAction](/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncDatabaseAction) in a Flink DataStream job or directly through `flink run`, users can synchronize the whole MySQL database into one Paimon database.
+By using [MySqlSyncDatabaseAction](/docs/{{ .Site.Params.Branch }}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncDatabaseAction) in a Flink DataStream job or directly through `flink run`, users can synchronize the whole MySQL database into one Paimon database.
 
 To use this feature through `flink run`, run the following shell command.
 
