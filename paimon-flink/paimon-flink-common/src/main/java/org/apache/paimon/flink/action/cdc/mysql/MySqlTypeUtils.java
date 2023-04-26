@@ -171,7 +171,9 @@ public class MySqlTypeUtils {
             case DATETIME:
             case TIMESTAMP:
                 if (length == null) {
-                    return DataTypes.TIMESTAMP();
+                    // default precision is 0
+                    // see https://dev.mysql.com/doc/refman/8.0/en/date-and-time-type-syntax.html
+                    return DataTypes.TIMESTAMP(0);
                 } else if (length >= JDBC_TIMESTAMP_BASE_LENGTH) {
                     if (length > JDBC_TIMESTAMP_BASE_LENGTH + 1) {
                         // Timestamp with a fraction of seconds.
@@ -184,7 +186,10 @@ public class MySqlTypeUtils {
                 } else if (length >= 0 && length <= TimestampType.MAX_PRECISION) {
                     return DataTypes.TIMESTAMP(length);
                 } else {
-                    return DataTypes.TIMESTAMP();
+                    throw new UnsupportedOperationException(
+                            "Unsupported length "
+                                    + length
+                                    + " for MySQL DATETIME and TIMESTAMP types");
                 }
             case CHAR:
                 return DataTypes.CHAR(Preconditions.checkNotNull(length));

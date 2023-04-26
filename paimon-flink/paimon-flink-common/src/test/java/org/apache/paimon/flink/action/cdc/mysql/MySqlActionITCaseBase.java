@@ -83,17 +83,19 @@ public class MySqlActionITCaseBase extends ActionITCaseBase {
 
         // wait for table schema to become our expected schema
         while (true) {
-            int cnt = 0;
-            for (int i = 0; i < table.schema().fields().size(); i++) {
-                DataField field = table.schema().fields().get(i);
-                boolean sameName = field.name().equals(rowType.getFieldNames().get(i));
-                boolean sameType = field.type().equals(rowType.getFieldTypes().get(i));
-                if (sameName && sameType) {
-                    cnt++;
+            if (rowType.getFieldCount() == table.schema().fields().size()) {
+                int cnt = 0;
+                for (int i = 0; i < table.schema().fields().size(); i++) {
+                    DataField field = table.schema().fields().get(i);
+                    boolean sameName = field.name().equals(rowType.getFieldNames().get(i));
+                    boolean sameType = field.type().equals(rowType.getFieldTypes().get(i));
+                    if (sameName && sameType) {
+                        cnt++;
+                    }
                 }
-            }
-            if (cnt == rowType.getFieldCount()) {
-                break;
+                if (cnt == rowType.getFieldCount()) {
+                    break;
+                }
             }
             table = table.copyWithLatestSchema();
             Thread.sleep(1000);
