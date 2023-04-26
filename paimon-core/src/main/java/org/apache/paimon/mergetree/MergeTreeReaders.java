@@ -35,29 +35,12 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-import static org.apache.paimon.CoreOptions.SORT_ENGINE;
 import static org.apache.paimon.CoreOptions.SortEngine;
 
 /** Utility class to create commonly used {@link RecordReader}s for merge trees. */
 public class MergeTreeReaders {
 
     private MergeTreeReaders() {}
-
-    public static RecordReader<KeyValue> readerForMergeTree(
-            List<List<SortedRun>> sections,
-            boolean dropDelete,
-            KeyValueFileReaderFactory readerFactory,
-            Comparator<InternalRow> userKeyComparator,
-            MergeFunction<KeyValue> mergeFunction)
-            throws IOException {
-        return readerForMergeTree(
-                sections,
-                dropDelete,
-                readerFactory,
-                userKeyComparator,
-                mergeFunction,
-                SORT_ENGINE.defaultValue());
-    }
 
     public static RecordReader<KeyValue> readerForMergeTree(
             List<List<SortedRun>> sections,

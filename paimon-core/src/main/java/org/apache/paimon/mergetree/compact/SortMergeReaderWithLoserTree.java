@@ -30,15 +30,16 @@ import java.util.Comparator;
 import java.util.List;
 
 /** {@link SortMergeReader} implemented with loser-tree. */
-public class SortMergeReaderWithLoserTree<T> extends SortMergeReader<T> {
+public class SortMergeReaderWithLoserTree<T> implements SortMergeReader<T> {
 
+    private final MergeFunctionWrapper<T> mergeFunctionWrapper;
     private final LoserTree<KeyValue> loserTree;
 
     public SortMergeReaderWithLoserTree(
             List<RecordReader<KeyValue>> readers,
             Comparator<InternalRow> userKeyComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper) {
-        super(mergeFunctionWrapper);
+        this.mergeFunctionWrapper = mergeFunctionWrapper;
         this.loserTree =
                 new LoserTree<>(
                         readers,

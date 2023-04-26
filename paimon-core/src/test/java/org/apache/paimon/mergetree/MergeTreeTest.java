@@ -60,10 +60,11 @@ import org.apache.paimon.utils.RecordWriter;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -80,8 +81,10 @@ import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.CoreOptions.SortEngine;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link MergeTreeReaders} and {@link MergeTreeWriter}. */
@@ -101,13 +104,10 @@ public class MergeTreeTest {
     private RecordWriter<KeyValue> writer;
 
     @BeforeEach
-    public void beforeEach() throws IOException {
+    public void beforeEach() {
         path = new Path(tempDir.toString());
         pathFactory = new FileStorePathFactory(path);
         comparator = Comparator.comparingInt(o -> o.getInt(0));
-        recreateMergeTree(1024 * 1024);
-        Path bucketDir = writerFactory.pathFactory().toPath("ignore").getParent();
-        LocalFileIO.create().mkdirs(bucketDir);
     }
 
     private SchemaManager createTestingSchemaManager(Path path) {
@@ -126,7 +126,7 @@ public class MergeTreeTest {
         return new SchemaEvolutionTableTestBase.TestingSchemaManager(path, schemas);
     }
 
-    private void recreateMergeTree(long targetFileSize) {
+    private void recreateMergeTree(long targetFileSize, SortEngine sortEngine) throws IOException {
         Options configuration = new Options();
         configuration.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
         configuration.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
@@ -187,7 +187,9 @@ public class MergeTreeTest {
                         0,
                         options.fileCompressionPerLevel(),
                         options.fileCompression());
-        writer = createMergeTreeWriter(Collections.emptyList());
+        writer = createMergeTreeWriter(Collections.emptyList(), sortEngine);
+        Path bucketDir = writerFactory.pathFactory().toPath("ignore").getParent();
+        LocalFileIO.create().mkdirs(bucketDir);
     }
 
     @BeforeAll
@@ -201,47 +203,54 @@ public class MergeTreeTest {
         service = null;
     }
 
-    @Test
-    public void testEmpty() throws Exception {
-        doTestWriteRead(0);
-    }
-
-    @Test
-    public void test1() throws Exception {
-        doTestWriteRead(1);
-    }
-
-    @Test
-    public void test2() throws Exception {
-        doTestWriteRead(new Random().nextInt(2));
-    }
-
-    @Test
-    public void test8() throws Exception {
-        doTestWriteRead(new Random().nextInt(8));
-    }
-
-    @Test
-    public void testRandom() throws Exception {
-        doTestWriteRead(new Random().nextInt(20));
-    }
-
-    @Test
-    public void testRestore() throws Exception {
-        List<TestRecord> expected = new ArrayList<>(writeBatch());
-        List<DataFileMeta> newFiles = writer.prepareCommit(true).newFilesIncrement().newFiles();
-        writer = createMergeTreeWriter(newFiles);
-        expected.addAll(writeBatch());
-        writer.prepareCommit(true);
-        writer.sync();
-        assertRecords(expected);
+    @ParameterizedTest
+    @EnumSource(SortEngine.class)
+    public void testEmpty(SortEngine sortEngine) throws Exception {
+        doTestWriteRead(0, sortEngine);
     }
 
     @ParameterizedTest
-    @ValueSource(longs = {1, 1024 * 1024})
-    public void testCloseUpgrade(long targetFileSize) throws Exception {
+    @EnumSource(SortEngine.class)
+    public void test1(SortEngine sortEngine) throws Exception {
+        doTestWriteRead(1, sortEngine);
+    }
+
+    @ParameterizedTest
+    @EnumSource(SortEngine.class)
+    public void test2(SortEngine sortEngine) throws Exception {
+        doTestWriteRead(new Random().nextInt(2), sortEngine);
+    }
+
+    @ParameterizedTest
+    @EnumSource(SortEngine.class)
+    public void test8(SortEngine sortEngine) throws Exception {
+        doTestWriteRead(new Random().nextInt(8), sortEngine);
+    }
+
+    @ParameterizedTest
+    @EnumSource(SortEngine.class)
+    public void testRandom(SortEngine sortEngine) throws Exception {
+        doTestWriteRead(new Random().nextInt(20), sortEngine);
+    }
+
+    @ParameterizedTest
+    @EnumSource(SortEngine.class)
+    public void testRestore(SortEngine sortEngine) throws Exception {
+        recreateMergeTree(1024 * 1024, sortEngine);
+        List<TestRecord> expected = new ArrayList<>(writeBatch());
+        List<DataFileMeta> newFiles = writer.prepareCommit(true).newFilesIncrement().newFiles();
+        writer = createMergeTreeWriter(newFiles, sortEngine);
+        expected.addAll(writeBatch());
+        writer.prepareCommit(true);
+        writer.sync();
+        assertRecords(expected, sortEngine);
+    }
+
+    @ParameterizedTest
+    @MethodSource("closeUpgradeTestProvider")
+    public void testCloseUpgrade(long targetFileSize, SortEngine sortEngine) throws Exception {
         // To generate a large number of upgrade files
-        recreateMergeTree(targetFileSize);
+        recreateMergeTree(targetFileSize, sortEngine);
 
         List<TestRecord> expected = new ArrayList<>();
         Random random = new Random();
@@ -264,19 +273,22 @@ public class MergeTreeTest {
         }
         writer.close();
 
-        assertRecords(expected, compactedFiles, true);
+        assertRecords(expected, compactedFiles, true, sortEngine);
     }
 
-    @Test
-    public void testWriteMany() throws Exception {
-        doTestWriteRead(3, 20_000);
+    @ParameterizedTest
+    @EnumSource(SortEngine.class)
+    public void testWriteMany(SortEngine sortEngine) throws Exception {
+        doTestWriteRead(3, 20_000, sortEngine);
     }
 
-    private void doTestWriteRead(int batchNumber) throws Exception {
-        doTestWriteRead(batchNumber, 200);
+    private void doTestWriteRead(int batchNumber, SortEngine sortEngine) throws Exception {
+        doTestWriteRead(batchNumber, 200, sortEngine);
     }
 
-    private void doTestWriteRead(int batchNumber, int perBatch) throws Exception {
+    private void doTestWriteRead(int batchNumber, int perBatch, SortEngine sortEngine)
+            throws Exception {
+        recreateMergeTree(1024 * 1024, sortEngine);
         List<TestRecord> expected = new ArrayList<>();
         List<DataFileMeta> newFiles = new ArrayList<>();
         Set<String> newFileNames = new HashSet<>();
@@ -296,14 +308,14 @@ public class MergeTreeTest {
         }
 
         // assert records from writer
-        assertRecords(expected);
+        assertRecords(expected, sortEngine);
 
         // assert records from increment new files
-        assertRecords(expected, newFiles, false);
-        assertRecords(expected, newFiles, true);
+        assertRecords(expected, newFiles, false, sortEngine);
+        assertRecords(expected, newFiles, true, sortEngine);
 
         // assert records from increment compacted files
-        assertRecords(expected, compactedFiles, true);
+        assertRecords(expected, compactedFiles, true, sortEngine);
 
         writer.close();
 
@@ -318,7 +330,7 @@ public class MergeTreeTest {
         assertThat(files).isEqualTo(Collections.emptySet());
     }
 
-    private MergeTreeWriter createMergeTreeWriter(List<DataFileMeta> files) {
+    private MergeTreeWriter createMergeTreeWriter(List<DataFileMeta> files, SortEngine sortEngine) {
         long maxSequenceNumber =
                 files.stream().map(DataFileMeta::maxSequenceNumber).max(Long::compare).orElse(-1L);
         MergeTreeWriter writer =
@@ -326,7 +338,7 @@ public class MergeTreeTest {
                         false,
                         128,
                         null,
-                        createCompactManager(service, files),
+                        createCompactManager(service, files, sortEngine),
                         maxSequenceNumber,
                         comparator,
                         DeduplicateMergeFunction.factory().create(),
@@ -340,7 +352,7 @@ public class MergeTreeTest {
     }
 
     private MergeTreeCompactManager createCompactManager(
-            ExecutorService compactExecutor, List<DataFileMeta> files) {
+            ExecutorService compactExecutor, List<DataFileMeta> files, SortEngine sortEngine) {
         CompactStrategy strategy =
                 new UniversalCompaction(
                         options.maxSizeAmplificationPercent(),
@@ -354,7 +366,7 @@ public class MergeTreeTest {
                 comparator,
                 options.targetFileSize(),
                 options.numSortedRunStopTrigger(),
-                new TestRewriter());
+                new TestRewriter(sortEngine));
     }
 
     private void mergeCompacted(
@@ -390,19 +402,23 @@ public class MergeTreeTest {
         return records;
     }
 
-    private void assertRecords(List<TestRecord> expected) throws Exception {
+    private void assertRecords(List<TestRecord> expected, SortEngine sortEngine) throws Exception {
         // compaction will drop delete
         List<DataFileMeta> files =
                 ((MergeTreeCompactManager) ((MergeTreeWriter) writer).compactManager())
                         .levels()
                         .allFiles();
-        assertRecords(expected, files, true);
+        assertRecords(expected, files, true, sortEngine);
     }
 
     private void assertRecords(
-            List<TestRecord> expected, List<DataFileMeta> files, boolean dropDelete)
+            List<TestRecord> expected,
+            List<DataFileMeta> files,
+            boolean dropDelete,
+            SortEngine sortEngine)
             throws Exception {
-        assertThat(readAll(files, dropDelete)).isEqualTo(compactAndSort(expected, dropDelete));
+        assertThat(readAll(files, dropDelete, sortEngine))
+                .isEqualTo(compactAndSort(expected, dropDelete));
     }
 
     private List<TestRecord> compactAndSort(List<TestRecord> records, boolean dropDelete) {
@@ -425,15 +441,16 @@ public class MergeTreeTest {
         }
     }
 
-    private List<TestRecord> readAll(List<DataFileMeta> files, boolean dropDelete)
-            throws Exception {
+    private List<TestRecord> readAll(
+            List<DataFileMeta> files, boolean dropDelete, SortEngine sortEngine) throws Exception {
         RecordReader<KeyValue> reader =
                 MergeTreeReaders.readerForMergeTree(
                         new IntervalPartition(files, comparator).partition(),
                         dropDelete,
                         readerFactory,
                         comparator,
-                        DeduplicateMergeFunction.factory().create());
+                        DeduplicateMergeFunction.factory().create(),
+                        sortEngine);
         List<TestRecord> records = new ArrayList<>();
         try (RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<>(reader)) {
             while (iterator.hasNext()) {
@@ -462,7 +479,24 @@ public class MergeTreeTest {
         return records;
     }
 
+    private static Stream<Arguments> closeUpgradeTestProvider() {
+        List<Arguments> arguments = new ArrayList<>();
+        long[] targetFileSize = new long[] {1, 1024 * 1024};
+        for (SortEngine sortEngine : SortEngine.values()) {
+            for (long size : targetFileSize) {
+                arguments.add(Arguments.of(size, sortEngine));
+            }
+        }
+        return arguments.stream();
+    }
+
     private class TestRewriter extends AbstractCompactRewriter {
+
+        private final SortEngine sortEngine;
+
+        public TestRewriter(SortEngine sortEngine) {
+            this.sortEngine = sortEngine;
+        }
 
         @Override
         public CompactResult rewrite(
@@ -476,7 +510,8 @@ public class MergeTreeTest {
                             dropDelete,
                             compactReaderFactory,
                             comparator,
-                            DeduplicateMergeFunction.factory().create());
+                            DeduplicateMergeFunction.factory().create(),
+                            sortEngine);
             writer.write(new RecordReaderIterator<>(sectionsReader));
             writer.close();
             return new CompactResult(extractFilesFromSections(sections), writer.result());

@@ -32,10 +32,11 @@ import java.util.List;
 import java.util.PriorityQueue;
 
 /** {@link SortMergeReader} implemented with min-heap. */
-public class SortMergeReaderWithMinHeap<T> extends SortMergeReader<T> {
+public class SortMergeReaderWithMinHeap<T> implements SortMergeReader<T> {
 
     private final List<RecordReader<KeyValue>> nextBatchReaders;
     private final Comparator<InternalRow> userKeyComparator;
+    private final MergeFunctionWrapper<T> mergeFunctionWrapper;
 
     private final PriorityQueue<Element> minHeap;
     private final List<Element> polled;
@@ -44,9 +45,9 @@ public class SortMergeReaderWithMinHeap<T> extends SortMergeReader<T> {
             List<RecordReader<KeyValue>> readers,
             Comparator<InternalRow> userKeyComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper) {
-        super(mergeFunctionWrapper);
         this.nextBatchReaders = new ArrayList<>(readers);
         this.userKeyComparator = userKeyComparator;
+        this.mergeFunctionWrapper = mergeFunctionWrapper;
 
         this.minHeap =
                 new PriorityQueue<>(

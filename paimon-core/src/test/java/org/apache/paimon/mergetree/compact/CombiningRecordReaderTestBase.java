@@ -18,7 +18,6 @@
 
 package org.apache.paimon.mergetree.compact;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordComparator;
@@ -78,10 +77,6 @@ public abstract class CombiningRecordReaderTestBase {
                             random.nextInt(100) + 1, addOnly()));
         }
         return readersData;
-    }
-
-    protected void runTest(List<List<ReusingTestData>> readersData) throws IOException {
-        runTest(readersData, CoreOptions.SORT_ENGINE.defaultValue());
     }
 
     protected void runTest(List<List<ReusingTestData>> readersData, SortEngine sortEngine)

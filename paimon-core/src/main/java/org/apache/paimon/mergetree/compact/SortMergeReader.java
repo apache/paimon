@@ -34,15 +34,9 @@ import static org.apache.paimon.CoreOptions.SortEngine;
  *
  * <p>NOTE: {@link KeyValue}s from the same {@link RecordReader} must not contain the same key.
  */
-public abstract class SortMergeReader<T> implements RecordReader<T> {
+public interface SortMergeReader<T> extends RecordReader<T> {
 
-    protected final MergeFunctionWrapper<T> mergeFunctionWrapper;
-
-    public SortMergeReader(MergeFunctionWrapper<T> mergeFunctionWrapper) {
-        this.mergeFunctionWrapper = mergeFunctionWrapper;
-    }
-
-    public static <T> SortMergeReader<T> createSortMergeReader(
+    static <T> SortMergeReader<T> createSortMergeReader(
             List<RecordReader<KeyValue>> readers,
             Comparator<InternalRow> userKeyComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper,
