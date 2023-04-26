@@ -208,34 +208,29 @@ class MySqlActionUtils {
 
     private static void validateMySqlConfig(Configuration mySqlConfig) {
         checkArgument(
-                mySqlConfig.get(MySqlSourceOptions.HOSTNAME) != null
-                        && !mySqlConfig.get(MySqlSourceOptions.HOSTNAME).isEmpty(),
+                mySqlConfig.get(MySqlSourceOptions.HOSTNAME) != null,
                 String.format(
-                        "mysql-conf [%s] cannot be empty.", MySqlSourceOptions.HOSTNAME.key()));
+                        "mysql-conf [%s] must be specified.", MySqlSourceOptions.HOSTNAME.key()));
 
         checkArgument(
-                mySqlConfig.get(MySqlSourceOptions.USERNAME) != null
-                        && !mySqlConfig.get(MySqlSourceOptions.USERNAME).isEmpty(),
+                mySqlConfig.get(MySqlSourceOptions.USERNAME) != null,
                 String.format(
-                        "mysql-conf [%s] cannot be empty.", MySqlSourceOptions.USERNAME.key()));
+                        "mysql-conf [%s] must be specified.", MySqlSourceOptions.USERNAME.key()));
 
         checkArgument(
-                mySqlConfig.get(MySqlSourceOptions.PASSWORD) != null
-                        && !mySqlConfig.get(MySqlSourceOptions.PASSWORD).isEmpty(),
+                mySqlConfig.get(MySqlSourceOptions.PASSWORD) != null,
                 String.format(
-                        "mysql-conf [%s] cannot be empty.", MySqlSourceOptions.PASSWORD.key()));
+                        "mysql-conf [%s] must be specified.", MySqlSourceOptions.PASSWORD.key()));
 
         checkArgument(
-                mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME) != null
-                        && !mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME).isEmpty(),
+                mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME) != null,
                 String.format(
-                        "mysql-conf [%s] cannot be empty.",
+                        "mysql-conf [%s] must be specified.",
                         MySqlSourceOptions.DATABASE_NAME.key()));
 
         checkArgument(
-                mySqlConfig.get(MySqlSourceOptions.TABLE_NAME) != null
-                        && !mySqlConfig.get(MySqlSourceOptions.TABLE_NAME).isEmpty(),
+                mySqlConfig.get(MySqlSourceOptions.TABLE_NAME) != null,
                 String.format(
-                        "mysql-conf [%s] cannot be empty.", MySqlSourceOptions.TABLE_NAME.key()));
+                        "mysql-conf [%s] must be specified.", MySqlSourceOptions.TABLE_NAME.key()));
     }
 }
