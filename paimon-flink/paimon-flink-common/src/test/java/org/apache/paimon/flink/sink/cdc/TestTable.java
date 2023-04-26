@@ -125,12 +125,18 @@ public class TestTable {
                 }
 
                 List<CdcRecord> records = new ArrayList<>();
+                boolean shouldInsert = true;
                 if (expected.containsKey(key)) {
                     records.add(new CdcRecord(RowKind.DELETE, expected.get(key)));
+                    expected.remove(key);
+                    // 20% chance to only delete without insert
+                    shouldInsert = random.nextInt(5) > 0;
                 }
-                records.add(new CdcRecord(RowKind.INSERT, fields));
+                if (shouldInsert) {
+                    records.add(new CdcRecord(RowKind.INSERT, fields));
+                    expected.put(key, fields);
+                }
                 events.add(new TestCdcEvent(tableName, records, Objects.hash(tableName, key)));
-                expected.put(key, fields);
             }
         }
     }

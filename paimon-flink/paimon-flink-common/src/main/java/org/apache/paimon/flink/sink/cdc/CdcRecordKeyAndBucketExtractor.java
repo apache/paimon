@@ -74,7 +74,7 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
     @Override
     public BinaryRow partition() {
         if (partition == null) {
-            partition = partitionProjection.apply(record.project(partitionFields));
+            partition = partitionProjection.apply(record.projectAsInsert(partitionFields));
         }
         return partition;
     }
@@ -82,7 +82,7 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
     @Override
     public int bucket() {
         if (bucketKey == null) {
-            bucketKey = bucketKeyProjection.apply(record.project(bucketKeyFields));
+            bucketKey = bucketKeyProjection.apply(record.projectAsInsert(bucketKeyFields));
         }
         if (bucket == null) {
             bucket =
