@@ -114,6 +114,13 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
             }
 
             if (!snapshotManager.snapshotExists(nextSnapshotId)) {
+                Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+                if (earliestSnapshotId != null && earliestSnapshotId > nextSnapshotId) {
+                    throw new OutOfRangeException(
+                            String.format(
+                                    "The snapshot waiting to be consumed is %d, but the earliest snapshot in storage is %d.",
+                                    nextSnapshotId, earliestSnapshotId));
+                }
                 LOG.debug(
                         "Next snapshot id {} does not exist, wait for the snapshot generation.",
                         nextSnapshotId);

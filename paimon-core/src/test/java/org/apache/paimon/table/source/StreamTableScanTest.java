@@ -39,6 +39,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.fail;
 
 /** Tests for {@link StreamTableScan}. */
 public class StreamTableScanTest extends ScannerTestBase {
@@ -253,5 +254,48 @@ public class StreamTableScanTest extends ScannerTestBase {
         StreamTableScan scan = table.newReadBuilder().newStreamScan();
         TableScan.Plan plan = scan.plan();
         assertThat(plan.splits()).isEmpty();
+    }
+
+    @Test
+    public void testPlanWithOutOfRange() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        FileStoreTable table = this.table.copy(options);
+        TableRead read = table.newRead();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        StreamTableScan scan = table.newStreamScan();
+
+        // write base data
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(1, 20, 200L));
+        write.write(rowData(1, 40, 400L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // first call with snapshot, should return complete records from 1st commit and
+        // nextSnapshotId should be 2
+        TableScan.Plan plan = scan.plan();
+        assertThat(getResult(read, plan.splits()))
+                .hasSameElementsAs(Arrays.asList("+I 1|10|100", "+I 1|20|200", "+I 1|40|400"));
+
+        // write incremental data and snapshot 1 should be expired
+        write.write(rowData(1, 20, 201L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        // write incremental data and snapshot 2 should be expired
+        write.write(rowData(1, 20, 202L));
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        try {
+            // second call with snapshot, should throw an OutOfRangeException
+            scan.plan();
+            fail("Should throw an OutOfRangeException.");
+        } catch (OutOfRangeException ignore) {
+            // ignore
+        }
+
+        write.close();
+        commit.close();
     }
 }
