@@ -20,6 +20,7 @@ package org.apache.paimon.mergetree;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.BinaryRow;
@@ -85,7 +86,7 @@ import static java.util.Collections.singletonList;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link MergeTreeReaders} and {@link MergeTreeWriter}. */
-public class MergeTreeTest {
+public abstract class MergeTreeTestBase {
 
     @TempDir java.nio.file.Path tempDir;
     private static ExecutorService service;
@@ -99,12 +100,14 @@ public class MergeTreeTest {
     private KeyValueFileWriterFactory writerFactory;
     private KeyValueFileWriterFactory compactWriterFactory;
     private RecordWriter<KeyValue> writer;
+    private SortEngine sortEngine;
 
     @BeforeEach
     public void beforeEach() throws IOException {
         path = new Path(tempDir.toString());
         pathFactory = new FileStorePathFactory(path);
         comparator = Comparator.comparingInt(o -> o.getInt(0));
+        sortEngine = getSortEngine();
         recreateMergeTree(1024 * 1024);
         Path bucketDir = writerFactory.pathFactory().toPath("ignore").getParent();
         LocalFileIO.create().mkdirs(bucketDir);
@@ -433,7 +436,8 @@ public class MergeTreeTest {
                         dropDelete,
                         readerFactory,
                         comparator,
-                        DeduplicateMergeFunction.factory().create());
+                        DeduplicateMergeFunction.factory().create(),
+                        sortEngine);
         List<TestRecord> records = new ArrayList<>();
         try (RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<>(reader)) {
             while (iterator.hasNext()) {
@@ -462,6 +466,8 @@ public class MergeTreeTest {
         return records;
     }
 
+    protected abstract SortEngine getSortEngine();
+
     private class TestRewriter extends AbstractCompactRewriter {
 
         @Override
@@ -476,7 +482,8 @@ public class MergeTreeTest {
                             dropDelete,
                             compactReaderFactory,
                             comparator,
-                            DeduplicateMergeFunction.factory().create());
+                            DeduplicateMergeFunction.factory().create(),
+                            sortEngine);
             writer.write(new RecordReaderIterator<>(sectionsReader));
             writer.close();
             return new CompactResult(extractFilesFromSections(sections), writer.result());
@@ -510,6 +517,24 @@ public class MergeTreeTest {
         @Override
         public String toString() {
             return "TestRecord{" + "kind=" + kind + ", k=" + k + ", v=" + v + '}';
+        }
+    }
+
+    /** {@link MergeTreeTestBase} with {@link SortEngine#LOSER_TREE}. */
+    public static class MergeTreeTestWithLoserTree extends MergeTreeTestBase {
+
+        @Override
+        protected SortEngine getSortEngine() {
+            return SortEngine.LOSER_TREE;
+        }
+    }
+
+    /** {@link MergeTreeTestBase} with {@link SortEngine#MIN_HEAP}. */
+    public static class MergeTreeTestWithMinHeap extends MergeTreeTestBase {
+
+        @Override
+        protected SortEngine getSortEngine() {
+            return SortEngine.MIN_HEAP;
         }
     }
 }

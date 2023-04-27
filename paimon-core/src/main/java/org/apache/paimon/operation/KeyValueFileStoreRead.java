@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.InternalRow;
@@ -33,6 +34,7 @@ import org.apache.paimon.mergetree.compact.IntervalPartition;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -53,6 +55,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.SORT_ENGINE;
 import static org.apache.paimon.io.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
 import static org.apache.paimon.predicate.PredicateBuilder.containsFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
@@ -65,6 +68,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     private final Comparator<InternalRow> keyComparator;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final boolean valueCountMode;
+    private final SortEngine sortEngine;
 
     @Nullable private int[][] keyProjectedFields;
 
@@ -99,6 +103,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         this.keyComparator = keyComparator;
         this.mfFactory = mfFactory;
         this.valueCountMode = tableSchema.trimmedPrimaryKeys().isEmpty();
+        this.sortEngine = Options.fromMap(tableSchema.options()).get(SORT_ENGINE);
     }
 
     public KeyValueFileStoreRead withKeyProjection(int[][] projectedFields) {
@@ -196,7 +201,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                                                 ? overlappedSectionFactory
                                                 : nonOverlappedSectionFactory,
                                         keyComparator,
-                                        mergeFuncWrapper));
+                                        mergeFuncWrapper,
+                                        sortEngine));
             }
             DropDeleteReader reader =
                     new DropDeleteReader(ConcatRecordReader.create(sectionReaders));

@@ -18,12 +18,15 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.ReusingTestData;
 import org.apache.paimon.utils.TestReusingRecordReader;
 
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -35,43 +38,53 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
     protected abstract MergeFunction<KeyValue> createMergeFunction();
 
     @Override
-    protected RecordReader<KeyValue> createRecordReader(List<TestReusingRecordReader> readers) {
-        return new SortMergeReader<>(
+    protected RecordReader<KeyValue> createRecordReader(
+            List<TestReusingRecordReader> readers, CoreOptions.SortEngine sortEngine) {
+        return SortMergeReader.createSortMergeReader(
                 new ArrayList<>(readers),
                 KEY_COMPARATOR,
-                new ReducerMergeFunctionWrapper(createMergeFunction()));
+                new ReducerMergeFunctionWrapper(createMergeFunction()),
+                sortEngine);
     }
 
-    @Test
-    public void testEmpty() throws IOException {
-        runTest(parseData(""));
-        runTest(parseData("", "", ""));
+    @ParameterizedTest
+    @EnumSource(SortEngine.class)
+    public void testEmpty(SortEngine sortEngine) throws IOException {
+        runTest(parseData(""), sortEngine);
+        runTest(parseData("", "", ""), sortEngine);
     }
 
-    @Test
-    public void testAlternateKeys() throws IOException {
+    @ParameterizedTest
+    @EnumSource(SortEngine.class)
+    public void testAlternateKeys(SortEngine sortEngine) throws IOException {
         runTest(
                 parseData(
                         "1, 1, +, 100 | 3, 2, +, 300 | 5, 3, +, 200 | 7, 4, +, 600 | 9, 20, +, 400",
                         "0, 5, +, 0",
                         "0, 10, +, 0",
                         "",
-                        "2, 6, +, 200 | 4, 7, +, 400 | 6, 8, +, 600 | 8, 9, +, 800"));
+                        "2, 6, +, 200 | 4, 7, +, 400 | 6, 8, +, 600 | 8, 9, +, 800"),
+                sortEngine);
     }
 
-    @Test
-    public void testDuplicateKeys() throws IOException {
-        runTest(parseData("1, 1, +, 100 | 3, 3, +, 300", "1, 4, +, 200 | 3, 5, +, 300"));
+    @ParameterizedTest
+    @EnumSource(SortEngine.class)
+    public void testDuplicateKeys(SortEngine sortEngine) throws IOException {
+        runTest(
+                parseData("1, 1, +, 100 | 3, 3, +, 300", "1, 4, +, 200 | 3, 5, +, 300"),
+                sortEngine);
     }
 
-    @Test
-    public void testLongTailRecords() throws IOException {
+    @ParameterizedTest
+    @EnumSource(SortEngine.class)
+    public void testLongTailRecords(SortEngine sortEngine) throws IOException {
         runTest(
                 parseData(
                         "1, 1, +, 100 | 2, 500, +, 200",
                         "1, 3, +, 100 | 3, 4, +, 300 | 5, 501, +, 500 | 7, 503, +, 700 | "
                                 + "8, 504, +, 800 | 9, 505, +, 900 | 10, 506, +, 1000 | "
-                                + "11, 507, +, 1100 | 12, 508, +, 1200 | 13, 509, +, 1300"));
+                                + "11, 507, +, 1100 | 12, 508, +, 1200 | 13, 509, +, 1300"),
+                sortEngine);
     }
 
     /** Tests for {@link SortMergeReader} with {@link DeduplicateMergeFunction}. */
@@ -111,8 +124,9 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
             return new ValueCountMergeFunction();
         }
 
-        @Test
-        public void testCancelingRecords() throws IOException {
+        @ParameterizedTest
+        @EnumSource(SortEngine.class)
+        public void testCancelingRecords(SortEngine sortEngine) throws IOException {
             runTest(
                     parseData(
                             "1, 1, +, 100 | 3, 5, +, -300 | 5, 300, +, 300",
@@ -120,8 +134,9 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
                             "1, 4, +, -200 | 3, 3, +, 300",
                             "5, 100, +, -200 | 7, 123, +, -500",
                             "7, 321, +, 200",
-                            "7, 456, +, 300"));
-            runTest(parseData("1, 2, +, 100", "1, 1, +, -100"));
+                            "7, 456, +, 300"),
+                    sortEngine);
+            runTest(parseData("1, 2, +, 100", "1, 1, +, -100"), sortEngine);
         }
     }
 }

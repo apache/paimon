@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.InternalRow;
@@ -42,8 +43,9 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
-            MergeFunctionFactory<KeyValue> mfFactory) {
-        super(readerFactory, writerFactory, keyComparator, mfFactory);
+            MergeFunctionFactory<KeyValue> mfFactory,
+            SortEngine sortEngine) {
+        super(readerFactory, writerFactory, keyComparator, mfFactory, sortEngine);
     }
 
     protected abstract boolean rewriteChangelog(
@@ -71,8 +73,11 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
                     () -> {
                         List<RecordReader<KeyValue>> runReaders =
                                 MergeTreeReaders.readerForSection(section, readerFactory);
-                        return new SortMergeReader<>(
-                                runReaders, keyComparator, createMergeWrapper(outputLevel));
+                        return SortMergeReader.createSortMergeReader(
+                                runReaders,
+                                keyComparator,
+                                createMergeWrapper(outputLevel),
+                                sortEngine);
                     });
         }
 

@@ -18,18 +18,13 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.utils.Preconditions;
 
-import javax.annotation.Nullable;
-
-import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 
 /**
  * This reader is to read a list of {@link RecordReader}, which is already sorted by key and
@@ -38,168 +33,22 @@ import java.util.PriorityQueue;
  *
  * <p>NOTE: {@link KeyValue}s from the same {@link RecordReader} must not contain the same key.
  */
-public class SortMergeReader<T> implements RecordReader<T> {
+public interface SortMergeReader<T> extends RecordReader<T> {
 
-    private final List<RecordReader<KeyValue>> nextBatchReaders;
-    private final Comparator<InternalRow> userKeyComparator;
-    private final MergeFunctionWrapper<T> mergeFunctionWrapper;
-
-    private final PriorityQueue<Element> minHeap;
-    private final List<Element> polled;
-
-    public SortMergeReader(
+    static <T> SortMergeReader<T> createSortMergeReader(
             List<RecordReader<KeyValue>> readers,
             Comparator<InternalRow> userKeyComparator,
-            MergeFunctionWrapper<T> mergeFunctionWrapper) {
-        this.nextBatchReaders = new ArrayList<>(readers);
-        this.userKeyComparator = userKeyComparator;
-        this.mergeFunctionWrapper = mergeFunctionWrapper;
-
-        this.minHeap =
-                new PriorityQueue<>(
-                        (e1, e2) -> {
-                            int result = userKeyComparator.compare(e1.kv.key(), e2.kv.key());
-                            if (result != 0) {
-                                return result;
-                            }
-                            return Long.compare(e1.kv.sequenceNumber(), e2.kv.sequenceNumber());
-                        });
-        this.polled = new ArrayList<>();
-    }
-
-    @Nullable
-    @Override
-    public RecordIterator<T> readBatch() throws IOException {
-        for (RecordReader<KeyValue> reader : nextBatchReaders) {
-            while (true) {
-                RecordIterator<KeyValue> iterator = reader.readBatch();
-                if (iterator == null) {
-                    // no more batches, permanently remove this reader
-                    reader.close();
-                    break;
-                }
-                KeyValue kv = iterator.next();
-                if (kv == null) {
-                    // empty iterator, clean up and try next batch
-                    iterator.releaseBatch();
-                } else {
-                    // found next kv
-                    minHeap.offer(new Element(kv, iterator, reader));
-                    break;
-                }
-            }
-        }
-        nextBatchReaders.clear();
-
-        return minHeap.isEmpty() ? null : new SortMergeIterator();
-    }
-
-    @Override
-    public void close() throws IOException {
-        for (RecordReader<KeyValue> reader : nextBatchReaders) {
-            reader.close();
-        }
-        for (Element element : minHeap) {
-            element.iterator.releaseBatch();
-            element.reader.close();
-        }
-        for (Element element : polled) {
-            element.iterator.releaseBatch();
-            element.reader.close();
-        }
-    }
-
-    /** The iterator iterates on {@link SortMergeReader}. */
-    private class SortMergeIterator implements RecordIterator<T> {
-
-        private boolean released = false;
-
-        @Override
-        public T next() throws IOException {
-            while (true) {
-                boolean hasMore = nextImpl();
-                if (!hasMore) {
-                    return null;
-                }
-                T result = mergeFunctionWrapper.getResult();
-                if (result != null) {
-                    return result;
-                }
-            }
-        }
-
-        private boolean nextImpl() throws IOException {
-            Preconditions.checkState(
-                    !released, "SortMergeIterator#advanceNext is called after release");
-            Preconditions.checkState(
-                    nextBatchReaders.isEmpty(),
-                    "SortMergeIterator#advanceNext is called even if the last call returns null. "
-                            + "This is a bug.");
-
-            // add previously polled elements back to priority queue
-            for (Element element : polled) {
-                if (element.update()) {
-                    // still kvs left, add back to priority queue
-                    minHeap.offer(element);
-                } else {
-                    // reach end of batch, clean up
-                    element.iterator.releaseBatch();
-                    nextBatchReaders.add(element.reader);
-                }
-            }
-            polled.clear();
-
-            // there are readers reaching end of batch, so we end current batch
-            if (!nextBatchReaders.isEmpty()) {
-                return false;
-            }
-
-            mergeFunctionWrapper.reset();
-            InternalRow key =
-                    Preconditions.checkNotNull(minHeap.peek(), "Min heap is empty. This is a bug.")
-                            .kv
-                            .key();
-
-            // fetch all elements with the same key
-            // note that the same iterator should not produce the same keys, so this code is correct
-            while (!minHeap.isEmpty()) {
-                Element element = minHeap.peek();
-                if (userKeyComparator.compare(key, element.kv.key()) != 0) {
-                    break;
-                }
-                minHeap.poll();
-                mergeFunctionWrapper.add(element.kv);
-                polled.add(element);
-            }
-            return true;
-        }
-
-        @Override
-        public void releaseBatch() {
-            released = true;
-        }
-    }
-
-    private static class Element {
-        private KeyValue kv;
-        private final RecordIterator<KeyValue> iterator;
-        private final RecordReader<KeyValue> reader;
-
-        private Element(
-                KeyValue kv, RecordIterator<KeyValue> iterator, RecordReader<KeyValue> reader) {
-            this.kv = kv;
-            this.iterator = iterator;
-            this.reader = reader;
-        }
-
-        // IMPORTANT: Must not call this for elements still in priority queue!
-        private boolean update() throws IOException {
-            KeyValue nextKv = iterator.next();
-            if (nextKv == null) {
-                return false;
-            }
-            kv = nextKv;
-            return true;
+            MergeFunctionWrapper<T> mergeFunctionWrapper,
+            SortEngine sortEngine) {
+        switch (sortEngine) {
+            case MIN_HEAP:
+                return new SortMergeReaderWithMinHeap<>(
+                        readers, userKeyComparator, mergeFunctionWrapper);
+            case LOSER_TREE:
+                return new SortMergeReaderWithLoserTree<>(
+                        readers, userKeyComparator, mergeFunctionWrapper);
+            default:
+                throw new UnsupportedOperationException("Unsupported sort engine: " + sortEngine);
         }
     }
 }

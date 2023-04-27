@@ -18,13 +18,15 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.ReusingTestData;
 import org.apache.paimon.utils.TestReusingRecordReader;
 
-import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -47,11 +49,14 @@ public abstract class CombiningRecordReaderTestBase {
     protected abstract List<ReusingTestData> getExpected(List<ReusingTestData> input);
 
     protected abstract RecordReader<KeyValue> createRecordReader(
-            List<TestReusingRecordReader> readers);
+            List<TestReusingRecordReader> readers, SortEngine sortEngine);
 
-    @RepeatedTest(100)
-    public void testRandom() throws IOException {
-        runTest(generateRandomData());
+    @ParameterizedTest
+    @EnumSource(SortEngine.class)
+    public void testRandom(SortEngine sortEngine) throws IOException {
+        for (int i = 0; i < 100; i++) {
+            runTest(generateRandomData(), sortEngine);
+        }
     }
 
     protected List<List<ReusingTestData>> parseData(String... stringsData) {
@@ -74,7 +79,8 @@ public abstract class CombiningRecordReaderTestBase {
         return readersData;
     }
 
-    protected void runTest(List<List<ReusingTestData>> readersData) throws IOException {
+    protected void runTest(List<List<ReusingTestData>> readersData, SortEngine sortEngine)
+            throws IOException {
         Iterator<ReusingTestData> expectedIterator =
                 getExpected(
                                 readersData.stream()
@@ -85,7 +91,7 @@ public abstract class CombiningRecordReaderTestBase {
         for (List<ReusingTestData> readerData : readersData) {
             readers.add(new TestReusingRecordReader(readerData));
         }
-        RecordReader<KeyValue> recordReader = createRecordReader(readers);
+        RecordReader<KeyValue> recordReader = createRecordReader(readers, sortEngine);
 
         RecordReader.RecordIterator<KeyValue> batch;
         while ((batch = recordReader.readBatch()) != null) {

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.ReusingTestData;
@@ -43,7 +45,8 @@ public class ConcatRecordReaderTest extends CombiningRecordReaderTestBase {
     }
 
     @Override
-    protected RecordReader<KeyValue> createRecordReader(List<TestReusingRecordReader> readers) {
+    protected RecordReader<KeyValue> createRecordReader(
+            List<TestReusingRecordReader> readers, SortEngine sortEngine) {
         return new ConcatRecordReader(
                 readers.stream()
                         .map(r -> (ConcatRecordReader.ReaderSupplier) () -> r)
@@ -64,5 +67,9 @@ public class ConcatRecordReaderTest extends CombiningRecordReaderTestBase {
                                 + " 7, 40, +, 700 |  9, 200, -, 900",
                         "",
                         " 12, 60, +, 1200 |  14, 70, -, 1400 |  16, 80, +, 1600 |  18, 90, -, 1800"));
+    }
+
+    private void runTest(List<List<ReusingTestData>> readersData) throws IOException {
+        runTest(readersData, CoreOptions.SORT_ENGINE.defaultValue());
     }
 }
