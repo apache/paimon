@@ -72,7 +72,8 @@ public class HiveCatalogTest extends CatalogTestBase {
                                         DEFAULT_TABLE_SCHEMA,
                                         false))
                 .hasRootCauseInstanceOf(IllegalStateException.class)
-                .hasRootCauseMessage("Database name[TEST_DB] cannot contain upper case");
+                .hasRootCauseMessage(
+                        "Database name[TEST_DB] cannot contain upper case in hive catalog");
 
         assertThatThrownBy(
                         () ->
@@ -81,7 +82,8 @@ public class HiveCatalogTest extends CatalogTestBase {
                                         DEFAULT_TABLE_SCHEMA,
                                         false))
                 .hasRootCauseInstanceOf(IllegalStateException.class)
-                .hasRootCauseMessage("Table name[NEW_TABLE] cannot contain upper case");
+                .hasRootCauseMessage(
+                        "Table name[NEW_TABLE] cannot contain upper case in hive catalog");
     }
 
     private static final String HADOOP_CONF_DIR =
