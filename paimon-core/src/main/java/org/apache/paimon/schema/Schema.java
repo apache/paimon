@@ -121,7 +121,7 @@ public class Schema {
             return fields;
         }
         duplicateColumns = duplicate(primaryKeys);
-        Preconditions.checkArgument(
+        Preconditions.checkState(
                 duplicateColumns.isEmpty(),
                 "Primary key constraint %s must not contain duplicate columns. Found: %s",
                 primaryKeys,
