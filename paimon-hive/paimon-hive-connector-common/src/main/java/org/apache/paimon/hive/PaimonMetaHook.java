@@ -18,34 +18,83 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.hive.mapred.PaimonInputFormat;
 import org.apache.paimon.hive.mapred.PaimonOutputFormat;
-import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.TableUtils;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
+import org.apache.hadoop.hive.metastore.MetaStoreUtils;
+import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.Table;
+
+import java.util.List;
+import java.util.Optional;
+
+import static org.apache.paimon.hive.HiveTypeUtils.typeInfoToLogicalType;
 
 /**
  * {@link HiveMetaHook} for paimon. Currently this class is only used to set input and output
  * formats.
  */
 public class PaimonMetaHook implements HiveMetaHook {
+    private static final String COMMENT = "comment";
+    private final Configuration conf;
 
-    @Override
-    public void preCreateTable(Table table) throws MetaException {
-        Preconditions.checkArgument(
-                !table.isSetPartitionKeys() || table.getPartitionKeys().isEmpty(),
-                "Paimon currently does not support creating partitioned table "
-                        + "with PARTITIONED BY clause. If you want to query from a partitioned table, "
-                        + "please add partition columns into the ordinary table columns.");
-
-        table.getSd().setInputFormat(PaimonInputFormat.class.getCanonicalName());
-        table.getSd().setOutputFormat(PaimonOutputFormat.class.getCanonicalName());
+    public PaimonMetaHook(Configuration conf) {
+        this.conf = conf;
     }
 
     @Override
-    public void rollbackCreateTable(Table table) throws MetaException {}
+    public void preCreateTable(Table table) throws MetaException {
+        if (table.getPartitionKeysSize() != 0) {
+            throw new MetaException(
+                    "Paimon currently does not support creating partitioned table "
+                            + "with PARTITIONED BY clause. If you want to query from a partitioned table, "
+                            + "please add partition columns into the ordinary table columns.");
+        }
+
+        // hive ql parse cannot recognize input near '$' in table name, no need to add paimon system
+        // table verification.
+
+        table.getSd().setInputFormat(PaimonInputFormat.class.getCanonicalName());
+        table.getSd().setOutputFormat(PaimonOutputFormat.class.getCanonicalName());
+
+        CatalogContext context = catalogContext(table);
+        Optional<TableSchema> tableSchema = TableUtils.schema(context);
+        if (tableSchema.isPresent()) {
+            // paimon table already exists
+            return;
+        }
+        // create paimon table
+        List<FieldSchema> cols = table.getSd().getCols();
+        Schema.Builder schemaBuilder =
+                Schema.newBuilder().comment(table.getParameters().get(COMMENT));
+        cols.iterator()
+                .forEachRemaining(
+                        fieldSchema ->
+                                schemaBuilder.column(
+                                        fieldSchema.getName().toLowerCase(),
+                                        typeInfoToLogicalType(fieldSchema.getType()),
+                                        fieldSchema.getComment()));
+        TableUtils.createTable(context, schemaBuilder.build());
+    }
+
+    @Override
+    public void rollbackCreateTable(Table table) throws MetaException {
+        if (!MetaStoreUtils.isExternalTable(table)) {
+            return;
+        }
+        CatalogContext context = catalogContext(table);
+        // we have created an paimon table, so we delete it to roll back;
+        TableUtils.dropTable(context);
+    }
 
     @Override
     public void commitCreateTable(Table table) throws MetaException {}
@@ -58,4 +107,10 @@ public class PaimonMetaHook implements HiveMetaHook {
 
     @Override
     public void commitDropTable(Table table, boolean b) throws MetaException {}
+
+    private CatalogContext catalogContext(Table table) {
+        Options options = PaimonJobConf.extractCatalogConfig(conf);
+        options.set(CoreOptions.PATH, table.getSd().getLocation());
+        return CatalogContext.create(options, conf);
+    }
 }

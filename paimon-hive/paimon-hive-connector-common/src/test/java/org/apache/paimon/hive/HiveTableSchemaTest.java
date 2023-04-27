@@ -36,6 +36,7 @@ import java.util.HashMap;
 import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for {@link HiveSchema}. */
@@ -51,22 +52,26 @@ public class HiveTableSchemaTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    public void testExtractSchema() throws Exception {
+    public void testExtractSchemaWithEmptyDDLAndNoPaimonTable() {
+        // Extract schema with empty DDL and no paimon table
+        Properties tableWithEmptyDDL = createTableWithEmptyDDL();
+
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> HiveSchema.extract(null, tableWithEmptyDDL))
+                .withMessage(
+                        "Schema file not found in location "
+                                + tempDir.toString()
+                                + ". Please create table first.");
+    }
+
+    @Test
+    public void testExtractSchemaWithEmptyDDLAndExistsPaimonTable() throws Exception {
+        // create a paimon table
         createSchema();
+        // Extract schema with empty DDL and exists paimon table
+        Properties tableWithEmptyDDL = createTableWithEmptyDDL();
 
-        Properties properties = new Properties();
-        properties.setProperty("columns", "a,b,c");
-        properties.setProperty(
-                "columns.types",
-                String.join(
-                        ":",
-                        Arrays.asList(
-                                TypeInfoFactory.intTypeInfo.getTypeName(),
-                                TypeInfoFactory.stringTypeInfo.getTypeName(),
-                                TypeInfoFactory.getDecimalTypeInfo(5, 3).getTypeName())));
-        properties.setProperty("location", tempDir.toString());
-
-        HiveSchema schema = HiveSchema.extract(null, properties);
+        HiveSchema schema = HiveSchema.extract(null, tableWithEmptyDDL);
         assertThat(schema.fieldNames()).isEqualTo(Arrays.asList("a", "b", "c"));
         assertThat(schema.fieldTypes())
                 .isEqualTo(
@@ -77,15 +82,28 @@ public class HiveTableSchemaTest {
     }
 
     @Test
-    public void testExtractSchemaWithEmptyDDL() throws Exception {
+    public void testExtractSchemaWithExistsDDLAndNoPaimonTable() {
+        // Extract schema with exists DDL and no paimon table
+        Properties tableWithExistsDDL = createTableWithExistsDDL();
+
+        HiveSchema schema = HiveSchema.extract(null, tableWithExistsDDL);
+        assertThat(schema.fieldNames()).isEqualTo(Arrays.asList("a", "b", "c"));
+        assertThat(schema.fieldTypes())
+                .isEqualTo(
+                        Arrays.asList(
+                                DataTypes.INT(), DataTypes.STRING(), DataTypes.DECIMAL(5, 3)));
+        assertThat(schema.fieldComments())
+                .isEqualTo(Arrays.asList("col1 comment", "col2 comment", "col3 comment"));
+    }
+
+    @Test
+    public void testExtractSchemaWithExistsDDLAndExistsPaimonTable() throws Exception {
+        // create a paimon table
         createSchema();
+        // Extract schema with exists DDL and exists paimon table
+        Properties tableWithExistsDDL = createTableWithExistsDDL();
 
-        Properties properties = new Properties();
-        properties.setProperty("columns", "");
-        properties.setProperty("columns.types", "");
-        properties.setProperty("location", tempDir.toString());
-
-        HiveSchema schema = HiveSchema.extract(null, properties);
+        HiveSchema schema = HiveSchema.extract(null, tableWithExistsDDL);
         assertThat(schema.fieldNames()).isEqualTo(Arrays.asList("a", "b", "c"));
         assertThat(schema.fieldTypes())
                 .isEqualTo(
@@ -109,6 +127,7 @@ public class HiveTableSchemaTest {
                                 TypeInfoFactory.intTypeInfo.getTypeName(),
                                 TypeInfoFactory.stringTypeInfo.getTypeName(),
                                 TypeInfoFactory.getDecimalTypeInfo(6, 3).getTypeName())));
+        properties.setProperty("columns.comments", "\0\0");
         properties.setProperty("location", tempDir.toString());
 
         String expected =
@@ -139,7 +158,7 @@ public class HiveTableSchemaTest {
         properties.setProperty("columns", "a");
         properties.setProperty("columns.types", TypeInfoFactory.intTypeInfo.getTypeName());
         properties.setProperty("location", tempDir.toString());
-
+        properties.setProperty("columns.comments", "");
         String expected =
                 String.join(
                         "\n",
@@ -154,10 +173,9 @@ public class HiveTableSchemaTest {
                         "Field #2",
                         "Hive DDL          : null",
                         "Paimon Schema: c decimal(5,3)");
-        IllegalArgumentException exception =
-                assertThrows(
-                        IllegalArgumentException.class, () -> HiveSchema.extract(null, properties));
-        assertThat(exception).hasMessageContaining(expected);
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> HiveSchema.extract(null, properties))
+                .withMessageContaining(expected);
     }
 
     @Test
@@ -176,6 +194,7 @@ public class HiveTableSchemaTest {
                                 TypeInfoFactory.getDecimalTypeInfo(5, 3).getTypeName(),
                                 TypeInfoFactory.intTypeInfo.getTypeName(),
                                 TypeInfoFactory.stringTypeInfo.getTypeName())));
+        properties.setProperty("columns.comments", "\0\0\0\0");
         properties.setProperty("location", tempDir.toString());
 
         String expected =
@@ -192,10 +211,9 @@ public class HiveTableSchemaTest {
                         "Field #4",
                         "Hive DDL          : e string",
                         "Paimon Schema: null");
-        IllegalArgumentException exception =
-                assertThrows(
-                        IllegalArgumentException.class, () -> HiveSchema.extract(null, properties));
-        assertThat(exception).hasMessageContaining(expected);
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> HiveSchema.extract(null, properties))
+                .withMessageContaining(expected);
     }
 
     private void createSchema() throws Exception {
@@ -207,5 +225,33 @@ public class HiveTableSchemaTest {
                                 Collections.emptyList(),
                                 new HashMap<>(),
                                 ""));
+    }
+
+    private Properties createTableWithEmptyDDL() {
+        String tableName = "empty_ddl_test_table";
+        Properties properties = new Properties();
+        properties.setProperty("name", tableName);
+        properties.setProperty("columns", "");
+        properties.setProperty("columns.types", "");
+        properties.setProperty("location", tempDir.toString());
+        return properties;
+    }
+
+    private Properties createTableWithExistsDDL() {
+        String tableName = "test_table";
+        Properties properties = new Properties();
+        properties.setProperty("name", tableName);
+        properties.setProperty("columns", "a,b,c");
+        properties.setProperty(
+                "columns.types",
+                String.join(
+                        ":",
+                        Arrays.asList(
+                                TypeInfoFactory.intTypeInfo.getTypeName(),
+                                TypeInfoFactory.stringTypeInfo.getTypeName(),
+                                TypeInfoFactory.getDecimalTypeInfo(5, 3).getTypeName())));
+        properties.setProperty("columns.comments", "col1 comment\0col2 comment\0col3 comment");
+        properties.setProperty("location", tempDir.toString());
+        return properties;
     }
 }

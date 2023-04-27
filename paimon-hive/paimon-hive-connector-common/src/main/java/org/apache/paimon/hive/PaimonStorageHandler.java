@@ -65,7 +65,7 @@ public class PaimonStorageHandler implements HiveStoragePredicateHandler, HiveSt
 
     @Override
     public HiveMetaHook getMetaHook() {
-        return new PaimonMetaHook();
+        return new PaimonMetaHook(this.conf);
     }
 
     @Override
