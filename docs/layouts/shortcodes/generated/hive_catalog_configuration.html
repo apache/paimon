@@ -20,5 +20,14 @@
             <td>String</td>
             <td>File directory of the hive-site.xml , used to create HiveMetastoreClient and security authentication, such as Kerberos, LDAP, Ranger and so on</td>
         </tr>
+        <tr>
+            <td><h5>location-in-properties</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Setting the location in properties of hive table/database.
+If you don't want to access the location by the filesystem of hive when using a object storage such as s3,oss
+you can set this option to true.
+</td>
+        </tr>
     </tbody>
 </table>

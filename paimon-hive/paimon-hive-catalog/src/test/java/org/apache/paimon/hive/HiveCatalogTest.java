@@ -44,14 +44,13 @@ public class HiveCatalogTest extends CatalogTestBase {
         HiveConf hiveConf = new HiveConf();
         String jdoConnectionURL = "jdbc:derby:memory:" + UUID.randomUUID();
         hiveConf.setVar(METASTORECONNECTURLKEY, jdoConnectionURL + ";create=true");
-        hiveConf.setVar(HiveConf.ConfVars.METASTOREWAREHOUSE, warehouse);
         HiveMetaStoreClient metaStoreClient = new HiveMetaStoreClient(hiveConf);
         String metastoreClientClass = "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
         try (MockedStatic<HiveCatalog> mocked = Mockito.mockStatic(HiveCatalog.class)) {
             mocked.when(() -> HiveCatalog.createClient(hiveConf, metastoreClientClass))
                     .thenReturn(metaStoreClient);
         }
-        catalog = new HiveCatalog(fileIO, hiveConf, metastoreClientClass);
+        catalog = new HiveCatalog(fileIO, hiveConf, metastoreClientClass, warehouse);
     }
 
     @Test

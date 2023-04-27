@@ -18,6 +18,8 @@
 
 package org.apache.paimon.hive.runner;
 
+import org.apache.paimon.hive.annotation.Minio;
+import org.apache.paimon.s3.MinioTestContainer;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.io.Resources;
@@ -72,9 +74,7 @@ import static org.reflections.ReflectionUtils.withAnnotation;
 public class PaimonEmbeddedHiveRunner extends BlockJUnit4ClassRunner {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(PaimonEmbeddedHiveRunner.class);
-    private HiveShellContainer container;
     private final HiveRunnerConfig config = new HiveRunnerConfig();
-    protected HiveServerContext context;
 
     public PaimonEmbeddedHiveRunner(Class<?> clazz) throws InitializationError {
         super(clazz);
@@ -85,21 +85,45 @@ public class PaimonEmbeddedHiveRunner extends BlockJUnit4ClassRunner {
         // need to load hive runner config before the context is inited
         loadAnnotatesHiveRunnerConfig(getTestClass().getJavaClass());
         final TemporaryFolder temporaryFolder = new TemporaryFolder();
-        context = new PaimonEmbeddedHiveServerContext(temporaryFolder, config);
         List<TestRule> rules = super.classRules();
         ExternalResource hiveShell =
                 new ExternalResource() {
+                    private HiveShellContainer innerContainer;
+
                     @Override
                     protected void before() throws Throwable {
-                        container =
-                                createHiveServerContainer(getTestClass().getJavaClass(), context);
+                        PaimonEmbeddedHiveServerContext paimonEmbeddedHiveServerContext =
+                                new PaimonEmbeddedHiveServerContext(temporaryFolder, config);
+                        innerContainer =
+                                createHiveServerContainer(
+                                        getTestClass().getJavaClass(),
+                                        paimonEmbeddedHiveServerContext);
                     }
 
                     @Override
                     protected void after() {
-                        tearDown();
+                        tearDownHiveContainer(innerContainer);
                     }
                 };
+
+        ExternalResource minio =
+                new ExternalResource() {
+                    public MinioTestContainer minioTestContainer;
+
+                    @Override
+                    protected void before() {
+                        minioTestContainer = setMinioTestContainer(getTestClass().getJavaClass());
+                    }
+
+                    @Override
+                    protected void after() {
+                        if (minioTestContainer != null && minioTestContainer.isRunning()) {
+                            minioTestContainer.close();
+                        }
+                    }
+                };
+
+        rules.add(minio);
         rules.add(hiveShell);
         rules.add(temporaryFolder);
         return rules;
@@ -134,7 +158,7 @@ public class PaimonEmbeddedHiveRunner extends BlockJUnit4ClassRunner {
         }
     }
 
-    private void tearDown() {
+    private void tearDownHiveContainer(HiveShellContainer container) {
         if (container != null) {
             LOGGER.info("Tearing down {}", getName());
             try {
@@ -340,6 +364,26 @@ public class PaimonEmbeddedHiveRunner extends BlockJUnit4ClassRunner {
                     ReflectionUtils.getStaticFieldValue(
                             testClass, hivePropertyField.getName(), Map.class));
         }
+    }
+
+    private MinioTestContainer setMinioTestContainer(final Class testClass) {
+        Set<Field> allFields = ReflectionUtils.getAllFields(testClass, withAnnotation(Minio.class));
+
+        Preconditions.checkState(
+                allFields.size() <= 1,
+                "At most one field of type MinioTestContainer should to be annotated with @MinIO");
+        MinioTestContainer minioTestContainer = null;
+        if (!allFields.isEmpty()) {
+            minioTestContainer = new MinioTestContainer();
+            minioTestContainer.start();
+
+            Field field = allFields.iterator().next();
+            Preconditions.checkState(
+                    ReflectionUtils.isOfType(field, MinioTestContainer.class),
+                    "Field annotated with @MinIO should be of type MinioTestContainer");
+            ReflectionUtils.setStaticField(testClass, field.getName(), minioTestContainer);
+        }
+        return minioTestContainer;
     }
 
     /**

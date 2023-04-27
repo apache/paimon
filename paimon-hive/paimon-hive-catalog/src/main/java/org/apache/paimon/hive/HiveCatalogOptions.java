@@ -40,5 +40,14 @@ public final class HiveCatalogOptions {
                     .withDescription(
                             "File directory of the core-site.xml、hdfs-site.xml、yarn-site.xml、mapred-site.xml. Currently, only local file system paths are supported.");
 
+    public static final ConfigOption<Boolean> LOCATION_IN_PROPERTIES =
+            ConfigOptions.key("location-in-properties")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Setting the location in properties of hive table/database.\n"
+                                    + "If you don't want to access the location by the filesystem of hive when using a object storage such as s3,oss\n"
+                                    + "you can set this option to true.\n");
+
     private HiveCatalogOptions() {}
 }
