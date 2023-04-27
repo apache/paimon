@@ -122,7 +122,7 @@ You can now start Flink SQL client to execute SQL scripts.
 
 ```sql
 -- if you're trying out Paimon in a distributed environment,
--- warehouse path should be set to a shared file system, such as HDFS or OSS
+-- warehouse path should be set to a shared file system, such as HDFS、OSS or OBS
 CREATE CATALOG my_catalog WITH (
     'type'='paimon',
     'warehouse'='file:/tmp/paimon'

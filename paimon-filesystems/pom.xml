@@ -37,12 +37,15 @@
         <module>paimon-oss-impl</module>
         <module>paimon-s3</module>
         <module>paimon-s3-impl</module>
+        <module>paimon-obs</module>
+        <module>paimon-obs-impl</module>
     </modules>
 
     <properties>
         <fs.hadoopshaded.version>3.3.4</fs.hadoopshaded.version>
         <fs.s3.aws.version>1.12.319</fs.s3.aws.version>
         <commons.beanutils.version>1.9.4</commons.beanutils.version>
+        <fs.obs.huaweicloud.version>3.1.1.29</fs.obs.huaweicloud.version>
     </properties>
 
 </project>

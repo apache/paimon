@@ -86,6 +86,7 @@ This documentation is a guide for downloading Paimon Jars.
 |------------|-------------------------------------------------------------------------------------------------------------------------|
 | paimon-oss | [paimon-oss-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-oss/{{< version >}}/) |
 | paimon-s3  | [paimon-s3-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-s3/{{< version >}}/)   |
+| paimon-obs | [paimon-obs-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-obs/{{< version >}}/) |
 
 {{< /unstable >}}
 
@@ -95,6 +96,7 @@ This documentation is a guide for downloading Paimon Jars.
 |------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
 | paimon-oss | [paimon-oss-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-oss/{{< version >}}/paimon-oss-{{< version >}}.jar) |
 | paimon-s3  | [paimon-s3-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-s3/{{< version >}}/paimon-s3-{{< version >}}.jar)    |
+| paimon-obs | [paimon-obs-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-s3/{{< version >}}/paimon-obs-{{< version >}}.jar)  |
 
 {{< /stable >}}
 
