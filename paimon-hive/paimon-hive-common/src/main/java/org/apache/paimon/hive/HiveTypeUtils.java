@@ -37,10 +37,10 @@ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 import org.apache.hadoop.hive.serde2.typeinfo.VarcharTypeInfo;
 
-import static org.apache.paimon.types.VarBinaryType.MAX_LENGTH;
-
 import java.util.List;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.types.VarBinaryType.MAX_LENGTH;
 
 /** Utils for converting types related classes between Paimon and Hive. */
 public class HiveTypeUtils {

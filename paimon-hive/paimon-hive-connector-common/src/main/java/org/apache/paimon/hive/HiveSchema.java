@@ -140,9 +140,22 @@ public class HiveSchema {
         int highestFieldId = -1;
         List<DataField> columns = new ArrayList<>();
         for (int i = 0; i < columnNames.size(); i++) {
-            columns.add(new DataField(++highestFieldId, columnNames.get(i), typeInfoToLogicalType(typeInfos.get(i)), comments.get(i)));
+            columns.add(
+                    new DataField(
+                            ++highestFieldId,
+                            columnNames.get(i),
+                            typeInfoToLogicalType(typeInfos.get(i)),
+                            comments.get(i)));
         }
-        TableSchema tableSchema = new TableSchema(0L, columns, highestFieldId, Collections.emptyList(), Collections.emptyList(), options.toMap(), properties.getProperty("comment"));
+        TableSchema tableSchema =
+                new TableSchema(
+                        0L,
+                        columns,
+                        highestFieldId,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options.toMap(),
+                        properties.getProperty("comment"));
         return new HiveSchema(tableSchema);
     }
 
