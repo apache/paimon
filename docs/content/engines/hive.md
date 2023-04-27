@@ -34,7 +34,7 @@ Paimon currently supports Hive 2.1, 2.1-cdh-6.3, 2.2, 2.3 and 3.1.
 
 ## Execution Engine
 
-Paimon currently supports MR and Tez execution engine for Hive.
+Paimon currently supports MR and Tez execution engine for Hive Read, and MR execution engine for Hive Write. 
 
 ## Installation
 
@@ -182,6 +182,35 @@ OK
 1	Table
 2	Store
 */
+
+-- Insert records into test table
+
+INSERT INTO test_table VALUES (3, 'Paimon');
+
+SELECT a, b FROM test_table ORDER BY a;
+
+/*
+OK
+1	Table
+2	Store
+3	Paimon
+*/
+-- Insert records into test table from other table
+
+INSERT INTO test_table SELECT a, b FROM test_table;
+
+SELECT a, b FROM test_table ORDER BY a;
+
+/*
+OK
+1	Table
+1	Table
+2	Store
+2	Store
+3	Paimon
+3	Paimon
+*/
+
 ```
 
 ## Hive Type Conversion

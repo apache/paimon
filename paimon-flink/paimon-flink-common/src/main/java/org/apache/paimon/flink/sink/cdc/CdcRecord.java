@@ -49,18 +49,9 @@ public class CdcRecord implements Serializable {
         this.fields = fields;
     }
 
-    public RowKind kind() {
-        return kind;
-    }
-
-    /** Map key is the field's name, and map value is the field's value. */
-    public Map<String, String> fields() {
-        return fields;
-    }
-
     /**
      * Project {@code fields} to a {@link GenericRow}. The fields of row are specified by the given
-     * {@code dataFields}.
+     * {@code dataFields} and its {@link RowKind} will always be {@link RowKind#INSERT}.
      *
      * <p>NOTE: This method will always return a {@link GenericRow} even if some keys of {@code
      * fields} are not in {@code dataFields}. If you want to make sure all field names of {@code
@@ -69,7 +60,7 @@ public class CdcRecord implements Serializable {
      * @param dataFields {@link DataField}s of the converted {@link GenericRow}.
      * @return the projected {@link GenericRow}.
      */
-    public GenericRow project(List<DataField> dataFields) {
+    public GenericRow projectAsInsert(List<DataField> dataFields) {
         GenericRow genericRow = new GenericRow(dataFields.size());
         for (int i = 0; i < dataFields.size(); i++) {
             DataField dataField = dataFields.get(i);
@@ -81,11 +72,12 @@ public class CdcRecord implements Serializable {
 
     /**
      * Convert {@code fields} to a {@link GenericRow}. The fields of row are specified by the given
-     * {@code dataFields}.
+     * {@code dataFields} and its {@link RowKind} is determined by {@code kind} of this {@link
+     * CdcRecord}.
      *
      * <p>NOTE: This method requires all field names of {@code dataFields} existed in keys of {@code
-     * fields}. If you only want to convert some {@code fields}, use {@link CdcRecord#project}
-     * instead.
+     * fields}. If you only want to convert some {@code fields}, use {@link
+     * CdcRecord#projectAsInsert} instead.
      *
      * @param dataFields {@link DataField}s of the converted {@link GenericRow}.
      * @return if all field names of {@code dataFields} existed in keys of {@code fields} and all
@@ -94,7 +86,7 @@ public class CdcRecord implements Serializable {
      *     returned
      */
     public Optional<GenericRow> toGenericRow(List<DataField> dataFields) {
-        GenericRow genericRow = new GenericRow(dataFields.size());
+        GenericRow genericRow = new GenericRow(this.kind, dataFields.size());
         List<String> fieldNames =
                 dataFields.stream().map(DataField::name).collect(Collectors.toList());
 

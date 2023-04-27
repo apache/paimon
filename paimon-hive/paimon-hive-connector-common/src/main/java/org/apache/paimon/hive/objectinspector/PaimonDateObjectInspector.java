@@ -26,10 +26,11 @@ import org.apache.hadoop.hive.serde2.objectinspector.primitive.DateObjectInspect
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 import java.sql.Date;
+import java.time.LocalDate;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for DATE type. */
 public class PaimonDateObjectInspector extends AbstractPrimitiveJavaObjectInspector
-        implements DateObjectInspector {
+        implements DateObjectInspector, WriteableObjectInspector {
 
     public PaimonDateObjectInspector() {
         super(TypeInfoFactory.dateTypeInfo);
@@ -55,6 +56,18 @@ public class PaimonDateObjectInspector extends AbstractPrimitiveJavaObjectInspec
             return new Date(date.getTime());
         } else {
             return o;
+        }
+    }
+
+    @Override
+    public Integer convert(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Date) {
+            return DateTimeUtils.toInternal((Date) value);
+        } else {
+            return DateTimeUtils.toInternal((LocalDate) value);
         }
     }
 }

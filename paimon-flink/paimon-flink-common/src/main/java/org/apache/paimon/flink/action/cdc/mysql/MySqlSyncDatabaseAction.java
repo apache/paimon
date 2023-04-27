@@ -42,6 +42,8 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
@@ -52,6 +54,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * An {@link Action} which synchronize the whole MySQL database into one Paimon database.
@@ -96,6 +101,10 @@ public class MySqlSyncDatabaseAction implements Action {
     private final String warehouse;
     private final String database;
     private final boolean ignoreIncompatible;
+    private final String tablePrefix;
+    private final String tableSuffix;
+    @Nullable private final Pattern includingPattern;
+    @Nullable private final Pattern excludingPattern;
     private final Map<String, String> catalogConfig;
     private final Map<String, String> tableConfig;
 
@@ -106,16 +115,44 @@ public class MySqlSyncDatabaseAction implements Action {
             boolean ignoreIncompatible,
             Map<String, String> catalogConfig,
             Map<String, String> tableConfig) {
+        this(
+                mySqlConfig,
+                warehouse,
+                database,
+                ignoreIncompatible,
+                null,
+                null,
+                null,
+                null,
+                catalogConfig,
+                tableConfig);
+    }
+
+    MySqlSyncDatabaseAction(
+            Map<String, String> mySqlConfig,
+            String warehouse,
+            String database,
+            boolean ignoreIncompatible,
+            @Nullable String tablePrefix,
+            @Nullable String tableSuffix,
+            @Nullable String includingTables,
+            @Nullable String excludingTables,
+            Map<String, String> catalogConfig,
+            Map<String, String> tableConfig) {
         this.mySqlConfig = Configuration.fromMap(mySqlConfig);
         this.warehouse = warehouse;
         this.database = database;
         this.ignoreIncompatible = ignoreIncompatible;
+        this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
+        this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
+        this.includingPattern = includingTables == null ? null : Pattern.compile(includingTables);
+        this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
         this.catalogConfig = catalogConfig;
         this.tableConfig = tableConfig;
     }
 
     public void build(StreamExecutionEnvironment env) throws Exception {
-        Preconditions.checkArgument(
+        checkArgument(
                 !mySqlConfig.contains(MySqlSourceOptions.TABLE_NAME),
                 MySqlSourceOptions.TABLE_NAME.key()
                         + " cannot be set for mysql-sync-database. "
@@ -129,31 +166,30 @@ public class MySqlSyncDatabaseAction implements Action {
         boolean caseSensitive = catalog.caseSensitive();
 
         if (!caseSensitive) {
-            Preconditions.checkArgument(
-                    database.equals(database.toLowerCase()),
-                    String.format(
-                            "Database name [%s] cannot contain upper case in case-insensitive catalog.",
-                            database));
+            validateCaseInsensitive();
         }
 
         List<MySqlSchema> mySqlSchemas = getMySqlSchemaList(caseSensitive);
-        Preconditions.checkArgument(
+        checkArgument(
                 mySqlSchemas.size() > 0,
                 "No tables found in MySQL database "
                         + mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME)
                         + ", or MySQL database does not exist.");
 
         catalog.createDatabase(database, true);
+        TableNameConverter tableNameConverter =
+                new TableNameConverter(caseSensitive, tablePrefix, tableSuffix);
 
         List<FileStoreTable> fileStoreTables = new ArrayList<>();
         List<String> monitoredTables = new ArrayList<>();
         for (MySqlSchema mySqlSchema : mySqlSchemas) {
-            Identifier identifier = new Identifier(database, mySqlSchema.tableName());
+            String paimonTableName = tableNameConverter.convert(mySqlSchema.tableName());
+            Identifier identifier = new Identifier(database, paimonTableName);
             FileStoreTable table;
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
                 if (shouldMonitorTable(table.schema(), mySqlSchema, identifier)) {
-                    monitoredTables.add(mySqlSchema.originalTableName());
+                    monitoredTables.add(mySqlSchema.tableName());
                 }
             } catch (Catalog.TableNotExistException e) {
                 Schema schema =
@@ -164,7 +200,7 @@ public class MySqlSyncDatabaseAction implements Action {
                                 tableConfig);
                 catalog.createTable(identifier, schema, false);
                 table = (FileStoreTable) catalog.getTable(identifier);
-                monitoredTables.add(mySqlSchema.originalTableName());
+                monitoredTables.add(mySqlSchema.tableName());
             }
             fileStoreTables.add(table);
         }
@@ -181,7 +217,7 @@ public class MySqlSyncDatabaseAction implements Action {
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
         EventParser.Factory<String> parserFactory =
-                () -> new MySqlDebeziumJsonEventParser(zoneId, caseSensitive);
+                () -> new MySqlDebeziumJsonEventParser(zoneId, caseSensitive, tableNameConverter);
 
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<String>()
@@ -197,6 +233,24 @@ public class MySqlSyncDatabaseAction implements Action {
         sinkBuilder.build();
     }
 
+    private void validateCaseInsensitive() {
+        checkArgument(
+                database.equals(database.toLowerCase()),
+                String.format(
+                        "Database name [%s] cannot contain upper case in case-insensitive catalog.",
+                        database));
+        checkArgument(
+                tablePrefix.equals(tablePrefix.toLowerCase()),
+                String.format(
+                        "Table prefix [%s] cannot contain upper case in case-insensitive catalog.",
+                        tablePrefix));
+        checkArgument(
+                tableSuffix.equals(tableSuffix.toLowerCase()),
+                String.format(
+                        "Table suffix [%s] cannot contain upper case in case-insensitive catalog.",
+                        tablePrefix));
+    }
+
     private List<MySqlSchema> getMySqlSchemaList(boolean caseSensitive) throws Exception {
         String databaseName = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME);
         List<MySqlSchema> mySqlSchemaList = new ArrayList<>();
@@ -206,6 +260,9 @@ public class MySqlSyncDatabaseAction implements Action {
                     metaData.getTables(databaseName, null, "%", new String[] {"TABLE"})) {
                 while (tables.next()) {
                     String tableName = tables.getString("TABLE_NAME");
+                    if (!shouldMonitorTable(tableName)) {
+                        continue;
+                    }
                     MySqlSchema mySqlSchema =
                             new MySqlSchema(metaData, databaseName, tableName, caseSensitive);
                     if (mySqlSchema.primaryKeys().size() > 0) {
@@ -216,6 +273,18 @@ public class MySqlSyncDatabaseAction implements Action {
             }
         }
         return mySqlSchemaList;
+    }
+
+    private boolean shouldMonitorTable(String mySqlTableName) {
+        boolean shouldMonitor = true;
+        if (includingPattern != null) {
+            shouldMonitor = includingPattern.matcher(mySqlTableName).matches();
+        }
+        if (excludingPattern != null) {
+            shouldMonitor = shouldMonitor && !excludingPattern.matcher(mySqlTableName).matches();
+        }
+        LOG.debug("Source table {} is monitored? {}", mySqlTableName, shouldMonitor);
+        return shouldMonitor;
     }
 
     private boolean shouldMonitorTable(
@@ -230,7 +299,7 @@ public class MySqlSyncDatabaseAction implements Action {
                     identifier.getFullName(),
                     tableSchema.fields(),
                     mySqlSchema.databaseName(),
-                    mySqlSchema.originalTableName(),
+                    mySqlSchema.tableName(),
                     mySqlSchema.fields());
             return false;
         } else {
@@ -244,7 +313,7 @@ public class MySqlSyncDatabaseAction implements Action {
                             identifier.getFullName(),
                             tableSchema.fields(),
                             mySqlSchema.databaseName(),
-                            mySqlSchema.originalTableName(),
+                            mySqlSchema.tableName(),
                             mySqlSchema.fields()));
         }
     }
@@ -264,6 +333,10 @@ public class MySqlSyncDatabaseAction implements Action {
         String warehouse = params.get("warehouse");
         String database = params.get("database");
         boolean ignoreIncompatible = Boolean.parseBoolean(params.get("ignore-incompatible"));
+        String tablePrefix = params.get("table-prefix");
+        String tableSuffix = params.get("table-suffix");
+        String includingTables = params.get("including-tables");
+        String excludingTables = params.get("excluding-tables");
 
         Map<String, String> mySqlConfig = getConfigMap(params, "mysql-conf");
         Map<String, String> catalogConfig = getConfigMap(params, "catalog-conf");
@@ -278,6 +351,10 @@ public class MySqlSyncDatabaseAction implements Action {
                         warehouse,
                         database,
                         ignoreIncompatible,
+                        tablePrefix,
+                        tableSuffix,
+                        includingTables,
+                        excludingTables,
                         catalogConfig == null ? Collections.emptyMap() : catalogConfig,
                         tableConfig == null ? Collections.emptyMap() : tableConfig));
     }
@@ -314,7 +391,11 @@ public class MySqlSyncDatabaseAction implements Action {
         System.out.println("Syntax:");
         System.out.println(
                 "  mysql-sync-database --warehouse <warehouse-path> --database <database-name> "
-                        + "[--ignore-incompatible <true/false>]"
+                        + "[--ignore-incompatible <true/false>] "
+                        + "[--table-prefix <paimon-table-prefix>] "
+                        + "[--table-suffix <paimon-table-suffix>] "
+                        + "[--including-tables <mysql-table-name|name-regular-expr>] "
+                        + "[--excluding-tables <mysql-table-name|name-regular-expr>] "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
@@ -324,6 +405,23 @@ public class MySqlSyncDatabaseAction implements Action {
                 "--ignore-incompatible is default false, in this case, if MySQL table name exists in Paimon "
                         + "and their schema is incompatible, an exception will be thrown. "
                         + "You can specify it to true explicitly to ignore the incompatible tables and exception.");
+        System.out.println();
+
+        System.out.println(
+                "--table-prefix is the prefix of all Paimon tables to be synchronized. For example, if you want all "
+                        + "synchronized tables to have \"ods_\" as prefix, you can specify `--table-prefix ods_`.");
+        System.out.println("The usage of --table-suffix is same as `--table-prefix`");
+        System.out.println();
+
+        System.out.println(
+                "--including-tables is used to specify which source tables are to be synchronized. "
+                        + "You must use '|' to separate multiple tables. Regular expression is supported.");
+        System.out.println(
+                "--excluding-tables is used to specify which source tables are not to be synchronized. "
+                        + "The usage is same as --including-tables.");
+        System.out.println(
+                "--excluding-tables has higher priority than --including-tables if you specified both.");
+        System.out.println();
 
         System.out.println("MySQL CDC source conf syntax:");
         System.out.println("  key=value");

@@ -20,6 +20,7 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -37,6 +38,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.StringUtils;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
@@ -64,6 +66,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.paimon.hive.FileStoreTestUtils.DATABASE_NAME;
+import static org.apache.paimon.hive.FileStoreTestUtils.TABLE_NAME;
+
 /** IT cases for {@link PaimonStorageHandler} and {@link PaimonInputFormat}. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
 public class PaimonStorageHandlerITCase {
@@ -82,7 +87,8 @@ public class PaimonStorageHandlerITCase {
     public static void beforeClass() {
         // TODO Currently FlinkEmbeddedHiveRunner can only be used for one test class,
         //  so we have to select engine randomly. Write our own Hive tester in the future.
-        engine = ThreadLocalRandom.current().nextBoolean() ? "mr" : "tez";
+        // engine = ThreadLocalRandom.current().nextBoolean() ? "mr" : "tez";
+        engine = "mr";
     }
 
     @Before
@@ -602,30 +608,54 @@ public class PaimonStorageHandlerITCase {
             List<String> primaryKeys,
             List<InternalRow> data)
             throws Exception {
+
+        return createChangelogExternalTable(rowType, partitionKeys, primaryKeys, data, "");
+    }
+
+    private String createChangelogExternalTable(
+            RowType rowType,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            List<InternalRow> data,
+            String tableName)
+            throws Exception {
         String path = folder.newFolder().toURI().toString();
-        String tablePath = String.format("%s/default.db/hive_test_table", path);
+        String tableNameNotNull =
+                StringUtils.isNullOrWhitespaceOnly(tableName) ? TABLE_NAME : tableName;
+        String tablePath = String.format("%s/default.db/%s", path, tableNameNotNull);
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
         conf.set(CoreOptions.BUCKET, 2);
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        Identifier identifier = Identifier.create(DATABASE_NAME, tableNameNotNull);
         Table table =
-                FileStoreTestUtils.createFileStoreTable(conf, rowType, partitionKeys, primaryKeys);
+                FileStoreTestUtils.createFileStoreTable(
+                        conf, rowType, partitionKeys, primaryKeys, identifier);
 
         return writeData(table, tablePath, data);
     }
 
     private String createAppendOnlyExternalTable(
             RowType rowType, List<String> partitionKeys, List<InternalRow> data) throws Exception {
+        return createAppendOnlyExternalTable(rowType, partitionKeys, data, "");
+    }
+
+    private String createAppendOnlyExternalTable(
+            RowType rowType, List<String> partitionKeys, List<InternalRow> data, String tableName)
+            throws Exception {
         String path = folder.newFolder().toURI().toString();
-        String tablePath = String.format("%s/default.db/hive_test_table", path);
+        String tableNameNotNull =
+                StringUtils.isNullOrWhitespaceOnly(tableName) ? TABLE_NAME : tableName;
+        String tablePath = String.format("%s/default.db/%s", path, tableNameNotNull);
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
         conf.set(CoreOptions.BUCKET, 2);
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
         conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
+        Identifier identifier = Identifier.create(DATABASE_NAME, tableNameNotNull);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
-                        conf, rowType, partitionKeys, Collections.emptyList());
+                        conf, rowType, partitionKeys, Collections.emptyList(), identifier);
 
         return writeData(table, tablePath, data);
     }

@@ -28,7 +28,7 @@ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for CHAR type. */
 public class PaimonCharObjectInspector extends AbstractPrimitiveJavaObjectInspector
-        implements HiveCharObjectInspector {
+        implements HiveCharObjectInspector, WriteableObjectInspector {
 
     private final int len;
 
@@ -58,5 +58,10 @@ public class PaimonCharObjectInspector extends AbstractPrimitiveJavaObjectInspec
         } else {
             return o;
         }
+    }
+
+    @Override
+    public BinaryString convert(Object value) {
+        return value == null ? null : BinaryString.fromString(value.toString());
     }
 }

@@ -26,9 +26,11 @@ import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitive
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.HiveDecimalObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
+import java.math.BigDecimal;
+
 /** {@link AbstractPrimitiveJavaObjectInspector} for DECIMAL type. */
 public class PaimonDecimalObjectInspector extends AbstractPrimitiveJavaObjectInspector
-        implements HiveDecimalObjectInspector {
+        implements HiveDecimalObjectInspector, WriteableObjectInspector {
 
     public PaimonDecimalObjectInspector(int precision, int scale) {
         super(TypeInfoFactory.getDecimalTypeInfo(precision, scale));
@@ -55,5 +57,18 @@ public class PaimonDecimalObjectInspector extends AbstractPrimitiveJavaObjectIns
         } else {
             return o;
         }
+    }
+
+    @Override
+    public Decimal convert(Object o) {
+        if (o == null) {
+            return null;
+        }
+
+        BigDecimal result = ((HiveDecimal) o).bigDecimalValue();
+        // during the HiveDecimal to BigDecimal conversion the scale is lost, when the value is 0
+        result = result.setScale(scale());
+
+        return Decimal.fromBigDecimal(result, result.precision(), result.scale());
     }
 }

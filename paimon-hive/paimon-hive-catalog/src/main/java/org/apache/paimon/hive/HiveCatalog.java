@@ -305,6 +305,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         try {
+            checkIdentifierUpperCase(toTable);
             String fromDB = fromTable.getDatabaseName();
             String fromTableName = fromTable.getObjectName();
             Table table = client.getTable(fromDB, fromTableName);
@@ -329,6 +330,7 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
 
+        checkFieldNamesUpperCaseInSchemaChange(changes);
         try {
             final SchemaManager schemaManager = schemaManager(identifier);
             // first commit changes to underlying files
@@ -368,12 +370,29 @@ public class HiveCatalog extends AbstractCatalog {
         checkState(
                 identifier.getDatabaseName().equals(identifier.getDatabaseName().toLowerCase()),
                 String.format(
-                        "Database name[%s] cannot contain upper case",
+                        "Database name[%s] cannot contain upper case in hive catalog",
                         identifier.getDatabaseName()));
         checkState(
                 identifier.getObjectName().equals(identifier.getObjectName().toLowerCase()),
                 String.format(
-                        "Table name[%s] cannot contain upper case", identifier.getObjectName()));
+                        "Table name[%s] cannot contain upper case in hive catalog",
+                        identifier.getObjectName()));
+    }
+
+    private void checkFieldNamesUpperCaseInSchemaChange(List<SchemaChange> changes) {
+        List<String> fieldNames = new ArrayList<>();
+        for (SchemaChange change : changes) {
+            if (change instanceof SchemaChange.AddColumn) {
+                SchemaChange.AddColumn addColumn = (SchemaChange.AddColumn) change;
+                fieldNames.add(addColumn.fieldName());
+            } else if (change instanceof SchemaChange.RenameColumn) {
+                SchemaChange.RenameColumn rename = (SchemaChange.RenameColumn) change;
+                fieldNames.add(rename.newName());
+            } else {
+                // do nothing
+            }
+        }
+        checkFieldNamesUpperCase(fieldNames);
     }
 
     private void checkFieldNamesUpperCase(List<String> fieldNames) {
@@ -383,7 +402,9 @@ public class HiveCatalog extends AbstractCatalog {
                         .collect(Collectors.toList());
         checkState(
                 illegalFieldNames.isEmpty(),
-                String.format("Field names %s cannot contain upper case", illegalFieldNames));
+                String.format(
+                        "Field names %s cannot contain upper case in hive catalog",
+                        illegalFieldNames));
     }
 
     private Database convertToDatabase(String name) {
@@ -583,15 +604,15 @@ public class HiveCatalog extends AbstractCatalog {
         if (hadoopConf == null) {
             hadoopConf = new Configuration();
         }
-        // ignore all the static conf file URLs that HiveConf may have set
-        HiveConf.setHiveSiteLocation(null);
-        HiveConf.setLoadMetastoreConfig(false);
-        HiveConf.setLoadHiveServer2Config(false);
-        HiveConf hiveConf = new HiveConf(hadoopConf, HiveConf.class);
 
         LOG.info("Setting hive conf dir as {}", hiveConfDir);
-
         if (hiveConfDir != null) {
+            // ignore all the static conf file URLs that HiveConf may have set
+            HiveConf.setHiveSiteLocation(null);
+            HiveConf.setLoadMetastoreConfig(false);
+            HiveConf.setLoadHiveServer2Config(false);
+            HiveConf hiveConf = new HiveConf(hadoopConf, HiveConf.class);
+
             org.apache.hadoop.fs.Path hiveSite =
                     new org.apache.hadoop.fs.Path(hiveConfDir, HIVE_SITE_FILE);
             if (!hiveSite.toUri().isAbsolute()) {
@@ -606,9 +627,11 @@ public class HiveCatalog extends AbstractCatalog {
                         "Failed to load hive-site.xml from specified path:" + hiveSite, e);
             }
             hiveConf.addResource(hiveSite);
-        }
 
-        return hiveConf;
+            return hiveConf;
+        } else {
+            return new HiveConf(hadoopConf, HiveConf.class);
+        }
     }
 
     public static boolean isEmbeddedMetastore(HiveConf hiveConf) {

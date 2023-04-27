@@ -23,7 +23,10 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -38,12 +41,14 @@ import org.junit.jupiter.api.Timeout;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -148,6 +153,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         statement.executeUpdate("ALTER TABLE schema_evolution_1 MODIFY COLUMN v2 BIGINT");
         statement.executeUpdate(
                 "INSERT INTO schema_evolution_1 VALUES (2, 7, 'seven', 70000000000)");
+        statement.executeUpdate("DELETE FROM schema_evolution_1 WHERE _id = 5");
         statement.executeUpdate("UPDATE schema_evolution_1 SET v2 = 30000000000 WHERE _id = 3");
         statement.executeUpdate("ALTER TABLE schema_evolution_2 MODIFY COLUMN v2 BIGINT");
         statement.executeUpdate(
@@ -167,7 +173,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "+I[1, 2, second, NULL]",
                         "+I[2, 3, three, 30000000000]",
                         "+I[2, 4, four, NULL]",
-                        "+I[1, 5, five, 50]",
                         "+I[1, 6, six, 60]",
                         "+I[2, 7, seven, 70000000000]",
                         "+I[2, 8, eight, 80000000000]");
@@ -203,7 +208,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "+I[1, 2, second, NULL, NULL, NULL, NULL]",
                         "+I[2, 3, three, 30000000000, NULL, NULL, NULL]",
                         "+I[2, 4, four, NULL, NULL, NULL, NULL]",
-                        "+I[1, 5, five, 50, NULL, NULL, NULL]",
                         "+I[1, 6, six, 60, NULL, NULL, NULL]",
                         "+I[2, 7, seven, 70000000000, NULL, NULL, NULL]",
                         "+I[2, 8, very long string, 80000000000, NULL, NULL, NULL]",
@@ -236,7 +240,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "+I[1, 2, second, NULL, NULL, NULL, NULL]",
                         "+I[2, 3, three, 30000000000, NULL, NULL, NULL]",
                         "+I[2, 4, four, NULL, NULL, [102, 111, 117, 114, 46, 98, 105, 110, 46, 108, 111, 110, 103], 4.00000000004]",
-                        "+I[1, 5, five, 50, NULL, NULL, NULL]",
                         "+I[1, 6, six, 60, NULL, NULL, NULL]",
                         "+I[2, 7, seven, 70000000000, NULL, NULL, NULL]",
                         "+I[2, 8, very long string, 80000000000, NULL, NULL, NULL]",
@@ -344,18 +347,14 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         // the first round checks for table creation
         // the second round checks for running the action on an existing table
         for (int i = 0; i < 2; i++) {
-            testAllTypesImpl();
+            testAllTypesOnce();
         }
     }
 
-    private void testAllTypesImpl() throws Exception {
+    private void testAllTypesOnce() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "all_types_table");
-
-        // orc format do not support time type, so we use parquet format.
-        Map<String, String> paimonConfig = getBasicMySqlConfig();
-        paimonConfig.put("file.format", "parquet");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(1);
@@ -371,10 +370,32 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
                         Collections.emptyMap(),
-                        paimonConfig);
+                        Collections.emptyMap());
         action.build(env);
-        JobClient jobClient = env.executeAsync();
+        JobClient client = env.executeAsync();
 
+        while (true) {
+            JobStatus status = client.getJobStatus().get();
+            if (status == JobStatus.RUNNING) {
+                break;
+            }
+            Thread.sleep(1000);
+        }
+
+        try (Connection conn =
+                DriverManager.getConnection(
+                        MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
+                        MYSQL_CONTAINER.getUsername(),
+                        MYSQL_CONTAINER.getPassword())) {
+            try (Statement statement = conn.createStatement()) {
+                testAllTypesImpl(statement);
+            }
+        }
+
+        client.cancel().get();
+    }
+
+    private void testAllTypesImpl(Statement statement) throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -578,7 +599,22 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "]");
         waitForResult(expected, table, rowType, Arrays.asList("pt", "_id"));
 
-        jobClient.cancel().get();
+        // test all types during schema evolution
+        try {
+            statement.executeUpdate("ALTER TABLE all_types_table ADD COLUMN v INT");
+            List<DataField> newFields = new ArrayList<>(rowType.getFields());
+            newFields.add(new DataField(rowType.getFieldCount(), "v", DataTypes.INT()));
+            RowType newRowType = new RowType(newFields);
+            List<String> newExpected =
+                    expected.stream()
+                            .map(s -> s.substring(0, s.length() - 1) + ", NULL]")
+                            .collect(Collectors.toList());
+            waitForResult(newExpected, table, newRowType, Arrays.asList("pt", "_id"));
+        } finally {
+            statement.executeUpdate("ALTER TABLE all_types_table DROP COLUMN v");
+            SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+            schemaManager.commitChanges(SchemaChange.dropColumn("v"));
+        }
     }
 
     @Test

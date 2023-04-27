@@ -72,7 +72,8 @@ public class HiveCatalogTest extends CatalogTestBase {
                                         DEFAULT_TABLE_SCHEMA,
                                         false))
                 .hasRootCauseInstanceOf(IllegalStateException.class)
-                .hasRootCauseMessage("Database name[TEST_DB] cannot contain upper case");
+                .hasRootCauseMessage(
+                        "Database name[TEST_DB] cannot contain upper case in hive catalog");
 
         assertThatThrownBy(
                         () ->
@@ -81,6 +82,38 @@ public class HiveCatalogTest extends CatalogTestBase {
                                         DEFAULT_TABLE_SCHEMA,
                                         false))
                 .hasRootCauseInstanceOf(IllegalStateException.class)
-                .hasRootCauseMessage("Table name[NEW_TABLE] cannot contain upper case");
+                .hasRootCauseMessage(
+                        "Table name[NEW_TABLE] cannot contain upper case in hive catalog");
+    }
+
+    private static final String HADOOP_CONF_DIR =
+            Thread.currentThread().getContextClassLoader().getResource("hadoop-conf-dir").getPath();
+
+    private static final String HIVE_CONF_DIR =
+            Thread.currentThread().getContextClassLoader().getResource("hive-conf-dir").getPath();
+
+    @Test
+    public void testHadoopConfDir() {
+        HiveConf hiveConf = HiveCatalog.createHiveConf(null, HADOOP_CONF_DIR);
+        assertThat(hiveConf.get("fs.defaultFS")).isEqualTo("dummy-fs");
+    }
+
+    @Test
+    public void testHiveConfDir() {
+        try {
+            testHiveConfDirImpl();
+        } finally {
+            cleanUpHiveConfDir();
+        }
+    }
+
+    private void testHiveConfDirImpl() {
+        HiveConf hiveConf = HiveCatalog.createHiveConf(HIVE_CONF_DIR, null);
+        assertThat(hiveConf.get("hive.metastore.uris")).isEqualTo("dummy-hms");
+    }
+
+    private void cleanUpHiveConfDir() {
+        // reset back to default value
+        HiveConf.setHiveSiteLocation(HiveConf.class.getClassLoader().getResource("hive-site.xml"));
     }
 }

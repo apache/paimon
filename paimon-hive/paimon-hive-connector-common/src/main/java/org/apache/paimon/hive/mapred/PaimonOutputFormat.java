@@ -18,27 +18,70 @@
 
 package org.apache.paimon.hive.mapred;
 
-import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.hive.RowDataContainer;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hive.ql.exec.FileSinkOperator;
+import org.apache.hadoop.hive.ql.io.HiveOutputFormat;
+import org.apache.hadoop.io.NullWritable;
+import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.OutputFormat;
 import org.apache.hadoop.mapred.RecordWriter;
+import org.apache.hadoop.mapred.TaskAttemptID;
 import org.apache.hadoop.util.Progressable;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Properties;
 
-/** {@link OutputFormat} for table split. Currently useless. */
-public class PaimonOutputFormat implements OutputFormat<InternalRow, InternalRow> {
+import static org.apache.paimon.hive.utils.HiveUtils.createFileStoreTable;
+
+/** {@link OutputFormat} for table split. */
+public class PaimonOutputFormat
+        implements OutputFormat<NullWritable, RowDataContainer>,
+                HiveOutputFormat<NullWritable, RowDataContainer> {
+
+    private static final String TASK_ATTEMPT_ID_KEY = "mapreduce.task.attempt.id";
 
     @Override
-    public RecordWriter<InternalRow, InternalRow> getRecordWriter(
+    public RecordWriter<NullWritable, RowDataContainer> getRecordWriter(
             FileSystem fileSystem, JobConf jobConf, String s, Progressable progressable)
             throws IOException {
-        throw new UnsupportedOperationException(
-                "Paimon currently can only be used as an input format for Hive.");
+        return writer(jobConf);
     }
 
     @Override
     public void checkOutputSpecs(FileSystem fileSystem, JobConf jobConf) throws IOException {}
+
+    @Override
+    public FileSinkOperator.RecordWriter getHiveRecordWriter(
+            JobConf jobConf,
+            Path path,
+            Class<? extends Writable> aClass,
+            boolean b,
+            Properties properties,
+            Progressable progressable)
+            throws IOException {
+        return writer(jobConf);
+    }
+
+    private static PaimonRecordWriter writer(JobConf jobConf) {
+        TaskAttemptID taskAttemptID = TaskAttemptID.forName(jobConf.get(TASK_ATTEMPT_ID_KEY));
+        FileStoreTable table = createFileStoreTable(jobConf);
+        // force write-only = true
+        Map<String, String> newOptions =
+                Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), Boolean.TRUE.toString());
+        FileStoreTable copy = table.copy(newOptions);
+        BatchWriteBuilder batchWriteBuilder = copy.newBatchWriteBuilder();
+        BatchTableWrite batchTableWrite = batchWriteBuilder.newWrite();
+
+        return new PaimonRecordWriter(batchTableWrite, taskAttemptID, copy.name());
+    }
 }

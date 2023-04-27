@@ -63,6 +63,7 @@ public class OrcSplitReaderUtil {
             case SMALLINT:
                 return TypeDescription.createShort();
             case INTEGER:
+            case TIME_WITHOUT_TIME_ZONE:
                 return TypeDescription.createInt();
             case BIGINT:
                 return TypeDescription.createLong();

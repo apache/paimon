@@ -74,7 +74,7 @@ public abstract class FileStatsExtractorTestBase {
         FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
         Path path = new Path(tempDir.toString() + "/test");
         PositionOutputStream out = new LocalFileIO().newOutputStream(path, false);
-        FormatWriter writer = writerFactory.create(out);
+        FormatWriter writer = writerFactory.create(out, fileCompression());
 
         List<GenericRow> data = createData(rowType);
         for (GenericRow row : data) {
@@ -251,4 +251,6 @@ public abstract class FileStatsExtractorTestBase {
     protected abstract FileFormat createFormat();
 
     protected abstract RowType rowType();
+
+    protected abstract String fileCompression();
 }

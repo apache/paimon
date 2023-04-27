@@ -42,6 +42,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 class MySqlActionUtils {
 
     static Connection getConnection(Configuration mySqlConfig) throws Exception {
@@ -117,6 +119,7 @@ class MySqlActionUtils {
     }
 
     static MySqlSource<String> buildMySqlSource(Configuration mySqlConfig) {
+        validateMySqlConfig(mySqlConfig);
         MySqlSourceBuilder<String> sourceBuilder = MySqlSource.builder();
 
         String databaseName = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME);
@@ -201,5 +204,33 @@ class MySqlActionUtils {
         JsonDebeziumDeserializationSchema schema =
                 new JsonDebeziumDeserializationSchema(true, customConverterConfigs);
         return sourceBuilder.deserializer(schema).includeSchemaChanges(true).build();
+    }
+
+    private static void validateMySqlConfig(Configuration mySqlConfig) {
+        checkArgument(
+                mySqlConfig.get(MySqlSourceOptions.HOSTNAME) != null,
+                String.format(
+                        "mysql-conf [%s] must be specified.", MySqlSourceOptions.HOSTNAME.key()));
+
+        checkArgument(
+                mySqlConfig.get(MySqlSourceOptions.USERNAME) != null,
+                String.format(
+                        "mysql-conf [%s] must be specified.", MySqlSourceOptions.USERNAME.key()));
+
+        checkArgument(
+                mySqlConfig.get(MySqlSourceOptions.PASSWORD) != null,
+                String.format(
+                        "mysql-conf [%s] must be specified.", MySqlSourceOptions.PASSWORD.key()));
+
+        checkArgument(
+                mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME) != null,
+                String.format(
+                        "mysql-conf [%s] must be specified.",
+                        MySqlSourceOptions.DATABASE_NAME.key()));
+
+        checkArgument(
+                mySqlConfig.get(MySqlSourceOptions.TABLE_NAME) != null,
+                String.format(
+                        "mysql-conf [%s] must be specified.", MySqlSourceOptions.TABLE_NAME.key()));
     }
 }
