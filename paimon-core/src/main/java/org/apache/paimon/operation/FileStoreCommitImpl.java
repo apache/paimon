@@ -777,7 +777,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         "\n",
                         "Conflicts during commits are normal and this failure is intended to resolve the conflicts.",
                         "Conflicts are mainly caused by the following scenarios:",
-                        "1. Multiple jobs are writing into the same partition at the same time.",
+                        "1. Multiple jobs are writing into the same partition at the same time, you can use "
+                                + "https://paimon.apache.org/docs/master/maintenance/write-performance/#dedicated-compaction-job"
+                                + " to support multiple writing.",
                         "2. You're recovering from an old savepoint, or you're creating multiple jobs from a savepoint.",
                         "   The job will fail continuously in this scenario to protect metadata from corruption.",
                         "   You can either recover from the latest savepoint, "
