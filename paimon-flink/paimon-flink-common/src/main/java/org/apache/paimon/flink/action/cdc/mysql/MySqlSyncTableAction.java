@@ -305,13 +305,13 @@ public class MySqlSyncTableAction implements Action {
     }
 
     private boolean schemaCompatible(TableSchema tableSchema, MySqlSchema mySqlSchema) {
-        for (Map.Entry<String, DataType> entry : mySqlSchema.fields.entrySet()) {
+        for (Map.Entry<String, Tuple3<String,DataType,String>> entry : mySqlSchema.fields.entrySet()) {
             int idx = tableSchema.fieldNames().indexOf(entry.getKey());
             if (idx < 0) {
                 return false;
             }
             DataType type = tableSchema.fields().get(idx).type();
-            if (!SchemaChangeProcessFunction.canConvert(entry.getValue(), type)) {
+            if (!SchemaChangeProcessFunction.canConvert(entry.getValue().f1, type)) {
                 return false;
             }
         }
@@ -322,8 +322,8 @@ public class MySqlSyncTableAction implements Action {
         Schema.Builder builder = Schema.newBuilder();
         builder.options(paimonConfig);
 
-        for (Map.Entry<String, DataType> entry : mySqlSchema.fields.entrySet()) {
-            builder.column(entry.getKey(), entry.getValue());
+        for (Map.Entry<String, Tuple3<String,DataType,String>> entry : mySqlSchema.fields.entrySet()) {
+            builder.column(entry.getKey(), entry.getValue().f1,entry.getValue().f2);
         }
 
         if (primaryKeys.size() > 0) {
@@ -355,7 +355,7 @@ public class MySqlSyncTableAction implements Action {
         private final String databaseName;
         private final String tableName;
 
-        private final Map<String, DataType> fields;
+        private final Map<String, Tuple3<String,DataType,String>> fields;
         private final List<String> primaryKeys;
 
         private MySqlSchema(DatabaseMetaData metaData, String databaseName, String tableName)
@@ -368,6 +368,7 @@ public class MySqlSyncTableAction implements Action {
                 while (rs.next()) {
                     String fieldName = rs.getString("COLUMN_NAME");
                     String fieldType = rs.getString("TYPE_NAME");
+                    String fieldComment = rs.getString("REMARKS");
                     Integer precision = rs.getInt("COLUMN_SIZE");
                     if (rs.wasNull()) {
                         precision = null;
@@ -376,7 +377,7 @@ public class MySqlSyncTableAction implements Action {
                     if (rs.wasNull()) {
                         scale = null;
                     }
-                    fields.put(fieldName, MySqlTypeUtils.toDataType(fieldType, precision, scale));
+                    fields.put(fieldName, Tuple3.of(fieldType, MySqlTypeUtils.toDataType(fieldType, precision, scale), fieldComment));
                 }
             }
 
@@ -390,13 +391,13 @@ public class MySqlSyncTableAction implements Action {
         }
 
         private MySqlSchema merge(MySqlSchema other) {
-            for (Map.Entry<String, DataType> entry : other.fields.entrySet()) {
+            for (Map.Entry<String, Tuple3<String,DataType,String>> entry : other.fields.entrySet()) {
                 String fieldName = entry.getKey();
-                DataType newType = entry.getValue();
+                DataType newType = entry.getValue().f1;
                 if (fields.containsKey(fieldName)) {
-                    DataType oldType = fields.get(fieldName);
+                    DataType oldType = fields.get(fieldName).f1;
                     if (SchemaChangeProcessFunction.canConvert(oldType, newType)) {
-                        fields.put(fieldName, newType);
+                        fields.put(fieldName, Tuple3.of(fieldName,newType,entry.getValue().f2));
                     } else if (SchemaChangeProcessFunction.canConvert(newType, oldType)) {
                         // nothing to do
                     } else {
@@ -410,7 +411,7 @@ public class MySqlSyncTableAction implements Action {
                                         other.tableName));
                     }
                 } else {
-                    fields.put(fieldName, newType);
+                    fields.put(fieldName, Tuple3.of(fieldName,newType,entry.getValue().f2));
                 }
             }
             if (!primaryKeys.equals(other.primaryKeys)) {
