@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.ValueCountMergeFunction;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
@@ -36,7 +37,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.BinaryTableStats;
-import org.apache.paimon.table.sink.SinkRecordConverter;
+import org.apache.paimon.table.sink.InternalRowKeyAndBucketExtractor;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.KeyValueTableRead;
@@ -141,10 +142,16 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<KeyValue> newWrite(String commitUser) {
+        return newWrite(commitUser, null);
+    }
+
+    @Override
+    public TableWriteImpl<KeyValue> newWrite(
+            String commitUser, ManifestCacheFilter manifestFilter) {
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
-                store().newWrite(commitUser),
-                new SinkRecordConverter(tableSchema),
+                store().newWrite(commitUser, manifestFilter),
+                new InternalRowKeyAndBucketExtractor(tableSchema),
                 record -> {
                     switch (record.row().getRowKind()) {
                         case INSERT:

@@ -49,6 +49,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -73,6 +74,7 @@ public abstract class HiveCatalogITCaseBase {
         hiveShell.execute("USE test_db");
         hiveShell.execute("CREATE TABLE hive_table ( a INT, b STRING )");
         hiveShell.execute("INSERT INTO hive_table VALUES (100, 'Hive'), (200, 'Table')");
+        hiveShell.executeQuery("SHOW TABLES");
 
         path = folder.newFolder().toURI().toString();
         EnvironmentSettings settings = EnvironmentSettings.newInstance().inBatchMode().build();
@@ -241,7 +243,7 @@ public abstract class HiveCatalogITCaseBase {
                         .contains("Table Type:         \tEXTERNAL_TABLE      \tNULL"));
         tEnv.executeSql("DROP TABLE t").await();
         Path tablePath = new Path(path, "test_db.db/t");
-        Assert.assertTrue(tablePath.getFileSystem().exists(tablePath));
+        Assert.assertFalse(tablePath.getFileSystem().exists(tablePath));
     }
 
     @Test
@@ -266,7 +268,7 @@ public abstract class HiveCatalogITCaseBase {
     public void testCreateTableAs() throws Exception {
         tEnv.executeSql("CREATE TABLE t (a INT)").await();
         tEnv.executeSql("INSERT INTO t VALUES(1)").await();
-        tEnv.executeSql("CREATE TABLE t1 AS SELECT * FROM t");
+        tEnv.executeSql("CREATE TABLE t1 AS SELECT * FROM t").await();
         List<Row> result = collect("SELECT * FROM t1$schemas s");
         Assertions.assertThat(result.toString())
                 .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, ]]");
@@ -277,7 +279,8 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("CREATE TABLE t_option (a INT)").await();
         tEnv.executeSql("INSERT INTO t_option VALUES(1)").await();
         tEnv.executeSql(
-                "CREATE TABLE t1_option WITH ('file.format' = 'parquet') AS SELECT * FROM t_option");
+                        "CREATE TABLE t1_option WITH ('file.format' = 'parquet') AS SELECT * FROM t_option")
+                .await();
         List<Row> resultOption = collect("SELECT * FROM t1_option$options");
         Assertions.assertThat(resultOption).containsExactly(Row.of("file.format", "parquet"));
         List<Row> dataOption = collect("SELECT * FROM t1_option");
@@ -292,8 +295,8 @@ public abstract class HiveCatalogITCaseBase {
                         + "    dt STRING,\n"
                         + "    hh STRING\n"
                         + ") PARTITIONED BY (dt, hh)");
-        tEnv.executeSql("INSERT INTO t_p  SELECT 1,2,'a','2023-02-19','12'");
-        tEnv.executeSql("CREATE TABLE t1_p WITH ('partition' = 'dt') AS SELECT * FROM t_p");
+        tEnv.executeSql("INSERT INTO t_p  SELECT 1,2,'a','2023-02-19','12'").await();
+        tEnv.executeSql("CREATE TABLE t1_p WITH ('partition' = 'dt') AS SELECT * FROM t_p").await();
         List<Row> resultPartition = collect("SELECT * FROM t1_p$schemas s");
         Assertions.assertThat(resultPartition.toString())
                 .isEqualTo(
@@ -304,16 +307,18 @@ public abstract class HiveCatalogITCaseBase {
 
         // primary key
         tEnv.executeSql(
-                "CREATE TABLE t_pk (\n"
-                        + "    user_id BIGINT,\n"
-                        + "    item_id BIGINT,\n"
-                        + "    behavior STRING,\n"
-                        + "    dt STRING,\n"
-                        + "    hh STRING,\n"
-                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
-                        + ")");
-        tEnv.executeSql("INSERT INTO t_pk VALUES(1,2,'aaa','2020-01-02','09')");
-        tEnv.executeSql("CREATE TABLE t_pk_as WITH ('primary-key' = 'dt') AS SELECT * FROM t_pk");
+                        "CREATE TABLE t_pk (\n"
+                                + "    user_id BIGINT,\n"
+                                + "    item_id BIGINT,\n"
+                                + "    behavior STRING,\n"
+                                + "    dt STRING,\n"
+                                + "    hh STRING,\n"
+                                + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                                + ")")
+                .await();
+        tEnv.executeSql("INSERT INTO t_pk VALUES(1,2,'aaa','2020-01-02','09')").await();
+        tEnv.executeSql("CREATE TABLE t_pk_as WITH ('primary-key' = 'dt') AS SELECT * FROM t_pk")
+                .await();
         List<Row> resultPk = collect("SHOW CREATE TABLE t_pk_as");
         Assertions.assertThat(resultPk.toString()).contains("PRIMARY KEY (`dt`)");
         List<Row> dataPk = collect("SELECT * FROM t_pk_as");
@@ -321,17 +326,19 @@ public abstract class HiveCatalogITCaseBase {
 
         // primary key + partition
         tEnv.executeSql(
-                "CREATE TABLE t_all (\n"
-                        + "    user_id BIGINT,\n"
-                        + "    item_id BIGINT,\n"
-                        + "    behavior STRING,\n"
-                        + "    dt STRING,\n"
-                        + "    hh STRING,\n"
-                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
-                        + ") PARTITIONED BY (dt, hh)");
-        tEnv.executeSql("INSERT INTO t_all VALUES(1,2,'login','2020-01-02','09')");
+                        "CREATE TABLE t_all (\n"
+                                + "    user_id BIGINT,\n"
+                                + "    item_id BIGINT,\n"
+                                + "    behavior STRING,\n"
+                                + "    dt STRING,\n"
+                                + "    hh STRING,\n"
+                                + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                                + ") PARTITIONED BY (dt, hh)")
+                .await();
+        tEnv.executeSql("INSERT INTO t_all VALUES(1,2,'login','2020-01-02','09')").await();
         tEnv.executeSql(
-                "CREATE TABLE t_all_as WITH ('primary-key' = 'dt,hh' , 'partition' = 'dt' ) AS SELECT * FROM t_all");
+                        "CREATE TABLE t_all_as WITH ('primary-key' = 'dt,hh' , 'partition' = 'dt' ) AS SELECT * FROM t_all")
+                .await();
         List<Row> resultAll = collect("SHOW CREATE TABLE t_all_as");
         Assertions.assertThat(resultAll.toString()).contains("PRIMARY KEY (`dt`, `hh`)");
         Assertions.assertThat(resultAll.toString()).contains("PARTITIONED BY (`dt`)");
@@ -340,63 +347,69 @@ public abstract class HiveCatalogITCaseBase {
 
         // primary key do not exist.
         tEnv.executeSql(
-                "CREATE TABLE t_pk_not_exist (\n"
-                        + "    user_id BIGINT,\n"
-                        + "    item_id BIGINT,\n"
-                        + "    behavior STRING,\n"
-                        + "    dt STRING,\n"
-                        + "    hh STRING,\n"
-                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
-                        + ")");
+                        "CREATE TABLE t_pk_not_exist (\n"
+                                + "    user_id BIGINT,\n"
+                                + "    item_id BIGINT,\n"
+                                + "    behavior STRING,\n"
+                                + "    dt STRING,\n"
+                                + "    hh STRING,\n"
+                                + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                                + ")")
+                .await();
 
         Assertions.assertThatThrownBy(
                         () ->
                                 tEnv.executeSql(
-                                        "CREATE TABLE t_pk_not_exist_as WITH ('primary-key' = 'aaa') AS SELECT * FROM t_pk_not_exist"))
+                                                "CREATE TABLE t_pk_not_exist_as WITH ('primary-key' = 'aaa') AS SELECT * FROM t_pk_not_exist")
+                                        .await())
                 .hasRootCauseMessage("Primary key column '[aaa]' is not defined in the schema.");
 
         // primary key in option and DDL.
         Assertions.assertThatThrownBy(
                         () ->
                                 tEnv.executeSql(
-                                        "CREATE TABLE t_pk_ddl_option ("
-                                                + "                            user_id BIGINT,"
-                                                + "                            item_id BIGINT,"
-                                                + "                            behavior STRING,"
-                                                + "                            dt STRING,"
-                                                + "                            hh STRING,"
-                                                + "                            PRIMARY KEY (dt, hh, user_id) NOT ENFORCED"
-                                                + "                        ) WITH ('primary-key' = 'dt')"))
+                                                "CREATE TABLE t_pk_ddl_option ("
+                                                        + "                            user_id BIGINT,"
+                                                        + "                            item_id BIGINT,"
+                                                        + "                            behavior STRING,"
+                                                        + "                            dt STRING,"
+                                                        + "                            hh STRING,"
+                                                        + "                            PRIMARY KEY (dt, hh, user_id) NOT ENFORCED"
+                                                        + "                        ) WITH ('primary-key' = 'dt')")
+                                        .await())
                 .hasRootCauseMessage(
                         "Cannot define primary key on DDL and table options at the same time.");
 
         // partition do not exist.
         tEnv.executeSql(
-                "CREATE TABLE t_partition_not_exist (\n"
-                        + "    user_id BIGINT,\n"
-                        + "    item_id BIGINT,\n"
-                        + "    behavior STRING,\n"
-                        + "    dt STRING,\n"
-                        + "    hh STRING\n"
-                        + ") PARTITIONED BY (dt, hh) ");
+                        "CREATE TABLE t_partition_not_exist (\n"
+                                + "    user_id BIGINT,\n"
+                                + "    item_id BIGINT,\n"
+                                + "    behavior STRING,\n"
+                                + "    dt STRING,\n"
+                                + "    hh STRING\n"
+                                + ") PARTITIONED BY (dt, hh) ")
+                .await();
 
         Assertions.assertThatThrownBy(
                         () ->
                                 tEnv.executeSql(
-                                        "CREATE TABLE t_partition_not_exist_as WITH ('partition' = 'aaa') AS SELECT * FROM t_partition_not_exist"))
+                                                "CREATE TABLE t_partition_not_exist_as WITH ('partition' = 'aaa') AS SELECT * FROM t_partition_not_exist")
+                                        .await())
                 .hasRootCauseMessage("Partition column '[aaa]' is not defined in the schema.");
 
         // partition in option and DDL.
         Assertions.assertThatThrownBy(
                         () ->
                                 tEnv.executeSql(
-                                        "CREATE TABLE t_partition_ddl_option ("
-                                                + "                            user_id BIGINT,"
-                                                + "                            item_id BIGINT,"
-                                                + "                            behavior STRING,"
-                                                + "                            dt STRING,"
-                                                + "                            hh STRING"
-                                                + "                        ) PARTITIONED BY (dt, hh)  WITH ('partition' = 'dt')"))
+                                                "CREATE TABLE t_partition_ddl_option ("
+                                                        + "                            user_id BIGINT,"
+                                                        + "                            item_id BIGINT,"
+                                                        + "                            behavior STRING,"
+                                                        + "                            dt STRING,"
+                                                        + "                            hh STRING"
+                                                        + "                        ) PARTITIONED BY (dt, hh)  WITH ('partition' = 'dt')")
+                                        .await())
                 .hasRootCauseMessage(
                         "Cannot define partition on DDL and table options at the same time.");
     }
@@ -415,6 +428,11 @@ public abstract class HiveCatalogITCaseBase {
         assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t1 RENAME TO t2"))
                 .hasMessage(
                         "Could not execute ALTER TABLE my_hive.test_db.t1 RENAME TO my_hive.test_db.t2");
+
+        // the target table name has upper case.
+        assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t1 RENAME TO T1"))
+                .hasMessage(
+                        "Could not execute ALTER TABLE my_hive.test_db.t1 RENAME TO my_hive.test_db.T1");
 
         tEnv.executeSql("ALTER TABLE t1 RENAME TO t3").await();
         List<String> tables = hiveShell.executeQuery("SHOW TABLES");
@@ -484,7 +502,8 @@ public abstract class HiveCatalogITCaseBase {
                                                 "CREATE TABLE T ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
                                         .await())
                 .hasRootCauseMessage(
-                        String.format("Table name[%s] cannot contain upper case", "T"));
+                        String.format(
+                                "Table name[%s] cannot contain upper case in hive catalog", "T"));
 
         assertThatThrownBy(
                         () ->
@@ -492,7 +511,9 @@ public abstract class HiveCatalogITCaseBase {
                                                 "CREATE TABLE t (A INT, b STRING, C STRING) WITH ( 'file.format' = 'avro')")
                                         .await())
                 .hasRootCauseMessage(
-                        String.format("Field names %s cannot contain upper case", "[A, C]"));
+                        String.format(
+                                "Field names %s cannot contain upper case in hive catalog",
+                                "[A, C]"));
     }
 
     @Test
@@ -504,6 +525,50 @@ public abstract class HiveCatalogITCaseBase {
         new LocalFileIO().delete(new org.apache.paimon.fs.Path(path, "test_db.db/t"), true);
         tables = collect("SHOW TABLES");
         Assert.assertEquals("[]", tables.toString());
+    }
+
+    @Test
+    public void testCatalogOptionsInheritAndOverride() throws Exception {
+        tEnv.executeSql(
+                        String.join(
+                                "\n",
+                                "CREATE CATALOG my_hive_options WITH (",
+                                "  'type' = 'paimon',",
+                                "  'metastore' = 'hive',",
+                                "  'uri' = '',",
+                                "  'warehouse' = '" + path + "',",
+                                "  'lock.enabled' = 'true',",
+                                "  'table-default.opt1' = 'value1',",
+                                "  'table-default.opt2' = 'value2',",
+                                "  'table-default.opt3' = 'value3'",
+                                ")"))
+                .await();
+        tEnv.executeSql("USE CATALOG my_hive_options").await();
+
+        // check inherit
+        tEnv.executeSql("CREATE TABLE table_without_options (a INT, b STRING)").await();
+
+        Identifier identifier = new Identifier("default", "table_without_options");
+        Catalog catalog =
+                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
+        Map<String, String> tableOptions = catalog.getTable(identifier).options();
+
+        Assertions.assertThat(tableOptions).containsEntry("opt1", "value1");
+        Assertions.assertThat(tableOptions).containsEntry("opt2", "value2");
+        Assertions.assertThat(tableOptions).containsEntry("opt3", "value3");
+        Assertions.assertThat(tableOptions).doesNotContainKey("lock.enabled");
+
+        // check override
+        tEnv.executeSql(
+                        "CREATE TABLE table_with_options (a INT, b STRING) WITH ('opt1' = 'new_value')")
+                .await();
+        identifier = new Identifier("default", "table_with_options");
+        tableOptions = catalog.getTable(identifier).options();
+
+        Assertions.assertThat(tableOptions).containsEntry("opt1", "new_value");
+        Assertions.assertThat(tableOptions).containsEntry("opt2", "value2");
+        Assertions.assertThat(tableOptions).containsEntry("opt3", "value3");
+        Assertions.assertThat(tableOptions).doesNotContainKey("lock.enabled");
     }
 
     protected List<Row> collect(String sql) throws Exception {

@@ -94,7 +94,7 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "A comma-separated list of columns for which to create a bloon filter when writing.");
+                            "A comma-separated list of columns for which to create a bloom filter when writing.");
 
     public static final ConfigOption<Double> ORC_BLOOM_FILTER_FPP =
             key("orc.bloom.filter.fpp")
@@ -112,6 +112,14 @@ public class CoreOptions implements Serializable {
                                     + " 'file.compression.per.level' = '0:lz4,1:zlib', for orc file format, the compression value "
                                     + "could be NONE, ZLIB, SNAPPY, LZO, LZ4, for parquet file format, the compression value could be "
                                     + "UNCOMPRESSED, SNAPPY, GZIP, LZO, BROTLI, LZ4, ZSTD.");
+
+    public static final ConfigOption<String> FILE_COMPRESSION =
+            key("file.compression")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Default file compression format, can be overridden by "
+                                    + FILE_COMPRESSION_PER_LEVEL.key());
 
     public static final ConfigOption<FileFormatType> MANIFEST_FORMAT =
             key("manifest.format")
@@ -178,6 +186,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether to ignore delete records in partial-update mode.");
 
+    public static final ConfigOption<SortEngine> SORT_ENGINE =
+            key("sort-engine")
+                    .enumType(SortEngine.class)
+                    .defaultValue(SortEngine.LOSER_TREE)
+                    .withDescription("Specify the sort engine for table with primary key.");
+
     @Immutable
     public static final ConfigOption<WriteMode> WRITE_MODE =
             key("write-mode")
@@ -221,6 +235,13 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "Whether the write buffer can be spillable. Enabled by default when using object storage.");
+
+    public static final ConfigOption<MemorySize> WRITE_MANIFEST_CACHE =
+            key("write-manifest-cache")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(0))
+                    .withDescription(
+                            "Cache size for reading manifest files for write initialization.");
 
     public static final ConfigOption<Integer> LOCAL_SORT_MAX_NUM_FILE_HANDLES =
             key("local-sort.max-num-file-handles")
@@ -568,6 +589,28 @@ public class CoreOptions implements Serializable {
                             "Only used to force TableScan to construct 'ContinuousCompactorStartingScanner' and "
                                     + "'ContinuousCompactorFollowUpScanner' for dedicated streaming compaction job.");
 
+    public static final ConfigOption<StreamingReadMode> STREAMING_READ_MODE =
+            key("streaming-read-mode")
+                    .enumType(StreamingReadMode.class)
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "The mode of streaming read that specifies to read the data of table file or log")
+                                    .linebreak()
+                                    .linebreak()
+                                    .text("Possible values:")
+                                    .linebreak()
+                                    .list(
+                                            text(
+                                                    StreamingReadMode.FILE.getValue()
+                                                            + ": Reads from the data of table file store."))
+                                    .list(
+                                            text(
+                                                    StreamingReadMode.LOG.getValue()
+                                                            + ": Read from the data of table log store."))
+                                    .build());
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -622,6 +665,10 @@ public class CoreOptions implements Serializable {
         return options.get(MANIFEST_TARGET_FILE_SIZE);
     }
 
+    public MemorySize writeManifestCache() {
+        return options.get(WRITE_MANIFEST_CACHE);
+    }
+
     public String partitionDefaultName() {
         return options.get(PARTITION_DEFAULT_NAME);
     }
@@ -639,6 +686,10 @@ public class CoreOptions implements Serializable {
         Map<String, String> levelCompressions = options.get(FILE_COMPRESSION_PER_LEVEL);
         return levelCompressions.entrySet().stream()
                 .collect(Collectors.toMap(e -> Integer.valueOf(e.getKey()), Map.Entry::getValue));
+    }
+
+    public String fileCompression() {
+        return options.get(FILE_COMPRESSION);
     }
 
     public int snapshotNumRetainMin() {
@@ -659,6 +710,10 @@ public class CoreOptions implements Serializable {
 
     public MergeEngine mergeEngine() {
         return options.get(MERGE_ENGINE);
+    }
+
+    public SortEngine sortEngine() {
+        return options.get(SORT_ENGINE);
     }
 
     public long splitTargetSize() {
@@ -820,6 +875,10 @@ public class CoreOptions implements Serializable {
 
     public int readBatchSize() {
         return options.get(READ_BATCH_SIZE);
+    }
+
+    public static StreamingReadMode streamReadType(Options options) {
+        return options.get(STREAMING_READ_MODE);
     }
 
     /** Specifies the merge engine for table with primary key. */
@@ -1054,6 +1113,49 @@ public class CoreOptions implements Serializable {
         }
     }
 
+    /** Specifies the type for streaming read. */
+    public enum StreamingReadMode implements DescribedEnum {
+        LOG("log", "Reads from the log store."),
+        FILE("file", "Reads from the file store.");
+
+        private final String value;
+        private final String description;
+
+        StreamingReadMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+
+        public String getValue() {
+            return value;
+        }
+
+        @VisibleForTesting
+        public static StreamingReadMode fromValue(String value) {
+            for (StreamingReadMode formatType : StreamingReadMode.values()) {
+                if (formatType.value.equals(value)) {
+                    return formatType;
+                }
+            }
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid format type %s, only support [%s]",
+                            value,
+                            StringUtils.join(
+                                    Arrays.stream(StreamingReadMode.values()).iterator(), ",")));
+        }
+    }
+
     /**
      * Set the default values of the {@link CoreOptions} via the given {@link Options}.
      *
@@ -1098,5 +1200,31 @@ public class CoreOptions implements Serializable {
             }
         }
         return immutableKeys;
+    }
+
+    /** Specifies the sort engine for table with primary key. */
+    public enum SortEngine implements DescribedEnum {
+        MIN_HEAP("min-heap", "Use min-heap for multiway sorting."),
+        LOSER_TREE(
+                "loser-tree",
+                "Use loser-tree for multiway sorting. Compared with heapsort, loser-tree has fewer comparisons and is more efficient.");
+
+        private final String value;
+        private final String description;
+
+        SortEngine(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
     }
 }

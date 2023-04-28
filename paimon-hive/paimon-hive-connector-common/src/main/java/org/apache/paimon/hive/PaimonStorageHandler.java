@@ -19,6 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.hive.mapred.PaimonInputFormat;
+import org.apache.paimon.hive.mapred.PaimonOutputCommitter;
 import org.apache.paimon.hive.mapred.PaimonOutputFormat;
 
 import org.apache.hadoop.conf.Configuration;
@@ -38,6 +39,9 @@ import org.apache.hadoop.mapred.OutputFormat;
 
 import java.util.Map;
 import java.util.Properties;
+
+import static org.apache.paimon.hive.PaimonJobConf.MAPRED_OUTPUT_COMMITTER;
+import static org.apache.paimon.hive.PaimonJobConf.PAIMON_WRITE;
 
 /** {@link HiveStorageHandler} for paimon. This is the entrance class of Hive API. */
 public class PaimonStorageHandler implements HiveStoragePredicateHandler, HiveStorageHandler {
@@ -78,13 +82,23 @@ public class PaimonStorageHandler implements HiveStoragePredicateHandler, HiveSt
     public void configureInputJobCredentials(TableDesc tableDesc, Map<String, String> map) {}
 
     @Override
-    public void configureOutputJobProperties(TableDesc tableDesc, Map<String, String> map) {}
+    public void configureOutputJobProperties(TableDesc tableDesc, Map<String, String> map) {
+        Properties properties = tableDesc.getProperties();
+        PaimonJobConf.configureOutputJobProperties(conf, properties, map);
+    }
 
     @Override
     public void configureTableJobProperties(TableDesc tableDesc, Map<String, String> map) {}
 
     @Override
-    public void configureJobConf(TableDesc tableDesc, JobConf jobConf) {}
+    public void configureJobConf(TableDesc tableDesc, JobConf jobConf) {
+        if (tableDesc != null
+                && tableDesc.getProperties() != null
+                && tableDesc.getProperties().get(PAIMON_WRITE) != null) {
+
+            jobConf.set(MAPRED_OUTPUT_COMMITTER, PaimonOutputCommitter.class.getName());
+        }
+    }
 
     @Override
     public void setConf(Configuration configuration) {

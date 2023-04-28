@@ -160,7 +160,7 @@ public class HadoopConfigLoadingTest {
         final String k5 = "key5";
 
         final String v1 = "from HADOOP_CONF_DIR";
-        final String v2 = "from Paimon config `fs.hdfs.hadoopconf`";
+        final String v2 = "from Paimon config `hadoop-conf-dir`";
         final String v4 = "from HADOOP_HOME/etc/hadoop";
         final String v5 = "from HADOOP_HOME/conf";
 

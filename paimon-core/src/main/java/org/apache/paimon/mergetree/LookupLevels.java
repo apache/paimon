@@ -35,9 +35,9 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.IOFunction;
 
-import org.apache.flink.shaded.guava30.com.google.common.cache.Cache;
-import org.apache.flink.shaded.guava30.com.google.common.cache.CacheBuilder;
-import org.apache.flink.shaded.guava30.com.google.common.cache.RemovalNotification;
+import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;
+import org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder;
+import org.apache.paimon.shade.guava30.com.google.common.cache.RemovalNotification;
 
 import javax.annotation.Nullable;
 

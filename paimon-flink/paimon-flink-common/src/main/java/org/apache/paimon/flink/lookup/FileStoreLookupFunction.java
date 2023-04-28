@@ -31,7 +31,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.TypeUtils;
 
-import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
+import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
+
 import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.functions.FunctionContext;

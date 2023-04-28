@@ -18,7 +18,11 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.utils.BlockingIterator;
+
 import org.apache.flink.types.Row;
+import org.apache.flink.types.RowKind;
+import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -815,6 +819,47 @@ public class PreAggregationITCase {
             assertThatThrownBy(
                     () -> sEnv.from("T1").execute().print(),
                     "Pre-aggregate continuous reading is not supported");
+        }
+    }
+
+    /** ITCase for sum aggregate function retraction. */
+    public static class SumRetractionAggregation extends CatalogITCaseBase {
+        @Override
+        protected List<String> ddl() {
+            return Collections.singletonList(
+                    "CREATE TABLE T ("
+                            + "k INT,"
+                            + "b Decimal(12, 2),"
+                            + "PRIMARY KEY (k) NOT ENFORCED)"
+                            + " WITH ('merge-engine'='aggregation', "
+                            + "'changelog-producer' = 'full-compaction',"
+                            + "'fields.b.aggregate-function'='sum'"
+                            + ");");
+        }
+
+        @Test
+        public void testRetraction() throws Exception {
+            sql("CREATE TABLE INPUT (" + "k INT," + "b INT," + "PRIMARY KEY (k) NOT ENFORCED);");
+            CloseableIterator<Row> insert =
+                    streamSqlIter("INSERT INTO T SELECT k, SUM(b) FROM INPUT GROUP BY k;");
+            BlockingIterator<Row, Row> select = streamSqlBlockIter("SELECT * FROM T");
+
+            sql("INSERT INTO INPUT VALUES (1, 1), (2, 2)");
+            assertThat(select.collect(2))
+                    .containsExactlyInAnyOrder(
+                            Row.of(1, BigDecimal.valueOf(100, 2)),
+                            Row.of(2, BigDecimal.valueOf(200, 2)));
+
+            sql("INSERT INTO INPUT VALUES (1, 3), (2, 4)");
+            assertThat(select.collect(4))
+                    .containsExactlyInAnyOrder(
+                            Row.ofKind(RowKind.UPDATE_BEFORE, 1, BigDecimal.valueOf(100, 2)),
+                            Row.ofKind(RowKind.UPDATE_AFTER, 1, BigDecimal.valueOf(300, 2)),
+                            Row.ofKind(RowKind.UPDATE_BEFORE, 2, BigDecimal.valueOf(200, 2)),
+                            Row.ofKind(RowKind.UPDATE_AFTER, 2, BigDecimal.valueOf(400, 2)));
+
+            select.close();
+            insert.close();
         }
     }
 }

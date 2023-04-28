@@ -40,6 +40,7 @@ under the License.
     <modules>
         <module>paimon-spark-common</module>
         <module>paimon-spark-2</module>
+        <module>paimon-spark-3.4</module>
         <module>paimon-spark-3.3</module>
         <module>paimon-spark-3.1</module>
         <module>paimon-spark-3.2</module>
@@ -59,6 +60,14 @@ under the License.
             <artifactId>paimon-test-utils</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-s3</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+            <type>test-jar</type>
         </dependency>
 
         <dependency>

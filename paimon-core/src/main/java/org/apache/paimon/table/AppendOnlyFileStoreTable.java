@@ -24,6 +24,7 @@ import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendOnlyFileStoreRead;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.FileStoreScan;
@@ -31,7 +32,7 @@ import org.apache.paimon.operation.ReverseReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.sink.SinkRecordConverter;
+import org.apache.paimon.table.sink.InternalRowKeyAndBucketExtractor;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;
 import org.apache.paimon.table.source.DataSplit;
@@ -123,9 +124,15 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<InternalRow> newWrite(String commitUser) {
+        return newWrite(commitUser, null);
+    }
+
+    @Override
+    public TableWriteImpl<InternalRow> newWrite(
+            String commitUser, ManifestCacheFilter manifestFilter) {
         return new TableWriteImpl<>(
-                store().newWrite(commitUser),
-                new SinkRecordConverter(tableSchema),
+                store().newWrite(commitUser, manifestFilter),
+                new InternalRowKeyAndBucketExtractor(tableSchema),
                 record -> {
                     Preconditions.checkState(
                             record.row().getRowKind() == RowKind.INSERT,

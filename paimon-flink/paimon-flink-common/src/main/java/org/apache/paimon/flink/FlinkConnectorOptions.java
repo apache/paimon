@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.StreamingReadMode;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
@@ -32,6 +33,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.paimon.CoreOptions.STREAMING_READ_MODE;
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.description.TextElement.text;
 
@@ -58,7 +60,11 @@ public class FlinkConnectorOptions {
                                     .list(
                                             TextElement.text(
                                                     "\"kafka\": Kafka log system, the data is double written to file"
-                                                            + " store and kafka, and the streaming read will be read from kafka."))
+                                                            + " store and kafka, and the streaming read will be read from kafka. If streaming read from file, configures "
+                                                            + STREAMING_READ_MODE.key()
+                                                            + " to "
+                                                            + StreamingReadMode.FILE.getValue()
+                                                            + "."))
                                     .build());
 
     public static final ConfigOption<Integer> SINK_PARALLELISM =
@@ -70,13 +76,6 @@ public class FlinkConnectorOptions {
                                     + "By default, if this option is not defined, the planner will derive the parallelism "
                                     + "for each statement individually by also considering the global configuration.");
 
-    public static final ConfigOption<Boolean> SINK_SHUFFLE_BY_PARTITION =
-            ConfigOptions.key("sink.partition-shuffle")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "The option to enable shuffle data by dynamic partition fields in sink phase for paimon.");
-
     public static final ConfigOption<Integer> SCAN_PARALLELISM =
             ConfigOptions.key("scan.parallelism")
                     .intType()
@@ -86,6 +85,7 @@ public class FlinkConnectorOptions {
                                     + "By default, if this option is not defined, the planner will derive the parallelism "
                                     + "for each statement individually by also considering the global configuration. "
                                     + "If user enable the scan.infer-parallelism, the planner will derive the parallelism by inferred parallelism.");
+
     public static final ConfigOption<Boolean> INFER_SCAN_PARALLELISM =
             ConfigOptions.key("scan.infer-parallelism")
                     .booleanType()

@@ -20,6 +20,7 @@ package org.apache.paimon.reader;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.Filter;
 
 import javax.annotation.Nullable;
 
@@ -89,6 +90,31 @@ public interface RecordReader<T> extends Closeable {
                 }
             };
         }
+
+        /** Filters a {@link RecordIterator}. */
+        default RecordIterator<T> filter(Filter<T> filter) {
+            RecordIterator<T> thisIterator = this;
+            return new RecordIterator<T>() {
+                @Nullable
+                @Override
+                public T next() throws IOException {
+                    while (true) {
+                        T next = thisIterator.next();
+                        if (next == null) {
+                            return null;
+                        }
+                        if (filter.test(next)) {
+                            return next;
+                        }
+                    }
+                }
+
+                @Override
+                public void releaseBatch() {
+                    thisIterator.releaseBatch();
+                }
+            };
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -127,6 +153,27 @@ public interface RecordReader<T> extends Closeable {
                     return null;
                 }
                 return iterator.transform(function);
+            }
+
+            @Override
+            public void close() throws IOException {
+                thisReader.close();
+            }
+        };
+    }
+
+    /** Filters a {@link RecordReader}. */
+    default RecordReader<T> filter(Filter<T> filter) {
+        RecordReader<T> thisReader = this;
+        return new RecordReader<T>() {
+            @Nullable
+            @Override
+            public RecordIterator<T> readBatch() throws IOException {
+                RecordIterator<T> iterator = thisReader.readBatch();
+                if (iterator == null) {
+                    return null;
+                }
+                return iterator.filter(filter);
             }
 
             @Override

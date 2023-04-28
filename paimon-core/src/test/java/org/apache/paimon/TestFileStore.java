@@ -117,6 +117,10 @@ public class TestFileStore extends KeyValueFileStore {
         this.commitIdentifier = 0L;
     }
 
+    public AbstractFileStoreWrite<KeyValue> newWrite() {
+        return super.newWrite(commitUser);
+    }
+
     public FileStoreCommitImpl newCommit() {
         return super.newCommit(commitUser);
     }
@@ -199,7 +203,7 @@ public class TestFileStore extends KeyValueFileStore {
         if (snapshotIdBeforeCommit == null) {
             snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
         }
-        commit.dropPartitions(partitions);
+        commit.dropPartitions(partitions, Long.MAX_VALUE);
 
         Long snapshotIdAfterCommit = snapshotManager.latestSnapshotId();
         assertThat(snapshotIdAfterCommit).isNotNull();
@@ -217,7 +221,7 @@ public class TestFileStore extends KeyValueFileStore {
             Long watermark,
             BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction)
             throws Exception {
-        AbstractFileStoreWrite<KeyValue> write = newWrite(commitUser);
+        AbstractFileStoreWrite<KeyValue> write = newWrite();
         Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
         for (KeyValue kv : kvs) {
             BinaryRow partition = partitionCalculator.apply(kv);

@@ -18,8 +18,10 @@
 
 package org.apache.paimon.codegen;
 
-import org.apache.flink.shaded.guava30.com.google.common.cache.Cache;
-import org.apache.flink.shaded.guava30.com.google.common.cache.CacheBuilder;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
+
 import org.codehaus.janino.SimpleCompiler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,12 +45,13 @@ public final class CompileUtils {
      * avoid this problem.
      */
     static final Cache<ClassKey, Class<?>> COMPILED_CLASS_CACHE =
-            CacheBuilder.newBuilder()
+            Caffeine.newBuilder()
                     // estimated maximum planning/startup time
                     .expireAfterAccess(Duration.ofMinutes(5))
                     // estimated cache size
                     .maximumSize(300)
                     .softValues()
+                    .executor(MoreExecutors.directExecutor())
                     .build();
 
     /**
@@ -67,7 +70,7 @@ public final class CompileUtils {
             // to prevent class leaks we don't cache the class loader directly
             // but only its hash code
             final ClassKey classKey = new ClassKey(cl.hashCode(), code);
-            return (Class<T>) COMPILED_CLASS_CACHE.get(classKey, () -> doCompile(cl, name, code));
+            return (Class<T>) COMPILED_CLASS_CACHE.get(classKey, key -> doCompile(cl, name, code));
         } catch (Exception e) {
             throw new RuntimeException(e.getMessage(), e);
         }

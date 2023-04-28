@@ -26,6 +26,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
@@ -48,8 +49,15 @@ public class HiveSchema {
 
     private final TableSchema tableSchema;
 
+    private final RowType rowType;
+
     private HiveSchema(TableSchema tableSchema) {
         this.tableSchema = tableSchema;
+        this.rowType = new RowType(tableSchema.fields());
+    }
+
+    public RowType rowType() {
+        return rowType;
     }
 
     public List<String> fieldNames() {
@@ -58,6 +66,10 @@ public class HiveSchema {
 
     public List<DataType> fieldTypes() {
         return tableSchema.logicalRowType().getFieldTypes();
+    }
+
+    public List<DataField> fields() {
+        return tableSchema.fields();
     }
 
     public List<String> fieldComments() {

@@ -16,16 +16,16 @@
 
 -- In production you would almost certainly limit the replication user must be on the follower (slave) machine,
 -- to prevent other clients accessing the log from other machines. For example, 'replicator'@'follower.acme.com'.
--- However, in this database we'll grant 2 users different privileges:
+-- However, in this database we'll grant the test user 'paimonuser' all privileges:
 --
--- 1) 'paimonuser' - all privileges required by the snapshot reader AND binlog reader (used for testing)
--- 2) 'mysqluser' - all privileges
---
-GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT, LOCK TABLES  ON *.* TO 'paimonuser'@'%';
-CREATE USER 'mysqluser' IDENTIFIED BY 'mysqlpw';
-GRANT ALL PRIVILEGES ON *.* TO 'mysqluser'@'%';
+GRANT ALL PRIVILEGES ON *.* TO 'paimonuser'@'%';
 
-USE paimon_test;
+-- ################################################################################
+--  MySqlSyncTableActionITCase
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_table;
+USE paimon_sync_table;
 
 CREATE TABLE schema_evolution_1 (
     pt INT,
@@ -41,78 +41,155 @@ CREATE TABLE schema_evolution_2 (
     PRIMARY KEY (_id)
 );
 
+CREATE TABLE schema_evolution_multiple (
+    _id INT,
+    v1 VARCHAR(10),
+    v2 INT,
+    v3 VARCHAR(10),
+    PRIMARY KEY (_id)
+);
+
 CREATE TABLE all_types_table (
     _id INT,
-    _boolean TINYINT(1),
+    pt DECIMAL(2, 1),
+    -- TINYINT
+    _tinyint1 TINYINT(1),
+    _boolean BOOLEAN,
+    _bool BOOL,
     _tinyint TINYINT,
     _tinyint_unsigned TINYINT(2) UNSIGNED,
     _tinyint_unsigned_zerofill TINYINT(2) UNSIGNED ZEROFILL,
+    -- SMALLINT
     _smallint SMALLINT,
     _smallint_unsigned SMALLINT UNSIGNED,
     _smallint_unsigned_zerofill SMALLINT(4) UNSIGNED ZEROFILL,
+    -- MEDIUMINT
     _mediumint MEDIUMINT,
     _mediumint_unsigned MEDIUMINT UNSIGNED,
     _mediumint_unsigned_zerofill MEDIUMINT(8) UNSIGNED ZEROFILL,
-    _int INT,
-    _int_unsigned INT UNSIGNED,
-    _int_unsigned_zerofill INT(8) UNSIGNED ZEROFILL,
+    -- INT
+     _int INT,
+     _int_unsigned INT UNSIGNED,
+     _int_unsigned_zerofill INT(8) UNSIGNED ZEROFILL,
+    -- BIGINT
     _bigint BIGINT,
     _bigint_unsigned BIGINT UNSIGNED,
     _bigint_unsigned_zerofill BIGINT(16) UNSIGNED ZEROFILL,
     _serial SERIAL,
+    -- FLOAT
     _float FLOAT,
     _float_unsigned FLOAT UNSIGNED,
     _float_unsigned_zerofill FLOAT(4) UNSIGNED ZEROFILL,
+    -- REAL
     _real REAL,
     _real_unsigned REAL UNSIGNED,
     _real_unsigned_zerofill REAL(10, 7) UNSIGNED ZEROFILL,
+    -- DOUBLE
     _double DOUBLE,
     _double_unsigned DOUBLE UNSIGNED,
     _double_unsigned_zerofill DOUBLE(10, 7) UNSIGNED ZEROFILL,
+    -- DOUBLE PRECISION
     _double_precision DOUBLE PRECISION,
     _double_precision_unsigned DOUBLE PRECISION UNSIGNED,
     _double_precision_unsigned_zerofill DOUBLE PRECISION(10, 7) UNSIGNED ZEROFILL,
+    -- NUMERIC
     _numeric NUMERIC(8, 3),
     _numeric_unsigned NUMERIC(8, 3) UNSIGNED,
     _numeric_unsigned_zerofill NUMERIC(8, 3) UNSIGNED ZEROFILL,
+    -- FIXED
     _fixed FIXED(40, 3),
     _fixed_unsigned FIXED(40, 3) UNSIGNED,
     _fixed_unsigned_zerofill FIXED(40, 3) UNSIGNED ZEROFILL,
+    -- DECIMAL
     _decimal DECIMAL(8),
     _decimal_unsigned DECIMAL(8) UNSIGNED,
     _decimal_unsigned_zerofill DECIMAL(8) UNSIGNED ZEROFILL,
+    -- DATE
     _date DATE,
+    -- DATETIME
     _datetime DATETIME,
+    _datetime3 DATETIME(3),
+    _datetime6 DATETIME(6),
+    -- DATETIME precision test
+    _datetime_p DATETIME,
+    _datetime_p2 DATETIME(2),
+    -- TIMESTAMP
     _timestamp TIMESTAMP(6) DEFAULT NULL,
+    _timestamp0 TIMESTAMP,
+    -- string
     _char CHAR(10),
     _varchar VARCHAR(20),
+    _tinytext TINYTEXT,
     _text TEXT,
+    _mediumtext MEDIUMTEXT,
+    _longtext LONGTEXT,
+    -- BINARY
     _bin BINARY(10),
     _varbin VARBINARY(20),
+    _tinyblob TINYBLOB,
     _blob BLOB,
+    _mediumblob MEDIUMBLOB,
+    _longblob LONGBLOB,
+    -- json
+    _json JSON,
+    -- enum
+    _enum ENUM ('value1','value2','value3'),
+    -- YEAR
+    _year YEAR,
+    _time TIME,
     PRIMARY KEY (_id)
 );
 
+
 INSERT INTO all_types_table VALUES (
-    1,
-    true, 1, 2, 3,
+    1, 1.1,
+    -- TINYINT
+    true, true, false, 1, 2, 3,
+    -- SMALLINT
     1000, 2000, 3000,
+    -- MEDIUMINT
     100000, 200000, 300000,
+    -- INT
     1000000, 2000000, 3000000,
+    -- BIGINT
     10000000000, 20000000000, 30000000000, 40000000000,
+    -- FLOAT
     1.5, 2.5, 3.5,
+    -- REAL
     1.000001, 2.000002, 3.000003,
+    -- DOUBLE
     1.000011, 2.000022, 3.000033,
+    -- DOUBLE PRECISION
     1.000111, 2.000222, 3.000333,
+    -- NUMERIC
     12345.11, 12345.22, 12345.33,
+    -- FIXED
     123456789876543212345678987654321.11, 123456789876543212345678987654321.22, 123456789876543212345678987654321.33,
+    -- DECIMAL
     11111, 22222, 33333,
-    '2023-03-23', '2023-03-23 14:30:05', '2023-03-23 15:00:10.123456',
-    'Paimon', 'Apache Paimon', 'Apache Paimon MySQL Test Data',
-    'bytes', 'more bytes', 'very long bytes test data'
+    -- DATE
+    '2023-03-23',
+    -- DATETIME
+    '2023-03-23 14:30:05', '2023-03-23 14:30:05.123', '2023-03-23 14:30:05.123456',
+    -- DATETIME precision test
+    '2023-03-24 14:30', '2023-03-24 14:30:05.12',
+    -- TIMESTAMP
+    '2023-03-23 15:00:10.123456', '2023-03-23 00:10',
+    -- string
+    'Paimon', 'Apache Paimon','Apache Paimon MySQL TINYTEXT Test Data', 'Apache Paimon MySQL Test Data','Apache Paimon MySQL MEDIUMTEXT Test Data','Apache Paimon MySQL Long Test Data',
+    -- BINARY
+    'bytes', 'more bytes', 'TINYBLOB type test data', 'BLOB type test data' , 'MEDIUMBLOB type test data' , 'LONGBLOB  bytes test data',
+    -- json
+    '{"a":"b"}',
+    -- enum
+    'value1',
+     -- YEAR
+     2023,
+     -- TIME,
+     '10:13:23'
 ), (
-    2,
-    NULL, NULL, NULL, NULL,
+    2, 2.2,
+    NULL, NULL, NULL, NULL, NULL, NULL,
     NULL, NULL, NULL,
     NULL, NULL, NULL,
     NULL, NULL, NULL,
@@ -124,9 +201,16 @@ INSERT INTO all_types_table VALUES (
     NULL, NULL, NULL,
     NULL, NULL, NULL,
     NULL, NULL, NULL,
+    NULL,
     NULL, NULL, NULL,
-    NULL, NULL, NULL,
-    NULL, NULL, NULL
+    NULL, NULL,
+    NULL, NULL,
+    NULL, NULL, NULL, NULL,NULL, NULL,
+    NULL, NULL, NULL, NULL,NULL, NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL
 );
 
 CREATE TABLE incompatible_field_1 (
@@ -153,4 +237,174 @@ CREATE TABLE incompatible_pk_2 (
     b BIGINT,
     c VARCHAR(20),
     PRIMARY KEY (a)
+);
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database;
+USE paimon_sync_database;
+
+CREATE TABLE t1 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k1 INT,
+    k2 VARCHAR(10),
+    v1 INT,
+    v2 BIGINT,
+    PRIMARY KEY (k1, k2)
+);
+
+-- no primary key, should be ignored
+CREATE TABLE t3 (
+    v1 INT
+);
+
+-- to make sure we use JDBC Driver correctly
+CREATE DATABASE paimon_sync_database1;
+USE paimon_sync_database1;
+
+CREATE TABLE t1 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k1 INT,
+    k2 VARCHAR(10),
+    v1 INT,
+    v2 BIGINT,
+    PRIMARY KEY (k1, k2)
+);
+
+-- no primary key, should be ignored
+CREATE TABLE t3 (
+    v1 INT
+);
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testIgnoreIncompatibleTables
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database_ignore_incompatible;
+USE paimon_sync_database_ignore_incompatible;
+
+CREATE TABLE incompatible (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE compatible (
+    k1 INT,
+    k2 VARCHAR(10),
+    v1 INT,
+    v2 BIGINT,
+    PRIMARY KEY (k1, k2)
+);
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testTableAffix
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database_affix;
+USE paimon_sync_database_affix;
+
+CREATE TABLE t1 (
+    k1 INT,
+    v0 VARCHAR(10),
+    PRIMARY KEY (k1)
+);
+
+CREATE TABLE t2 (
+    k2 INT,
+    v0 VARCHAR(10),
+    PRIMARY KEY (k2)
+);
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testIncludingTables
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database_including;
+USE paimon_sync_database_including;
+
+CREATE TABLE paimon_1 (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE paimon_2 (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE flink (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE ignored (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testExcludingTables
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database_excluding;
+USE paimon_sync_database_excluding;
+
+CREATE TABLE paimon_1 (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE paimon_2 (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE flink (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE sync (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testIncludingAndExcludingTables
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database_in_excluding;
+USE paimon_sync_database_in_excluding;
+
+CREATE TABLE paimon_1 (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE paimon_2 (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE flink (
+    k INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE test (
+    k INT,
+    PRIMARY KEY (k)
 );

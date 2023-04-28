@@ -18,13 +18,14 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.types.DataField;
 
 import java.io.Serializable;
 import java.util.List;
+import java.util.Optional;
 
 /**
- * Parse a CDC change event to a list of {@link SchemaChange} or {@link CdcRecord}.
+ * Parse a CDC change event to a list of {@link DataField}s or {@link CdcRecord}.
  *
  * @param <T> CDC change event type
  */
@@ -32,9 +33,11 @@ public interface EventParser<T> {
 
     void setRawEvent(T rawEvent);
 
-    boolean isSchemaChange();
+    String tableName();
 
-    List<SchemaChange> getSchemaChanges();
+    boolean isUpdatedDataFields();
+
+    Optional<List<DataField>> getUpdatedDataFields();
 
     List<CdcRecord> getRecords();
 

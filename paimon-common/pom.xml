@@ -37,15 +37,21 @@ under the License.
 
     <dependencies>
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-shaded-jackson</artifactId>
-            <version>${flink.shaded.jackson.version}-${flink.shaded.version}</version>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-shade-jackson-2</artifactId>
+            <version>${paimon.shade.jackson.version}-${project.version}</version>
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-shaded-guava</artifactId>
-            <version>${flink.shaded.guava.version}-${flink.shaded.version}</version>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-shade-guava-30</artifactId>
+            <version>${paimon.shade.guava.version}-${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-shade-caffeine-2</artifactId>
+            <version>${paimon.shade.caffeine.version}-${project.version}</version>
         </dependency>
 
         <!-- Java compiler -->
@@ -259,15 +265,15 @@ under the License.
                             <relocations>
                                 <relocation>
                                     <pattern>org.antlr.v4.runtime</pattern>
-                                    <shadedPattern>org.apache.paimon.shaded.org.antlr.v4.runtime</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shade.org.antlr.v4.runtime</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.codehaus.janino</pattern>
-                                    <shadedPattern>org.apache.paimon.shaded.org.codehaus.janino</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shade.org.codehaus.janino</shadedPattern>
                                 </relocation>
                                 <relocation>
                                     <pattern>org.codehaus.commons</pattern>
-                                    <shadedPattern>org.apache.paimon.shaded.org.codehaus.commons</shadedPattern>
+                                    <shadedPattern>org.apache.paimon.shade.org.codehaus.commons</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>

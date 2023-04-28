@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.utils.FixBinPacking;
 
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
@@ -61,12 +62,11 @@ public class StaticFileStoreSplitEnumerator
 
     private static Map<Integer, Queue<FileStoreSourceSplit>> createSplitAssignment(
             Collection<FileStoreSourceSplit> splits, int numReaders) {
+        List<List<FileStoreSourceSplit>> assignmentList =
+                FixBinPacking.pack(splits, split -> split.split().rowCount(), numReaders);
         Map<Integer, Queue<FileStoreSourceSplit>> assignment = new HashMap<>();
-        int i = 0;
-        for (FileStoreSourceSplit split : splits) {
-            int task = i % numReaders;
-            assignment.computeIfAbsent(task, k -> new LinkedList<>()).add(split);
-            i++;
+        for (int i = 0; i < assignmentList.size(); i++) {
+            assignment.put(i, new LinkedList<>(assignmentList.get(i)));
         }
         return assignment;
     }

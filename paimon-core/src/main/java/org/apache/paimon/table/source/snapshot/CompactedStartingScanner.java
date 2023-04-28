@@ -33,18 +33,30 @@ public class CompactedStartingScanner implements StartingScanner {
     private static final Logger LOG = LoggerFactory.getLogger(CompactedStartingScanner.class);
 
     @Override
-    @Nullable
     public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
-        Long startingSnapshotId = snapshotManager.latestCompactedSnapshotId();
+        Long startingSnapshotId = pick(snapshotManager);
         if (startingSnapshotId == null) {
-            LOG.debug("There is currently no compact snapshot. Waiting for snapshot generation.");
-            return null;
+            startingSnapshotId = snapshotManager.latestSnapshotId();
+            if (startingSnapshotId == null) {
+                LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
+                return new NoSnapshot();
+            } else {
+                LOG.debug(
+                        "No compact snapshot found, reading from the latest snapshot {}.",
+                        startingSnapshotId);
+            }
         }
-        return new Result(
+
+        return new ScannedResult(
                 startingSnapshotId,
                 snapshotSplitReader
                         .withKind(ScanKind.ALL)
                         .withSnapshot(startingSnapshotId)
                         .splits());
+    }
+
+    @Nullable
+    protected Long pick(SnapshotManager snapshotManager) {
+        return snapshotManager.latestCompactedSnapshotId();
     }
 }

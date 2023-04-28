@@ -95,4 +95,9 @@ public class ParquetFileStatsExtractorTest extends FileStatsExtractorTestBase {
         }
         return stats;
     }
+
+    @Override
+    protected String fileCompression() {
+        return "SNAPPY";
+    }
 }

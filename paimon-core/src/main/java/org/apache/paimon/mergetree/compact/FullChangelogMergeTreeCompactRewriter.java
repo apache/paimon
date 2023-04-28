@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
@@ -40,8 +41,9 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
-            MergeFunctionFactory<KeyValue> mfFactory) {
-        super(readerFactory, writerFactory, keyComparator, mfFactory);
+            MergeFunctionFactory<KeyValue> mfFactory,
+            SortEngine sortEngine) {
+        super(readerFactory, writerFactory, keyComparator, mfFactory, sortEngine);
         this.maxLevel = maxLevel;
     }
 

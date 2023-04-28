@@ -50,6 +50,8 @@ CREATE CATALOG my_catalog WITH (
 USE CATALOG my_catalog;
 ```
 
+You can define any default table options with the prefix `table-default.` for tables created in the catalog.
+
 {{< /tab >}}
 
 {{< tab "Spark3" >}}
@@ -61,6 +63,8 @@ spark-sql ... \
     --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
     --conf spark.sql.catalog.paimon.warehouse=hdfs://path/to/warehouse
 ```
+
+You can define any default table options with the prefix `spark.sql.catalog.paimon.table-default.` for tables created in the catalog.
 
 After `spark-sql` is started, you can switch to the `default` database of the `paimon` catalog with the following SQL.
 
@@ -76,6 +80,8 @@ USE paimon.default;
 
 By using Paimon Hive catalog, changes to the catalog will directly affect the corresponding Hive metastore. Tables created in such catalog can also be accessed directly from Hive.
 
+To use Hive catalog, Database name, Table name and Field names should be lower case.
+
 {{< tabs "hive-metastore-example" >}}
 
 {{< tab "Flink" >}}
@@ -83,6 +89,8 @@ By using Paimon Hive catalog, changes to the catalog will directly affect the co
 Paimon Hive catalog in Flink relies on Flink Hive connector bundled jar. You should first download Flink Hive connector bundled jar and add it to classpath. See [here](https://nightlies.apache.org/flink/flink-docs-master/docs/connectors/table/hive/overview/#using-bundled-hive-jar) for more info.
 
 The following Flink SQL registers and uses a Paimon Hive catalog named `my_hive`. Metadata and table files are stored under `hdfs://path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
+
+If your Hive requires security authentication such as Kerberos, LDAP, Ranger and so on. You can specify the hive-conf-dir parameter to the hive-site.xml file path.
 
 ```sql
 CREATE CATALOG my_hive WITH (
@@ -94,6 +102,8 @@ CREATE CATALOG my_hive WITH (
 
 USE CATALOG my_hive;
 ```
+
+You can define any default table options with the prefix `table-default.` for tables created in the catalog.
 
 {{< /tab >}}
 
@@ -111,6 +121,8 @@ spark-sql ... \
     --conf spark.sql.catalog.paimon.uri=thrift://<hive-metastore-host-name>:<port>
 ```
 
+You can define any default table options with the prefix `spark.sql.catalog.paimon.table-default.` for tables created in the catalog.
+
 After `spark-sql` is started, you can switch to the `default` database of the `paimon` catalog with the following SQL.
 
 ```sql
@@ -120,3 +132,8 @@ USE paimon.default;
 {{< /tab >}}
 
 {{< /tabs >}}
+
+If you are using a object storage , and you don't want that the location of paimon table/database is accessed by the filesystem of hive,
+which may lead to the error such as "No FileSystem for scheme: s3a".
+You can set location in the properties of table/database by the config of `location-in-properties`. See
+[setting the location of table/database in properties ]({{< ref "maintenance/configurations#HiveCatalogOptions" >}})

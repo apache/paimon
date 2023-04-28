@@ -24,8 +24,8 @@ import org.apache.paimon.utils.JsonDeserializer;
 import org.apache.paimon.utils.JsonSerializer;
 import org.apache.paimon.utils.StringUtils;
 
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;
 import java.util.ArrayList;

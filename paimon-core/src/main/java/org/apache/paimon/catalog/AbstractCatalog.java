@@ -28,15 +28,36 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.StringUtils;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
 
     protected static final String DB_SUFFIX = ".db";
 
+    protected static final String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
+
     protected final FileIO fileIO;
+
+    protected final Map<String, String> tableDefaultOptions;
 
     protected AbstractCatalog(FileIO fileIO) {
         this.fileIO = fileIO;
+        this.tableDefaultOptions = new HashMap<>();
+    }
+
+    protected AbstractCatalog(FileIO fileIO, Map<String, String> options) {
+        this.fileIO = fileIO;
+        this.tableDefaultOptions = new HashMap<>();
+
+        options.keySet().stream()
+                .filter(key -> key.startsWith(TABLE_DEFAULT_OPTION_PREFIX))
+                .forEach(
+                        key ->
+                                this.tableDefaultOptions.put(
+                                        key.substring(TABLE_DEFAULT_OPTION_PREFIX.length()),
+                                        options.get(key)));
     }
 
     @Override
@@ -62,7 +83,8 @@ public abstract class AbstractCatalog implements Catalog {
         return FileStoreTableFactory.create(fileIO, getDataTableLocation(identifier), tableSchema);
     }
 
-    protected Path databasePath(String database) {
+    @VisibleForTesting
+    public Path databasePath(String database) {
         return new Path(warehouse(), database + DB_SUFFIX);
     }
 
@@ -93,6 +115,10 @@ public abstract class AbstractCatalog implements Catalog {
                             "Cannot '%s' for system table '%s', please use data table.",
                             method, identifier));
         }
+    }
+
+    protected void copyTableDefaultOptions(Map<String, String> options) {
+        tableDefaultOptions.forEach(options::putIfAbsent);
     }
 
     private String[] tableAndSystemName(Identifier identifier) {

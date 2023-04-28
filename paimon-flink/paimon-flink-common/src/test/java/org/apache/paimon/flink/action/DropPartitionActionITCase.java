@@ -21,6 +21,8 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -62,9 +64,9 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
         assertThat(snapshot.id()).isEqualTo(5);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
 
-        TableScan.Plan plan = table.newScan().plan();
+        TableScan.Plan plan = table.newReadBuilder().newScan().plan();
         assertThat(plan.splits().size()).isEqualTo(2);
-        List<String> actual = getResult(table.newRead(), plan.splits(), ROW_TYPE);
+        List<String> actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
 
         List<String> expected;
         if (hasPk) {
@@ -109,9 +111,10 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
         assertThat(snapshot.id()).isEqualTo(5);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
 
-        TableScan.Plan plan = table.newScan().plan();
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().plan();
         assertThat(plan.splits().size()).isEqualTo(2);
-        List<String> actual = getResult(table.newRead(), plan.splits(), ROW_TYPE);
+        List<String> actual = getResult(readBuilder.newRead(), plan.splits(), ROW_TYPE);
 
         List<String> expected;
         if (hasPk) {
@@ -146,8 +149,10 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
                                 : Collections.emptyList(),
                         new HashMap<>());
         snapshotManager = table.snapshotManager();
-        write = table.newWrite(commitUser);
-        commit = table.newCommit(commitUser);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
 
         // prepare data
         writeData(

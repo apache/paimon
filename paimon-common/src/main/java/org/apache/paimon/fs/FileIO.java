@@ -251,12 +251,12 @@ public interface FileIO extends Serializable {
         // load fallbackIO
         FileIOLoader fallbackIO = config.fallbackIO();
         if (loader == null) {
-            loader = checkAccess(fallbackIO, path);
+            loader = checkAccess(fallbackIO, path, config);
         }
 
         // load hadoopIO
         if (loader == null) {
-            loader = checkAccess(new HadoopFileIOLoader(), path);
+            loader = checkAccess(new HadoopFileIOLoader(), path, config);
         }
 
         if (loader == null) {

@@ -37,6 +37,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
+import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
@@ -68,6 +69,7 @@ public class OrcFileStatsExtractorTest extends FileStatsExtractorTestBase {
                         new DecimalType(5, 2),
                         new DecimalType(38, 18),
                         new DateType(),
+                        new TimeType(),
                         new TimestampType(3),
                         new LocalZonedTimestampType(3),
                         // orc reader & writer currently cannot preserve a high precision timestamp
@@ -76,5 +78,10 @@ public class OrcFileStatsExtractorTest extends FileStatsExtractorTestBase {
                         new MapType(new VarCharType(8), new VarCharType(8)),
                         new MultisetType(new VarCharType(8)))
                 .build();
+    }
+
+    @Override
+    protected String fileCompression() {
+        return "LZ4";
     }
 }

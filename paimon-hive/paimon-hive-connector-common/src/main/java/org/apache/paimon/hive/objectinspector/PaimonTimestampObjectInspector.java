@@ -25,9 +25,11 @@ import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitive
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.TimestampObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
+import java.time.LocalDateTime;
+
 /** {@link AbstractPrimitiveJavaObjectInspector} for TIMESTAMP type. */
 public class PaimonTimestampObjectInspector extends AbstractPrimitiveJavaObjectInspector
-        implements TimestampObjectInspector {
+        implements TimestampObjectInspector, WriteableObjectInspector {
 
     public PaimonTimestampObjectInspector() {
         super(TypeInfoFactory.timestampTypeInfo);
@@ -54,6 +56,18 @@ public class PaimonTimestampObjectInspector extends AbstractPrimitiveJavaObjectI
             return new java.sql.Timestamp(timestamp.getTime());
         } else {
             return o;
+        }
+    }
+
+    @Override
+    public Timestamp convert(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof java.sql.Timestamp) {
+            return Timestamp.fromSQLTimestamp((java.sql.Timestamp) value);
+        } else {
+            return Timestamp.fromLocalDateTime((LocalDateTime) value);
         }
     }
 }

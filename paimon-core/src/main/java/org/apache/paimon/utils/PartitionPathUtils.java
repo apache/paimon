@@ -20,8 +20,10 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.fs.Path;
 
+import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /** Utils for file system. */
@@ -79,6 +81,35 @@ public class PartitionPathUtils {
         }
         suffixBuf.append(Path.SEPARATOR);
         return suffixBuf.toString();
+    }
+
+    /**
+     * Generate all hierarchical paths from partition spec.
+     *
+     * <p>For example, if the partition spec is (pt1: '0601', pt2: '12', pt3: '30'), this method
+     * will return a list (start from index 0):
+     *
+     * <ul>
+     *   <li>pt1=0601
+     *   <li>pt1=0601/pt2=12
+     *   <li>pt1=0601/pt2=12/pt3=30
+     * </ul>
+     */
+    public static List<String> generateHierarchicalPartitionPaths(
+            LinkedHashMap<String, String> partitionSpec) {
+        List<String> paths = new ArrayList<>();
+        if (partitionSpec.isEmpty()) {
+            return paths;
+        }
+        StringBuilder suffixBuf = new StringBuilder();
+        for (Map.Entry<String, String> e : partitionSpec.entrySet()) {
+            suffixBuf.append(escapePathName(e.getKey()));
+            suffixBuf.append('=');
+            suffixBuf.append(escapePathName(e.getValue()));
+            suffixBuf.append(Path.SEPARATOR);
+            paths.add(suffixBuf.toString());
+        }
+        return paths;
     }
 
     /**

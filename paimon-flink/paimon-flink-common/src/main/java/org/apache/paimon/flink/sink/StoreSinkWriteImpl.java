@@ -29,15 +29,12 @@ import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
 
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
-import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Function;
 
 /** Default implementation of {@link StoreSinkWrite}. This writer does not have states. */
 public class StoreSinkWriteImpl implements StoreSinkWrite {
@@ -45,42 +42,35 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     private static final Logger LOG = LoggerFactory.getLogger(StoreSinkWriteImpl.class);
 
     protected final String commitUser;
+    protected final StoreSinkWriteState state;
+    private final IOManager ioManager;
+    private final boolean isOverwrite;
     private final boolean waitCompaction;
 
     protected TableWriteImpl<?> write;
 
     public StoreSinkWriteImpl(
             FileStoreTable table,
-            StateInitializationContext context,
-            String initialCommitUser,
+            String commitUser,
+            StoreSinkWriteState state,
             IOManager ioManager,
             boolean isOverwrite,
-            boolean waitCompaction)
-            throws Exception {
-        // Each job can only have one user name and this name must be consistent across restarts.
-        // We cannot use job id as commit user name here because user may change job id by creating
-        // a savepoint, stop the job and then resume from savepoint.
-        commitUser =
-                StateUtils.getSingleValueFromState(
-                        context, "commit_user_state", String.class, initialCommitUser);
-
-        // State will be null if the upstream of this subtask has finished, but some other subtasks
-        // are still running.
-        // See comments of StateUtils.getSingleValueFromState for more detail.
-        //
-        // If the state is null, no new records will come. We only need to deal with checkpoints and
-        // close events.
-        if (commitUser == null) {
-            write = null;
-        } else {
-            write =
-                    table.newWrite(commitUser)
-                            .withIOManager(
-                                    new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()))
-                            .withOverwrite(isOverwrite);
-        }
-
+            boolean waitCompaction) {
+        this.commitUser = commitUser;
+        this.state = state;
+        this.ioManager = ioManager;
+        this.isOverwrite = isOverwrite;
         this.waitCompaction = waitCompaction;
+        this.write = newTableWrite(table);
+    }
+
+    private TableWriteImpl<?> newTableWrite(FileStoreTable table) {
+        return table.newWrite(
+                        commitUser,
+                        (part, bucket) ->
+                                state.stateValueFilter().filter(table.name(), part, bucket))
+                .withIOManager(new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()))
+                .withOverwrite(isOverwrite);
     }
 
     @Override
@@ -131,7 +121,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     }
 
     @Override
-    public void snapshotState(StateSnapshotContext context) throws Exception {
+    public void snapshotState() throws Exception {
         // do nothing
     }
 
@@ -143,14 +133,14 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     }
 
     @Override
-    public void replace(Function<String, TableWriteImpl<?>> newWriteProvider) throws Exception {
+    public void replace(FileStoreTable newTable) throws Exception {
         if (commitUser == null) {
             return;
         }
 
         List<AbstractFileStoreWrite.State> states = write.checkpoint();
         write.close();
-        write = newWriteProvider.apply(commitUser);
+        write = newTableWrite(newTable);
         write.restore(states);
     }
 }

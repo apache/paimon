@@ -22,14 +22,14 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
 
-import org.apache.flink.shaded.guava30.com.google.common.cache.Cache;
-import org.apache.flink.shaded.guava30.com.google.common.cache.CacheBuilder;
-import org.apache.flink.shaded.guava30.com.google.common.cache.RemovalNotification;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.Objects;
-import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
 
 /** Cache manager to cache bytes to paged {@link MemorySegment}s. */
@@ -41,10 +41,11 @@ public class CacheManager {
     public CacheManager(int pageSize, MemorySize maxMemorySize) {
         this.pageSize = pageSize;
         this.cache =
-                CacheBuilder.newBuilder()
+                Caffeine.newBuilder()
                         .weigher(this::weigh)
                         .maximumWeight(maxMemorySize.getBytes())
                         .removalListener(this::onRemoval)
+                        .executor(MoreExecutors.directExecutor())
                         .build();
     }
 
@@ -61,11 +62,16 @@ public class CacheManager {
             RandomAccessFile file, int pageNumber, Consumer<Integer> cleanCallback) {
         CacheKey key = new CacheKey(file, pageNumber);
         CacheValue value;
-        try {
-            value = cache.get(key, () -> createValue(key, cleanCallback));
-        } catch (ExecutionException e) {
-            throw new RuntimeException(e);
-        }
+        value =
+                cache.get(
+                        key,
+                        cacheKey -> {
+                            try {
+                                return createValue(key, cleanCallback);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
         return value.segment;
     }
 
@@ -77,8 +83,8 @@ public class CacheManager {
         return cacheValue.segment.size();
     }
 
-    private void onRemoval(RemovalNotification<CacheKey, CacheValue> notification) {
-        notification.getValue().cleanCallback.accept(notification.getKey().pageNumber);
+    private void onRemoval(CacheKey key, CacheValue value, RemovalCause cause) {
+        value.cleanCallback.accept(key.pageNumber);
     }
 
     private CacheValue createValue(CacheKey key, Consumer<Integer> cleanCallback)

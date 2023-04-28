@@ -96,7 +96,7 @@ public class Levels {
     }
 
     public SortedRun runOfLevel(int level) {
-        checkArgument(level > 0, "Level0 dose not have one single sorted run.");
+        checkArgument(level > 0, "Level0 does not have one single sorted run.");
         return levels.get(level - 1);
     }
 

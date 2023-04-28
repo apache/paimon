@@ -34,7 +34,7 @@ Paimon currently supports Hive 2.1, 2.1-cdh-6.3, 2.2, 2.3 and 3.1.
 
 ## Execution Engine
 
-Paimon currently supports MR and Tez execution engine for Hive.
+Paimon currently supports MR and Tez execution engine for Hive Read, and MR execution engine for Hive Write. 
 
 ## Installation
 
@@ -42,20 +42,20 @@ Download the jar file with corresponding version.
 
 {{< stable >}}
 
-|                  | Jar                                                                                                                                                                                                                |
-|------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Hive 3.1         | [paimon-hive-connector-3.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-hive-connector-3.1-{{< version >}}.jar)                 |
-| Hive 2.3         | [paimon-hive-connector-2.3-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-hive-connector-2.3-{{< version >}}.jar)                 |
-| Hive 2.2         | [paimon-hive-connector-2.2-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-hive-connector-2.2-{{< version >}}.jar)                 |
-| Hive 2.1         | [paimon-hive-connector-2.1-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-hive-connector-2.1-{{< version >}}.jar)                 |
-| Hive 2.1-cdh-6.3 | [paimon-hive-connector-2.1-cdh-6.3-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-hive-connector-2.1-cdh-6.3-{{< version >}}.jar) |
+|                  | Jar                                                                                                                                                                                                                     |
+|------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Hive 3.1         | [paimon-hive-connector-3.1-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-3.1/{{< version >}}/paimon-hive-connector-3.1-{{< version >}}.jar)                         |
+| Hive 2.3         | [paimon-hive-connector-2.3-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.3/{{< version >}}/paimon-hive-connector-2.3-{{< version >}}.jar)                         |
+| Hive 2.2         | [paimon-hive-connector-2.2-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.2/{{< version >}}/paimon-hive-connector-2.2-{{< version >}}.jar)                         |
+| Hive 2.1         | [paimon-hive-connector-2.1-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.1/{{< version >}}/paimon-hive-connector-2.1-{{< version >}}.jar)                         |
+| Hive 2.1-cdh-6.3 | [paimon-hive-connector-2.1-cdh-6.3-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.1-cdh-6.3/{{< version >}}/paimon-hive-connector-2.1-cdh-6.3-{{< version >}}.jar) |
 
 {{< /stable >}}
 
 {{< unstable >}}
 
-|                  | Jar                                                                                                                                                                                                                |
-|------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+|                  | Jar                                                                                                                                                                   |
+|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Hive 3.1         | [paimon-hive-connector-3.1-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-3.1/{{< version >}}/)                 |
 | Hive 2.3         | [paimon-hive-connector-2.3-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-2.3/{{< version >}}/)                 |
 | Hive 2.2         | [paimon-hive-connector-2.2-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-hive-connector-2.2/{{< version >}}/)                 |
@@ -182,6 +182,35 @@ OK
 1	Table
 2	Store
 */
+
+-- Insert records into test table
+
+INSERT INTO test_table VALUES (3, 'Paimon');
+
+SELECT a, b FROM test_table ORDER BY a;
+
+/*
+OK
+1	Table
+2	Store
+3	Paimon
+*/
+-- Insert records into test table from other table
+
+INSERT INTO test_table SELECT a, b FROM test_table;
+
+SELECT a, b FROM test_table ORDER BY a;
+
+/*
+OK
+1	Table
+1	Table
+2	Store
+2	Store
+3	Paimon
+3	Paimon
+*/
+
 ```
 
 ## Hive Type Conversion
@@ -193,7 +222,7 @@ All Hive's data types are available in package `org.apache.hadoop.hive.serde2.ty
     <thead>
     <tr>
       <th class="text-left" style="width: 10%">Hive Data Type</th>
-      <th class="text-left" style="width: 10%">Flink Data Type</th>
+      <th class="text-left" style="width: 10%">Paimon Data Type</th>
       <th class="text-left" style="width: 5%">Atomic Type</th>
     </tr>
     </thead>

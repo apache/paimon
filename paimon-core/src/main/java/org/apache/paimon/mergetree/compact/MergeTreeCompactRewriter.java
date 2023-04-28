@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.InternalRow;
@@ -40,16 +41,19 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     protected final KeyValueFileWriterFactory writerFactory;
     protected final Comparator<InternalRow> keyComparator;
     protected final MergeFunctionFactory<KeyValue> mfFactory;
+    protected final SortEngine sortEngine;
 
     public MergeTreeCompactRewriter(
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
-            MergeFunctionFactory<KeyValue> mfFactory) {
+            MergeFunctionFactory<KeyValue> mfFactory,
+            SortEngine sortEngine) {
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
         this.keyComparator = keyComparator;
         this.mfFactory = mfFactory;
+        this.sortEngine = sortEngine;
     }
 
     @Override
@@ -64,7 +68,12 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
                 writerFactory.createRollingMergeTreeFileWriter(outputLevel);
         RecordReader<KeyValue> sectionsReader =
                 MergeTreeReaders.readerForMergeTree(
-                        sections, dropDelete, readerFactory, keyComparator, mfFactory.create());
+                        sections,
+                        dropDelete,
+                        readerFactory,
+                        keyComparator,
+                        mfFactory.create(),
+                        sortEngine);
         writer.write(new RecordReaderIterator<>(sectionsReader));
         writer.close();
         return new CompactResult(extractFilesFromSections(sections), writer.result());

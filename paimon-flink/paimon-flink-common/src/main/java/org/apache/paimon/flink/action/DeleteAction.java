@@ -45,6 +45,7 @@ public class DeleteAction extends ActionBase {
 
     public DeleteAction(String warehouse, String databaseName, String tableName, String filter) {
         super(warehouse, databaseName, tableName);
+        changeIgnoreMergeEngine();
         this.filter = filter;
     }
 

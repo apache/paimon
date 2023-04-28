@@ -213,6 +213,15 @@ public abstract class SparkCatalogBase implements TableCatalog, SupportsNamespac
     }
 
     @Override
+    public boolean tableExists(Identifier ident) {
+        try {
+            return catalog.tableExists(toIdentifier(ident));
+        } catch (NoSuchTableException e) {
+            return false;
+        }
+    }
+
+    @Override
     public Table alterTable(Identifier ident, TableChange... changes) throws NoSuchTableException {
         List<SchemaChange> schemaChanges =
                 Arrays.stream(changes).map(this::toSchemaChange).collect(Collectors.toList());

@@ -285,7 +285,8 @@ public class SparkReadITCase extends SparkReadTestBase {
                         + "b STRING)\n"
                         + "PARTITIONED BY (a)\n");
         assertThat(spark.sql("DESCRIBE PartitionedTable").collectAsList().toString())
-                .isEqualTo("[[a,bigint,], [b,string,], [,,], [# Partitioning,,], [Part 0,a,]]");
+                .isEqualTo(
+                        "[[a,bigint,null], [b,string,null], [# Partition Information,,], [# col_name,data_type,comment], [a,bigint,null]]");
     }
 
     @Test
@@ -453,10 +454,14 @@ public class SparkReadITCase extends SparkReadTestBase {
         spark.sql(ddl);
         assertThatThrownBy(() -> spark.sql(ddl))
                 .isInstanceOf(TableAlreadyExistsException.class)
-                .hasMessageContaining(String.format("Table default.%s already exists", tableName));
+                .hasMessageContaining(
+                        String.format(
+                                "Cannot create table or view `default`.`%s` because it already "
+                                        + "exists",
+                                tableName));
         assertThatThrownBy(() -> spark.sql(ddl.replace("default", "foo")))
                 .isInstanceOf(NoSuchNamespaceException.class)
-                .hasMessageContaining("Namespace 'foo' not found");
+                .hasMessageContaining("The schema `foo` cannot be found");
 
         assertThatThrownBy(
                         () ->
@@ -551,7 +556,7 @@ public class SparkReadITCase extends SparkReadTestBase {
 
         assertThatThrownBy(() -> spark.sql("CREATE NAMESPACE bar"))
                 .isInstanceOf(NamespaceAlreadyExistsException.class)
-                .hasMessageContaining("Namespace 'bar' already exists");
+                .hasMessageContaining("Cannot create schema `bar` because it already exists");
 
         assertThat(
                         spark.sql("SHOW NAMESPACES").collectAsList().stream()

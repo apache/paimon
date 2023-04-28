@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
@@ -124,6 +125,6 @@ public class DropPartitionAction extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        commit.dropPartitions(partitions);
+        commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
     }
 }

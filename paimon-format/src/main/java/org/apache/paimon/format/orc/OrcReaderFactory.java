@@ -31,6 +31,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Pool;
 
@@ -252,41 +253,47 @@ public class OrcReaderFactory implements FormatReaderFactory {
             long splitLength)
             throws IOException {
         org.apache.orc.Reader orcReader = createReader(conf, fileIO, path);
+        try {
+            // get offset and length for the stripes that start in the split
+            Pair<Long, Long> offsetAndLength =
+                    getOffsetAndLengthForSplit(splitStart, splitLength, orcReader.getStripes());
 
-        // get offset and length for the stripes that start in the split
-        Pair<Long, Long> offsetAndLength =
-                getOffsetAndLengthForSplit(splitStart, splitLength, orcReader.getStripes());
+            // create ORC row reader configuration
+            org.apache.orc.Reader.Options options =
+                    new org.apache.orc.Reader.Options()
+                            .schema(schema)
+                            .range(offsetAndLength.getLeft(), offsetAndLength.getRight())
+                            .useZeroCopy(OrcConf.USE_ZEROCOPY.getBoolean(conf))
+                            .skipCorruptRecords(OrcConf.SKIP_CORRUPT_DATA.getBoolean(conf))
+                            .tolerateMissingSchema(
+                                    OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf));
 
-        // create ORC row reader configuration
-        org.apache.orc.Reader.Options options =
-                new org.apache.orc.Reader.Options()
-                        .schema(schema)
-                        .range(offsetAndLength.getLeft(), offsetAndLength.getRight())
-                        .useZeroCopy(OrcConf.USE_ZEROCOPY.getBoolean(conf))
-                        .skipCorruptRecords(OrcConf.SKIP_CORRUPT_DATA.getBoolean(conf))
-                        .tolerateMissingSchema(OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf));
-
-        // configure filters
-        if (!conjunctPredicates.isEmpty()) {
-            SearchArgument.Builder b = SearchArgumentFactory.newBuilder();
-            b = b.startAnd();
-            for (OrcFilters.Predicate predicate : conjunctPredicates) {
-                predicate.add(b);
+            // configure filters
+            if (!conjunctPredicates.isEmpty()) {
+                SearchArgument.Builder b = SearchArgumentFactory.newBuilder();
+                b = b.startAnd();
+                for (OrcFilters.Predicate predicate : conjunctPredicates) {
+                    predicate.add(b);
+                }
+                b = b.end();
+                options.searchArgument(b.build(), new String[] {});
             }
-            b = b.end();
-            options.searchArgument(b.build(), new String[] {});
+
+            // configure selected fields
+            options.include(computeProjectionMask(schema, selectedFields));
+
+            // create ORC row reader
+            RecordReader orcRowsReader = orcReader.rows(options);
+
+            // assign ids
+            schema.getId();
+
+            return orcRowsReader;
+        } catch (IOException e) {
+            // exception happened, we need to close the reader
+            IOUtils.closeQuietly(orcReader);
+            throw e;
         }
-
-        // configure selected fields
-        options.include(computeProjectionMask(schema, selectedFields));
-
-        // create ORC row reader
-        RecordReader orcRowsReader = orcReader.rows(options);
-
-        // assign ids
-        schema.getId();
-
-        return orcRowsReader;
     }
 
     private static VectorizedRowBatch createBatchWrapper(TypeDescription schema, int batchSize) {

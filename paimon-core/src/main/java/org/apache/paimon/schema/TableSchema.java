@@ -131,8 +131,19 @@ public class TableSchema implements Serializable {
         return options;
     }
 
+    public List<String> bucketKeys() {
+        List<String> bucketKeys = originalBucketKeys();
+        if (bucketKeys.isEmpty()) {
+            bucketKeys = trimmedPrimaryKeys();
+        }
+        if (bucketKeys.isEmpty()) {
+            bucketKeys = fieldNames();
+        }
+        return bucketKeys;
+    }
+
     /** Original bucket keys, maybe empty. */
-    public List<String> originalBucketKeys() {
+    private List<String> originalBucketKeys() {
         String key = options.get(BUCKET_KEY.key());
         if (StringUtils.isNullOrWhitespaceOnly(key)) {
             return Collections.emptyList();
@@ -178,14 +189,7 @@ public class TableSchema implements Serializable {
     }
 
     public RowType logicalBucketKeyType() {
-        List<String> bucketKeys = originalBucketKeys();
-        if (bucketKeys.isEmpty()) {
-            bucketKeys = trimmedPrimaryKeys();
-        }
-        if (bucketKeys.isEmpty()) {
-            bucketKeys = fieldNames();
-        }
-        return projectedLogicalRowType(bucketKeys);
+        return projectedLogicalRowType(bucketKeys());
     }
 
     public RowType logicalTrimmedPrimaryKeysType() {

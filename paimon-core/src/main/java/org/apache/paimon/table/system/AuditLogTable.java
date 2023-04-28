@@ -47,7 +47,7 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.apache.flink.shaded.guava30.com.google.common.primitives.Ints;
+import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 
 import javax.annotation.Nullable;
 

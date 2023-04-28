@@ -50,7 +50,7 @@ import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SerializationUtils;
 
-import org.apache.flink.shaded.guava30.com.google.common.collect.Iterators;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
 import java.io.IOException;
 import java.util.ArrayList;

@@ -195,7 +195,7 @@ This file is based on the checkstyle file of Apache Beam.
 			<!-- Checks for out of order import statements. -->
 			<property name="severity" value="error"/>
 			<property name="groups"
-					  value="org.apache.paimon,org.apache.paimon.shaded,*,javax,java,scala"/>
+					  value="org.apache.paimon,org.apache.paimon.shade,*,javax,java,scala"/>
 			<property name="separated" value="true"/>
 			<property name="sortStaticImportsAlphabetically" value="true"/>
 			<property name="option" value="bottom"/>
@@ -214,19 +214,19 @@ This file is based on the checkstyle file of Apache Beam.
 		</module>
 		<module name="IllegalImport">
 			<property name="illegalPkgs" value="org.codehaus.jackson"/>
-			<message key="import.illegal" value="{0}; Use flink-shaded-jackson instead."/>
+			<message key="import.illegal" value="{0}; Use paimon-shade-jackson instead."/>
 		</module>
 		<module name="IllegalImport">
-			<property name="illegalPkgs" value="org.objectweb.asm"/>
-			<message key="import.illegal" value="{0}; Use flink-shaded-asm instead."/>
-		</module>
-		<module name="IllegalImport">
-			<property name="illegalPkgs" value="io.netty"/>
-			<message key="import.illegal" value="{0}; Use flink-shaded-netty instead."/>
+			<property name="illegalPkgs" value="com.fasterxml.jackson"/>
+			<message key="import.illegal" value="{0}; Use paimon-shade-jackson instead."/>
 		</module>
 		<module name="IllegalImport">
 			<property name="illegalPkgs" value="com.google.common"/>
-			<message key="import.illegal" value="{0}; Use flink-shaded-guava instead."/>
+			<message key="import.illegal" value="{0}; Use paimon-shade-guava instead."/>
+		</module>
+		<module name="IllegalImport">
+			<property name="illegalPkgs" value="com.github.ben-manes.caffeine"/>
+			<message key="import.illegal" value="{0}; Use paimon-shade-caffeine instead."/>
 		</module>
 
 		<module name="RedundantModifier">

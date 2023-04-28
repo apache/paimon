@@ -20,7 +20,9 @@ package org.apache.paimon.plugin;
 
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.LocalFileUtils;
+import org.apache.paimon.utils.StringUtils;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
@@ -30,6 +32,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.ServiceLoader;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -63,7 +66,9 @@ public class PluginLoader {
     public PluginLoader(String jarName) {
         try {
             ClassLoader ownerClassLoader = PluginLoader.class.getClassLoader();
-            Path tmpDirectory = Paths.get(System.getProperty("java.io.tmpdir"));
+            Path tmpDirectory =
+                    tmpDirectoryFromYarn()
+                            .orElseGet(() -> Paths.get(System.getProperty("java.io.tmpdir")));
             Files.createDirectories(
                     LocalFileUtils.getTargetPathIfContainsSymbolicPath(tmpDirectory));
             Path delegateJar =
@@ -132,5 +137,16 @@ public class PluginLoader {
 
     public ClassLoader submoduleClassLoader() {
         return submoduleClassLoader;
+    }
+
+    private static Optional<Path> tmpDirectoryFromYarn() {
+        String localDirs = System.getenv("LOCAL_DIRS");
+        if (!StringUtils.isBlank(localDirs)) {
+            String[] paths = localDirs.split(",|" + File.pathSeparator);
+            if (paths.length > 0) {
+                return Optional.of(Paths.get(paths[0]));
+            }
+        }
+        return Optional.empty();
     }
 }

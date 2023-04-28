@@ -133,6 +133,7 @@ public class RandomGenericRowDataGenerator {
                                                     FIELD_COMMENTS.get(i)))
                             .collect(Collectors.toList()));
 
+    // todo generate with schema
     public static GenericRow generate() {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         byte[] randomBytes = new byte[random.nextInt(20)];
@@ -185,11 +186,13 @@ public class RandomGenericRowDataGenerator {
         return builder.toString();
     }
 
-    private static BigDecimal randomBigDecimal(int precision, int scale) {
+    public static BigDecimal randomBigDecimal(int precision, int scale) {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         StringBuilder builder = new StringBuilder();
+        // to avoid starting with  0
         for (int i = 0; i < precision - scale; i++) {
-            builder.append((char) (random.nextInt(10) + '0'));
+            int t = random.nextInt(10);
+            builder.append(t == 0 ? 1 : t);
         }
         builder.append('.');
         for (int i = 0; i < scale; i++) {

@@ -36,12 +36,12 @@ Download the jar file with corresponding version.
 
 {{< stable >}}
 
-| Version    | Jar                                                                                                                                               |
-|------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| Flink 1.17 | [paimon-flink-1.17-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.17-{{< version >}}.jar) |
-| Flink 1.16 | [paimon-flink-1.16-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.16-{{< version >}}.jar) |
-| Flink 1.15 | [paimon-flink-1.15-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.15-{{< version >}}.jar) |
-| Flink 1.14 | [paimon-flink-1.14-{{< version >}}.jar](https://www.apache.org/dyn/closer.lua/flink/paimon-{{< version >}}/paimon-flink-1.14-{{< version >}}.jar) |
+| Version    | Jar                                                                                                                                                                     |
+|------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 1.17 | [paimon-flink-1.17-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.17/{{< version >}}/paimon-flink-1.17-{{< version >}}.jar) |
+| Flink 1.16 | [paimon-flink-1.16-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.16/{{< version >}}/paimon-flink-1.16-{{< version >}}.jar) |
+| Flink 1.15 | [paimon-flink-1.15-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.15/{{< version >}}/paimon-flink-1.15-{{< version >}}.jar) |
+| Flink 1.14 | [paimon-flink-1.14-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.14/{{< version >}}/paimon-flink-1.14-{{< version >}}.jar) |
 
 {{< /stable >}}
 
@@ -69,7 +69,7 @@ You can find the bundled jar in `./paimon-flink/paimon-flink-<flink-version>/tar
 
 **Step 1: Download Flink**
 
-If you haven't downloaded Flink, you can [download Flink 1.16](https://flink.apache.org/downloads.html), then extract the archive with the following command.
+If you haven't downloaded Flink, you can [download Flink](https://flink.apache.org/downloads.html), then extract the archive with the following command.
 
 ```bash
 tar -xzf flink-*.tgz

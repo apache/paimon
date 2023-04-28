@@ -1,6 +1,7 @@
 .cache
 .classpath
-.idea
+.idea/*
+!.idea/vcs.xml
 .metadata
 .settings
 .project
@@ -15,3 +16,6 @@ target
 .DS_Store
 *.ipr
 *.iws
+test/coverage
+dependency-reduced-pom.xml
+jacoco.exec

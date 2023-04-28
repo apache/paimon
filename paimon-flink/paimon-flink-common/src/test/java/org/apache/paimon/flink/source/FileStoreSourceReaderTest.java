@@ -28,6 +28,8 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
+import org.apache.flink.connector.testutils.source.reader.TestingReaderOutput;
+import org.apache.flink.table.data.RowData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -78,11 +80,28 @@ public class FileStoreSourceReaderTest {
         final TestingReaderContext context = new TestingReaderContext();
         final FileStoreSourceReader<?> reader = createReader(context);
 
-        reader.addSplits(Collections.singletonList(createTestFileSplit()));
+        reader.addSplits(Collections.singletonList(createTestFileSplit("id1")));
         reader.start();
         reader.close();
 
         assertThat(context.getNumSplitRequests()).isEqualTo(0);
+    }
+
+    @Test
+    public void testAddMultipleSplits() throws Exception {
+        final TestingReaderContext context = new TestingReaderContext();
+        final FileStoreSourceReader<?> reader = createReader(context);
+
+        reader.start();
+        assertThat(context.getNumSplitRequests()).isEqualTo(1);
+
+        reader.addSplits(Arrays.asList(createTestFileSplit("id1"), createTestFileSplit("id2")));
+        TestingReaderOutput<RowData> output = new TestingReaderOutput<>();
+        while (reader.getNumberOfCurrentlyAssignedSplits() > 0) {
+            reader.pollNext(output);
+            Thread.sleep(10);
+        }
+        assertThat(context.getNumSplitRequests()).isEqualTo(2);
     }
 
     private FileStoreSourceReader<?> createReader(TestingReaderContext context) {
@@ -93,7 +112,7 @@ public class FileStoreSourceReaderTest {
                 null);
     }
 
-    private static FileStoreSourceSplit createTestFileSplit() {
-        return newSourceSplit("id1", row(1), 0, Collections.emptyList());
+    private static FileStoreSourceSplit createTestFileSplit(String id) {
+        return newSourceSplit(id, row(1), 0, Collections.emptyList());
     }
 }
