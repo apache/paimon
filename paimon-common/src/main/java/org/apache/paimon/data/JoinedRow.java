@@ -48,22 +48,26 @@ public class JoinedRow implements InternalRow {
     public JoinedRow() {}
 
     /**
-     * Creates a new {@link JoinedRow} of kind {@link RowKind#INSERT} backed by {@param row1} and
-     * {@param row2}.
+     * Creates a new {@link JoinedRow} of kind {@link RowKind#INSERT} backed by row1 and row2.
      *
      * <p>Note that it must be ensured that the backing rows are set to non-{@code null} values
      * before accessing data from this {@link JoinedRow}.
+     *
+     * @param row1 the first row
+     * @param row2 the second row
      */
     public JoinedRow(@Nullable InternalRow row1, @Nullable InternalRow row2) {
         this(RowKind.INSERT, row1, row2);
     }
 
     /**
-     * Creates a new {@link JoinedRow} of kind {@param rowKind} backed by {@param row1} and {@param
-     * row2}.
+     * Creates a new {@link JoinedRow} of kind {@link RowKind#INSERT} backed by row1 and row2.
      *
      * <p>Note that it must be ensured that the backing rows are set to non-{@code null} values
      * before accessing data from this {@link JoinedRow}.
+     *
+     * @param row1 the first row
+     * @param row2 the second row
      */
     public JoinedRow(RowKind rowKind, @Nullable InternalRow row1, @Nullable InternalRow row2) {
         this.rowKind = rowKind;
