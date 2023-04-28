@@ -32,11 +32,13 @@ import org.apache.hadoop.hive.serde2.typeinfo.CharTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.DecimalTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.ListTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.MapTypeInfo;
+import org.apache.hadoop.hive.serde2.typeinfo.StructTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 import org.apache.hadoop.hive.serde2.typeinfo.VarcharTypeInfo;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -172,6 +174,23 @@ public class HiveTypeUtils {
             return DataTypes.MAP(
                     typeInfoToLogicalType(mapTypeInfo.getMapKeyTypeInfo()),
                     typeInfoToLogicalType(mapTypeInfo.getMapValueTypeInfo()));
+        } else if (typeInfo instanceof StructTypeInfo) {
+            StructTypeInfo structTypeInfo = (StructTypeInfo) typeInfo;
+            ArrayList<String> fieldNames = structTypeInfo.getAllStructFieldNames();
+            ArrayList<TypeInfo> typeInfos = structTypeInfo.getAllStructFieldTypeInfos();
+
+            int highestFieldId = -1;
+            DataField[] dataFields = new DataField[fieldNames.size()];
+            for (int i = 0; i < fieldNames.size(); i++) {
+                dataFields[i] =
+                        new DataField(
+                                ++highestFieldId,
+                                fieldNames.get(i),
+                                typeInfoToLogicalType(typeInfos.get(i)),
+                                "");
+            }
+
+            return DataTypes.ROW(dataFields);
         }
 
         throw new UnsupportedOperationException("Unsupported hive type " + typeInfo.getTypeName());

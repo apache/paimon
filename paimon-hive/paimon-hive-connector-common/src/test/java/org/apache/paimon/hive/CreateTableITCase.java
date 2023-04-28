@@ -18,13 +18,17 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.schema.TableSchema;
+
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.ql.parse.ParseException;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.junit.Test;
 
 import java.util.Arrays;
+import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
@@ -128,6 +132,115 @@ public class CreateTableITCase extends HiveTestBase {
                         "Paimon currently does not support creating partitioned table "
                                 + "with PARTITIONED BY clause. If you want to query from a partitioned table, "
                                 + "please add partition columns into the ordinary table columns.");
+    }
+
+    @Test
+    public void testCreateTableWithPrimaryKey() {
+        String tableName = "primary_key_table";
+        String hiveSql =
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE EXTERNAL TABLE " + tableName + " (",
+                                "user_id "
+                                        + TypeInfoFactory.longTypeInfo.getTypeName()
+                                        + " COMMENT 'The user_id field',",
+                                "item_id "
+                                        + TypeInfoFactory.longTypeInfo.getTypeName()
+                                        + " COMMENT 'The item_id field',",
+                                "behavior "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The behavior field',",
+                                "dt "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The dt field',",
+                                "hh "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The hh field'",
+                                ")",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
+                                "LOCATION '" + path + "'",
+                                "TBLPROPERTIES (",
+                                "  'primary-key'='dt,hh,user_id'",
+                                ")"));
+        assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
+        Optional<TableSchema> tableSchema = paimonTableSchema();
+        assertThat(tableSchema).isPresent();
+        assertThat(tableSchema.get().primaryKeys()).contains("dt", "hh", "user_id");
+        assertThat(tableSchema.get().partitionKeys()).isEmpty();
+    }
+
+    @Test
+    public void testCreateTableWithPartition() {
+        String tableName = "partition_table";
+        String hiveSql =
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE EXTERNAL TABLE " + tableName + " (",
+                                "user_id "
+                                        + TypeInfoFactory.longTypeInfo.getTypeName()
+                                        + " COMMENT 'The user_id field',",
+                                "item_id "
+                                        + TypeInfoFactory.longTypeInfo.getTypeName()
+                                        + " COMMENT 'The item_id field',",
+                                "behavior "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The behavior field',",
+                                "dt "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The dt field',",
+                                "hh "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The hh field'",
+                                ")",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
+                                "LOCATION '" + path + "'",
+                                "TBLPROPERTIES (",
+                                "  'partition'='dt,hh'",
+                                ")"));
+        assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
+        Optional<TableSchema> tableSchema = paimonTableSchema();
+        assertThat(tableSchema).isPresent();
+        assertThat(tableSchema.get().partitionKeys()).contains("dt", "hh");
+        assertThat(tableSchema.get().primaryKeys()).isEmpty();
+    }
+
+    @Test
+    public void testCreateTableWithPrimaryKeyAndPartition() {
+        String tableName = "primary_key_partition_table";
+        String hiveSql =
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE EXTERNAL TABLE " + tableName + " (",
+                                "user_id "
+                                        + TypeInfoFactory.longTypeInfo.getTypeName()
+                                        + " COMMENT 'The user_id field',",
+                                "item_id "
+                                        + TypeInfoFactory.longTypeInfo.getTypeName()
+                                        + " COMMENT 'The item_id field',",
+                                "behavior "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The behavior field',",
+                                "dt "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The dt field',",
+                                "hh "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The hh field'",
+                                ")",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
+                                "LOCATION '" + path + "'",
+                                "TBLPROPERTIES (",
+                                "  'primary-key'='dt,hh,user_id',",
+                                "  'partition'='dt,hh'",
+                                ")"));
+        assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
+        Optional<TableSchema> tableSchema = paimonTableSchema();
+        assertThat(tableSchema).isPresent();
+        assertThat(tableSchema.get().primaryKeys()).contains("dt", "hh", "user_id");
+        assertThat(tableSchema.get().partitionKeys()).contains("dt", "hh");
     }
 
     @Test

@@ -20,12 +20,14 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.mapred.PaimonInputFormat;
 import org.apache.paimon.hive.mapred.PaimonOutputFormat;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.TableUtils;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
@@ -33,7 +35,10 @@ import org.apache.hadoop.hive.metastore.MetaStoreUtils;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.Table;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 
@@ -44,6 +49,7 @@ import static org.apache.paimon.hive.HiveTypeUtils.typeInfoToLogicalType;
  * formats.
  */
 public class PaimonMetaHook implements HiveMetaHook {
+    private static final Logger LOG = LoggerFactory.getLogger(PaimonMetaHook.class);
     private static final String COMMENT = "comment";
     private final Configuration conf;
 
@@ -66,8 +72,17 @@ public class PaimonMetaHook implements HiveMetaHook {
         table.getSd().setInputFormat(PaimonInputFormat.class.getCanonicalName());
         table.getSd().setOutputFormat(PaimonOutputFormat.class.getCanonicalName());
 
+        Path path = new Path(table.getSd().getLocation());
         CatalogContext context = catalogContext(table);
-        Optional<TableSchema> tableSchema = TableUtils.schema(context);
+        FileIO fileIO;
+        try {
+            fileIO = FileIO.get(path, context);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        SchemaManager schemaManager = new SchemaManager(fileIO, path);
+        Optional<TableSchema> tableSchema = schemaManager.latest();
         if (tableSchema.isPresent()) {
             // paimon table already exists
             return;
@@ -75,7 +90,9 @@ public class PaimonMetaHook implements HiveMetaHook {
         // create paimon table
         List<FieldSchema> cols = table.getSd().getCols();
         Schema.Builder schemaBuilder =
-                Schema.newBuilder().comment(table.getParameters().get(COMMENT));
+                Schema.newBuilder()
+                        .options(context.options().toMap())
+                        .comment(table.getParameters().get(COMMENT));
         cols.iterator()
                 .forEachRemaining(
                         fieldSchema ->
@@ -83,7 +100,11 @@ public class PaimonMetaHook implements HiveMetaHook {
                                         fieldSchema.getName().toLowerCase(),
                                         typeInfoToLogicalType(fieldSchema.getType()),
                                         fieldSchema.getComment()));
-        TableUtils.createTable(context, schemaBuilder.build());
+        try {
+            schemaManager.createTable(schemaBuilder.build());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -91,9 +112,18 @@ public class PaimonMetaHook implements HiveMetaHook {
         if (!MetaStoreUtils.isExternalTable(table)) {
             return;
         }
+
+        // we have created a paimon table, so we delete it to roll back;
+        Path path = new Path(table.getSd().getLocation());
         CatalogContext context = catalogContext(table);
-        // we have created an paimon table, so we delete it to roll back;
-        TableUtils.dropTable(context);
+        try {
+            FileIO fileIO = FileIO.get(path, context);
+            if (fileIO.exists(path)) {
+                fileIO.deleteDirectoryQuietly(path);
+            }
+        } catch (IOException e) {
+            LOG.error("Delete directory [{}] fail for the paimon table.", path, e);
+        }
     }
 
     @Override
@@ -111,6 +141,7 @@ public class PaimonMetaHook implements HiveMetaHook {
     private CatalogContext catalogContext(Table table) {
         Options options = PaimonJobConf.extractCatalogConfig(conf);
         options.set(CoreOptions.PATH, table.getSd().getLocation());
+        table.getParameters().forEach(options::set);
         return CatalogContext.create(options, conf);
     }
 }

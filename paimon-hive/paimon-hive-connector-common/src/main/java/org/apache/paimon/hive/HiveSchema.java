@@ -20,10 +20,11 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.TableUtils;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -43,9 +44,9 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -58,13 +59,10 @@ import static org.apache.paimon.hive.HiveTypeUtils.typeInfoToLogicalType;
 public class HiveSchema {
 
     private static final Logger LOG = LoggerFactory.getLogger(HiveSchema.class);
-
-    private final TableSchema tableSchema;
     private final RowType rowType;
 
-    private HiveSchema(TableSchema tableSchema) {
-        this.tableSchema = tableSchema;
-        this.rowType = new RowType(tableSchema.fields());
+    private HiveSchema(RowType rowType) {
+        this.rowType = rowType;
     }
 
     public RowType rowType() {
@@ -72,19 +70,21 @@ public class HiveSchema {
     }
 
     public List<String> fieldNames() {
-        return tableSchema.fieldNames();
+        return rowType.getFieldNames();
     }
 
     public List<DataType> fieldTypes() {
-        return tableSchema.logicalRowType().getFieldTypes();
+        return rowType.getFieldTypes();
     }
 
     public List<DataField> fields() {
-        return tableSchema.fields();
+        return rowType.getFields();
     }
 
     public List<String> fieldComments() {
-        return schemaComments(tableSchema);
+        return rowType.getFields().stream()
+                .map(DataField::description)
+                .collect(Collectors.toList());
     }
 
     /** Extract {@link HiveSchema} from Hive serde properties. */
@@ -99,21 +99,26 @@ public class HiveSchema {
         }
         Path path = new Path(location);
         Options options = PaimonJobConf.extractCatalogConfig(configuration);
-        options.set(CoreOptions.PATH, path.toUri().toString());
-        CatalogContext catalogContext = CatalogContext.create(options, configuration);
-        Optional<TableSchema> tableSchemaOptional = TableUtils.schema(catalogContext);
+        options.set(CoreOptions.PATH, location);
+        CatalogContext context = CatalogContext.create(options, configuration);
+        Optional<TableSchema> tableSchema;
+        try {
+            tableSchema = new SchemaManager(FileIO.get(path, context), path).latest();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
 
         String columnProperty = properties.getProperty(serdeConstants.LIST_COLUMNS);
         // Create hive external table with empty ddl
         if (StringUtils.isEmpty(columnProperty)) {
-            if (!tableSchemaOptional.isPresent()) {
+            if (!tableSchema.isPresent()) {
                 throw new IllegalArgumentException(
                         "Schema file not found in location "
                                 + location
                                 + ". Please create table first.");
             }
             // Paimon external table can read schema from the specified location
-            return new HiveSchema(tableSchemaOptional.get());
+            return new HiveSchema(new RowType(tableSchema.get().fields()));
         }
 
         // Create hive external table with ddl
@@ -129,34 +134,23 @@ public class HiveSchema {
                 Lists.newArrayList(
                         Splitter.on('\0').split(properties.getProperty("columns.comments")));
         // Both Paimon table schema and Hive table schema exist
-        if (tableSchemaOptional.isPresent() && columnNames.size() > 0 && typeInfos.size() > 0) {
+        if (tableSchema.isPresent() && columnNames.size() > 0 && typeInfos.size() > 0) {
             LOG.debug(
                     "Extract schema with exists DDL and exists paimon table, table location:[{}].",
                     location);
-            checkSchemaMatched(columnNames, typeInfos, tableSchemaOptional.get());
-            comments = schemaComments(tableSchemaOptional.get());
+            checkSchemaMatched(columnNames, typeInfos, tableSchema.get());
+            // Use paimon table column comment when the paimon table exists.
+            comments =
+                    tableSchema.get().fields().stream()
+                            .map(DataField::description)
+                            .collect(Collectors.toList());
         }
-
-        int highestFieldId = -1;
-        List<DataField> columns = new ArrayList<>();
+        RowType.Builder builder = RowType.builder();
         for (int i = 0; i < columnNames.size(); i++) {
-            columns.add(
-                    new DataField(
-                            ++highestFieldId,
-                            columnNames.get(i),
-                            typeInfoToLogicalType(typeInfos.get(i)),
-                            comments.get(i)));
+            builder.field(
+                    columnNames.get(i), typeInfoToLogicalType(typeInfos.get(i)), comments.get(i));
         }
-        TableSchema tableSchema =
-                new TableSchema(
-                        0L,
-                        columns,
-                        highestFieldId,
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        options.toMap(),
-                        properties.getProperty("comment"));
-        return new HiveSchema(tableSchema);
+        return new HiveSchema(builder.build());
     }
 
     private static void checkSchemaMatched(
@@ -211,11 +205,5 @@ public class HiveSchema {
                             + "Mismatched fields are:\n"
                             + String.join("--------------------\n", mismatched));
         }
-    }
-
-    private static List<String> schemaComments(TableSchema tableSchema) {
-        return tableSchema.fields().stream()
-                .map(DataField::description)
-                .collect(Collectors.toList());
     }
 }

@@ -265,6 +265,21 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
+    public void testHiveCreateAndFlinkRead() throws Exception {
+        hiveShell.execute(
+                "CREATE EXTERNAL TABLE hive_test_table ( a INT, b STRING ) "
+                        + "STORED BY '"
+                        + PaimonStorageHandler.class.getName()
+                        + "'"
+                        + "LOCATION '"
+                        + path
+                        + "/test_db.db/hive_test_table'");
+        hiveShell.execute("INSERT INTO hive_test_table VALUES (1, 'Apache'), (2, 'Paimon')");
+        List<Row> actual = collect("SELECT * FROM hive_test_table");
+        Assertions.assertThat(actual).contains(Row.of(1, "Apache"), Row.of(2, "Paimon"));
+    }
+
+    @Test
     public void testCreateTableAs() throws Exception {
         tEnv.executeSql("CREATE TABLE t (a INT)").await();
         tEnv.executeSql("INSERT INTO t VALUES(1)").await();

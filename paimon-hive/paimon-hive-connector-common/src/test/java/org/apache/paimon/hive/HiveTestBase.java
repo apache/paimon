@@ -23,6 +23,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
@@ -40,6 +41,7 @@ import org.junit.runner.RunWith;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Optional;
 
 /** hive engine execute paimon table test base. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -76,6 +78,10 @@ public abstract class HiveTestBase {
 
     protected void createPaimonTable() throws Exception {
         new SchemaManager(LocalFileIO.create(), new Path(path)).createTable(DEFAULT_TABLE_SCHEMA);
+    }
+
+    protected Optional<TableSchema> paimonTableSchema() {
+        return new SchemaManager(LocalFileIO.create(), new Path(path)).latest();
     }
 
     protected String generateDefaultHiveSql(String tableName) {
