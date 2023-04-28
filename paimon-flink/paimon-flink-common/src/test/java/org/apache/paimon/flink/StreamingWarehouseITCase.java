@@ -18,35 +18,21 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.flink.kafka.KafkaTableTestBase;
 import org.apache.paimon.utils.BlockingIterator;
-import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
 import java.util.function.Function;
 
-import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
-import static org.apache.paimon.CoreOptions.MergeEngine;
-import static org.apache.paimon.CoreOptions.WRITE_MODE;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.sEnv;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.fail;
 
 /** Paimon IT case to test concurrent batch overwrite and streaming insert into. */
 public class StreamingWarehouseITCase extends KafkaTableTestBase {
@@ -228,157 +214,6 @@ public class StreamingWarehouseITCase extends KafkaTableTestBase {
         dailyTaskHandler.cancel().get();
     }
 
-    @ParameterizedTest
-    @EnumSource(MergeEngine.class)
-    public void testUpdateWithPrimaryKey(MergeEngine mergeEngine) throws Exception {
-        init(createAndRegisterTempFile("").toString(), 1);
-
-        // Step1: define cleaned trade order table schema
-        Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
-        options.put(MERGE_ENGINE.key(), mergeEngine.toString());
-        createTestTable(true, options);
-
-        // Step2: batch write some historical data
-        insertTestData();
-
-        // Step3: prepare expected data.
-        final Set<CleanedTradeOrder> expectedData =
-                new HashSet<CleanedTradeOrder>(4) {
-                    {
-                        add(
-                                parseData(
-                                        "0, 2023-04-23 14:23:25, buyer_id_0, 1, 1, 1, true, 1, 2022-04-23"));
-                        add(
-                                parseData(
-                                        "1, 2023-04-23 14:23:26, _ANONYMOUS_, 2, 2, 2, true, 2.0, 2022-04-23"));
-                        add(
-                                parseData(
-                                        "2, 2023-04-23 14:23:27, buyer_id_2, 3, 3, 3, true, 1, 2022-04-23"));
-                        add(
-                                parseData(
-                                        "3, 2023-04-24 14:23:28, 404NotFound, 4, 4, 4, true, -1, 2022-04-24"));
-                    }
-                };
-
-        // Step4: update some data
-        try {
-            updateTestData();
-            assertThat(mergeEngine).isIn(MergeEngine.DEDUPLICATE, MergeEngine.PARTIAL_UPDATE);
-
-            // Step5: verify result
-            String querySql = "SELECT * FROM cleaned_trade_order";
-            try (BlockingIterator<Row, CleanedTradeOrder> batchIter =
-                    BlockingIterator.of(bEnv.executeSql(querySql).collect(), ORDER_CONVERTER)) {
-                batchIter
-                        .collect()
-                        .forEach(
-                                data -> {
-                                    assertThat(expectedData.remove(data)).isTrue();
-                                });
-                assertThat(expectedData).isEmpty();
-            }
-        } catch (UnsupportedOperationException e) {
-            assertThat(mergeEngine).isNotIn(MergeEngine.DEDUPLICATE, MergeEngine.PARTIAL_UPDATE);
-        }
-    }
-
-    @ParameterizedTest
-    @EnumSource(WriteMode.class)
-    public void testUpdateWithoutPrimaryKey(WriteMode writeMode) throws Exception {
-        init(createAndRegisterTempFile("").toString(), 1);
-
-        // Step1: define cleaned trade order table schema
-        Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), writeMode.toString());
-        createTestTable(false, options);
-
-        // Step2: batch write some historical data
-        insertTestData();
-
-        // Step3: update some data
-        try {
-            updateTestData();
-            fail("Tables without primary keys should not support update statements.");
-        } catch (UnsupportedOperationException e) {
-            // ignore
-        }
-    }
-
-    private void createTestTable(boolean hasPrimaryKey, Map<String, String> options) {
-        StringBuilder withOptions = new StringBuilder();
-
-        for (Map.Entry<String, String> option : options.entrySet()) {
-            if (withOptions.length() != 0) {
-                withOptions.append(",");
-            }
-            withOptions
-                    .append("\n    '")
-                    .append(option.getKey())
-                    .append("' = '")
-                    .append(option.getValue())
-                    .append("'");
-        }
-
-        String cleanedOrders =
-                String.format(
-                        "CREATE TABLE IF NOT EXISTS cleaned_trade_order (\n"
-                                + "    order_id BIGINT NOT NULL,\n"
-                                + "    order_timestamp TIMESTAMP (3),\n"
-                                + "    buyer_id STRING,\n"
-                                + "    order_amount DOUBLE,\n"
-                                + "    loyalty_discount DOUBLE,\n"
-                                + "    shipping_fee DOUBLE,\n"
-                                + "    order_verified BOOLEAN,\n"
-                                + "    actual_gmv DOUBLE,\n"
-                                + "    dt STRING%s"
-                                + "  )\n"
-                                + "PARTITIONED BY (dt)\n"
-                                + "WITH (%s);",
-                        hasPrimaryKey ? ",\n    PRIMARY KEY (dt, order_id) NOT ENFORCED\n" : "\n",
-                        withOptions.toString());
-        bEnv.executeSql(cleanedOrders);
-    }
-
-    private void insertTestData() throws Exception {
-        String historicalData =
-                "INSERT INTO cleaned_trade_order VALUES\n"
-                        + "(0, TO_TIMESTAMP('2023-04-23 14:23:25'), 'buyer_id_0', 1, 1, 1, true, 1, '2022-04-23'),\n"
-                        + "(1, TO_TIMESTAMP('2023-04-23 14:23:26'), '404NotFound', 2, 2, 2, true, -1, '2022-04-23'),\n"
-                        + "(2, TO_TIMESTAMP('2023-04-23 14:23:27'), 'buyer_id_2', 3, 3, 3, true, 1, '2022-04-23'),\n"
-                        + "(3, TO_TIMESTAMP('2023-04-24 14:23:28'), '404NotFound', 4, 4, 4, true, -1, '2022-04-24');";
-        bEnv.executeSql(historicalData).await();
-    }
-
-    private void updateTestData() throws Exception {
-        String updateSql =
-                "UPDATE cleaned_trade_order\n"
-                        + "SET buyer_id = '_ANONYMOUS_', actual_gmv = order_amount + shipping_fee - loyalty_discount\n"
-                        + "WHERE buyer_id = '404NotFound' AND dt = '2022-04-23'";
-        bEnv.executeSql(updateSql).await();
-    }
-
-    private CleanedTradeOrder parseData(String str) {
-        if (str.trim().isEmpty()) {
-            return null;
-        }
-        String[] split = str.split(",");
-        Preconditions.checkArgument(split.length == 9, "Found invalid data string " + str);
-        CleanedTradeOrder order = new CleanedTradeOrder();
-        order.orderId = Long.parseLong(split[0].trim());
-        order.orderTimestamp =
-                LocalDateTime.parse(
-                        split[1].trim(), DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-        order.buyerId = split[2].trim();
-        order.orderAmount = Double.parseDouble(split[3].trim());
-        order.loyaltyDiscount = Double.parseDouble(split[4].trim());
-        order.shippingFee = Double.parseDouble(split[5].trim());
-        order.orderVerified = Boolean.parseBoolean(split[6].trim());
-        order.actualGmv = Double.parseDouble(split[7].trim());
-        order.dt = split[8].trim();
-        return order;
-    }
-
     private static final Function<Row, CleanedTradeOrder> ORDER_CONVERTER =
             (row) -> {
                 assert row != null && row.getArity() == 9;
@@ -406,39 +241,5 @@ public class StreamingWarehouseITCase extends KafkaTableTestBase {
         protected Boolean orderVerified;
         protected Double actualGmv;
         protected String dt;
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            CleanedTradeOrder that = (CleanedTradeOrder) o;
-            return Objects.equals(orderId, that.orderId)
-                    && Objects.equals(orderTimestamp, that.orderTimestamp)
-                    && Objects.equals(buyerId, that.buyerId)
-                    && Objects.equals(orderAmount, that.orderAmount)
-                    && Objects.equals(loyaltyDiscount, that.loyaltyDiscount)
-                    && Objects.equals(shippingFee, that.shippingFee)
-                    && Objects.equals(orderVerified, that.orderVerified)
-                    && Objects.equals(actualGmv, that.actualGmv)
-                    && Objects.equals(dt, that.dt);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(
-                    orderId,
-                    orderTimestamp,
-                    buyerId,
-                    orderAmount,
-                    loyaltyDiscount,
-                    shippingFee,
-                    orderVerified,
-                    actualGmv,
-                    dt);
-        }
     }
 }

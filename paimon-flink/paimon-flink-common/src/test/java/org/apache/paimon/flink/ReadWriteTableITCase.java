@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.WriteMode;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
@@ -48,21 +49,27 @@ import org.apache.flink.types.Row;
 import org.apache.flink.util.CollectionUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
+import static org.apache.paimon.CoreOptions.WRITE_MODE;
 import static org.apache.paimon.flink.AbstractFlinkTableFactory.buildPaimonTable;
 import static org.apache.paimon.flink.FlinkConnectorOptions.INFER_SCAN_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
@@ -1364,6 +1371,112 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         "+I[a, INT, true, null, null, null]",
                         "+I[b, INT, true, null, null, null]",
                         "+I[c, INT, true, null, AS `a` + `b`, null]");
+    }
+
+    // ----------------------------------------------------------------------------------------------------------------
+    // Update statement
+    // ----------------------------------------------------------------------------------------------------------------
+
+    @ParameterizedTest
+    @EnumSource(CoreOptions.MergeEngine.class)
+    public void testUpdateWithPrimaryKey(CoreOptions.MergeEngine mergeEngine) throws Exception {
+        Set<CoreOptions.MergeEngine> supportUpdateEngines = new HashSet<>();
+        supportUpdateEngines.add(CoreOptions.MergeEngine.DEDUPLICATE);
+        supportUpdateEngines.add(CoreOptions.MergeEngine.PARTIAL_UPDATE);
+        // Step1: define table schema
+        Map<String, String> options = new HashMap<>();
+        options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
+        options.put(MERGE_ENGINE.key(), mergeEngine.toString());
+        String table =
+                createTable(
+                        Arrays.asList(
+                                "id BIGINT NOT NULL",
+                                "currency STRING",
+                                "rate BIGINT",
+                                "dt String"),
+                        Arrays.asList("id", "dt"),
+                        Collections.singletonList("dt"),
+                        options);
+
+        // Step2: batch write some historical data
+        insertInto(
+                table,
+                "(1, 'US Dollar', 114, '2022-01-01')",
+                "(2, 'UNKNOWN', -1, '2022-01-01')",
+                "(3, 'Euro', 114, '2022-01-01')",
+                "(3, 'Euro', 119, '2022-01-02')");
+
+        // Step3: prepare expected data.
+        String rowKind = mergeEngine == CoreOptions.MergeEngine.PARTIAL_UPDATE ? "+I" : "+U";
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        // part = 2022-01-01
+                        changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01"),
+                        changelogRow(rowKind, 2L, "Yen", 1L, "2022-01-01"),
+                        changelogRow("+I", 3L, "Euro", 114L, "2022-01-01"),
+                        // part = 2022-01-02
+                        changelogRow("+I", 3L, "Euro", 119L, "2022-01-02"));
+
+        // Step4: prepare update statement
+        String updateStatement =
+                String.format(
+                        ""
+                                + "UPDATE %s "
+                                + "SET currency = 'Yen', "
+                                + "rate = 1 "
+                                + "WHERE currency = 'UNKNOWN' and dt = '2022-01-01'",
+                        table);
+
+        // Step5: execute update statement and verify result
+        if (supportUpdateEngines.contains(mergeEngine)) {
+            bEnv.executeSql(updateStatement).await();
+            String querySql = String.format("SELECT * FROM %s", table);
+            testBatchRead(querySql, expectedRecords);
+        } else {
+            assertThatThrownBy(() -> bEnv.executeSql(updateStatement).await())
+                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(WriteMode.class)
+    public void testUpdateWithoutPrimaryKey(WriteMode writeMode) throws Exception {
+        // Step1: define table schema
+        Map<String, String> options = new HashMap<>();
+        options.put(WRITE_MODE.key(), writeMode.toString());
+        options.put(MERGE_ENGINE.key(), MERGE_ENGINE.defaultValue().toString());
+        String table =
+                createTable(
+                        Arrays.asList(
+                                "id BIGINT NOT NULL",
+                                "currency STRING",
+                                "rate BIGINT",
+                                "dt String"),
+                        Collections.emptyList(),
+                        Collections.singletonList("dt"),
+                        options);
+
+        // Step2: batch write some historical data
+        insertInto(
+                table,
+                "(1, 'US Dollar', 114, '2022-01-01')",
+                "(2, 'UNKNOWN', -1, '2022-01-01')",
+                "(3, 'Euro', 114, '2022-01-01')",
+                "(3, 'Euro', 119, '2022-01-02')");
+
+        // Step3: prepare update statement
+        String updateStatement =
+                String.format(
+                        ""
+                                + "UPDATE %s "
+                                + "SET currency = 'Yen', "
+                                + "rate = 1 "
+                                + "WHERE currency = 'UNKNOWN' and dt = '2022-01-01'",
+                        table);
+
+        // Step4: execute update statement
+        assertThatThrownBy(() -> bEnv.executeSql(updateStatement).await())
+                .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
     }
 
     // ----------------------------------------------------------------------------------------------------------------
