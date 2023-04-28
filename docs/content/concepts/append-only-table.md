@@ -108,7 +108,7 @@ CREATE TABLE T (
 
 -- launch a bounded streaming job to read paimon_table
 SELECT window_start, window_end, SUM(f0) FROM
- TUMBLE(TABLE T, DESCRIPTOR(order_time), INTERVAL '10' MINUTES)) GROUP BY window_start, window_end; */;
+ TUMBLE(TABLE T, DESCRIPTOR(order_time), INTERVAL '10' MINUTES)) GROUP BY window_start, window_end;
 ```
 
 You can also enable [Flink Watermark alignment](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/datastream/event-time/generating_watermarks/#watermark-alignment-_beta_),
