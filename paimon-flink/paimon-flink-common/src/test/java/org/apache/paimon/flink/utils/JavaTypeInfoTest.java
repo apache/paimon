@@ -16,32 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source;
+package org.apache.paimon.flink.utils;
 
-import org.apache.paimon.annotation.Public;
-import org.apache.paimon.utils.Restorable;
+import org.apache.flink.api.common.typeutils.TypeInformationTestBase;
 
-import javax.annotation.Nullable;
+import java.io.Serializable;
 
-/**
- * {@link TableScan} for streaming, supports {@link #checkpoint} and {@link #restore}.
- *
- * <p>NOTE: {@link #checkpoint} will return the next snapshot id.
- *
- * @since 0.4.0
- */
-@Public
-public interface StreamTableScan extends TableScan, Restorable<Long> {
+/** Test for {@link JavaTypeInfo}. */
+class JavaTypeInfoTest extends TypeInformationTestBase<JavaTypeInfo<?>> {
 
-    /** Restore from checkpoint next snapshot id. */
     @Override
-    void restore(@Nullable Long nextSnapshotId);
+    protected JavaTypeInfo<?>[] getTestData() {
+        return new JavaTypeInfo<?>[] {
+            new JavaTypeInfo<>(TestClass.class), new JavaTypeInfo<>(AlternativeClass.class)
+        };
+    }
 
-    /** Checkpoint to return next snapshot id. */
-    @Nullable
-    @Override
-    Long checkpoint();
+    static class TestClass implements Serializable {}
 
-    /** Notifies the checkpoint complete with next snapshot id. */
-    void notifyCheckpointComplete(@Nullable Long nextSnapshot);
+    static class AlternativeClass implements Serializable {}
 }

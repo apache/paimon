@@ -37,9 +37,11 @@ import org.apache.paimon.utils.FailingFileIO;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.connector.source.Boundedness;
-import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.api.dag.Transformation;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.transformations.SourceTransformation;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.data.GenericRowData;
@@ -326,12 +328,15 @@ public class FileStoreITCase extends AbstractTestBase {
         table =
                 table.copy(
                         Collections.singletonMap(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "1024"));
-        Source<RowData, ?, ?> source =
+        DataStream<RowData> source =
                 new FlinkSourceBuilder(IDENTIFIER, table)
                         .withContinuousMode(true)
                         .withEnv(env)
-                        .buildSource();
-        assertThat(source.getBoundedness()).isEqualTo(Boundedness.BOUNDED);
+                        .build();
+        Transformation<RowData> transformation = source.getTransformation();
+        assertThat(transformation).isInstanceOf(SourceTransformation.class);
+        assertThat(((SourceTransformation<?, ?, ?>) transformation).getSource().getBoundedness())
+                .isEqualTo(Boundedness.BOUNDED);
     }
 
     private void innerTestContinuous(FileStoreTable table) throws Exception {
@@ -449,12 +454,12 @@ public class FileStoreITCase extends AbstractTestBase {
                         InternalTypeInfo.of(TABLE_TYPE));
     }
 
-    public static List<Row> executeAndCollect(DataStreamSource<RowData> source) throws Exception {
+    public static List<Row> executeAndCollect(DataStream<RowData> source) throws Exception {
         return executeAndCollect(source, CONVERTER);
     }
 
     public static List<Row> executeAndCollect(
-            DataStreamSource<RowData> source, DataStructureConverter<RowData, Row> converter)
+            DataStream<RowData> source, DataStructureConverter<RowData, Row> converter)
             throws Exception {
         CloseableIterator<RowData> iterator = source.executeAndCollect();
         List<Row> results = new ArrayList<>();
