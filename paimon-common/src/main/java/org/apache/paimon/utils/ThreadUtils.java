@@ -44,4 +44,14 @@ public class ThreadUtils {
                 "Thread dump: \n{}",
                 Arrays.stream(perThreadInfo).map(Object::toString).collect(Collectors.joining()));
     }
+
+    public static boolean stackContains(String name) {
+        StackTraceElement[] ss = new RuntimeException().getStackTrace();
+        for (StackTraceElement s : ss) {
+            if (s.toString().contains(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
 }
