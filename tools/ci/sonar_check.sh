@@ -25,5 +25,5 @@ fi
 -Dsonar.core.codeCoveragePlugin=jacoco \
 -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
 -Dhttp.keepAlive=false -Dmaven.wagon.http.pool=false \
--Dsonar.exclusions=,paimon-benchmark/src/**/*,test/**/*.java \
+-Dsonar.exclusions=,paimon-cluster-benchmark/src/**/*,paimon-micro-benchmarks/src/**/*,test/**/*.java \
 -Dmaven.wagon.httpconnectionManager.ttlSeconds=120
