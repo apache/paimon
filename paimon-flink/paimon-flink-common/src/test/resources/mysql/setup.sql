@@ -239,6 +239,11 @@ CREATE TABLE incompatible_pk_2 (
     PRIMARY KEY (a)
 );
 
+CREATE TABLE checkTableSchema (
+    k INT comment 'primary',
+    PRIMARY KEY (k)
+);
+
 -- ################################################################################
 --  MySqlSyncDatabaseActionITCase
 -- ################################################################################
