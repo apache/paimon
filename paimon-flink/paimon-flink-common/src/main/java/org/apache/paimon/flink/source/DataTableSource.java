@@ -39,7 +39,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Projection;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
@@ -208,7 +208,7 @@ public class DataTableSource extends FlinkTableSource
                 !streaming, env -> configureSource(sourceBuilder, env));
     }
 
-    private DataStreamSource<RowData> configureSource(
+    private DataStream<RowData> configureSource(
             FlinkSourceBuilder sourceBuilder, StreamExecutionEnvironment env) {
         Options options = Options.fromMap(this.table.options());
         Integer parallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);

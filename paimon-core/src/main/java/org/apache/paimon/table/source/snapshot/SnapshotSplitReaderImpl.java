@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
@@ -47,10 +48,12 @@ import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping
 
 /** Implementation of {@link SnapshotSplitReader}. */
 public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
+
     private final FileStoreScan scan;
     private final TableSchema tableSchema;
     private final CoreOptions options;
     private final SnapshotManager snapshotManager;
+    private final ConsumerManager consumerManager;
     private final SplitGenerator splitGenerator;
     private final BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer;
 
@@ -68,8 +71,15 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
         this.tableSchema = tableSchema;
         this.options = options;
         this.snapshotManager = snapshotManager;
+        this.consumerManager =
+                new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         this.splitGenerator = splitGenerator;
         this.nonPartitionFilterConsumer = nonPartitionFilterConsumer;
+    }
+
+    @Override
+    public ConsumerManager consumerManager() {
+        return consumerManager;
     }
 
     @Override

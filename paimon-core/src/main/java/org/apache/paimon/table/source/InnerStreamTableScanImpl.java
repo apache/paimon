@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
@@ -193,5 +194,19 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     @Override
     public void restore(@Nullable Long nextSnapshotId) {
         this.nextSnapshotId = nextSnapshotId;
+    }
+
+    @Override
+    public void notifyCheckpointComplete(@Nullable Long nextSnapshot) {
+        if (nextSnapshot == null) {
+            return;
+        }
+
+        String consumerId = options.consumerId();
+        if (consumerId != null) {
+            snapshotSplitReader
+                    .consumerManager()
+                    .recordConsumer(consumerId, new Consumer(nextSnapshot));
+        }
     }
 }

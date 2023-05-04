@@ -47,8 +47,11 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -534,6 +537,66 @@ public abstract class FileStoreTableTestBase {
                                 "1|20|200|binary|varbinary|mapKey:mapVal|multiset|null",
                                 "1|30|300|binary|varbinary|mapKey:mapVal|multiset|3000",
                                 "1|40|400|binary|varbinary|mapKey:mapVal|multiset|4000"));
+    }
+
+    @Test
+    public void testConsumeId() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(CoreOptions.CONSUMER_ID, "my_id");
+                            options.set(SNAPSHOT_NUM_RETAINED_MIN, 3);
+                            options.set(SNAPSHOT_NUM_RETAINED_MAX, 3);
+                        });
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = writeBuilder.newWrite();
+        StreamTableCommit commit = writeBuilder.newCommit();
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        StreamTableScan scan = readBuilder.newStreamScan();
+        TableRead read = readBuilder.newRead();
+
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        List<String> result = getResult(read, scan.plan().splits(), STREAMING_ROW_TO_STRING);
+        assertThat(result)
+                .containsExactlyInAnyOrder("+1|10|100|binary|varbinary|mapKey:mapVal|multiset");
+
+        write.write(rowData(1, 20, 200L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        result = getResult(read, scan.plan().splits(), STREAMING_ROW_TO_STRING);
+        assertThat(result)
+                .containsExactlyInAnyOrder("+1|20|200|binary|varbinary|mapKey:mapVal|multiset");
+
+        // checkpoint and notifyCheckpointComplete
+        Long nextSnapshot = scan.checkpoint();
+        scan.notifyCheckpointComplete(nextSnapshot);
+
+        write.write(rowData(1, 30, 300L));
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        // read again using consume id
+        scan = readBuilder.newStreamScan();
+        assertThat(scan.plan().splits()).isEmpty();
+        result = getResult(read, scan.plan().splits(), STREAMING_ROW_TO_STRING);
+        assertThat(result)
+                .containsExactlyInAnyOrder("+1|30|300|binary|varbinary|mapKey:mapVal|multiset");
+
+        // test snapshot expiration
+        for (int i = 3; i <= 8; i++) {
+            write.write(rowData(1, (i + 1) * 10, (i + 1) * 100L));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+
+        // not expire
+        result = getResult(read, scan.plan().splits(), STREAMING_ROW_TO_STRING);
+        assertThat(result)
+                .containsExactlyInAnyOrder("+1|40|400|binary|varbinary|mapKey:mapVal|multiset");
+
+        write.close();
     }
 
     protected List<String> getResult(

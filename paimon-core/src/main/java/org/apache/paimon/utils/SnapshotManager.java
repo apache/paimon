@@ -55,6 +55,14 @@ public class SnapshotManager implements Serializable {
         this.tablePath = tablePath;
     }
 
+    public FileIO fileIO() {
+        return fileIO;
+    }
+
+    public Path tablePath() {
+        return tablePath;
+    }
+
     public Path snapshotDirectory() {
         return new Path(tablePath + "/snapshot");
     }

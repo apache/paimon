@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -45,6 +46,7 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -71,6 +73,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
     private final FileStorePathFactory pathFactory;
     private final SnapshotManager snapshotManager;
+    private final ConsumerManager consumerManager;
     private final ManifestFile manifestFile;
     private final ManifestList manifestList;
 
@@ -91,6 +94,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         this.millisRetained = millisRetained;
         this.pathFactory = pathFactory;
         this.snapshotManager = snapshotManager;
+        this.consumerManager =
+                new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         this.manifestFile = manifestFileFactory.create();
         this.manifestList = manifestListFactory.create();
     }
@@ -135,6 +140,11 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     }
 
     private void expireUntil(long earliestId, long endExclusiveId) {
+        OptionalLong minNextSnapshot = consumerManager.minNextSnapshot();
+        if (minNextSnapshot.isPresent()) {
+            endExclusiveId = Math.min(minNextSnapshot.getAsLong(), endExclusiveId);
+        }
+
         if (endExclusiveId <= earliestId) {
             // No expire happens:
             // write the hint file in order to see the earliest snapshot directly next time

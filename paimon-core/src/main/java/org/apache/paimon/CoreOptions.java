@@ -558,6 +558,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1024)
                     .withDescription("Read batch size for orc and parquet.");
 
+    public static final ConfigOption<String> CONSUMER_ID =
+            key("consumer-id")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Consumer id for recording the offset of consumption in the storage.");
+
     @Deprecated
     @ExcludeFromDocumentation("For compatibility with older versions")
     public static final ConfigOption<Boolean> APPEND_ONLY_ASSERT_DISORDER =
@@ -865,6 +872,10 @@ public class CoreOptions implements Serializable {
 
     public int readBatchSize() {
         return options.get(READ_BATCH_SIZE);
+    }
+
+    public String consumerId() {
+        return options.get(CONSUMER_ID);
     }
 
     public static StreamingReadMode streamReadType(Options options) {

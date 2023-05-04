@@ -27,6 +27,7 @@ import org.apache.paimon.table.source.TableScan;
 
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -317,6 +318,9 @@ public class ContinuousFileSplitEnumeratorTest {
         public Long checkpoint() {
             return null;
         }
+
+        @Override
+        public void notifyCheckpointComplete(@Nullable Long nextSnapshot) {}
 
         @Override
         public void restore(Long state) {}

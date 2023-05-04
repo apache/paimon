@@ -92,6 +92,30 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         testProjection("T2");
     }
 
+    @TestTemplate
+    public void testConsumerId() throws Exception {
+        String table = "T2";
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM %s /*+ OPTIONS('consumer-id'='me') */", table));
+
+        batchSql("INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table);
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
+
+        Thread.sleep(1000);
+        iterator.close();
+
+        iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM %s /*+ OPTIONS('consumer-id'='me') */", table));
+        batchSql("INSERT INTO %s VALUES ('7', '8', '9')", table);
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("7", "8", "9"));
+        iterator.close();
+    }
+
     private void testSimple(String table) throws Exception {
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(streamSqlIter("SELECT * FROM %s", table));
