@@ -203,7 +203,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     private Map<String, String> extractRow(JsonNode recordRow) {
-        // the geometry, point type can not be converted to string, so we convert it to Object first.
+        // the geometry, point type can not be converted to string, so we convert it to Object
+        // first.
         Map<String, Object> jsonMap =
                 objectMapper.convertValue(recordRow, new TypeReference<Map<String, Object>>() {});
         if (jsonMap == null) {
@@ -264,8 +265,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 long microsecondsPerSecond = 1_000_000;
                 long nanosecondsPerMicros = 1_000;
                 long seconds = microseconds / microsecondsPerSecond;
-                long nanoAdjustment =
-                        (microseconds % microsecondsPerSecond) * nanosecondsPerMicros;
+                long nanoAdjustment = (microseconds % microsecondsPerSecond) * nanosecondsPerMicros;
 
                 // display value of datetime is not affected by timezone, see
                 // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
@@ -291,8 +291,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 long microsecondsPerSecond = 1_000_000;
                 long nanosecondsPerMicros = 1_000;
                 long seconds = microseconds / microsecondsPerSecond;
-                long nanoAdjustment =
-                        (microseconds % microsecondsPerSecond) * nanosecondsPerMicros;
+                long nanoAdjustment = (microseconds % microsecondsPerSecond) * nanosecondsPerMicros;
 
                 newValue =
                         Instant.ofEpochSecond(seconds, nanoAdjustment)
@@ -325,8 +324,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                     newValue = objectWriter.writeValueAsString(geometryInfo);
                 } catch (Exception e) {
                     throw new IllegalArgumentException(
-                            String.format("Failed to convert %s to geometry JSON.", jsonNode),
-                            e);
+                            String.format("Failed to convert %s to geometry JSON.", jsonNode), e);
                 }
             }
 
