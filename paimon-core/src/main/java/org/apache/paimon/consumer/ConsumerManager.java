@@ -81,6 +81,7 @@ public class ConsumerManager implements Serializable {
                     .map(FileStatus::getPath)
                     .filter(path -> path.getName().startsWith(CONSUMER_PREFIX))
                     .map(path -> Consumer.fromPath(fileIO, path))
+                    .filter(Optional::isPresent)
                     .map(Optional::get)
                     .mapToLong(Consumer::nextSnapshot)
                     .reduce(Math::min);
