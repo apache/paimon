@@ -26,7 +26,7 @@ under the License.
 
 # Append Only Table
 
-By specifying `'write-mode' = 'append-only'` when creating the table, user creates an append-only table.
+If a table does not have a primary key defined, it is an append-only table by default.
 
 You can only insert a complete record into the table. No delete or update is supported and you cannot define primary keys.
 This type of table is suitable for use cases that do not require updates (such as log data synchronization).
@@ -176,7 +176,6 @@ CREATE TABLE MyTable (
     price DOUBLE,
     sales BIGINT
 ) WITH (
-    'write-mode' = 'append-only',
     'bucket' = '8',
     'bucket-key' = 'product_id'
 );
