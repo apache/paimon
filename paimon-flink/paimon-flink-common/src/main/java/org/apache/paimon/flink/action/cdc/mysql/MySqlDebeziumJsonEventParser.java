@@ -29,12 +29,15 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectWriter;
 
+import com.esri.core.geometry.ogc.OGCGeometry;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -200,107 +203,135 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     private Map<String, String> extractRow(JsonNode recordRow) {
-        Map<String, String> recordMap =
-                objectMapper.convertValue(recordRow, new TypeReference<Map<String, String>>() {});
-        if (recordMap == null) {
+        // the geometry, point type can not be converted to string, so we convert it to Object
+        // first.
+        Map<String, Object> jsonMap =
+                objectMapper.convertValue(recordRow, new TypeReference<Map<String, Object>>() {});
+        if (jsonMap == null) {
             return new HashMap<>();
         }
 
+        Map<String, String> resultMap = new HashMap<>();
         for (Map.Entry<String, String> field : mySqlFieldTypes.entrySet()) {
             String fieldName = field.getKey();
             String mySqlType = field.getValue();
-            if (recordMap.containsKey(fieldName)) {
-                String className = fieldClassNames.get(fieldName);
-                String oldValue = recordMap.get(fieldName);
-                String newValue = oldValue;
-
-                if (newValue == null) {
-                    continue;
-                }
-
-                // pay attention to the temporal types
-                // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-temporal-types
-                if ("bytes".equals(mySqlType) && className == null) {
-                    // MySQL binary, varbinary, blob
-                    newValue = new String(Base64.getDecoder().decode(oldValue));
-                } else if ("bytes".equals(mySqlType)
-                        && "org.apache.kafka.connect.data.Decimal".equals(className)) {
-                    // MySQL numeric, fixed, decimal
-                    try {
-                        new BigDecimal(oldValue);
-                    } catch (NumberFormatException e) {
-                        throw new IllegalArgumentException(
-                                "Invalid big decimal value "
-                                        + oldValue
-                                        + ". Make sure that in the `customConverterConfigs` "
-                                        + "of the JsonDebeziumDeserializationSchema you created, set '"
-                                        + JsonConverterConfig.DECIMAL_FORMAT_CONFIG
-                                        + "' to 'numeric'",
-                                e);
-                    }
-                } else if ("io.debezium.time.Date".equals(className)) {
-                    // MySQL date
-                    newValue = DateTimeUtils.toLocalDate(Integer.parseInt(oldValue)).toString();
-                } else if ("io.debezium.time.Timestamp".equals(className)) {
-                    // MySQL datetime (precision 0-3)
-
-                    // display value of datetime is not affected by timezone, see
-                    // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
-                    // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
-                    // for implementation
-                    LocalDateTime localDateTime =
-                            Instant.ofEpochMilli(Long.parseLong(oldValue))
-                                    .atZone(ZoneOffset.UTC)
-                                    .toLocalDateTime();
-                    newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 3);
-                } else if ("io.debezium.time.MicroTimestamp".equals(className)) {
-                    // MySQL datetime (precision 4-6)
-                    long microseconds = Long.parseLong(oldValue);
-                    long microsecondsPerSecond = 1_000_000;
-                    long nanosecondsPerMicros = 1_000;
-                    long seconds = microseconds / microsecondsPerSecond;
-                    long nanoAdjustment =
-                            (microseconds % microsecondsPerSecond) * nanosecondsPerMicros;
-
-                    // display value of datetime is not affected by timezone, see
-                    // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
-                    // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
-                    // for implementation
-                    LocalDateTime localDateTime =
-                            Instant.ofEpochSecond(seconds, nanoAdjustment)
-                                    .atZone(ZoneOffset.UTC)
-                                    .toLocalDateTime();
-                    newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 6);
-                } else if ("io.debezium.time.ZonedTimestamp".equals(className)) {
-                    // MySQL timestamp
-
-                    // dispaly value of timestamp is affected by timezone, see
-                    // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
-                    // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
-                    // for implementation
-                    LocalDateTime localDateTime =
-                            Instant.parse(oldValue).atZone(serverTimeZone).toLocalDateTime();
-                    newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 6);
-                } else if ("io.debezium.time.MicroTime".equals(className)) {
-                    long microseconds = Long.parseLong(oldValue);
-                    long microsecondsPerSecond = 1_000_000;
-                    long nanosecondsPerMicros = 1_000;
-                    long seconds = microseconds / microsecondsPerSecond;
-                    long nanoAdjustment =
-                            (microseconds % microsecondsPerSecond) * nanosecondsPerMicros;
-
-                    newValue =
-                            Instant.ofEpochSecond(seconds, nanoAdjustment)
-                                    .atZone(ZoneOffset.UTC)
-                                    .toLocalTime()
-                                    .toString();
-                }
-
-                recordMap.put(fieldName, newValue);
+            Object objectValue = jsonMap.get(fieldName);
+            if (objectValue == null) {
+                continue;
             }
+
+            String className = fieldClassNames.get(fieldName);
+            String oldValue = objectValue.toString();
+            String newValue = oldValue;
+
+            // pay attention to the temporal types
+            // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-temporal-types
+            if ("bytes".equals(mySqlType) && className == null) {
+                // MySQL binary, varbinary, blob
+                newValue = new String(Base64.getDecoder().decode(oldValue));
+            } else if ("bytes".equals(mySqlType)
+                    && "org.apache.kafka.connect.data.Decimal".equals(className)) {
+                // MySQL numeric, fixed, decimal
+                try {
+                    new BigDecimal(oldValue);
+                } catch (NumberFormatException e) {
+                    throw new IllegalArgumentException(
+                            "Invalid big decimal value "
+                                    + oldValue
+                                    + ". Make sure that in the `customConverterConfigs` "
+                                    + "of the JsonDebeziumDeserializationSchema you created, set '"
+                                    + JsonConverterConfig.DECIMAL_FORMAT_CONFIG
+                                    + "' to 'numeric'",
+                            e);
+                }
+            } else if ("io.debezium.time.Date".equals(className)) {
+                // MySQL date
+                newValue = DateTimeUtils.toLocalDate(Integer.parseInt(oldValue)).toString();
+            } else if ("io.debezium.time.Timestamp".equals(className)) {
+                // MySQL datetime (precision 0-3)
+
+                // display value of datetime is not affected by timezone, see
+                // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
+                // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
+                // for implementation
+                LocalDateTime localDateTime =
+                        Instant.ofEpochMilli(Long.parseLong(oldValue))
+                                .atZone(ZoneOffset.UTC)
+                                .toLocalDateTime();
+                newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 3);
+            } else if ("io.debezium.time.MicroTimestamp".equals(className)) {
+                // MySQL datetime (precision 4-6)
+                long microseconds = Long.parseLong(oldValue);
+                long microsecondsPerSecond = 1_000_000;
+                long nanosecondsPerMicros = 1_000;
+                long seconds = microseconds / microsecondsPerSecond;
+                long nanoAdjustment = (microseconds % microsecondsPerSecond) * nanosecondsPerMicros;
+
+                // display value of datetime is not affected by timezone, see
+                // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
+                // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
+                // for implementation
+                LocalDateTime localDateTime =
+                        Instant.ofEpochSecond(seconds, nanoAdjustment)
+                                .atZone(ZoneOffset.UTC)
+                                .toLocalDateTime();
+                newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 6);
+            } else if ("io.debezium.time.ZonedTimestamp".equals(className)) {
+                // MySQL timestamp
+
+                // dispaly value of timestamp is affected by timezone, see
+                // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
+                // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
+                // for implementation
+                LocalDateTime localDateTime =
+                        Instant.parse(oldValue).atZone(serverTimeZone).toLocalDateTime();
+                newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 6);
+            } else if ("io.debezium.time.MicroTime".equals(className)) {
+                long microseconds = Long.parseLong(oldValue);
+                long microsecondsPerSecond = 1_000_000;
+                long nanosecondsPerMicros = 1_000;
+                long seconds = microseconds / microsecondsPerSecond;
+                long nanoAdjustment = (microseconds % microsecondsPerSecond) * nanosecondsPerMicros;
+
+                newValue =
+                        Instant.ofEpochSecond(seconds, nanoAdjustment)
+                                .atZone(ZoneOffset.UTC)
+                                .toLocalTime()
+                                .toString();
+            } else if ("io.debezium.data.geometry.Point".equals(className)
+                    || "io.debezium.data.geometry.Geometry".equals(className)) {
+                JsonNode jsonNode = recordRow.get(fieldName);
+                try {
+                    byte[] wkb = jsonNode.get("wkb").binaryValue();
+                    String geoJson = OGCGeometry.fromBinary(ByteBuffer.wrap(wkb)).asGeoJson();
+                    JsonNode originGeoNode = objectMapper.readTree(geoJson);
+
+                    Optional<Integer> srid =
+                            Optional.ofNullable(
+                                    originGeoNode.has("srid")
+                                            ? originGeoNode.get("srid").intValue()
+                                            : null);
+                    Map<String, Object> geometryInfo = new HashMap<>();
+                    String geometryType = originGeoNode.get("type").asText();
+                    geometryInfo.put("type", geometryType);
+                    if (geometryType.equalsIgnoreCase("GeometryCollection")) {
+                        geometryInfo.put("geometries", originGeoNode.get("geometries"));
+                    } else {
+                        geometryInfo.put("coordinates", originGeoNode.get("coordinates"));
+                    }
+                    geometryInfo.put("srid", srid.orElse(0));
+                    ObjectWriter objectWriter = objectMapper.writer();
+                    newValue = objectWriter.writeValueAsString(geometryInfo);
+                } catch (Exception e) {
+                    throw new IllegalArgumentException(
+                            String.format("Failed to convert %s to geometry JSON.", jsonNode), e);
+                }
+            }
+
+            resultMap.put(fieldName, newValue);
         }
 
-        return recordMap;
+        return resultMap;
     }
 
     private Map<String, String> keyCaseInsensitive(Map<String, String> origin) {
