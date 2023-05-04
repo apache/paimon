@@ -43,6 +43,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.WRITE_MODE;
@@ -75,8 +76,14 @@ public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLev
             updatedColumns.forEach(
                     column -> {
                         if (primaryKeys.contains(column.getName())) {
-                            throw new UnsupportedOperationException(
-                                    "Updates to primary keys are not supported.");
+                            String errMsg =
+                                    String.format(
+                                            "Updates to primary keys are not supported, primaryKeys (%s), updatedColumns (%s)",
+                                            primaryKeys,
+                                            updatedColumns.stream()
+                                                    .map(Column::getName)
+                                                    .collect(Collectors.toList()));
+                            throw new UnsupportedOperationException(errMsg);
                         }
                     });
 
@@ -94,7 +101,7 @@ public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLev
                     }
                 }
                 // Even with partial-update we still need all columns. Because the topology
-                // structure is source -> cal -> ConstraintEnforcer -> sink, in the
+                // structure is source -> cal -> constraintEnforcer -> sink, in the
                 // constraintEnforcer operator, the constraint check will be performed according to
                 // the index, not according to the column. So we can't return only some columns,
                 // which will cause problems like ArrayIndexOutOfBoundsException.
@@ -103,15 +110,15 @@ public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLev
             throw new UnsupportedOperationException(
                     String.format(
                             "Only %s and %s types of %s support the update statement.",
-                            MergeEngine.DEDUPLICATE.toString(),
-                            MergeEngine.PARTIAL_UPDATE.toString(),
+                            MergeEngine.DEDUPLICATE,
+                            MergeEngine.PARTIAL_UPDATE,
                             MERGE_ENGINE.key()));
         } else if (table instanceof AppendOnlyFileStoreTable
                 || table instanceof ChangelogValueCountFileStoreTable) {
             throw new UnsupportedOperationException(
                     String.format(
                             "Only tables whose %s is %s and have primary keys support the update statement.",
-                            WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString()));
+                            WRITE_MODE.key(), WriteMode.CHANGE_LOG));
         } else {
             throw new UnsupportedOperationException(
                     "Unknown FileStoreTable subclass " + table.getClass().getName());
