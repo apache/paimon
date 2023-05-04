@@ -196,7 +196,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<WriteMode> WRITE_MODE =
             key("write-mode")
                     .enumType(WriteMode.class)
-                    .defaultValue(WriteMode.CHANGE_LOG)
+                    .defaultValue(WriteMode.AUTO)
                     .withDescription("Specify the write mode for table.");
 
     public static final ConfigOption<Boolean> WRITE_ONLY =

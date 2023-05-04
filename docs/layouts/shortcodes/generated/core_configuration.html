@@ -394,9 +394,9 @@
         </tr>
         <tr>
             <td><h5>write-mode</h5></td>
-            <td style="word-wrap: break-word;">change-log</td>
+            <td style="word-wrap: break-word;">auto</td>
             <td><p>Enum</p></td>
-            <td>Specify the write mode for table.<br /><br />Possible values:<ul><li>"append-only": The table can only accept append-only insert operations. Neither data deduplication nor any primary key constraints will be done when inserting rows into paimon.</li><li>"change-log": The table can accept insert/delete/update operations.</li></ul></td>
+            <td>Specify the write mode for table.<br /><br />Possible values:<ul><li>"auto": The change-log for table with primary key, append-only for table without primary key.</li><li>"append-only": The table can only accept append-only insert operations. Neither data deduplication nor any primary key constraints will be done when inserting rows into paimon.</li><li>"change-log": The table can accept insert/delete/update operations.</li></ul></td>
         </tr>
         <tr>
             <td><h5>write-only</h5></td>

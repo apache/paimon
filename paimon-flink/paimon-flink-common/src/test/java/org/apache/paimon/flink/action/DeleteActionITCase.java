@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
@@ -39,6 +40,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
@@ -144,12 +146,14 @@ public class DeleteActionITCase extends ActionITCaseBase {
     }
 
     private void prepareTable(boolean hasPk) throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
         FileStoreTable table =
                 createFileStoreTable(
                         ROW_TYPE,
                         Collections.emptyList(),
                         hasPk ? Collections.singletonList("k") : Collections.emptyList(),
-                        new HashMap<>());
+                        options);
         snapshotManager = table.snapshotManager();
         StreamWriteBuilder streamWriteBuilder =
                 table.newStreamWriteBuilder().withCommitUser(commitUser);

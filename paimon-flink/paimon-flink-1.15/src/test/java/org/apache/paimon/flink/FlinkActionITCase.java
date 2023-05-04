@@ -38,7 +38,8 @@ public class FlinkActionITCase extends CatalogITCaseBase {
     }
 
     protected List<String> ddl() {
-        return Collections.singletonList("CREATE TABLE T (k INT, v STRING)");
+        return Collections.singletonList(
+                "CREATE TABLE T (k INT, v STRING) WITH ('write-mode'='change-log')");
     }
 
     @Test

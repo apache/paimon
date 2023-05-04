@@ -72,8 +72,16 @@ public class FileStoreTableFactory {
     public static FileStoreTable create(
             FileIO fileIO, Path tablePath, TableSchema tableSchema, Options dynamicOptions) {
         FileStoreTable table;
-        if (Options.fromMap(tableSchema.options()).get(CoreOptions.WRITE_MODE)
-                == WriteMode.APPEND_ONLY) {
+        Options coreOptions = Options.fromMap(tableSchema.options());
+        WriteMode writeMode = coreOptions.get(CoreOptions.WRITE_MODE);
+        if (writeMode == WriteMode.AUTO) {
+            writeMode =
+                    tableSchema.primaryKeys().isEmpty()
+                            ? WriteMode.APPEND_ONLY
+                            : WriteMode.CHANGE_LOG;
+            coreOptions.set(CoreOptions.WRITE_MODE, writeMode);
+        }
+        if (writeMode == WriteMode.APPEND_ONLY) {
             table = new AppendOnlyFileStoreTable(fileIO, tablePath, tableSchema);
         } else {
             if (tableSchema.primaryKeys().isEmpty()) {
@@ -82,7 +90,6 @@ public class FileStoreTableFactory {
                 table = new ChangelogWithKeyFileStoreTable(fileIO, tablePath, tableSchema);
             }
         }
-
         return table.copy(dynamicOptions.toMap());
     }
 }

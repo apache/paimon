@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.WriteMode;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
@@ -29,6 +30,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.BlockingIterator;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.Configuration;
@@ -66,6 +69,7 @@ import static org.apache.flink.table.planner.factories.TestValuesTableFactory.ch
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
+import static org.apache.paimon.CoreOptions.WRITE_MODE;
 import static org.apache.paimon.flink.AbstractFlinkTableFactory.buildPaimonTable;
 import static org.apache.paimon.flink.FlinkConnectorOptions.INFER_SCAN_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
@@ -523,7 +527,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT", "dt STRING"),
                         Collections.emptyList(),
-                        Collections.singletonList("dt"));
+                        Collections.singletonList("dt"),
+                        ImmutableMap.of(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString()));
 
         insertIntoFromTable(temporaryTable, table);
 
@@ -667,7 +672,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT"),
                         Collections.emptyList(),
-                        Collections.emptyList());
+                        Collections.emptyList(),
+                        ImmutableMap.of(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString()));
 
         insertIntoFromTable(temporaryTable, table);
 
