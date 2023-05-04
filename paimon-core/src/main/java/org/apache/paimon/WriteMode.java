@@ -25,6 +25,9 @@ import static org.apache.paimon.options.description.TextElement.text;
 
 /** Defines the write mode for paimon. */
 public enum WriteMode implements DescribedEnum {
+    AUTO(
+            "auto",
+            "The change-log for table with primary key, append-only for table without primary key."),
     APPEND_ONLY(
             "append-only",
             "The table can only accept append-only insert operations. Neither data deduplication nor any "

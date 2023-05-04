@@ -608,6 +608,7 @@ public class PaimonStorageHandlerITCase {
         conf.set(CatalogOptions.WAREHOUSE, path);
         conf.set(CoreOptions.BUCKET, 2);
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(conf, rowType, partitionKeys, primaryKeys);
 
