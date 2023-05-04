@@ -47,7 +47,7 @@ under the License.
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-shade-jackson-2</artifactId>
-            <version>${paimon.shade.jackson.version}-${project.version}</version>
+            <version>${paimon.shade.jackson.version}-${paimon.shade.version}</version>
         </dependency>
 
         <!-- flink dependencies -->
