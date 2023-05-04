@@ -28,6 +28,7 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.hive.mapred.PaimonOutputFormat;
+import org.apache.paimon.hive.objectinspector.PaimonObjectInspectorFactory;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -46,6 +47,11 @@ import org.apache.paimon.utils.StringUtils;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
+import org.apache.hadoop.hive.common.type.HiveDecimal;
+import org.apache.hadoop.hive.serde2.objectinspector.ListObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.MapObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -58,7 +64,9 @@ import org.junit.runner.RunWith;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -620,7 +628,7 @@ public class HiveWriteITCase {
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<GenericRow> input = new ArrayList<>();
-        for (int i = random.nextInt(10); i > 0; i--) {
+        for (int i = random.nextInt(50); i > 0; i--) {
             while (true) {
                 // pk must not be null
                 GenericRow rowData = RandomGenericRowDataGenerator.generate();
@@ -657,9 +665,77 @@ public class HiveWriteITCase {
                         emptyData,
                         "hive_test_table_output");
         hiveShell.execute("insert into " + outputTableName + " SELECT * FROM test_table");
-        List<Object[]> select = hiveShell.executeStatement("select * from " + outputTableName);
-        List<Object[]> expect = hiveShell.executeStatement("select * from test_table");
-        assertThat(select.toArray()).containsExactlyInAnyOrder(expect.toArray());
+        List<Object[]> actual = hiveShell.executeStatement("select * from " + outputTableName);
+        Map<Integer, GenericRow> expected = new HashMap<>();
+        for (GenericRow rowData : input) {
+            int key = rowData.getInt(3);
+            expected.put(key, rowData);
+        }
+        // do not use assertThat(select.toArray()).containsExactlyInAnyOrder(expect.toArray());
+        // because containsExactlyInAnyOrder cannot compare map objects correctly
+        for (Object[] actualRow : actual) {
+            int key = (int) actualRow[3];
+            Assert.assertTrue(expected.containsKey(key));
+            GenericRow expectedRow = expected.get(key);
+            Assert.assertEquals(expectedRow.getFieldCount(), actualRow.length);
+            for (int i = 0; i < actualRow.length; i++) {
+                if (expectedRow.isNullAt(i)) {
+                    Assert.assertNull(actualRow[i]);
+                    continue;
+                }
+                ObjectInspector oi =
+                        PaimonObjectInspectorFactory.create(
+                                RandomGenericRowDataGenerator.LOGICAL_TYPES.get(i));
+                switch (oi.getCategory()) {
+                    case PRIMITIVE:
+                        AbstractPrimitiveJavaObjectInspector primitiveOi =
+                                (AbstractPrimitiveJavaObjectInspector) oi;
+                        Object expectedObject =
+                                primitiveOi.getPrimitiveJavaObject(expectedRow.getField(i));
+                        if (expectedObject instanceof byte[]) {
+                            Assert.assertArrayEquals(
+                                    (byte[]) expectedObject, (byte[]) actualRow[i]);
+                        } else if (expectedObject instanceof HiveDecimal) {
+                            // HiveDecimal will remove trailing zeros
+                            // so we have to compare it from the original DecimalData
+                            Assert.assertEquals(expectedRow.getField(i).toString(), actualRow[i]);
+                        } else {
+                            Assert.assertEquals(
+                                    String.valueOf(expectedObject), String.valueOf(actualRow[i]));
+                        }
+                        break;
+                    case LIST:
+                        ListObjectInspector listOi = (ListObjectInspector) oi;
+                        Assert.assertEquals(
+                                String.valueOf(listOi.getList(expectedRow.getField(i)))
+                                        .replace(" ", ""),
+                                actualRow[i]);
+                        break;
+                    case MAP:
+                        MapObjectInspector mapOi = (MapObjectInspector) oi;
+                        Map<String, String> expectedMap = new HashMap<>();
+                        mapOi.getMap(expectedRow.getField(i))
+                                .forEach(
+                                        (k, v) -> expectedMap.put(k.toString(), String.valueOf(v)));
+                        String actualString = actualRow[i].toString();
+                        actualString = actualString.substring(1, actualString.length() - 1);
+                        for (String kv : actualString.split(",")) {
+                            if (kv.trim().isEmpty()) {
+                                continue;
+                            }
+                            String[] split = kv.split(":");
+                            String k = split[0].substring(1, split[0].length() - 1);
+                            Assert.assertEquals(expectedMap.get(k), split[1]);
+                            expectedMap.remove(k);
+                        }
+                        break;
+                    default:
+                        throw new UnsupportedOperationException();
+                }
+            }
+            expected.remove(key);
+        }
+        Assert.assertTrue(expected.isEmpty());
     }
 
     @Test
