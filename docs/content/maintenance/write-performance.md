@@ -108,9 +108,9 @@ When number of sorted runs is small, Paimon writers will perform compaction asyn
     <tr>
       <td><h5>num-sorted-run.stop-trigger</h5></td>
       <td>No</td>
-      <td style="word-wrap: break-word;">10</td>
+      <td style="word-wrap: break-word;">(none)</td>
       <td>Integer</td>
-      <td>The number of sorted-runs that trigger the stopping of writes.</td>
+      <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 1.</td>
     </tr>
     </tbody>
 </table>
