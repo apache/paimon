@@ -25,6 +25,7 @@ import org.apache.paimon.fs.SeekableInputStream;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.Random;
 
 /** Fail the constructor of input or output stream. */
@@ -33,6 +34,8 @@ public class FailingConstructInputOutputIO extends TraceableFileIO {
     private final double rate;
     private final Random random = new Random();
     private String targetName;
+    private final HashSet<Path> openedInputPath = new HashSet<>();
+    private final HashSet<Path> openedOutputPath = new HashSet<>();
 
     public FailingConstructInputOutputIO(double rate, Class c) {
         this(rate, c, (String) null);
@@ -49,12 +52,14 @@ public class FailingConstructInputOutputIO extends TraceableFileIO {
 
     @Override
     public SeekableInputStream newInputStream(Path f) throws IOException {
+        openedInputPath.add(f);
         throwError();
         return super.newInputStream(f);
     }
 
     @Override
     public PositionOutputStream newOutputStream(Path f, boolean overwrite) throws IOException {
+        openedOutputPath.add(f);
         throwError();
         return super.newOutputStream(f, overwrite);
     }
@@ -68,6 +73,7 @@ public class FailingConstructInputOutputIO extends TraceableFileIO {
     }
 
     public boolean noLeak() {
-        return openInputStreams(s -> true).size() == 0 && openOutputStreams(s -> true).size() == 0;
+        return openInputStreams(s -> openedOutputPath.contains(s)).size() == 0
+                && openOutputStreams(s -> openedOutputPath.contains(s)).size() == 0;
     }
 }
