@@ -69,20 +69,7 @@ under the License.
             <scope>provided</scope>
         </dependency>
 
-        <dependency>
-            <groupId>com.ververica</groupId>
-            <artifactId>flink-connector-mysql-cdc</artifactId>
-            <version>${flink.cdc.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <!-- cdc dependencies -->
-
-        <dependency>
-            <groupId>com.ververica</groupId>
-            <artifactId>frocksdbjni</artifactId>
-            <version>${frocksdbjni.version}</version>
-        </dependency>
+        <!-- cdc dependencies start -->
 
         <dependency>
             <groupId>com.esri.geometry</groupId>
@@ -95,6 +82,21 @@ under the License.
                 </exclusion>
             </exclusions>
             <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.ververica</groupId>
+            <artifactId>flink-connector-mysql-cdc</artifactId>
+            <version>${flink.cdc.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- cdc dependencies end -->
+
+        <dependency>
+            <groupId>com.ververica</groupId>
+            <artifactId>frocksdbjni</artifactId>
+            <version>${frocksdbjni.version}</version>
         </dependency>
 
         <dependency>
