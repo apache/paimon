@@ -30,6 +30,7 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
+import org.apache.paimon.utils.ValueComparatorSupplier;
 
 import java.util.Comparator;
 import java.util.function.Supplier;
@@ -44,6 +45,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final RowType valueType;
     private final KeyValueFieldsExtractor keyValueFieldsExtractor;
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
+    private final Supplier<Comparator<InternalRow>> valueComparatorSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
 
     public KeyValueFileStore(
@@ -64,6 +66,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         this.keyValueFieldsExtractor = keyValueFieldsExtractor;
         this.mfFactory = mfFactory;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
+        this.valueComparatorSupplier = new ValueComparatorSupplier(valueType);
     }
 
     @Override
@@ -101,6 +104,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 keyType,
                 valueType,
                 keyComparatorSupplier,
+                valueComparatorSupplier,
                 mfFactory,
                 pathFactory(),
                 snapshotManager(),
