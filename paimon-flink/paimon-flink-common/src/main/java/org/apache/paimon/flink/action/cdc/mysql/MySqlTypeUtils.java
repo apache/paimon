@@ -98,6 +98,13 @@ public class MySqlTypeUtils {
     private static final String SET = "SET";
     private static final String ENUM = "ENUM";
     private static final String GEOMETRY = "GEOMETRY";
+    private static final String POINT = "POINT";
+    private static final String LINESTRING = "LINESTRING";
+    private static final String POLYGON = "POLYGON";
+    private static final String MULTIPOINT = "MULTIPOINT";
+    private static final String MULTILINESTRING = "MULTILINESTRING";
+    private static final String MULTIPOLYGON = "MULTIPOLYGON";
+    private static final String GEOMETRYCOLLECTION = "GEOMETRYCOLLECTION";
     private static final String UNKNOWN = "UNKNOWN";
 
     // This length is from JDBC.
@@ -201,6 +208,14 @@ public class MySqlTypeUtils {
             case LONGTEXT:
             case JSON:
             case ENUM:
+            case GEOMETRY:
+            case POINT:
+            case LINESTRING:
+            case POLYGON:
+            case MULTIPOINT:
+            case MULTILINESTRING:
+            case MULTIPOLYGON:
+            case GEOMETRYCOLLECTION:
                 return DataTypes.STRING();
             case BINARY:
                 return DataTypes.BINARY(Preconditions.checkNotNull(length));
