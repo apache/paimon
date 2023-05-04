@@ -44,6 +44,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -148,16 +149,16 @@ public class PartitionExpireTest {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         // prepare commits
-        int now =
-                Integer.parseInt(
-                        LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")));
+        LocalDate now = LocalDate.now();
         int preparedCommits = random.nextInt(20, 30);
 
         List<List<CommitMessage>> commitMessages = new ArrayList<>();
         Set<Long> notCommitted = new HashSet<>();
         for (int i = 0; i < preparedCommits; i++) {
             // ensure the partition will be expired
-            String f0 = String.valueOf(now - random.nextInt(10));
+            String f0 =
+                    now.minus(random.nextInt(10), ChronoUnit.DAYS)
+                            .format(DateTimeFormatter.ofPattern("yyyyMMdd"));
             String f1 = String.valueOf(random.nextInt(25));
             StreamTableWrite write = table.newWrite(commitUser);
             write.write(GenericRow.of(BinaryString.fromString(f0), BinaryString.fromString(f1)));
