@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-parent</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.4-SNAPSHOT</version>
+        <version>0.5-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-bundle</artifactId>
@@ -94,19 +94,19 @@ under the License.
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-shade-jackson-2</artifactId>
-            <version>${paimon.shade.jackson.version}-${project.version}</version>
+            <version>${paimon.shade.jackson.version}-${paimon.shade.version}</version>
         </dependency>
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-shade-guava-30</artifactId>
-            <version>${paimon.shade.guava.version}-${project.version}</version>
+            <version>${paimon.shade.guava.version}-${paimon.shade.version}</version>
         </dependency>
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-shade-caffeine-2</artifactId>
-            <version>${paimon.shade.caffeine.version}-${project.version}</version>
+            <version>${paimon.shade.caffeine.version}-${paimon.shade.version}</version>
         </dependency>
     </dependencies>
 

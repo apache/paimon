@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-flink</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.4-SNAPSHOT</version>
+        <version>0.5-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
@@ -37,6 +37,7 @@ under the License.
         <flink.version>1.17.0</flink.version>
         <flink.cdc.version>2.3.0</flink.cdc.version>
         <frocksdbjni.version>6.20.3-ververica-2.0</frocksdbjni.version>
+        <geometry.version>2.2.0</geometry.version>
     </properties>
 
     <dependencies>
@@ -68,12 +69,29 @@ under the License.
             <scope>provided</scope>
         </dependency>
 
+        <!-- cdc dependencies start -->
+
+        <dependency>
+            <groupId>com.esri.geometry</groupId>
+            <artifactId>esri-geometry-api</artifactId>
+            <version>${geometry.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-core</artifactId>
+                </exclusion>
+            </exclusions>
+            <scope>provided</scope>
+        </dependency>
+
         <dependency>
             <groupId>com.ververica</groupId>
             <artifactId>flink-connector-mysql-cdc</artifactId>
             <version>${flink.cdc.version}</version>
             <scope>provided</scope>
         </dependency>
+
+        <!-- cdc dependencies end -->
 
         <dependency>
             <groupId>com.ververica</groupId>

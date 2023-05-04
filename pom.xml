@@ -31,7 +31,7 @@ under the License.
     <artifactId>paimon-parent</artifactId>
     <groupId>org.apache.paimon</groupId>
     <name>Paimon : </name>
-    <version>0.4-SNAPSHOT</version>
+    <version>0.5-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <url>https://paimon.apache.org</url>
@@ -69,7 +69,8 @@ under the License.
     </modules>
 
     <properties>
-        <project.build.outputTimestamp>${maven.build.timestamp}</project.build.outputTimestamp>
+        <project.build.outputTimestamp>2023-05-04T05:07:22Z</project.build.outputTimestamp>
+        <paimon.shade.version>0.4-SNAPSHOT</paimon.shade.version>
         <paimon.shade.jackson.version>2.14.2</paimon.shade.jackson.version>
         <paimon.shade.guava.version>30.1.1-jre</paimon.shade.guava.version>
         <paimon.shade.caffeine.version>2.9.3</paimon.shade.caffeine.version>
@@ -902,7 +903,7 @@ under the License.
                         <dependency>
                             <groupId>org.apache.paimon</groupId>
                             <artifactId>paimon-ci-tools</artifactId>
-                            <version>${project.version}</version>
+                            <version>${paimon.shade.version}</version>
                         </dependency>
                     </dependencies>
                 </plugin>

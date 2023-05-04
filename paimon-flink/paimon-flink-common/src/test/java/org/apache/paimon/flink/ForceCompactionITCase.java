@@ -50,12 +50,15 @@ public class ForceCompactionITCase extends CatalogITCaseBase {
                         + "  f0 INT\n, "
                         + "  f1 STRING\n, "
                         + "  f2 STRING\n"
-                        + ") PARTITIONED BY (f1)",
+                        + ") PARTITIONED BY (f1)"
+                        + " WITH (\n"
+                        + "'write-mode' = 'change-log')",
                 "CREATE TABLE IF NOT EXISTS T1 (\n"
                         + "  f0 INT\n, "
                         + "  f1 STRING\n, "
                         + "  f2 STRING\n"
-                        + ")",
+                        + ") WITH (\n"
+                        + "'write-mode' = 'change-log')",
                 "CREATE TABLE IF NOT EXISTS T2 (\n"
                         + "  f0 INT\n, "
                         + "  f1 STRING\n, "

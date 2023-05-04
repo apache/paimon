@@ -21,6 +21,8 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.utils.Restorable;
 
+import javax.annotation.Nullable;
+
 /**
  * {@link TableScan} for streaming, supports {@link #checkpoint} and {@link #restore}.
  *
@@ -29,4 +31,17 @@ import org.apache.paimon.utils.Restorable;
  * @since 0.4.0
  */
 @Public
-public interface StreamTableScan extends TableScan, Restorable<Long> {}
+public interface StreamTableScan extends TableScan, Restorable<Long> {
+
+    /** Restore from checkpoint next snapshot id. */
+    @Override
+    void restore(@Nullable Long nextSnapshotId);
+
+    /** Checkpoint to return next snapshot id. */
+    @Nullable
+    @Override
+    Long checkpoint();
+
+    /** Notifies the checkpoint complete with next snapshot id. */
+    void notifyCheckpointComplete(@Nullable Long nextSnapshot);
+}

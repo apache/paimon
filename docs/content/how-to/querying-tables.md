@@ -130,6 +130,29 @@ SELECT * FROM t TIMESTAMP AS OF 1678883047;
 
 {{< /tabs >}}
 
+## Consumer ID
+
+{{< hint info >}}
+This is an experimental feature.
+{{< /hint >}}
+
+You can specify the `consumer-id` when streaming read table:
+```sql
+SELECT * FROM t /*+ OPTIONS('consumer-id' = 'myid') */;
+```
+
+When stream read Paimon tables, the next snapshot id to be recorded into the file system. This has several advantages:
+
+1. When previous job is stopped, the newly started job can continue to consume from the previous progress without
+   resuming from the state. The newly reading will start reading from next snapshot id found in consumer files.
+2. When deciding whether a snapshot has expired, Paimon looks at all the consumers of the table in the file system,
+   and if there are consumers that still depend on this snapshot, then this snapshot will not be deleted by expiration.
+
+{{< hint info >}}
+NOTE: If there is a consumer that will not be used anymore, please delete it, otherwise it will affect the expiration
+of the snapshot. The consumer file is in `${table-path}/consumer/consumer-${consumer-id}`.
+{{< /hint >}}
+
 ## System Tables
 
 System tables contain metadata and information about each table, such as the snapshots created and the options in use. Users can access system tables with batch queries.

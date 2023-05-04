@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.WriteMode;
 import org.apache.paimon.flink.sink.FileStoreSink;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.source.ContinuousFileStoreSource;
@@ -37,9 +38,11 @@ import org.apache.paimon.utils.FailingFileIO;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.connector.source.Boundedness;
-import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.api.dag.Transformation;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.transformations.SourceTransformation;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.data.GenericRowData;
@@ -75,6 +78,7 @@ import java.util.stream.Stream;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.WRITE_MODE;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -326,12 +330,15 @@ public class FileStoreITCase extends AbstractTestBase {
         table =
                 table.copy(
                         Collections.singletonMap(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "1024"));
-        Source<RowData, ?, ?> source =
+        DataStream<RowData> source =
                 new FlinkSourceBuilder(IDENTIFIER, table)
                         .withContinuousMode(true)
                         .withEnv(env)
-                        .buildSource();
-        assertThat(source.getBoundedness()).isEqualTo(Boundedness.BOUNDED);
+                        .build();
+        Transformation<RowData> transformation = source.getTransformation();
+        assertThat(transformation).isInstanceOf(SourceTransformation.class);
+        assertThat(((SourceTransformation<?, ?, ?>) transformation).getSource().getBoundedness())
+                .isEqualTo(Boundedness.BOUNDED);
     }
 
     private void innerTestContinuous(FileStoreTable table) throws Exception {
@@ -437,6 +444,7 @@ public class FileStoreITCase extends AbstractTestBase {
             options.set(PATH, FailingFileIO.getFailingPath(failingName, temporaryPath));
         }
         options.set(FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        options.set(WRITE_MODE, WriteMode.CHANGE_LOG);
         return options;
     }
 
@@ -449,12 +457,12 @@ public class FileStoreITCase extends AbstractTestBase {
                         InternalTypeInfo.of(TABLE_TYPE));
     }
 
-    public static List<Row> executeAndCollect(DataStreamSource<RowData> source) throws Exception {
+    public static List<Row> executeAndCollect(DataStream<RowData> source) throws Exception {
         return executeAndCollect(source, CONVERTER);
     }
 
     public static List<Row> executeAndCollect(
-            DataStreamSource<RowData> source, DataStructureConverter<RowData, Row> converter)
+            DataStream<RowData> source, DataStructureConverter<RowData, Row> converter)
             throws Exception {
         CloseableIterator<RowData> iterator = source.executeAndCollect();
         List<Row> results = new ArrayList<>();

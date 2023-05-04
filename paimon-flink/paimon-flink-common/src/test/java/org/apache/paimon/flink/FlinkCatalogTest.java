@@ -26,11 +26,13 @@ import org.apache.paimon.options.Options;
 
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.Schema;
+import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
 import org.apache.flink.table.catalog.CatalogDatabaseImpl;
 import org.apache.flink.table.catalog.CatalogTable;
+import org.apache.flink.table.catalog.CatalogTableImpl;
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
@@ -429,6 +431,32 @@ public class FlinkCatalogTest {
         assertThatThrownBy(() -> catalog.dropDatabase(path1.getDatabaseName(), false, false))
                 .isInstanceOf(DatabaseNotExistException.class)
                 .hasMessage("Database db1 does not exist in Catalog test-catalog.");
+    }
+
+    @Test
+    public void testCreateTableWithColumnOptions() throws Exception {
+        TableSchema schema =
+                TableSchema.builder()
+                        .field("pk", DataTypes.INT().notNull())
+                        .field("test", DataTypes.INT())
+                        .field("comp", DataTypes.INT(), "test + 1")
+                        .primaryKey("pk")
+                        .build();
+        CatalogTable catalogTable = new CatalogTableImpl(schema, Collections.emptyMap(), "");
+
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
+        catalog.createTable(path1, catalogTable, false);
+
+        CatalogTable got = (CatalogTable) catalog.getTable(path1);
+        TableSchema newSchema = got.getSchema();
+
+        assertThat(schema.getTableColumns()).isEqualTo(newSchema.getTableColumns());
+        assertThat(schema.getPrimaryKey().get().getColumns())
+                .isEqualTo(newSchema.getPrimaryKey().get().getColumns());
+
+        Map<String, String> expected = got.getOptions();
+        expected.remove("path");
+        assertThat(catalogTable.getOptions()).isEqualTo(expected);
     }
 
     private void checkEquals(ObjectPath path, CatalogTable t1, CatalogTable t2) {

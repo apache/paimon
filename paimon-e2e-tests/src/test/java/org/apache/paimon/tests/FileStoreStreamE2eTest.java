@@ -75,6 +75,7 @@ public class FileStoreStreamE2eTest extends E2eTestBase {
                         + "    b INT,\n"
                         + "    rn BIGINT\n"
                         + ") WITH (\n"
+                        + "    'write-mode'='change-log',\n"
                         + "    'bucket' = '3'\n"
                         + ");";
 

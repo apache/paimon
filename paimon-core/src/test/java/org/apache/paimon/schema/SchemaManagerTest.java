@@ -248,6 +248,7 @@ public class SchemaManagerTest {
     public void testChangelogTableWithFullCompaction() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put("key", "value");
+        options.put(CoreOptions.WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
         options.put(
                 CoreOptions.CHANGELOG_PRODUCER.key(),
                 CoreOptions.ChangelogProducer.FULL_COMPACTION.toString());

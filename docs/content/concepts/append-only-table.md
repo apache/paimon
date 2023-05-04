@@ -26,7 +26,7 @@ under the License.
 
 # Append Only Table
 
-By specifying `'write-mode' = 'append-only'` when creating the table, user creates an append-only table.
+If a table does not have a primary key defined, it is an append-only table by default.
 
 You can only insert a complete record into the table. No delete or update is supported and you cannot define primary keys.
 This type of table is suitable for use cases that do not require updates (such as log data synchronization).
@@ -108,7 +108,7 @@ CREATE TABLE T (
 
 -- launch a bounded streaming job to read paimon_table
 SELECT window_start, window_end, SUM(f0) FROM
- TUMBLE(TABLE T, DESCRIPTOR(order_time), INTERVAL '10' MINUTES)) GROUP BY window_start, window_end; */;
+ TUMBLE(TABLE T, DESCRIPTOR(order_time), INTERVAL '10' MINUTES)) GROUP BY window_start, window_end;
 ```
 
 You can also enable [Flink Watermark alignment](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/datastream/event-time/generating_watermarks/#watermark-alignment-_beta_),
@@ -176,7 +176,6 @@ CREATE TABLE MyTable (
     price DOUBLE,
     sales BIGINT
 ) WITH (
-    'write-mode' = 'append-only',
     'bucket' = '8',
     'bucket-key' = 'product_id'
 );

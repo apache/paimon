@@ -19,6 +19,7 @@
 package org.apache.paimon.hive.mapred;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -101,6 +102,7 @@ public class PaimonRecordReaderTest {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, tempDir.toString());
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
