@@ -84,8 +84,7 @@ public class ChangelogModeTest {
                 new DataTableSource(identifier, table, true, null, logStoreTableFactory);
         assertThat(source.getChangelogMode()).isEqualTo(expectSource);
 
-        FlinkTableSink sink =
-                new FlinkTableSink(identifier, table, null, null, Collections.emptyList());
+        FlinkTableSink sink = new FlinkTableSink(identifier, table, null, null);
         assertThat(sink.getChangelogMode(ChangelogMode.all())).isEqualTo(expectSink);
     }
 

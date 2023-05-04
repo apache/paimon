@@ -36,7 +36,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
@@ -49,7 +48,6 @@ import org.apache.flink.types.RowKind;
 import javax.annotation.Nullable;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
@@ -69,19 +67,15 @@ public abstract class FlinkTableSinkBase
     protected boolean overwrite = false;
     @Nullable protected CatalogLock.Factory lockFactory;
 
-    protected final List<Column> columns;
-
     public FlinkTableSinkBase(
             ObjectIdentifier tableIdentifier,
             Table table,
             DynamicTableFactory.Context context,
-            @Nullable LogStoreTableFactory logStoreTableFactory,
-            List<Column> columns) {
+            @Nullable LogStoreTableFactory logStoreTableFactory) {
         this.tableIdentifier = tableIdentifier;
         this.table = table;
         this.context = context;
         this.logStoreTableFactory = logStoreTableFactory;
-        this.columns = columns;
     }
 
     @Override
@@ -144,7 +138,7 @@ public abstract class FlinkTableSinkBase
     @Override
     public DynamicTableSink copy() {
         FlinkTableSink copied =
-                new FlinkTableSink(tableIdentifier, table, context, logStoreTableFactory, columns);
+                new FlinkTableSink(tableIdentifier, table, context, logStoreTableFactory);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
         copied.lockFactory = lockFactory;

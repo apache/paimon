@@ -20,12 +20,14 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.WriteMode;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
 import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.types.DataField;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.catalog.Column;
@@ -51,15 +53,14 @@ import static org.apache.paimon.CoreOptions.WRITE_MODE;
 /** Table sink to create sink. */
 public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLevelUpdate {
 
-    private Map<Integer, RowData.FieldGetter> updatedColumns = Collections.emptyMap();
+    private Map<Integer, InternalRow.FieldGetter> updatedColumns = Collections.emptyMap();
 
     public FlinkTableSink(
             ObjectIdentifier tableIdentifier,
             Table table,
             DynamicTableFactory.Context context,
-            @Nullable LogStoreTableFactory logStoreTableFactory,
-            List<Column> columns) {
-        super(tableIdentifier, table, context, logStoreTableFactory, columns);
+            @Nullable LogStoreTableFactory logStoreTableFactory) {
+        super(tableIdentifier, table, context, logStoreTableFactory);
     }
 
     @Override
@@ -73,6 +74,7 @@ public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLev
         if (table instanceof ChangelogWithKeyFileStoreTable) {
             Options options = Options.fromMap(table.options());
             Set<String> primaryKeys = new HashSet<>(table.primaryKeys());
+            Set<String> updatedColumnNames = new HashSet<>(updatedColumns.size());
             updatedColumns.forEach(
                     column -> {
                         if (primaryKeys.contains(column.getName())) {
@@ -85,21 +87,22 @@ public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLev
                                                     .collect(Collectors.toList()));
                             throw new UnsupportedOperationException(errMsg);
                         }
+                        updatedColumnNames.add(column.getName());
                     });
-
             if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE) {
                 return new RowLevelUpdateInfo() {};
             } else if (options.get(MERGE_ENGINE) == MergeEngine.PARTIAL_UPDATE) {
+                List<DataField> dataFields = table.rowType().getFields();
                 this.updatedColumns = new LinkedHashMap<>();
-                for (int i = 0; i < columns.size(); i++) {
-                    Column column = columns.get(i);
-                    if (primaryKeys.contains(column.getName()) || updatedColumns.contains(column)) {
+                for (int i = 0; i < dataFields.size(); i++) {
+                    DataField dataField = dataFields.get(i);
+                    if (primaryKeys.contains(dataField.name())
+                            || updatedColumnNames.contains(dataField.name())) {
                         this.updatedColumns.put(
-                                i,
-                                RowData.createFieldGetter(
-                                        column.getDataType().getLogicalType(), i));
+                                i, InternalRow.createFieldGetter(dataField.type(), i));
                     }
                 }
+
                 // Even with partial-update we still need all columns. Because the topology
                 // structure is source -> cal -> constraintEnforcer -> sink, in the
                 // constraintEnforcer operator, the constraint check will be performed according to

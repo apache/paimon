@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -45,7 +46,7 @@ public class FlinkSinkBuilder {
     @Nullable private Integer parallelism;
     @Nullable private String commitUser;
     @Nullable private StoreSinkWrite.Provider sinkProvider;
-    private Map<Integer, RowData.FieldGetter> updatedColumns = Collections.emptyMap();
+    private Map<Integer, InternalRow.FieldGetter> updatedColumns = Collections.emptyMap();
 
     public FlinkSinkBuilder(FileStoreTable table) {
         this.table = table;
@@ -76,7 +77,8 @@ public class FlinkSinkBuilder {
         return this;
     }
 
-    public FlinkSinkBuilder withUpdatedColumns(Map<Integer, RowData.FieldGetter> updatedColumns) {
+    public FlinkSinkBuilder withUpdatedColumns(
+            Map<Integer, InternalRow.FieldGetter> updatedColumns) {
         this.updatedColumns = updatedColumns;
         return this;
     }

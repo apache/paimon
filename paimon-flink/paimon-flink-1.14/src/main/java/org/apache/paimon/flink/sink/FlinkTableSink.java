@@ -21,13 +21,10 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.table.Table;
 
-import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.factories.DynamicTableFactory;
 
 import javax.annotation.Nullable;
-
-import java.util.List;
 
 /** Table sink to create sink. */
 public class FlinkTableSink extends FlinkTableSinkBase {
@@ -36,8 +33,7 @@ public class FlinkTableSink extends FlinkTableSinkBase {
             ObjectIdentifier tableIdentifier,
             Table table,
             DynamicTableFactory.Context context,
-            @Nullable LogStoreTableFactory logStoreTableFactory,
-            List<Column> columns) {
-        super(tableIdentifier, table, context, logStoreTableFactory, columns);
+            @Nullable LogStoreTableFactory logStoreTableFactory) {
+        super(tableIdentifier, table, context, logStoreTableFactory);
     }
 }

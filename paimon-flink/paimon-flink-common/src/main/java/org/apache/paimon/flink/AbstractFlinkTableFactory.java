@@ -91,8 +91,7 @@ public abstract class AbstractFlinkTableFactory
                 context.getObjectIdentifier(),
                 buildPaimonTable(context),
                 context,
-                createOptionalLogStoreFactory(context).orElse(null),
-                context.getCatalogTable().getResolvedSchema().getColumns());
+                createOptionalLogStoreFactory(context).orElse(null));
     }
 
     @Override
