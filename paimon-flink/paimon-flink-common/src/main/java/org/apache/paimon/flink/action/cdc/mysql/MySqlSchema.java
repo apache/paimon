@@ -38,7 +38,7 @@ public class MySqlSchema {
     private final String databaseName;
     private final String tableName;
 
-    private final Map<String, Tuple2<DataType, String>> fields;
+    private final LinkedHashMap<String, Tuple2<DataType, String>> fields;
     private final List<String> primaryKeys;
 
     public MySqlSchema(
