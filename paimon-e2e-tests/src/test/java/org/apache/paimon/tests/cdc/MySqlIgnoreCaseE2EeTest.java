@@ -128,8 +128,8 @@ public class MySqlIgnoreCaseE2EeTest extends MySqlCdcE2eTestBase {
                         createResultSink("result1", "fields STRING"));
 
         checkResult(
-                "[{\"id\":0,\"name\":\"k\",\"type\":\"INT NOT NULL\"},"
-                        + "{\"id\":1,\"name\":\"uppercase_v0\",\"type\":\"VARCHAR(20)\"}]");
+                "[{\"id\":0,\"name\":\"k\",\"type\":\"INT NOT NULL\",\"description\":\"\"},"
+                        + "{\"id\":1,\"name\":\"uppercase_v0\",\"type\":\"VARCHAR(20)\",\"description\":\"\"}]");
         clearCurrentResults();
         cancelJob(jobId);
     }

@@ -32,6 +32,7 @@ import com.ververica.cdc.connectors.mysql.table.JdbcUrlUtils;
 import com.ververica.cdc.connectors.mysql.table.StartupOptions;
 import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import com.ververica.cdc.debezium.table.DebeziumOptions;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 
@@ -68,13 +69,13 @@ class MySqlActionUtils {
     }
 
     static boolean schemaCompatible(TableSchema tableSchema, MySqlSchema mySqlSchema) {
-        for (Map.Entry<String, DataType> entry : mySqlSchema.fields().entrySet()) {
+        for (Map.Entry<String, Tuple2<DataType, String>> entry : mySqlSchema.fields().entrySet()) {
             int idx = tableSchema.fieldNames().indexOf(entry.getKey());
             if (idx < 0) {
                 return false;
             }
             DataType type = tableSchema.fields().get(idx).type();
-            if (UpdatedDataFieldsProcessFunction.canConvert(entry.getValue(), type)
+            if (UpdatedDataFieldsProcessFunction.canConvert(entry.getValue().f0, type)
                     != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
                 return false;
             }
@@ -90,8 +91,8 @@ class MySqlActionUtils {
         Schema.Builder builder = Schema.newBuilder();
         builder.options(paimonConfig);
 
-        for (Map.Entry<String, DataType> entry : mySqlSchema.fields().entrySet()) {
-            builder.column(entry.getKey(), entry.getValue());
+        for (Map.Entry<String, Tuple2<DataType, String>> entry : mySqlSchema.fields().entrySet()) {
+            builder.column(entry.getKey(), entry.getValue().f0, entry.getValue().f1);
         }
 
         if (specifiedPrimaryKeys.size() > 0) {

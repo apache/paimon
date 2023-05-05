@@ -30,6 +30,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
@@ -51,6 +52,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** IT cases for {@link MySqlSyncTableAction}. */
@@ -95,6 +97,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
             Thread.sleep(1000);
         }
 
+        checkTableSchema(
+                "[{\"id\":0,\"name\":\"pt\",\"type\":\"INT NOT NULL\",\"description\":\"primary\"},{\"id\":1,\"name\":\"_id\",\"type\":\"INT NOT NULL\",\"description\":\"_id\"},{\"id\":2,\"name\":\"v1\",\"type\":\"VARCHAR(10)\",\"description\":\"v1\"}]");
+
         try (Connection conn =
                 DriverManager.getConnection(
                         MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
@@ -104,6 +109,13 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 testSchemaEvolutionImpl(statement);
             }
         }
+    }
+
+    private void checkTableSchema(String excepted) throws Exception {
+
+        FileStoreTable table = getFileStoreTable();
+
+        assertEquals(excepted, JsonSerdeUtil.toFlatJson(table.schema().fields()));
     }
 
     private void testSchemaEvolutionImpl(Statement statement) throws Exception {
@@ -279,6 +291,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
             }
             Thread.sleep(1000);
         }
+
+        checkTableSchema(
+                "[{\"id\":0,\"name\":\"_id\",\"type\":\"INT NOT NULL\",\"description\":\"primary\"},{\"id\":1,\"name\":\"v1\",\"type\":\"VARCHAR(10)\",\"description\":\"v1\"},{\"id\":2,\"name\":\"v2\",\"type\":\"INT\",\"description\":\"v2\"},{\"id\":3,\"name\":\"v3\",\"type\":\"VARCHAR(10)\",\"description\":\"v3\"}]");
 
         try (Connection conn =
                 DriverManager.getConnection(
