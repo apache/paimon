@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -31,7 +30,6 @@ import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.Map;
 
 /** Builder for {@link FileStoreSink}. */
@@ -46,7 +44,6 @@ public class FlinkSinkBuilder {
     @Nullable private Integer parallelism;
     @Nullable private String commitUser;
     @Nullable private StoreSinkWrite.Provider sinkProvider;
-    private Map<Integer, InternalRow.FieldGetter> updatedColumns = Collections.emptyMap();
 
     public FlinkSinkBuilder(FileStoreTable table) {
         this.table = table;
@@ -77,12 +74,6 @@ public class FlinkSinkBuilder {
         return this;
     }
 
-    public FlinkSinkBuilder withUpdatedColumns(
-            Map<Integer, InternalRow.FieldGetter> updatedColumns) {
-        this.updatedColumns = updatedColumns;
-        return this;
-    }
-
     @VisibleForTesting
     public FlinkSinkBuilder withSinkProvider(
             String commitUser, StoreSinkWrite.Provider sinkProvider) {
@@ -103,8 +94,7 @@ public class FlinkSinkBuilder {
 
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         FileStoreSink sink =
-                new FileStoreSink(
-                        table, lockFactory, overwritePartition, logSinkFunction, updatedColumns);
+                new FileStoreSink(table, lockFactory, overwritePartition, logSinkFunction);
         return commitUser != null && sinkProvider != null
                 ? sink.sinkFrom(new DataStream<>(env, partitioned), commitUser, sinkProvider)
                 : sink.sinkFrom(new DataStream<>(env, partitioned));

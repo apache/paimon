@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.log.LogWriteCallback;
 import org.apache.paimon.table.FileStoreTable;
@@ -45,7 +43,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Map;
 
 /** A {@link PrepareCommitOperator} to write {@link RowData}. Record schema is fixed. */
 public class RowDataStoreWriteOperator extends PrepareCommitOperator<RowData> {
@@ -65,19 +62,15 @@ public class RowDataStoreWriteOperator extends PrepareCommitOperator<RowData> {
     /** We listen to this ourselves because we don't have an {@link InternalTimerService}. */
     private long currentWatermark = Long.MIN_VALUE;
 
-    private final Map<Integer, InternalRow.FieldGetter> updatedColumns;
-
     public RowDataStoreWriteOperator(
             FileStoreTable table,
             @Nullable LogSinkFunction logSinkFunction,
             StoreSinkWrite.Provider storeSinkWriteProvider,
-            String initialCommitUser,
-            Map<Integer, InternalRow.FieldGetter> updatedColumns) {
+            String initialCommitUser) {
         this.table = table;
         this.logSinkFunction = logSinkFunction;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;
-        this.updatedColumns = updatedColumns;
     }
 
     @Override
@@ -150,19 +143,10 @@ public class RowDataStoreWriteOperator extends PrepareCommitOperator<RowData> {
     @Override
     public void processElement(StreamRecord<RowData> element) throws Exception {
         sinkContext.timestamp = element.hasTimestamp() ? element.getTimestamp() : null;
+
         SinkRecord record;
         try {
-            InternalRow rowData = new FlinkRowWrapper(element.getValue());
-            if (!updatedColumns.isEmpty()) {
-                GenericRow genericRow =
-                        new GenericRow(rowData.getRowKind(), rowData.getFieldCount());
-                for (Map.Entry<Integer, InternalRow.FieldGetter> index :
-                        updatedColumns.entrySet()) {
-                    genericRow.setField(index.getKey(), index.getValue().getFieldOrNull(rowData));
-                }
-                rowData = genericRow;
-            }
-            record = write.write(rowData);
+            record = write.write(new FlinkRowWrapper(element.getValue()));
         } catch (Exception e) {
             throw new IOException(e);
         }

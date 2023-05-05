@@ -41,7 +41,6 @@ import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.types.RowKind;
 
@@ -132,7 +131,21 @@ public abstract class FlinkTableSinkBase
         final LogSinkFunction logSinkFunction =
                 overwrite ? null : (logSinkProvider == null ? null : logSinkProvider.createSink());
         return new PaimonDataStreamSinkProvider(
-                (dataStream) -> createFlinkSinkBuilder(dataStream, logSinkFunction, conf).build());
+                (dataStream) ->
+                        new FlinkSinkBuilder((FileStoreTable) table)
+                                .withInput(
+                                        new DataStream<>(
+                                                dataStream.getExecutionEnvironment(),
+                                                dataStream.getTransformation()))
+                                .withLockFactory(
+                                        Lock.factory(
+                                                lockFactory,
+                                                FlinkCatalog.toIdentifier(
+                                                        tableIdentifier.toObjectPath())))
+                                .withLogSinkFunction(logSinkFunction)
+                                .withOverwritePartition(overwrite ? staticPartitions : null)
+                                .withParallelism(conf.get(FlinkConnectorOptions.SINK_PARALLELISM))
+                                .build());
     }
 
     @Override
@@ -169,21 +182,5 @@ public abstract class FlinkTableSinkBase
 
     public void setLockFactory(@Nullable CatalogLock.Factory lockFactory) {
         this.lockFactory = lockFactory;
-    }
-
-    protected FlinkSinkBuilder createFlinkSinkBuilder(
-            DataStream<RowData> dataStream, LogSinkFunction logSinkFunction, Options conf) {
-        return new FlinkSinkBuilder((FileStoreTable) table)
-                .withInput(
-                        new DataStream<>(
-                                dataStream.getExecutionEnvironment(),
-                                dataStream.getTransformation()))
-                .withLockFactory(
-                        Lock.factory(
-                                lockFactory,
-                                FlinkCatalog.toIdentifier(tableIdentifier.toObjectPath())))
-                .withLogSinkFunction(logSinkFunction)
-                .withOverwritePartition(overwrite ? staticPartitions : null)
-                .withParallelism(conf.get(FlinkConnectorOptions.SINK_PARALLELISM));
     }
 }

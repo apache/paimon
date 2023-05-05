@@ -19,30 +19,23 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions.MergeEngine;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
 import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.types.DataField;
 
-import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.RowLevelModificationScanContext;
 import org.apache.flink.table.connector.sink.abilities.SupportsRowLevelUpdate;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -50,8 +43,6 @@ import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 
 /** Table sink to create sink. */
 public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLevelUpdate {
-
-    private Map<Integer, InternalRow.FieldGetter> updatedColumns = Collections.emptyMap();
 
     public FlinkTableSink(
             ObjectIdentifier tableIdentifier,
@@ -72,7 +63,6 @@ public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLev
         if (table instanceof ChangelogWithKeyFileStoreTable) {
             Options options = Options.fromMap(table.options());
             Set<String> primaryKeys = new HashSet<>(table.primaryKeys());
-            Set<String> updatedColumnNames = new HashSet<>(updatedColumns.size());
             updatedColumns.forEach(
                     column -> {
                         if (primaryKeys.contains(column.getName())) {
@@ -85,28 +75,15 @@ public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLev
                                                     .collect(Collectors.toList()));
                             throw new UnsupportedOperationException(errMsg);
                         }
-                        updatedColumnNames.add(column.getName());
                     });
-            if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE) {
-                return new RowLevelUpdateInfo() {};
-            } else if (options.get(MERGE_ENGINE) == MergeEngine.PARTIAL_UPDATE) {
-                List<DataField> dataFields = table.rowType().getFields();
-                this.updatedColumns = new LinkedHashMap<>();
-                for (int i = 0; i < dataFields.size(); i++) {
-                    DataField dataField = dataFields.get(i);
-                    if (primaryKeys.contains(dataField.name())
-                            || updatedColumnNames.contains(dataField.name())) {
-                        this.updatedColumns.put(
-                                i, InternalRow.createFieldGetter(dataField.type(), i));
-                    }
-                }
-
+            if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE
+                    || options.get(MERGE_ENGINE) == MergeEngine.PARTIAL_UPDATE) {
                 // Even with partial-update we still need all columns. Because the topology
                 // structure is source -> cal -> constraintEnforcer -> sink, in the
                 // constraintEnforcer operator, the constraint check will be performed according to
                 // the index, not according to the column. So we can't return only some columns,
                 // which will cause problems like ArrayIndexOutOfBoundsException.
-                // Returning partial columns will be supported after FLINK-32001 is resolved.
+                // TODO: return partial columns after FLINK-32001 is resolved.
                 return new RowLevelUpdateInfo() {};
             }
             throw new UnsupportedOperationException(
@@ -126,12 +103,5 @@ public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLev
             throw new UnsupportedOperationException(
                     "Unknown FileStoreTable subclass " + table.getClass().getName());
         }
-    }
-
-    @Override
-    protected FlinkSinkBuilder createFlinkSinkBuilder(
-            DataStream<RowData> dataStream, LogSinkFunction logSinkFunction, Options conf) {
-        return super.createFlinkSinkBuilder(dataStream, logSinkFunction, conf)
-                .withUpdatedColumns(updatedColumns);
     }
 }
