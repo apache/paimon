@@ -153,7 +153,7 @@ Please feel free to ask questions at any time. Either send a mail to the Dev mai
     <div class="panel panel-default">
       <div class="panel-body">
         <h2><span class="number">1</span><a href="#consensus">Discuss</a></h2>
-        <p>Create a Issue or mailing list discussion and reach consensus</p>
+        <p>Create an Issue or mailing list discussion and reach consensus</p>
         <p><b>To request an issue, please note that it is not just a "please assign it to me", you need to explain your understanding of the issue, and your design, and if possible, you need to provide your POC code.</b></p>
       </div>
     </div>

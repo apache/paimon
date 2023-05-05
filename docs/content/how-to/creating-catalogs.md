@@ -133,7 +133,7 @@ USE paimon.default;
 
 {{< /tabs >}}
 
-If you are using a object storage , and you don't want that the location of paimon table/database is accessed by the filesystem of hive,
+If you are using an object storage , and you don't want that the location of paimon table/database is accessed by the filesystem of hive,
 which may lead to the error such as "No FileSystem for scheme: s3a".
 You can set location in the properties of table/database by the config of `location-in-properties`. See
 [setting the location of table/database in properties ]({{< ref "maintenance/configurations#HiveCatalogOptions" >}})
