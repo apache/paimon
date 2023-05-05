@@ -387,6 +387,15 @@ public class CoreOptions implements Serializable {
                             "End condition \"watermark\" for bounded streaming mode. Stream"
                                     + " reading will end when a larger watermark snapshot is encountered.");
 
+    public static final ConfigOption<Integer> SCAN_MANIFEST_PARALLELISM =
+            key("scan.manifest.parallelism")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The parallelism of scanning manifest files, default value is the size of cpu processor."
+                                    + "Note: Scale-up this parameter will increase memory usage while scanning manifest files."
+                                    + "We can consider downsize it when we encounter an out of memory exception while scanning");
+
     public static final ConfigOption<LogConsistency> LOG_CONSISTENCY =
             key("log.consistency")
                     .enumType(LogConsistency.class)
@@ -842,6 +851,10 @@ public class CoreOptions implements Serializable {
 
     public Long scanSnapshotId() {
         return options.get(SCAN_SNAPSHOT_ID);
+    }
+
+    public Integer scanManifestParallelism() {
+        return options.get(SCAN_MANIFEST_PARALLELISM);
     }
 
     public Optional<String> sequenceField() {

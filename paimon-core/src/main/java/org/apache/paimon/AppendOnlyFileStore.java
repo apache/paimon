@@ -96,7 +96,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 manifestFileFactory(forWrite),
                 manifestListFactory(forWrite),
                 options.bucket(),
-                forWrite);
+                forWrite,
+                options.scanManifestParallelism());
     }
 
     @Override
