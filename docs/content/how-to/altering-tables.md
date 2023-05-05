@@ -162,7 +162,7 @@ ALTER TABLE my_table RENAME COLUMN c0 TO c1;
 
 ## Dropping Columns
 
-The following SQL drops tow columns `c1` and `c2` from table `my_table`.
+The following SQL drops two columns `c1` and `c2` from table `my_table`.
 
 {{< tabs "drop-columns-example" >}}
 

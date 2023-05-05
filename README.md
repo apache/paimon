@@ -8,7 +8,7 @@ Paimon is a streaming data lake platform that supports high-speed data ingestion
 
 Background and documentation is available at https://paimon.apache.org
 
-Paimon's former name was Flink Table Store, developed from the Flink community. The architecture refers to some design concepts of Iceberg.
+`Paimon`'s former name was `Flink Table Store`, developed from the Flink community. The architecture refers to some design concepts of Iceberg.
 Thanks to Apache Flink and Apache Iceberg.
 
 ## Collaboration
