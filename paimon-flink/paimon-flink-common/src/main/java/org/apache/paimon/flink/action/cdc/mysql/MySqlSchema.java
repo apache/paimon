@@ -21,6 +21,8 @@ package org.apache.paimon.flink.action.cdc.mysql;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.types.DataType;
 
+import org.apache.flink.api.java.tuple.Tuple2;
+
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.util.ArrayList;
@@ -36,7 +38,7 @@ public class MySqlSchema {
     private final String databaseName;
     private final String tableName;
 
-    private final LinkedHashMap<String, DataType> fields;
+    private final LinkedHashMap<String, Tuple2<DataType, String>> fields;
     private final List<String> primaryKeys;
 
     public MySqlSchema(
@@ -51,6 +53,7 @@ public class MySqlSchema {
                 String fieldName = rs.getString("COLUMN_NAME");
                 String fieldType = rs.getString("TYPE_NAME");
                 Integer precision = rs.getInt("COLUMN_SIZE");
+                String fieldComment = rs.getString("REMARKS");
 
                 if (rs.wasNull()) {
                     precision = null;
@@ -67,7 +70,11 @@ public class MySqlSchema {
                                     fieldName, databaseName, tableName));
                     fieldName = fieldName.toLowerCase();
                 }
-                fields.put(fieldName, MySqlTypeUtils.toDataType(fieldType, precision, scale));
+                fields.put(
+                        fieldName,
+                        Tuple2.of(
+                                MySqlTypeUtils.toDataType(fieldType, precision, scale),
+                                fieldComment));
             }
         }
 
@@ -91,7 +98,7 @@ public class MySqlSchema {
         return tableName;
     }
 
-    public Map<String, DataType> fields() {
+    public Map<String, Tuple2<DataType, String>> fields() {
         return fields;
     }
 
@@ -100,14 +107,14 @@ public class MySqlSchema {
     }
 
     public MySqlSchema merge(MySqlSchema other) {
-        for (Map.Entry<String, DataType> entry : other.fields.entrySet()) {
+        for (Map.Entry<String, Tuple2<DataType, String>> entry : other.fields.entrySet()) {
             String fieldName = entry.getKey();
-            DataType newType = entry.getValue();
+            DataType newType = entry.getValue().f0;
             if (fields.containsKey(fieldName)) {
-                DataType oldType = fields.get(fieldName);
+                DataType oldType = fields.get(fieldName).f0;
                 switch (UpdatedDataFieldsProcessFunction.canConvert(oldType, newType)) {
                     case CONVERT:
-                        fields.put(fieldName, newType);
+                        fields.put(fieldName, Tuple2.of(newType, entry.getValue().f1));
                         break;
                     case EXCEPTION:
                         throw new IllegalArgumentException(
@@ -120,7 +127,7 @@ public class MySqlSchema {
                                         other.tableName));
                 }
             } else {
-                fields.put(fieldName, newType);
+                fields.put(fieldName, Tuple2.of(newType, entry.getValue().f1));
             }
         }
         if (!primaryKeys.equals(other.primaryKeys)) {
