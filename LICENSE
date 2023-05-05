@@ -199,3 +199,29 @@
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+------------------------------------------------------------------------------------
+This product bundles various third-party components under other open source licenses.
+This section summarizes those components and their licenses. See licenses/
+for text of these licenses.
+
+Apache Software Foundation License 2.0
+--------------------------------------
+
+paimon-common/src/main/java/org/apache/paimon/lookup/hash/HashLookupStoreWriter.java
+paimon-common/src/main/java/org/apache/paimon/lookup/hash/HashLookupStoreReader.java
+paimon-common/src/main/java/org/apache/paimon/utils/VarLengthIntUtils.java
+paimon-filesystems/paimon-s3-impl/src/main/java/com/amazonaws/services/s3/model/transform/XmlResponsesSaxParser.java
+
+
+MIT License
+-----------
+
+docs/static/js/anchor.min.js
+
+
+BSD License
+------------
+
+paimon-common/src/main/antlr4/JavaLexer.g4
+paimon-common/src/main/antlr4/JavaParser.g4
