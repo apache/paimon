@@ -18,7 +18,10 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
+import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.DataType;
 
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.MySqlSourceBuilder;
@@ -32,10 +35,6 @@ import com.ververica.cdc.debezium.table.DebeziumOptions;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
-import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.types.DataType;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -43,6 +42,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 class MySqlActionUtils {
 
@@ -68,8 +69,7 @@ class MySqlActionUtils {
     }
 
     static boolean schemaCompatible(TableSchema tableSchema, MySqlSchema mySqlSchema) {
-        for (Map.Entry<String, Tuple2<DataType, String>> entry :
-                mySqlSchema.fields().entrySet()) {
+        for (Map.Entry<String, Tuple2<DataType, String>> entry : mySqlSchema.fields().entrySet()) {
             int idx = tableSchema.fieldNames().indexOf(entry.getKey());
             if (idx < 0) {
                 return false;
@@ -91,8 +91,7 @@ class MySqlActionUtils {
         Schema.Builder builder = Schema.newBuilder();
         builder.options(paimonConfig);
 
-        for (Map.Entry<String, Tuple2<DataType, String>> entry :
-                mySqlSchema.fields().entrySet()) {
+        for (Map.Entry<String, Tuple2<DataType, String>> entry : mySqlSchema.fields().entrySet()) {
             builder.column(entry.getKey(), entry.getValue().f0, entry.getValue().f1);
         }
 
