@@ -18,6 +18,7 @@
 package org.apache.paimon.data;
 
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.StringUtils;
 
@@ -43,6 +44,17 @@ public class DataFormatTestUtil {
                 Object field = fieldGetter.getFieldOrNull(row);
                 if (field instanceof byte[]) {
                     build.append(Arrays.toString((byte[]) field));
+                } else if (field instanceof InternalArray) {
+                    InternalArray internalArray = (InternalArray) field;
+                    ArrayType arrayType = (ArrayType) type.getTypeAt(i);
+                    InternalArray.ElementGetter elementGetter =
+                            InternalArray.createElementGetter(arrayType.getElementType());
+                    String[] result = new String[internalArray.size()];
+                    for (int j = 0; j < internalArray.size(); j++) {
+                        Object object = elementGetter.getElementOrNull(internalArray, j);
+                        result[j] = null == object ? null : object.toString();
+                    }
+                    build.append(Arrays.toString(result));
                 } else {
                     build.append(field);
                 }
