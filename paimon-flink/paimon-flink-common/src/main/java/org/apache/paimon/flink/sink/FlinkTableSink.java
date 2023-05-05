@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions.MergeEngine;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
@@ -48,7 +47,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
-import static org.apache.paimon.CoreOptions.WRITE_MODE;
 
 /** Table sink to create sink. */
 public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLevelUpdate {
@@ -108,20 +106,22 @@ public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLev
                 // constraintEnforcer operator, the constraint check will be performed according to
                 // the index, not according to the column. So we can't return only some columns,
                 // which will cause problems like ArrayIndexOutOfBoundsException.
+                // Returning partial columns will be supported after FLINK-32001 is resolved.
                 return new RowLevelUpdateInfo() {};
             }
             throw new UnsupportedOperationException(
                     String.format(
-                            "Only %s and %s types of %s support the update statement.",
+                            "%s can not support update, currently only %s of %s and %s can support update.",
+                            options.get(MERGE_ENGINE),
+                            MERGE_ENGINE.key(),
                             MergeEngine.DEDUPLICATE,
-                            MergeEngine.PARTIAL_UPDATE,
-                            MERGE_ENGINE.key()));
+                            MergeEngine.PARTIAL_UPDATE));
         } else if (table instanceof AppendOnlyFileStoreTable
                 || table instanceof ChangelogValueCountFileStoreTable) {
             throw new UnsupportedOperationException(
                     String.format(
-                            "Only tables whose %s is %s and have primary keys support the update statement.",
-                            WRITE_MODE.key(), WriteMode.CHANGE_LOG));
+                            "%s can not support update, because there is no primary key.",
+                            table.getClass().getName()));
         } else {
             throw new UnsupportedOperationException(
                     "Unknown FileStoreTable subclass " + table.getClass().getName());
