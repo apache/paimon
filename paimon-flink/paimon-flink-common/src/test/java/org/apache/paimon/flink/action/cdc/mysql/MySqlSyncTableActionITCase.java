@@ -97,6 +97,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
             Thread.sleep(1000);
         }
 
+        checkTableSchema();
+
         try (Connection conn =
                 DriverManager.getConnection(
                         MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
@@ -108,42 +110,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         }
     }
 
-    @Test
-    @Timeout(60)
-    public void checkTableSchema() throws Exception {
-        Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", DATABASE_NAME);
-        mySqlConfig.put("table-name", "checkTableSchema");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
-        MySqlSyncTableAction action =
-                new MySqlSyncTableAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("k"),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        while (true) {
-            JobStatus status = client.getJobStatus().get();
-            if (status == JobStatus.RUNNING) {
-                break;
-            }
-            Thread.sleep(1000);
-        }
+    private void checkTableSchema() throws Exception {
 
         FileStoreTable table = getFileStoreTable();
 
@@ -325,6 +292,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
             }
             Thread.sleep(1000);
         }
+
+        checkTableSchema();
 
         try (Connection conn =
                 DriverManager.getConnection(
