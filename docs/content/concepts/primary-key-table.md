@@ -28,7 +28,7 @@ under the License.
 
 Changelog table is the default table type when creating a table. Users can insert, update or delete records in the table.
 
-Primary keys are a set of columns that are unique for each record. Paimon imposes an ordering of data, which means the system will sort the primary key within each bucket. Using this feature, users can achieve high performance by adding filter conditions on the primary key.
+Primary keys consist of a set of columns that contain unique values for each record. Paimon enforces data ordering by sorting the primary key within each bucket, allowing users to achieve high performance by applying filtering conditions on the primary key.
 
 By [defining primary keys]({{< ref "how-to/creating-tables#tables-with-primary-keys" >}}) on a changelog table, users can access the following features.
 
@@ -37,7 +37,7 @@ By [defining primary keys]({{< ref "how-to/creating-tables#tables-with-primary-k
 When Paimon sink receives two or more records with the same primary keys, it will merge them into one record to keep primary keys unique. By specifying the `merge-engine` table property, users can choose how records are merged together.
 
 {{< hint info >}}
-Set `table.exec.sink.upsert-materialize` to `NONE` always in Flink SQL TableConfig, sink upsert-materialize may
+Always set `table.exec.sink.upsert-materialize` to `NONE` in Flink SQL TableConfig, sink upsert-materialize may
 result in strange behavior. When the input is out of order, we recommend that you use
 [Sequence Field]({{< ref "concepts/primary-key-table#sequence-field" >}}) to correct disorder.
 {{< /hint >}}
@@ -50,14 +50,15 @@ Specifically, if the latest record is a `DELETE` record, all records with the sa
 
 ### Partial Update
 
-By specifying `'merge-engine' = 'partial-update'`, users can set columns of a record across multiple updates and finally get a complete record. Specifically, value fields are updated to the latest data one by one under the same primary key, but null values are not overwritten.
+By specifying `'merge-engine' = 'partial-update'`,
+Users have the ability to update columns of a record through multiple updates until the record is complete. This is achieved by updating the value fields one by one, using the latest data under the same primary key. However, null values are not overwritten in the process.
 
-For example, let's say Paimon receives three records:
+For example, suppose Paimon receives three records:
 - `<1, 23.0, 10, NULL>`-
 - `<1, NULL, NULL, 'This is a book'>`
 - `<1, 25.2, NULL, NULL>`
 
-If the first column is the primary key. The final result will be `<1, 25.2, 10, 'This is a book'>`.
+Assuming that the first column is the primary key, the final result would be `<1, 25.2, 10, 'This is a book'>`.
 
 {{< hint info >}}
 For streaming queries, `partial-update` merge engine must be used together with `lookup` or `full-compaction` [changelog producer]({{< ref "concepts/primary-key-table#changelog-producers" >}}).
@@ -70,7 +71,7 @@ Partial cannot receive `DELETE` messages because the behavior cannot be defined.
 ### Aggregation
 
 {{< hint info >}}
-NOTE: Set `table.exec.sink.upsert-materialize` to `NONE` always in Flink SQL TableConfig.
+NOTE: Always set `table.exec.sink.upsert-materialize` to `NONE` in Flink SQL TableConfig.
 {{< /hint >}}
 
 Sometimes users only care about aggregated results. The `aggregation` merge engine aggregates each value field with the latest data one by one under the same primary key according to the aggregate function.
