@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.utils.Restorable;
@@ -63,6 +64,12 @@ public class TableWriteImpl<T>
     @Override
     public TableWriteImpl<T> withIOManager(IOManager ioManager) {
         write.withIOManager(ioManager);
+        return this;
+    }
+
+    @Override
+    public TableWriteImpl<T> withMemoryPool(MemorySegmentPool memoryPool) {
+        write.withMemoryPool(memoryPool);
         return this;
     }
 
