@@ -608,6 +608,11 @@ under the License.
                                         <exclude>log4j2.properties</exclude>
                                         <exclude>log4j-test.properties</exclude>
                                         <exclude>log4j2-test.properties</exclude>
+                                        <!-- Do not copy the signatures in the META-INF folder.
+								Otherwise, this might cause SecurityExceptions when using the JAR. -->
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
                                     </excludes>
                                 </filter>
                                 <!-- drop entries into META-INF and NOTICE files for the dummy artifact -->
