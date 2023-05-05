@@ -20,7 +20,9 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
@@ -29,6 +31,7 @@ import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VarCharType;
 
 import java.math.BigDecimal;
 import java.time.DateTimeException;
@@ -115,6 +118,25 @@ public class TypeUtils {
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) type;
                 return toTimestamp(str, timestampType.getPrecision());
+            case ARRAY:
+                ArrayType arrayType = (ArrayType) type;
+                DataType elementType = arrayType.getElementType();
+                if (elementType instanceof VarCharType) {
+                    if (s.startsWith("[")) {
+                        s = s.substring(1);
+                    }
+                    if (s.endsWith("]")) {
+                        s = s.substring(0, s.length() - 1);
+                    }
+                    String[] ss = s.split(",");
+                    BinaryString[] binaryStrings = new BinaryString[ss.length];
+                    for (int i = 0; i < ss.length; i++) {
+                        binaryStrings[i] = BinaryString.fromString(ss[i]);
+                    }
+                    return new GenericArray(binaryStrings);
+                } else {
+                    throw new UnsupportedOperationException("Unsupported type " + type);
+                }
             default:
                 throw new UnsupportedOperationException("Unsupported type " + type);
         }

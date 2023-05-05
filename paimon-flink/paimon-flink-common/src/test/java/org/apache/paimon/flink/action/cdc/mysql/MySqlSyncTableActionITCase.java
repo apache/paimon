@@ -487,7 +487,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.STRING(), // _multipoint
                             DataTypes.STRING(), // _multiline
                             DataTypes.STRING(), // _multipolygon
-                            DataTypes.STRING() // _geometrycollection
+                            DataTypes.STRING(), // _geometrycollection
+                            DataTypes.ARRAY(DataTypes.STRING()) // _set
                         },
                         new String[] {
                             "_id",
@@ -564,6 +565,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             "_multiline",
                             "_multipolygon",
                             "_geometrycollection",
+                            "_set",
                         });
         FileStoreTable table = getFileStoreTable();
         List<String> expected =
@@ -609,7 +611,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "{\"coordinates\":[[1,1],[2,2]],\"type\":\"MultiPoint\",\"srid\":0}, "
                                 + "{\"coordinates\":[[[1,1],[2,2],[3,3]],[[4,4],[5,5]]],\"type\":\"MultiLineString\",\"srid\":0}, "
                                 + "{\"coordinates\":[[[[0,0],[10,0],[10,10],[0,10],[0,0]]],[[[5,5],[7,5],[7,7],[5,7],[5,5]]]],\"type\":\"MultiPolygon\",\"srid\":0}, "
-                                + "{\"geometries\":[{\"type\":\"Point\",\"coordinates\":[10,10]},{\"type\":\"Point\",\"coordinates\":[30,30]},{\"type\":\"LineString\",\"coordinates\":[[15,15],[20,20]]}],\"type\":\"GeometryCollection\",\"srid\":0}"
+                                + "{\"geometries\":[{\"type\":\"Point\",\"coordinates\":[10,10]},{\"type\":\"Point\",\"coordinates\":[30,30]},{\"type\":\"LineString\",\"coordinates\":[[15,15],[20,20]]}],\"type\":\"GeometryCollection\",\"srid\":0}, "
+                                + "[a, b]"
                                 + "]",
                         "+I["
                                 + "2, 2.2, "
@@ -631,6 +634,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "NULL, NULL, "
                                 + "NULL, NULL, NULL, NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, NULL, NULL, NULL, "
+                                + "NULL, "
                                 + "NULL, "
                                 + "NULL, "
                                 + "NULL, "
