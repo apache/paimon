@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-baseURL = '//paimon.apache.org/docs/master'
+baseURL = '//paimon.apache.org/docs/0.4'
 languageCode = 'en-us'
 title = 'Apache Paimon'
 enableGitInfo = false
@@ -41,7 +41,7 @@ pygmentsUseClasses = true
   VersionTitle = "0.4-SNAPSHOT"
 
   # The branch for this version of Apache Paimon
-  Branch = "master"
+  Branch = "0.4"
 
   # The github repository for Apache Paimon
   Repo = "//github.com/apache/incubator-paimon"
