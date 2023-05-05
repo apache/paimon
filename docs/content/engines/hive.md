@@ -30,7 +30,7 @@ This documentation is a guide for using Paimon in Hive.
 
 ## Version
 
-Paimon currently supports Hive 2.1, 2.1-cdh-6.3, 2.2, 2.3 and 3.1.
+Paimon currently supports Hive 3.1, 2.3, 2.2, 2.1 and 2.1-cdh-6.3.
 
 ## Execution Engine
 
@@ -82,7 +82,7 @@ NOTE: If you are using HDFS, make sure that the environment variable `HADOOP_HOM
 
 ## Quick Start with Paimon Hive Catalog
 
-By using paimon Hive catalog, you can create, drop and insert into paimon tables from Flink. These operations directly affect the corresponding Hive metastore. Tables created in this way can also be accessed directly from Hive.
+By using paimon Hive catalog, you can create, drop, select and insert into paimon tables from Flink. These operations directly affect the corresponding Hive metastore. Tables created in this way can also be accessed directly from Hive.
 
 **Step 1: Prepare Flink Hive Connector Bundled Jar**
 
@@ -132,36 +132,41 @@ SELECT * FROM test_table;
 */
 ```
 
-**Step 3: Query the Table in Hive**
-
-Run the following Hive SQL in Hive CLI to access the created table.
+Select the paimon table created in hive from flink. [creating a table with Hive SQL]({{< ref "engines/hive#quick-start-with-hive-table" >}}).
 
 ```sql
--- Assume that paimon-hive-connector-<hive-version>-{{< version >}}.jar is already in auxlib directory.
--- List tables in Hive
--- (you might need to switch to "default" database if you're not there by default)
+-- Flink SQL CLI
+-- Define paimon Hive catalog
 
-SHOW TABLES;
+CREATE CATALOG my_hive WITH (
+  'type' = 'paimon',
+  'metastore' = 'hive',
+  'uri' = 'thrift://<hive-metastore-host-name>:<port>',
+  'warehouse' = '/path/to/table/store/warehouse'
+);
+
+-- Use paimon Hive catalog
+
+USE CATALOG my_hive;
+
+-- Read a table in paimon Hive catalog (use "default" database by default)
+-- Read records from hive_test_table
+
+SELECT * FROM hive_test_table;
 
 /*
-OK
-test_table
++---+--------+
+| a |     b  |
++---+--------+
+| 1 | Paimon |
++---+--------+
 */
 
--- Read records from test_table
-
-SELECT a, b FROM test_table ORDER BY a;
-
-/*
-OK
-1	Table
-2	Store
-*/
 ```
 
-## Quick Start with External Table
+## Quick Start with Hive Table
 
-To access existing paimon table, you can also register them as external tables in Hive. Run the following Hive SQL in Hive CLI.
+* To access existing paimon table, you can also register them as external and internal tables in Hive. Run the following Hive SQL in Hive CLI.
 
 ```sql
 -- Assume that paimon-hive-connector-{{< version >}}.jar is already in auxlib directory.
@@ -210,6 +215,45 @@ OK
 3	Paimon
 3	Paimon
 */
+
+```
+
+* To create paimon tables that do not exist, you can create them as external and internal tables in Hive. Run the following Hive SQL in Hive CLI.
+
+```sql
+-- Assume that paimon-hive-connector-{{< version >}}.jar is already in auxlib directory.
+-- Let's create a new external table that doesn't exist in paimon.
+-- Need to specify the location to the path of table.
+
+CREATE EXTERNAL TABLE hive_test_table(
+    a INT COMMENT 'The a field',
+    b STRING COMMENT 'The b field'
+)
+STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
+LOCATION '/path/to/table/store/warehouse/default.db/hive_test_table';
+
+-- Insert records into hive_test_table
+
+INSERT INTO hive_test_table VALUES (1, 'Paimon');
+
+-- Read records from hive_test_table
+
+SELECT a, b FROM hive_test_table;
+
+/*
+OK
+1	Paimon
+*/
+
+-- Let's create a new internal table that doesn't exist in paimon.
+-- Need to specify the location to the path of table.
+
+CREATE TABLE hive_internal_test_table(
+    a INT COMMENT 'The a field',
+    b STRING COMMENT 'The b field'
+)
+STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
+LOCATION '/path/to/table/store/warehouse/default.db/hive_internal_test_table';
 
 ```
 

@@ -20,13 +20,18 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.StringUtils;
+
+import org.apache.paimon.shade.guava30.com.google.common.base.Splitter;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
@@ -34,26 +39,30 @@ import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.hive.HiveTypeUtils.typeInfoToLogicalType;
 
 /** Column names, types and comments of a Hive table. */
 public class HiveSchema {
 
-    private final TableSchema tableSchema;
-
+    private static final Logger LOG = LoggerFactory.getLogger(HiveSchema.class);
     private final RowType rowType;
 
-    private HiveSchema(TableSchema tableSchema) {
-        this.tableSchema = tableSchema;
-        this.rowType = new RowType(tableSchema.fields());
+    private HiveSchema(RowType rowType) {
+        this.rowType = rowType;
     }
 
     public RowType rowType() {
@@ -61,19 +70,19 @@ public class HiveSchema {
     }
 
     public List<String> fieldNames() {
-        return tableSchema.fieldNames();
+        return rowType.getFieldNames();
     }
 
     public List<DataType> fieldTypes() {
-        return tableSchema.logicalRowType().getFieldTypes();
+        return rowType.getFieldTypes();
     }
 
     public List<DataField> fields() {
-        return tableSchema.fields();
+        return rowType.getFields();
     }
 
     public List<String> fieldComments() {
-        return tableSchema.fields().stream()
+        return rowType.getFields().stream()
                 .map(DataField::description)
                 .collect(Collectors.toList());
     }
@@ -86,34 +95,62 @@ public class HiveSchema {
             throw new UnsupportedOperationException(
                     "Location property is missing for table "
                             + tableName
-                            + ". Currently Paimon only supports external table for Hive "
-                            + "so location property must be set.");
+                            + ". Currently Paimon only supports hive table location property must be set.");
         }
         Path path = new Path(location);
         Options options = PaimonJobConf.extractCatalogConfig(configuration);
-        options.set(CoreOptions.PATH, path.toUri().toString());
-        CatalogContext catalogContext = CatalogContext.create(options, configuration);
-        TableSchema tableSchema = FileStoreTableFactory.create(catalogContext).schema();
-
-        if (properties.containsKey(serdeConstants.LIST_COLUMNS)
-                && properties.containsKey(serdeConstants.LIST_COLUMN_TYPES)) {
-            String columnNames = properties.getProperty(serdeConstants.LIST_COLUMNS);
-            String columnNameDelimiter =
-                    properties.getProperty(
-                            // serdeConstants.COLUMN_NAME_DELIMITER is not defined in earlier Hive
-                            // versions, so we use a constant string instead
-                            "column.name.delimite", String.valueOf(SerDeUtils.COMMA));
-            List<String> names = Arrays.asList(columnNames.split(columnNameDelimiter));
-
-            String columnTypes = properties.getProperty(serdeConstants.LIST_COLUMN_TYPES);
-            List<TypeInfo> typeInfos = TypeInfoUtils.getTypeInfosFromTypeString(columnTypes);
-
-            if (names.size() > 0 && typeInfos.size() > 0) {
-                checkSchemaMatched(names, typeInfos, tableSchema);
-            }
+        options.set(CoreOptions.PATH, location);
+        CatalogContext context = CatalogContext.create(options, configuration);
+        Optional<TableSchema> tableSchema;
+        try {
+            tableSchema = new SchemaManager(FileIO.get(path, context), path).latest();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
 
-        return new HiveSchema(tableSchema);
+        String columnProperty = properties.getProperty(serdeConstants.LIST_COLUMNS);
+        // Create hive external table with empty ddl
+        if (StringUtils.isEmpty(columnProperty)) {
+            if (!tableSchema.isPresent()) {
+                throw new IllegalArgumentException(
+                        "Schema file not found in location "
+                                + location
+                                + ". Please create table first.");
+            }
+            // Paimon external table can read schema from the specified location
+            return new HiveSchema(new RowType(tableSchema.get().fields()));
+        }
+
+        // Create hive external table with ddl
+        String columnNameDelimiter =
+                properties.getProperty(
+                        // serdeConstants.COLUMN_NAME_DELIMITER is not defined in earlier Hive
+                        // versions, so we use a constant string instead
+                        "column.name.delimite", String.valueOf(SerDeUtils.COMMA));
+        List<String> columnNames = Arrays.asList(columnProperty.split(columnNameDelimiter));
+        String columnTypes = properties.getProperty(serdeConstants.LIST_COLUMN_TYPES);
+        List<TypeInfo> typeInfos = TypeInfoUtils.getTypeInfosFromTypeString(columnTypes);
+        List<String> comments =
+                Lists.newArrayList(
+                        Splitter.on('\0').split(properties.getProperty("columns.comments")));
+        // Both Paimon table schema and Hive table schema exist
+        if (tableSchema.isPresent() && columnNames.size() > 0 && typeInfos.size() > 0) {
+            LOG.debug(
+                    "Extract schema with exists DDL and exists paimon table, table location:[{}].",
+                    location);
+            checkSchemaMatched(columnNames, typeInfos, tableSchema.get());
+            // Use paimon table column comment when the paimon table exists.
+            comments =
+                    tableSchema.get().fields().stream()
+                            .map(DataField::description)
+                            .collect(Collectors.toList());
+        }
+        RowType.Builder builder = RowType.builder();
+        for (int i = 0; i < columnNames.size(); i++) {
+            builder.field(
+                    columnNames.get(i), typeInfoToLogicalType(typeInfos.get(i)), comments.get(i));
+        }
+        return new HiveSchema(builder.build());
     }
 
     private static void checkSchemaMatched(

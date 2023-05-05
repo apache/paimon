@@ -65,6 +65,22 @@ CREATE TABLE MyTable (
 
 {{< /tab >}}
 
+{{< tab "Hive" >}}
+
+```sql
+CREATE TABLE MyTable (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior STRING,
+    dt STRING,
+    hh STRING
+) TBLPROPERTIES (
+    'primary-key' = 'dt,hh,user_id'
+);
+```
+
+{{< /tab >}}
+
 {{< /tabs >}}
 
 {{< hint info >}}
@@ -103,6 +119,23 @@ CREATE TABLE MyTable (
     hh STRING
 ) PARTITIONED BY (dt, hh) TBLPROPERTIES (
     'primary-key' = 'dt,hh,user_id'
+);
+```
+
+{{< /tab >}}
+
+{{< tab "Hive" >}}
+
+```sql
+CREATE TABLE MyTable (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior STRING,
+    dt STRING,
+    hh STRING
+) TBLPROPERTIES (
+    'primary-key' = 'dt,hh,user_id',
+    'partition'='dt,hh'
 );
 ```
 
@@ -309,6 +342,25 @@ CREATE TABLE MyTable (
 
 {{< /tab >}}
 
+{{< tab "Hive" >}}
+
+```sql
+CREATE TABLE MyTable (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior STRING,
+    dt STRING,
+    hh STRING
+) TBLPROPERTIES (
+    'primary-key' = 'dt,hh,user_id',
+    'partition'='dt,hh',
+    'bucket' = '2',
+    'bucket-key' = 'user_id'
+);
+```
+
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ## Creating External Tables
@@ -363,10 +415,21 @@ val dataset = spark.read.format("paimon").load("hdfs://path/to/table")
 
 {{< tab "Hive" >}}
 
-Hive SQL only supports reading from an external table. The following SQL creates an external table named `my_table`, where the base path of table files is `hdfs://path/to/table`. As schemas are stored in table files, users do not need to write column definitions.
+* To access existing paimon table, you can also register them as external and internal tables in Hive. The following SQL creates an external table named `my_table`, where the base path of table files is `hdfs://path/to/table`. As schemas are stored in table files, users do not need to write column definitions.
 
 ```sql
 CREATE EXTERNAL TABLE my_table
+STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
+LOCATION 'hdfs://path/to/table';
+```
+
+* To create paimon tables that do not exist, you can create them as external and internal tables in Hive. The following SQL creates an external table named `my_table`, where the base path of table files is `hdfs://path/to/table`.
+
+```sql
+CREATE EXTERNAL TABLE my_table(
+     a INT COMMENT 'The a field',
+     b STRING COMMENT 'The b field'
+)
 STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
 LOCATION 'hdfs://path/to/table';
 ```
