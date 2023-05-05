@@ -18,10 +18,11 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.types.DataType;
-
-import org.apache.flink.api.java.tuple.Tuple3;
 
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
@@ -30,20 +31,20 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
-/** Utility class to load MySQL table schema with JDBC. */
+/**
+ * Utility class to load MySQL table schema with JDBC.
+ */
 public class MySqlSchema {
 
     private final String databaseName;
     private final String tableName;
 
-    private final Map<String, Tuple3<String, DataType, String>> fields;
+    private final Map<String, Tuple2<DataType, String>> fields;
     private final List<String> primaryKeys;
 
     public MySqlSchema(
-            DatabaseMetaData metaData, String databaseName, String tableName, boolean caseSensitive)
-            throws Exception {
+        DatabaseMetaData metaData, String databaseName, String tableName, boolean caseSensitive)
+        throws Exception {
         this.databaseName = databaseName;
         this.tableName = tableName;
 
@@ -64,18 +65,17 @@ public class MySqlSchema {
                 }
                 if (!caseSensitive) {
                     checkArgument(
-                            !fields.containsKey(fieldName.toLowerCase()),
-                            String.format(
-                                    "Duplicate key '%s' in table '%s.%s' appears when converting fields map keys to case-insensitive form.",
-                                    fieldName, databaseName, tableName));
+                        !fields.containsKey(fieldName.toLowerCase()),
+                        String.format(
+                            "Duplicate key '%s' in table '%s.%s' appears when converting fields map keys to case-insensitive form.",
+                            fieldName, databaseName, tableName));
                     fieldName = fieldName.toLowerCase();
                 }
                 fields.put(
-                        fieldName,
-                        Tuple3.of(
-                                fieldType,
-                                MySqlTypeUtils.toDataType(fieldType, precision, scale),
-                                fieldComment));
+                    fieldName,
+                    Tuple2.of(
+                        MySqlTypeUtils.toDataType(fieldType, precision, scale),
+                        fieldComment));
             }
         }
 
@@ -99,7 +99,7 @@ public class MySqlSchema {
         return tableName;
     }
 
-    public Map<String, Tuple3<String, DataType, String>> fields() {
+    public Map<String, Tuple2<DataType, String>> fields() {
         return fields;
     }
 
@@ -108,27 +108,27 @@ public class MySqlSchema {
     }
 
     public MySqlSchema merge(MySqlSchema other) {
-        for (Map.Entry<String, Tuple3<String, DataType, String>> entry : other.fields.entrySet()) {
+        for (Map.Entry<String, Tuple2<DataType, String>> entry : other.fields.entrySet()) {
             String fieldName = entry.getKey();
-            DataType newType = entry.getValue().f1;
+            DataType newType = entry.getValue().f0;
             if (fields.containsKey(fieldName)) {
-                DataType oldType = fields.get(fieldName).f1;
+                DataType oldType = fields.get(fieldName).f0;
                 switch (UpdatedDataFieldsProcessFunction.canConvert(oldType, newType)) {
                     case CONVERT:
-                        fields.put(fieldName, Tuple3.of(fieldName, newType, entry.getValue().f2));
+                        fields.put(fieldName, Tuple2.of(newType, entry.getValue().f1));
                         break;
                     case EXCEPTION:
                         throw new IllegalArgumentException(
-                                String.format(
-                                        "Column %s have different types in table %s.%s and table %s.%s",
-                                        fieldName,
-                                        databaseName,
-                                        tableName,
-                                        other.databaseName,
-                                        other.tableName));
+                            String.format(
+                                "Column %s have different types in table %s.%s and table %s.%s",
+                                fieldName,
+                                databaseName,
+                                tableName,
+                                other.databaseName,
+                                other.tableName));
                 }
             } else {
-                fields.put(fieldName, Tuple3.of(fieldName, newType, entry.getValue().f2));
+                fields.put(fieldName, Tuple2.of(newType, entry.getValue().f1));
             }
         }
         if (!primaryKeys.equals(other.primaryKeys)) {
