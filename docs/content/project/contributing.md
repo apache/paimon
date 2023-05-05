@@ -63,7 +63,6 @@ lists, contributing code or documentation, improving website, testing release ca
       <td><span class="glyphicon glyphicon-user" aria-hidden="true"></span> Support Users</td>
       <td>Reply to questions on the <a href="https://github.com/apache/incubator-paimon#mailing-lists">user mailing list</a>,
           check the latest issues in <a href="https://github.com/apache/incubator-paimon/issues">Issues</a> for tickets which are actually user questions.
-        </ul>
       </td>
     </tr>
     <tr>
