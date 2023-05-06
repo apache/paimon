@@ -101,7 +101,9 @@ public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLev
                             table.getClass().getName()));
         } else {
             throw new UnsupportedOperationException(
-                    "Unknown FileStoreTable subclass " + table.getClass().getName());
+                    String.format(
+                            "%s can not support update, because it is an unknown subclass of FileStoreTable.",
+                            table.getClass().getName()));
         }
     }
 }

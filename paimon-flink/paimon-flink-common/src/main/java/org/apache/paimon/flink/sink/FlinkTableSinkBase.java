@@ -57,10 +57,11 @@ import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 public abstract class FlinkTableSinkBase
         implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning {
 
-    protected final ObjectIdentifier tableIdentifier;
+    private final ObjectIdentifier tableIdentifier;
+    private final DynamicTableFactory.Context context;
+    @Nullable private final LogStoreTableFactory logStoreTableFactory;
+
     protected final Table table;
-    protected final DynamicTableFactory.Context context;
-    @Nullable protected final LogStoreTableFactory logStoreTableFactory;
 
     protected Map<String, String> staticPartitions = new HashMap<>();
     protected boolean overwrite = false;
