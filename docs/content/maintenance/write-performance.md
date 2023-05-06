@@ -165,9 +165,12 @@ Run the following command to submit a compaction job for the table.
     /path/to/paimon-flink-**-{{< version >}}.jar \
     compact \
     --warehouse <warehouse-path> \
-    --database <database-name> \
-    --table <table-name>
+    --database <database-name> \ 
+    --table <table-name> \
+    [--partition <partition-name>] \
+    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
 ```
+* `--catalog-conf` is the configuration for Paimon catalog. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of catalog configurations.
 
 If you submit a batch job (set `execution.runtime-mode: batch` in Flink's configuration), all current table files will be compacted. If you submit a streaming job (set `execution.runtime-mode: streaming` in Flink's configuration), the job will continuously monitor new changes to the table and perform compactions as needed.
 
@@ -176,6 +179,23 @@ If you submit a batch job (set `execution.runtime-mode: batch` in Flink's config
 If you only want to submit the compaction job and don't want to wait until the job is done, you should submit in [detached mode](https://nightlies.apache.org/flink/flink-docs-stable/docs/deployment/cli/#submitting-a-job).
 
 {{< /hint >}}
+
+Example
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    -c org.apache.paimon.flink.action.FlinkActions \
+    /path/to/paimon-flink-**-{{< version >}}.jar \
+    compact \
+    --warehouse s3:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --partition dt=20221126,hh=08 \
+    --partition dt=20221127,hh=09 \
+    --catalog-conf s3.endpoint=https://****.com \
+    --catalog-conf s3.access-key=***** \
+    --catalog-conf s3.secret-key=*****
+```
 
 For more usage of the compact action, see
 

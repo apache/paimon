@@ -50,12 +50,12 @@ import java.sql.ResultSet;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
+import static org.apache.paimon.flink.action.Action.getConfigMap;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -338,45 +338,22 @@ public class MySqlSyncDatabaseAction implements Action {
         String includingTables = params.get("including-tables");
         String excludingTables = params.get("excluding-tables");
 
-        Map<String, String> mySqlConfig = getConfigMap(params, "mysql-conf");
-        Map<String, String> catalogConfig = getConfigMap(params, "catalog-conf");
-        Map<String, String> tableConfig = getConfigMap(params, "table-conf");
-        if (mySqlConfig == null) {
-            return Optional.empty();
-        }
-
-        return Optional.of(
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        ignoreIncompatible,
-                        tablePrefix,
-                        tableSuffix,
-                        includingTables,
-                        excludingTables,
-                        catalogConfig == null ? Collections.emptyMap() : catalogConfig,
-                        tableConfig == null ? Collections.emptyMap() : tableConfig));
-    }
-
-    private static Map<String, String> getConfigMap(MultipleParameterTool params, String key) {
-        if (!params.has(key)) {
-            return null;
-        }
-
-        Map<String, String> map = new HashMap<>();
-        for (String param : params.getMultiParameter(key)) {
-            String[] kv = param.split("=");
-            if (kv.length == 2) {
-                map.put(kv[0], kv[1]);
-                continue;
-            }
-
-            System.err.println(
-                    "Invalid " + key + " " + param + ".\nRun mysql-sync-database --help for help.");
-            return null;
-        }
-        return map;
+        Optional<Map<String, String>> mySqlConfigOption = getConfigMap(params, "mysql-conf");
+        Optional<Map<String, String>> catalogConfigOption = getConfigMap(params, "catalog-conf");
+        Optional<Map<String, String>> tableConfigOption = getConfigMap(params, "table-conf");
+        return mySqlConfigOption.map(
+                mySqlConfig ->
+                        new MySqlSyncDatabaseAction(
+                                mySqlConfig,
+                                warehouse,
+                                database,
+                                ignoreIncompatible,
+                                tablePrefix,
+                                tableSuffix,
+                                includingTables,
+                                excludingTables,
+                                catalogConfigOption.orElse(Collections.emptyMap()),
+                                tableConfigOption.orElse(Collections.emptyMap())));
     }
 
     private static void printHelp() {

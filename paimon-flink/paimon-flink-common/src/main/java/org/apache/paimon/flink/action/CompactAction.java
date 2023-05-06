@@ -36,10 +36,12 @@ import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.flink.action.Action.getConfigMap;
 import static org.apache.paimon.flink.action.Action.getPartitions;
 import static org.apache.paimon.flink.action.Action.getTablePath;
 
@@ -52,14 +54,18 @@ public class CompactAction extends ActionBase {
     private final CompactorSinkBuilder sinkBuilder;
 
     CompactAction(String warehouse, String database, String tableName) {
-        super(warehouse, database, tableName, new Options().set(CoreOptions.WRITE_ONLY, false));
+        this(warehouse, database, tableName, new Options());
+    }
+
+    CompactAction(String warehouse, String database, String tableName, Options catalogOptions) {
+        super(warehouse, database, tableName, catalogOptions);
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
                     String.format(
                             "Only FileStoreTable supports compact action. The table type is '%s'.",
                             table.getClass().getName()));
         }
-
+        table = table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
         sourceBuilder =
                 new CompactorSourceBuilder(identifier.getFullName(), (FileStoreTable) table);
         sinkBuilder = new CompactorSinkBuilder((FileStoreTable) table);
@@ -104,7 +110,12 @@ public class CompactAction extends ActionBase {
             return Optional.empty();
         }
 
-        CompactAction action = new CompactAction(tablePath.f0, tablePath.f1, tablePath.f2);
+        Optional<Map<String, String>> catalogConfigOption = getConfigMap(params, "catalog-conf");
+        Options catalogOptions =
+                Options.fromMap(catalogConfigOption.orElse(Collections.emptyMap()));
+
+        CompactAction action =
+                new CompactAction(tablePath.f0, tablePath.f1, tablePath.f2, catalogOptions);
 
         if (params.has("partition")) {
             List<Map<String, String>> partitions = getPartitions(params);
@@ -127,6 +138,9 @@ public class CompactAction extends ActionBase {
         System.out.println(
                 "  compact --warehouse <warehouse-path> --database <database-name> "
                         + "--table <table-name> [--partition <partition-name>]");
+        System.out.println(
+                "  compact --warehouse s3://path/to/warehouse --database <database-name> "
+                        + "--table <table-name> [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]");
         System.out.println("  compact --path <table-path> [--partition <partition-name>]");
         System.out.println();
 
@@ -142,6 +156,13 @@ public class CompactAction extends ActionBase {
         System.out.println(
                 "  compact --warehouse hdfs:///path/to/warehouse --database test_db --table test_table "
                         + "--partition dt=20221126,hh=08 --partition dt=20221127,hh=09");
+        System.out.println(
+                "  compact --warehouse s3:///path/to/warehouse "
+                        + "--database test_db "
+                        + "--table test_table "
+                        + "--catalog-conf s3.endpoint=https://****.com "
+                        + "--catalog-conf s3.access-key=***** "
+                        + "--catalog-conf s3.secret-key=***** ");
     }
 
     @Override

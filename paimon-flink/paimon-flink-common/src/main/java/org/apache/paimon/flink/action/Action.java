@@ -161,4 +161,23 @@ public interface Action {
             System.out.println("For detailed options of each action, run <action> --help");
         }
     }
+
+    static Optional<Map<String, String>> getConfigMap(MultipleParameterTool params, String key) {
+        if (!params.has(key)) {
+            return Optional.empty();
+        }
+
+        Map<String, String> map = new HashMap<>();
+        for (String param : params.getMultiParameter(key)) {
+            String[] kv = param.split("=");
+            if (kv.length == 2) {
+                map.put(kv[0], kv[1]);
+                continue;
+            }
+
+            System.err.println("Invalid key " + key + ". Please use format 'key=value'");
+            return Optional.empty();
+        }
+        return Optional.of(map);
+    }
 }
