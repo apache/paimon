@@ -32,14 +32,14 @@ Apache Spark and Apache Hive.
 
 ## Compatibility Matrix
 
-| Engine    | Version       | Batch Read | Batch Write | Create Table | Streaming Write | Streaming Read | Batch Overwrite |
-|:---------:|:-------------:|:----------:|:-----------:|:------------:|:---------------:|:--------------:|:---------------:|
-| Flink     | 1.14 - 1.17   |   ✅       |   ✅         |   ✅         |   ✅            |   ✅            |   ✅            |
-| Hive      | 2.1 - 3.1     |   ✅       |   ✅         |   ✅         |   ❌            |   ❌            |   ❌            |
-| Spark     | 3.1 - 3.4     |   ✅       |   ✅         |   ✅         |   ❌            |   ❌            |   ❌            |
-| Spark     | 2.4           |   ✅       |   ❌         |   ❌         |   ❌            |   ❌            |   ❌            |
-| Trino     | 358 - 400     |   ✅       |   ❌         |   ❌         |   ❌            |   ❌            |   ❌            |
-| Presto    | 0.236 - 0.279 |   ✅       |   ❌         |   ❌         |   ❌            |   ❌            |   ❌            |
+| Engine    | Version       | Batch Read | Batch Write | Create Table | Alter Table | Streaming Write | Streaming Read | Batch Overwrite |
+|:---------:|:-------------:|:----------:|:-----------:|:------------:|:-----------:|:---------------:|:--------------:|:---------------:|
+| Flink     | 1.14 - 1.17   |   ✅       |   ✅         |   ✅         |  ✅(1.17+)  |   ✅            |   ✅            |   ✅            |
+| Spark     | 3.1 - 3.4     |   ✅       |   ✅         |   ✅         |   ✅        |   ❌            |   ❌            |   ❌            |
+| Hive      | 2.1 - 3.1     |   ✅       |   ✅         |   ✅         |   ❌        |   ❌            |   ❌            |   ❌            |
+| Spark     | 2.4           |   ✅       |   ❌         |   ❌         |   ❌        |   ❌            |   ❌            |   ❌            |
+| Trino     | 358 - 400     |   ✅       |   ❌         |   ❌         |   ❌        |   ❌            |   ❌            |   ❌            |
+| Presto    | 0.236 - 0.279 |   ✅       |   ❌         |   ❌         |   ❌        |   ❌            |   ❌            |   ❌            |
 
 Ongoing engines:
 - Doris: Under development, [Support Paimon catalog](https://github.com/apache/doris/issues/18433), [Doris Roadmap 2023](https://github.com/apache/doris/issues/16392).
