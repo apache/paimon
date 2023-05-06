@@ -85,7 +85,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     @VisibleForTesting
     public Path databasePath(String database) {
-        return new Path(warehouse(), database + DB_SUFFIX);
+        return databasePath(warehouse(), database);
     }
 
     protected abstract String warehouse();
@@ -95,13 +95,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     @VisibleForTesting
     public Path getDataTableLocation(Identifier identifier) {
-        if (identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER)) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Table name[%s] cannot contain '%s' separator",
-                            identifier.getObjectName(), SYSTEM_TABLE_SPLITTER));
-        }
-        return new Path(databasePath(identifier.getDatabaseName()), identifier.getObjectName());
+        return dataTableLocation(warehouse(), identifier);
     }
 
     private boolean isSystemTable(Identifier identifier) {
@@ -129,5 +123,20 @@ public abstract class AbstractCatalog implements Catalog {
                             + identifier.getObjectName());
         }
         return splits;
+    }
+
+    public static Path dataTableLocation(String warehouse, Identifier identifier) {
+        if (identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Table name[%s] cannot contain '%s' separator",
+                            identifier.getObjectName(), SYSTEM_TABLE_SPLITTER));
+        }
+        return new Path(
+                databasePath(warehouse, identifier.getDatabaseName()), identifier.getObjectName());
+    }
+
+    public static Path databasePath(String warehouse, String database) {
+        return new Path(warehouse, database + DB_SUFFIX);
     }
 }

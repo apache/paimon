@@ -130,8 +130,8 @@ public class CreateTableITCase extends HiveTestBase {
                 .hasRootCauseInstanceOf(MetaException.class)
                 .hasRootCauseMessage(
                         "Paimon currently does not support creating partitioned table "
-                                + "with PARTITIONED BY clause. If you want to query from a partitioned table, "
-                                + "please add partition columns into the ordinary table columns.");
+                                + "with PARTITIONED BY clause. If you want to create a partitioned table, "
+                                + "please set partition fields in properties.");
     }
 
     @Test

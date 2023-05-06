@@ -90,24 +90,7 @@ public class HiveSchema {
     /** Extract {@link HiveSchema} from Hive serde properties. */
     public static HiveSchema extract(@Nullable Configuration configuration, Properties properties) {
         String location = properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION);
-        if (location == null) {
-            String tableName = properties.getProperty(hive_metastoreConstants.META_TABLE_NAME);
-            throw new UnsupportedOperationException(
-                    "Location property is missing for table "
-                            + tableName
-                            + ". Currently Paimon only supports hive table location property must be set.");
-        }
-        Path path = new Path(location);
-        Options options = PaimonJobConf.extractCatalogConfig(configuration);
-        options.set(CoreOptions.PATH, location);
-        CatalogContext context = CatalogContext.create(options, configuration);
-        Optional<TableSchema> tableSchema;
-        try {
-            tableSchema = new SchemaManager(FileIO.get(path, context), path).latest();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-
+        Optional<TableSchema> tableSchema = getExistsSchema(configuration, location);
         String columnProperty = properties.getProperty(serdeConstants.LIST_COLUMNS);
         // Create hive external table with empty ddl
         if (StringUtils.isEmpty(columnProperty)) {
@@ -151,6 +134,22 @@ public class HiveSchema {
                     columnNames.get(i), typeInfoToLogicalType(typeInfos.get(i)), comments.get(i));
         }
         return new HiveSchema(builder.build());
+    }
+
+    private static Optional<TableSchema> getExistsSchema(
+            @Nullable Configuration configuration, @Nullable String location) {
+        if (location == null) {
+            return Optional.empty();
+        }
+        Path path = new Path(location);
+        Options options = PaimonJobConf.extractCatalogConfig(configuration);
+        options.set(CoreOptions.PATH, location);
+        CatalogContext context = CatalogContext.create(options, configuration);
+        try {
+            return new SchemaManager(FileIO.get(path, context), path).latest();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private static void checkSchemaMatched(

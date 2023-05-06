@@ -80,7 +80,7 @@ There are several ways to add this jar to Hive.
 
 NOTE: If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
 
-## Quick Start with Paimon Hive Catalog
+## Flink SQL: with Paimon Hive Catalog 
 
 By using paimon Hive catalog, you can create, drop, select and insert into paimon tables from Flink. These operations directly affect the corresponding Hive metastore. Tables created in this way can also be accessed directly from Hive.
 
@@ -132,53 +132,23 @@ SELECT * FROM test_table;
 */
 ```
 
-Select the paimon table created in hive from flink. [creating a table with Hive SQL]({{< ref "engines/hive#quick-start-with-hive-table" >}}).
+## Hive SQL: access Paimon Tables already in Hive metastore
+
+Run the following Hive SQL in Hive CLI to access the created table.
 
 ```sql
--- Flink SQL CLI
--- Define paimon Hive catalog
+-- Assume that paimon-hive-connector-<hive-version>-{{< version >}}.jar is already in auxlib directory.
+-- List tables in Hive
+-- (you might need to switch to "default" database if you're not there by default)
 
-CREATE CATALOG my_hive WITH (
-  'type' = 'paimon',
-  'metastore' = 'hive',
-  'uri' = 'thrift://<hive-metastore-host-name>:<port>',
-  'warehouse' = '/path/to/table/store/warehouse'
-);
-
--- Use paimon Hive catalog
-
-USE CATALOG my_hive;
-
--- Read a table in paimon Hive catalog (use "default" database by default)
--- Read records from hive_test_table
-
-SELECT * FROM hive_test_table;
+SHOW TABLES;
 
 /*
-+---+--------+
-| a |     b  |
-+---+--------+
-| 1 | Paimon |
-+---+--------+
+OK
+test_table
 */
 
-```
-
-## Quick Start with Hive Table
-
-* To access existing paimon table, you can also register them as external and internal tables in Hive. Run the following Hive SQL in Hive CLI.
-
-```sql
--- Assume that paimon-hive-connector-{{< version >}}.jar is already in auxlib directory.
--- Let's use the test_table created in the above section.
--- To create an external table, you don't need to specify any column or table properties.
--- Pointing the location to the path of table is enough.
-
-CREATE EXTERNAL TABLE external_test_table
-STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
-LOCATION '/path/to/table/store/warehouse/default.db/test_table';
-
--- Read records from external_test_table
+-- Read records from test_table
 
 SELECT a, b FROM test_table ORDER BY a;
 
@@ -200,60 +170,61 @@ OK
 2	Store
 3	Paimon
 */
--- Insert records into test table from other table
-
-INSERT INTO test_table SELECT a, b FROM test_table;
-
-SELECT a, b FROM test_table ORDER BY a;
-
-/*
-OK
-1	Table
-1	Table
-2	Store
-2	Store
-3	Paimon
-3	Paimon
-*/
-
 ```
 
-* To create paimon tables that do not exist, you can create them as external and internal tables in Hive. Run the following Hive SQL in Hive CLI.
+## Hive SQL: create new Paimon Tables
+
+You can create new paimon tables in Hive. Run the following Hive SQL in Hive CLI.
 
 ```sql
 -- Assume that paimon-hive-connector-{{< version >}}.jar is already in auxlib directory.
--- Let's create a new external table that doesn't exist in paimon.
--- Need to specify the location to the path of table.
+-- Let's create a new paimon table.
 
-CREATE EXTERNAL TABLE hive_test_table(
+SET hive.metastore.warehouse.dir=warehouse_path;
+
+CREATE TABLE hive_test_table(
     a INT COMMENT 'The a field',
     b STRING COMMENT 'The b field'
 )
 STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
-LOCATION '/path/to/table/store/warehouse/default.db/hive_test_table';
+```
 
--- Insert records into hive_test_table
+## Hive SQL: access Paimon Tables by External Table
 
-INSERT INTO hive_test_table VALUES (1, 'Paimon');
+To access existing paimon table, you can also register them as external tables in Hive. Run the following Hive SQL in Hive CLI.
 
--- Read records from hive_test_table
+```sql
+-- Assume that paimon-hive-connector-{{< version >}}.jar is already in auxlib directory.
+-- Let's use the test_table created in the above section.
+-- To create an external table, you don't need to specify any column or table properties.
+-- Pointing the location to the path of table is enough.
 
-SELECT a, b FROM hive_test_table;
+CREATE EXTERNAL TABLE external_test_table
+STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
+LOCATION '/path/to/table/store/warehouse/default.db/test_table';
+
+-- Read records from external_test_table
+
+SELECT a, b FROM external_test_table ORDER BY a;
 
 /*
 OK
-1	Paimon
+1	Table
+2	Store
 */
 
--- Let's create a new internal table that doesn't exist in paimon.
--- Need to specify the location to the path of table.
+-- Insert records into test table
 
-CREATE TABLE hive_internal_test_table(
-    a INT COMMENT 'The a field',
-    b STRING COMMENT 'The b field'
-)
-STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
-LOCATION '/path/to/table/store/warehouse/default.db/hive_internal_test_table';
+INSERT INTO external_test_table VALUES (3, 'Paimon');
+
+SELECT a, b FROM external_test_table ORDER BY a;
+
+/*
+OK
+1	Table
+2	Store
+3	Paimon
+*/
 
 ```
 

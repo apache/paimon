@@ -19,7 +19,9 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.mapred.PaimonInputFormat;
@@ -30,6 +32,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
 import org.apache.hadoop.hive.metastore.MetaStoreUtils;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
@@ -49,7 +52,9 @@ import static org.apache.paimon.hive.HiveTypeUtils.typeInfoToLogicalType;
  * formats.
  */
 public class PaimonMetaHook implements HiveMetaHook {
+
     private static final Logger LOG = LoggerFactory.getLogger(PaimonMetaHook.class);
+
     private static final String COMMENT = "comment";
     private final Configuration conf;
 
@@ -62,8 +67,8 @@ public class PaimonMetaHook implements HiveMetaHook {
         if (table.getPartitionKeysSize() != 0) {
             throw new MetaException(
                     "Paimon currently does not support creating partitioned table "
-                            + "with PARTITIONED BY clause. If you want to query from a partitioned table, "
-                            + "please add partition columns into the ordinary table columns.");
+                            + "with PARTITIONED BY clause. If you want to create a partitioned table, "
+                            + "please set partition fields in properties.");
         }
 
         // hive ql parse cannot recognize input near '$' in table name, no need to add paimon system
@@ -72,7 +77,15 @@ public class PaimonMetaHook implements HiveMetaHook {
         table.getSd().setInputFormat(PaimonInputFormat.class.getCanonicalName());
         table.getSd().setOutputFormat(PaimonOutputFormat.class.getCanonicalName());
 
-        Path path = new Path(table.getSd().getLocation());
+        String location = table.getSd().getLocation();
+        if (location == null) {
+            String warehouse = conf.get(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
+            Identifier identifier = Identifier.create(table.getDbName(), table.getTableName());
+            location = AbstractCatalog.dataTableLocation(warehouse, identifier).toUri().toString();
+            table.getSd().setLocation(location);
+        }
+
+        Path path = new Path(location);
         CatalogContext context = catalogContext(table);
         FileIO fileIO;
         try {
