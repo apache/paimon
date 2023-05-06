@@ -1,17 +1,17 @@
-*(Please specify the module before the PR name: [core] ... or [flink] ...)*
+<!-- Please specify the module before the PR name: [core] ... or [flink] ... -->
 
 ### Purpose
 
-*(What is the purpose of the change, or the associated issue)*
+<!-- What is the purpose of the change, or the associated issue -->
 
 ### Tests
 
-*(List UT and IT cases to verify this change)*
+<!-- List UT and IT cases to verify this change -->
 
-### API and Format 
+### API and Format
 
-*(Does this change affect API or storage format)*
+<!-- Does this change affect API or storage format -->
 
 ### Documentation
 
-*(Does this change introduce a new feature)*
+<!-- Does this change introduce a new feature -->
