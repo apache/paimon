@@ -124,7 +124,7 @@ Keytab files must be distributed to every node in the cluster that runs Trino.
 ## Create Schema
 
 ```
-CREATE SCHEMA paimon.test;
+CREATE SCHEMA paimon.test_db;
 ```
 
 ## Create Table
@@ -170,14 +170,14 @@ ALTER TABLE paimon.test_db.orders ADD COLUMN "shipping_address varchar;
 ## Query
 
 ```
-SELECT * FROM paimon.default.MyTable
+SELECT * FROM paimon.test_db.orders
 ```
 
 ## Query with Time Traveling
 
 ```
 SET SESSION paimon.scan_timestamp_millis=1679486589444;
-SELECT * FROM paimon.default.MyTable;
+SELECT * FROM paimon.test_db.orders;
 ```
 
 ## Trino Type Conversion
