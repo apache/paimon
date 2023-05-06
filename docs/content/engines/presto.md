@@ -38,21 +38,21 @@ Paimon currently supports Presto 0.236 and above.
 
 Download the jar file with corresponding version.
 
-|     Version      | Jar                                                                                                                                                                                                            |
+| Version          | Jar                                                                                                                                                                           |
 |------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [0.236,0.268)    | [paimon-presto-0.236-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.236/{{< version >}}/paimon-presto-0.236-{{< version >}}.jar) |
-| [0.268,0.273)    | [paimon-presto-0.268-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.268/{{< version >}}/paimon-presto-0.268-{{< version >}}.jar) |
-| [0.273,0.279]    | [paimon-presto-0.273-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.273/{{< version >}}/paimon-presto-0.273-{{< version >}}.jar) |
+| [0.236, 0.268)   | [paimon-presto-0.236-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.236/{{< version >}}/paimon-presto-0.236-{{< version >}}.jar) |
+| [0.268, 0.273)   | [paimon-presto-0.268-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.268/{{< version >}}/paimon-presto-0.268-{{< version >}}.jar) |
+| [0.273, latest]  | [paimon-presto-0.273-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.273/{{< version >}}/paimon-presto-0.273-{{< version >}}.jar) |
 
 {{< /stable >}}
 
 {{< unstable >}}
 
-|     Version      | Jar                                                                                                                                                                                                            |
-|------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
-| [0.236,0.268)    | [paimon-presto-0.236-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.236/{{< version >}}/) |
-| [0.268,0.273)    | [paimon-presto-0.268-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.268/{{< version >}}/) |
-| [0.273,0.279]    | [paimon-presto-0.273-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.273/{{< version >}}/) |
+| Version         | Jar                                                                                                                                        |
+|-----------------|--------------------------------------------------------------------------------------------------------------------------------------------|
+| [0.236, 0.268)  | [paimon-presto-0.236-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.236/{{< version >}}/)  |
+| [0.268, 0.273)  | [paimon-presto-0.268-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.268/{{< version >}}/)  |
+| [0.273, latest] | [paimon-presto-0.273-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.273/{{< version >}}/)  |
 
 {{< /unstable >}}
 
