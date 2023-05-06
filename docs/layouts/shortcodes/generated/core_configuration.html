@@ -195,12 +195,6 @@
             <td>Specify the merge engine for table with primary key.<br /><br />Possible values:<ul><li>"deduplicate": De-duplicate and keep the last row.</li><li>"partial-update": Partial update non-null fields.</li><li>"aggregation": Aggregate fields with same primary key.</li></ul></td>
         </tr>
         <tr>
-            <td><h5>sort-engine</h5></td>
-            <td style="word-wrap: break-word;">loser-tree</td>
-            <td><p>Enum</p></td>
-            <td>Specify the sort engine for table with primary key.<br /><br />Possible values:<ul><li>"min-heap": Use min-heap for multiway sorting.</li><li>"loser-tree": Use loser-tree for multiway sorting. Compared with heapsort, loser-tree has fewer comparisons and is more efficient.</li></ul></td>
-        </tr>
-        <tr>
             <td><h5>num-levels</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
@@ -297,6 +291,12 @@
             <td>End condition "watermark" for bounded streaming mode. Stream reading will end when a larger watermark snapshot is encountered.</td>
         </tr>
         <tr>
+            <td><h5>scan.manifest.parallelism</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The parallelism of scanning manifest files, default value is the size of cpu processor.Note: Scale-up this parameter will increase memory usage while scanning manifest files.We can consider downsize it when we encounter an out of memory exception while scanning</td>
+        </tr>
+        <tr>
             <td><h5>scan.mode</h5></td>
             <td style="word-wrap: break-word;">default</td>
             <td><p>Enum</p></td>
@@ -343,6 +343,12 @@
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
             <td>The maximum time of completed snapshots to retain.</td>
+        </tr>
+        <tr>
+            <td><h5>sort-engine</h5></td>
+            <td style="word-wrap: break-word;">loser-tree</td>
+            <td><p>Enum</p></td>
+            <td>Specify the sort engine for table with primary key.<br /><br />Possible values:<ul><li>"min-heap": Use min-heap for multiway sorting.</li><li>"loser-tree": Use loser-tree for multiway sorting. Compared with heapsort, loser-tree has fewer comparisons and is more efficient.</li></ul></td>
         </tr>
         <tr>
             <td><h5>source.split.open-file-cost</h5></td>
