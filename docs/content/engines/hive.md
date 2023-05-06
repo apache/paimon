@@ -205,7 +205,7 @@ LOCATION '/path/to/table/store/warehouse/default.db/test_table';
 
 -- Read records from external_test_table
 
-SELECT a, b FROM test_table ORDER BY a;
+SELECT a, b FROM external_test_table ORDER BY a;
 
 /*
 OK
@@ -215,9 +215,9 @@ OK
 
 -- Insert records into test table
 
-INSERT INTO test_table VALUES (3, 'Paimon');
+INSERT INTO external_test_table VALUES (3, 'Paimon');
 
-SELECT a, b FROM test_table ORDER BY a;
+SELECT a, b FROM external_test_table ORDER BY a;
 
 /*
 OK

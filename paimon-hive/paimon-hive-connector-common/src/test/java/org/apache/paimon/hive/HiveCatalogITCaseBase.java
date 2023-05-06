@@ -268,7 +268,7 @@ public abstract class HiveCatalogITCaseBase {
     public void testHiveCreateAndFlinkRead() throws Exception {
         hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
         hiveShell.execute(
-                "CREATE EXTERNAL TABLE hive_test_table ( a INT, b STRING ) "
+                "CREATE TABLE hive_test_table ( a INT, b STRING ) "
                         + "STORED BY '"
                         + PaimonStorageHandler.class.getName()
                         + "'");
