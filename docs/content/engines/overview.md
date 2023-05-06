@@ -32,13 +32,18 @@ Apache Spark and Apache Hive.
 
 ## Compatibility Matrix
 
-| Engine | Version                     | Feature                                                                              | Read Pushdown      |
-|--------|-----------------------------|--------------------------------------------------------------------------------------|--------------------|
-| Flink  | 1.17/1.16/1.15/1.14         | batch/streaming read, batch/streaming write, create/drop table, create/drop database | Projection, Filter |
-| Hive   | 3.1/2.3/2.2/2.1/2.1 CDH 6.3 | batch read                                                                           | Projection, Filter |
-| Spark  | 3.3/3.2/3.1                 | batch read, batch write, create/drop table, create/drop database                     | Projection, Filter |
-| Spark  | 2.4                         | batch read                                                                           | Projection, Filter |
-| Trino  | 388/358                     | batch read, create/drop table, create/drop database                                  | Projection, Filter |
-| Presto | 0.236 and above             | batch read                                                                           | Projection, Filter |
+| Engine    | Version       | Batch Read | Batch Write | Create Table | Streaming Write | Streaming Read | Batch Overwrite |
+|:---------:|:-------------:|:----------:|:-----------:|:------------:|:---------------:|:--------------:|:---------------:|
+| Flink     | 1.14 - 1.17   |   ✅       |   ✅         |   ✅         |   ✅            |   ✅            |   ✅            |
+| Hive      | 2.1 - 3.1     |   ✅       |   ✅         |   ❌         |   ❌            |   ❌            |   ❌            |
+| Spark     | 3.1 - 3.4     |   ✅       |   ✅         |   ✅         |   ❌            |   ❌            |   ❌            |
+| Spark     | 2.4           |   ✅       |   ❌         |   ❌         |   ❌            |   ❌            |   ❌            |
+| Trino     | 358 - 400     |   ✅       |   ❌         |   ❌         |   ❌            |   ❌            |   ❌            |
+| Presto    | 0.236 - 0.279 |   ✅       |   ❌         |   ❌         |   ❌            |   ❌            |   ❌            |
+
+Ongoing engines:
+- Doris: Under development, [Support Paimon catalog](https://github.com/apache/doris/issues/18433), [Doris Roadmap 2023](https://github.com/apache/doris/issues/16392).
+- Seatunnel: Under development, [Introduce paimon connector](https://github.com/apache/incubator-seatunnel/pull/4178).
+- Starrocks: Under discussion
 
 [Download Link]({{< ref "project/download#engine-jars" >}})
