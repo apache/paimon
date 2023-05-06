@@ -66,7 +66,7 @@ Build bundled jar with the following command.
 mvn clean install -DskipTests
 ```
 
-You can find Presto connector jar in `./paimon-presto/paimon-presto-<presto-version>/target/paimon-presto-*.jar`.
+You can find Presto connector jar in `./paimon-presto-<presto-version>/target/paimon-presto-*.jar`.
 
 Then, copy `paimon-presto-*.jar and flink-shaded-hadoop-*-uber-*.jar` to plugin/paimon.
 
