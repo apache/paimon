@@ -430,8 +430,6 @@ external table named `my_table`, where the base path of table files is `hdfs://p
 in table files, users do not need to write column definitions.
 
 ```sql
-SET hive.metastore.warehouse.dir=warehouse_path;
-
 CREATE EXTERNAL TABLE my_table
 STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
 LOCATION 'hdfs:///path/to/table';
