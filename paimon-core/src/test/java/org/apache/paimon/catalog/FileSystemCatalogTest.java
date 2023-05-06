@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 /** Tests for {@link FileSystemCatalog}. */
 public class FileSystemCatalogTest extends CatalogTestBase {
@@ -51,5 +52,10 @@ public class FileSystemCatalogTest extends CatalogTestBase {
         catalog.createDatabase("db1", false);
         catalog.renameDatabase("db1", "db2", false);
         assertThat(catalog.listDatabases()).isEqualTo(Lists.newArrayList("db2"));
+        catalog.createDatabase("db3", false);
+        catalog.createDatabase("db4", false);
+        assertThatExceptionOfType(Catalog.DatabaseAlreadyExistException.class)
+                .isThrownBy(() -> catalog.renameDatabase("db3", "db4", false))
+                .withMessage("Database db4 already exists.");
     }
 }

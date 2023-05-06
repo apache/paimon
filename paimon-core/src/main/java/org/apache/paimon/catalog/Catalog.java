@@ -90,6 +90,10 @@ public interface Catalog extends AutoCloseable {
     /**
      * Rename a database.
      *
+     * <p>NOTE: If you use object storage, such as S3 or OSS, please use this syntax carefully,
+     * because the renaming of object storage is not atomic, and only partial files may be moved in
+     * case of failure.
+     *
      * @param fromDatabase the name of the database which need to rename
      * @param toDatabase the new database
      * @param ignoreIfNotExists Flag to specify behavior when the database does not exist: if set to
