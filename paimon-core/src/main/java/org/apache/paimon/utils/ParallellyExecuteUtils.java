@@ -42,6 +42,7 @@ public class ParallellyExecuteUtils {
         } else if (queueSize <= 0) {
             throw new NegativeArraySizeException("queue size should not be negetive");
         }
+        queueSize = 1;
 
         final Queue<List<U>> stack = new ArrayDeque<>(Lists.partition(input, queueSize));
 
@@ -66,7 +67,7 @@ public class ParallellyExecuteUtils {
                     }
 
                     private void advanceIfNeeded() {
-                        if ((activeList == null || index >= activeList.size())
+                        while ((activeList == null || index >= activeList.size())
                                 && stack.size() > 0) {
                             // reset index
                             index = 0;
