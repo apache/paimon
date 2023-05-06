@@ -18,168 +18,92 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.CoreOptions.ChangelogProducer;
-import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.MergeEngine;
-import org.apache.paimon.catalog.CatalogLock;
-import org.apache.paimon.flink.FlinkCatalog;
-import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
-import org.apache.paimon.flink.log.LogSinkProvider;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
 import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 
-import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectIdentifier;
-import org.apache.flink.table.connector.ChangelogMode;
-import org.apache.flink.table.connector.sink.DynamicTableSink;
-import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
-import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
+import org.apache.flink.table.connector.RowLevelModificationScanContext;
+import org.apache.flink.table.connector.sink.abilities.SupportsRowLevelUpdate;
 import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.types.RowKind;
 
 import javax.annotation.Nullable;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
-import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 
 /** Table sink to create sink. */
-public class FlinkTableSink implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning {
-
-    private final ObjectIdentifier tableIdentifier;
-    private final Table table;
-    private final DynamicTableFactory.Context context;
-    @Nullable private final LogStoreTableFactory logStoreTableFactory;
-
-    private Map<String, String> staticPartitions = new HashMap<>();
-    private boolean overwrite = false;
-    @Nullable private CatalogLock.Factory lockFactory;
+public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLevelUpdate {
 
     public FlinkTableSink(
             ObjectIdentifier tableIdentifier,
             Table table,
             DynamicTableFactory.Context context,
             @Nullable LogStoreTableFactory logStoreTableFactory) {
-        this.tableIdentifier = tableIdentifier;
-        this.table = table;
-        this.context = context;
-        this.logStoreTableFactory = logStoreTableFactory;
+        super(tableIdentifier, table, context, logStoreTableFactory);
     }
 
     @Override
-    public ChangelogMode getChangelogMode(ChangelogMode requestedMode) {
-        if (table instanceof AppendOnlyFileStoreTable) {
-            // Don't check this, for example, only inserts are available from the database, but the
-            // plan phase contains all changelogs
-            return requestedMode;
-        } else if (table instanceof ChangelogValueCountFileStoreTable) {
-            // no primary key, sink all changelogs
-            return requestedMode;
-        } else if (table instanceof ChangelogWithKeyFileStoreTable) {
+    public RowLevelUpdateInfo applyRowLevelUpdate(
+            List<Column> updatedColumns, @Nullable RowLevelModificationScanContext context) {
+        // Since only UPDATE_AFTER type messages can be received at present,
+        // AppendOnlyFileStoreTable and ChangelogValueCountFileStoreTable without primary keys
+        // cannot correctly handle old data, so they are marked as unsupported. Similarly, it is not
+        // allowed to update the primary key column when updating the column of
+        // ChangelogWithKeyFileStoreTable, because the old data cannot be handled correctly.
+        if (table instanceof ChangelogWithKeyFileStoreTable) {
             Options options = Options.fromMap(table.options());
-            if (options.get(CHANGELOG_PRODUCER) == ChangelogProducer.INPUT) {
-                return requestedMode;
+            Set<String> primaryKeys = new HashSet<>(table.primaryKeys());
+            updatedColumns.forEach(
+                    column -> {
+                        if (primaryKeys.contains(column.getName())) {
+                            String errMsg =
+                                    String.format(
+                                            "Updates to primary keys are not supported, primaryKeys (%s), updatedColumns (%s)",
+                                            primaryKeys,
+                                            updatedColumns.stream()
+                                                    .map(Column::getName)
+                                                    .collect(Collectors.toList()));
+                            throw new UnsupportedOperationException(errMsg);
+                        }
+                    });
+            if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE
+                    || options.get(MERGE_ENGINE) == MergeEngine.PARTIAL_UPDATE) {
+                // Even with partial-update we still need all columns. Because the topology
+                // structure is source -> cal -> constraintEnforcer -> sink, in the
+                // constraintEnforcer operator, the constraint check will be performed according to
+                // the index, not according to the column. So we can't return only some columns,
+                // which will cause problems like ArrayIndexOutOfBoundsException.
+                // TODO: return partial columns after FLINK-32001 is resolved.
+                return new RowLevelUpdateInfo() {};
             }
-
-            if (options.get(MERGE_ENGINE) == MergeEngine.AGGREGATE) {
-                return requestedMode;
-            }
-
-            if (options.get(LOG_CHANGELOG_MODE) == LogChangelogMode.ALL) {
-                return requestedMode;
-            }
-
-            // with primary key, default sink upsert
-            ChangelogMode.Builder builder = ChangelogMode.newBuilder();
-            for (RowKind kind : requestedMode.getContainedKinds()) {
-                if (kind != RowKind.UPDATE_BEFORE) {
-                    builder.addContainedKind(kind);
-                }
-            }
-            return builder.build();
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "%s can not support update, currently only %s of %s and %s can support update.",
+                            options.get(MERGE_ENGINE),
+                            MERGE_ENGINE.key(),
+                            MergeEngine.DEDUPLICATE,
+                            MergeEngine.PARTIAL_UPDATE));
+        } else if (table instanceof AppendOnlyFileStoreTable
+                || table instanceof ChangelogValueCountFileStoreTable) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "%s can not support update, because there is no primary key.",
+                            table.getClass().getName()));
         } else {
             throw new UnsupportedOperationException(
-                    "Unknown FileStoreTable subclass " + table.getClass().getName());
+                    String.format(
+                            "%s can not support update, because it is an unknown subclass of FileStoreTable.",
+                            table.getClass().getName()));
         }
-    }
-
-    @Override
-    public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
-        if (overwrite && !context.isBounded()) {
-            throw new UnsupportedOperationException(
-                    "Paimon doesn't support streaming INSERT OVERWRITE.");
-        }
-
-        LogSinkProvider logSinkProvider = null;
-        if (logStoreTableFactory != null) {
-            logSinkProvider = logStoreTableFactory.createSinkProvider(this.context, context);
-        }
-
-        Options conf = Options.fromMap(table.options());
-        // Do not sink to log store when overwrite mode
-        final LogSinkFunction logSinkFunction =
-                overwrite ? null : (logSinkProvider == null ? null : logSinkProvider.createSink());
-        return new PaimonDataStreamSinkProvider(
-                (dataStream) ->
-                        new FlinkSinkBuilder((FileStoreTable) table)
-                                .withInput(
-                                        new DataStream<>(
-                                                dataStream.getExecutionEnvironment(),
-                                                dataStream.getTransformation()))
-                                .withLockFactory(
-                                        Lock.factory(
-                                                lockFactory,
-                                                FlinkCatalog.toIdentifier(
-                                                        tableIdentifier.toObjectPath())))
-                                .withLogSinkFunction(logSinkFunction)
-                                .withOverwritePartition(overwrite ? staticPartitions : null)
-                                .withParallelism(conf.get(FlinkConnectorOptions.SINK_PARALLELISM))
-                                .build());
-    }
-
-    @Override
-    public DynamicTableSink copy() {
-        FlinkTableSink copied =
-                new FlinkTableSink(tableIdentifier, table, context, logStoreTableFactory);
-        copied.staticPartitions = new HashMap<>(staticPartitions);
-        copied.overwrite = overwrite;
-        copied.lockFactory = lockFactory;
-        return copied;
-    }
-
-    @Override
-    public String asSummaryString() {
-        return "PaimonSink";
-    }
-
-    @Override
-    public void applyStaticPartition(Map<String, String> partition) {
-        table.partitionKeys()
-                .forEach(
-                        partitionKey -> {
-                            if (partition.containsKey(partitionKey)) {
-                                this.staticPartitions.put(
-                                        partitionKey, partition.get(partitionKey));
-                            }
-                        });
-    }
-
-    @Override
-    public void applyOverwrite(boolean overwrite) {
-        this.overwrite = overwrite;
-    }
-
-    public void setLockFactory(@Nullable CatalogLock.Factory lockFactory) {
-        this.lockFactory = lockFactory;
     }
 }

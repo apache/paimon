@@ -129,7 +129,8 @@ public class ReadWriteTableTestUtil {
             List<String> primaryKeys,
             List<String> partitionKeys,
             Map<String, String> options) {
-        String table = "MyTable_" + UUID.randomUUID();
+        // "-" is not allowed in the table name.
+        String table = ("MyTable_" + UUID.randomUUID()).replace("-", "_");
         sEnv.executeSql(buildDdl(table, fieldsSpec, primaryKeys, partitionKeys, options));
         return table;
     }
