@@ -25,7 +25,10 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
+import org.apache.paimon.schema.SchemaChange.AddConstraint;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
+import org.apache.paimon.schema.SchemaChange.DropConstraint;
+import org.apache.paimon.schema.SchemaChange.ModifyConstraint;
 import org.apache.paimon.schema.SchemaChange.RemoveOption;
 import org.apache.paimon.schema.SchemaChange.RenameColumn;
 import org.apache.paimon.schema.SchemaChange.SetOption;
@@ -188,6 +191,7 @@ public class SchemaManager implements Serializable {
             TableSchema schema =
                     latest().orElseThrow(
                                     () -> new RuntimeException("Table not exists: " + tableRoot));
+            List<String> primaryKeys = schema.primaryKeys();
             Map<String, String> newOptions = new HashMap<>(schema.options());
             List<DataField> newFields = new ArrayList<>(schema.fields());
             AtomicInteger highestFieldId = new AtomicInteger(schema.highestFieldId());
@@ -356,6 +360,14 @@ public class SchemaManager implements Serializable {
                         }
                     }
 
+                } else if (change instanceof AddConstraint) {
+                    AddConstraint addConstraint = (AddConstraint) change;
+                    primaryKeys = addConstraint.fieldNames();
+                } else if (change instanceof ModifyConstraint) {
+                    ModifyConstraint modifyConstraint = (ModifyConstraint) change;
+                    primaryKeys = modifyConstraint.fieldNames();
+                } else if (change instanceof DropConstraint) {
+                    primaryKeys = new ArrayList<>();
                 } else {
                     throw new UnsupportedOperationException(
                             "Unsupported change: " + change.getClass());
@@ -368,7 +380,7 @@ public class SchemaManager implements Serializable {
                             newFields,
                             highestFieldId.get(),
                             schema.partitionKeys(),
-                            schema.primaryKeys(),
+                            primaryKeys,
                             newOptions,
                             schema.comment());
 

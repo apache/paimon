@@ -25,6 +25,7 @@ import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -41,6 +42,18 @@ public interface SchemaChange extends Serializable {
 
     static SchemaChange removeOption(String key) {
         return new RemoveOption(key);
+    }
+
+    static SchemaChange addConstraint(List<String> fieldNames) {
+        return new AddConstraint(fieldNames);
+    }
+
+    static SchemaChange modifyConstraint(List<String> fieldNames) {
+        return new ModifyConstraint(fieldNames);
+    }
+
+    static SchemaChange dropConstraint() {
+        return new DropConstraint();
     }
 
     static SchemaChange addColumn(String fieldName, DataType dataType) {
@@ -497,6 +510,71 @@ public interface SchemaChange extends Serializable {
             int result = Objects.hash(newDescription);
             result = 31 * result + Arrays.hashCode(fieldNames);
             return result;
+        }
+    }
+
+    /** A SchemaChange to drop constraint. */
+    final class DropConstraint implements SchemaChange {}
+
+    /** A SchemaChange to add new constraint. */
+    final class AddConstraint implements SchemaChange {
+
+        private final List<String> fieldNames;
+
+        public AddConstraint(List<String> fieldNames) {
+            this.fieldNames = fieldNames;
+        }
+
+        public List<String> fieldNames() {
+            return fieldNames;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof AddConstraint)) {
+                return false;
+            }
+            AddConstraint that = (AddConstraint) o;
+            return fieldNames.equals(that.fieldNames);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(fieldNames);
+        }
+    }
+
+    /** A SchemaChange to modify constraint. */
+    class ModifyConstraint implements SchemaChange {
+
+        private final List<String> fieldNames;
+
+        public ModifyConstraint(List<String> fieldNames) {
+            this.fieldNames = fieldNames;
+        }
+
+        public List<String> fieldNames() {
+            return fieldNames;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof AddConstraint)) {
+                return false;
+            }
+            AddConstraint that = (AddConstraint) o;
+            return fieldNames.equals(that.fieldNames);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(fieldNames);
         }
     }
 }

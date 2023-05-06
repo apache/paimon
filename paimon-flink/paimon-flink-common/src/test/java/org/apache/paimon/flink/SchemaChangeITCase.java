@@ -155,12 +155,59 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testAddPrimaryKey() {
+        sql("CREATE TABLE T (a STRING NOT NULL, b STRING NOT NULL, c STRING)");
+        sql("INSERT INTO T VALUES('aaa', 'bbb', 'ccc')");
+        sql("ALTER TABLE T ADD PRIMARY KEY (a, b) NOT ENFORCED");
+        List<Row> result = sql("SHOW CREATE TABLE T");
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `b` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `c` VARCHAR(2147483647),\n");
+        assertThat(result.toString()).contains("PRIMARY KEY (`a`, `b`) NOT ENFORCED");
+        result = sql("SELECT * FROM T");
+        assertThat(result.toString()).isEqualTo("[+I[aaa, bbb, ccc]]");
+    }
+
+    @Test
     public void testDropPrimaryKey() {
         sql("CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c STRING)");
+        sql("INSERT INTO T VALUES('aaa', 'bbb', 'ccc')");
         assertThatThrownBy(() -> sql("ALTER TABLE T DROP a"))
                 .hasMessageContaining(
                         "Failed to execute ALTER TABLE statement.\n"
                                 + "The column `a` is used as the primary key.");
+
+        sql("ALTER TABLE T DROP PRIMARY KEY");
+        List<Row> result = sql("SHOW CREATE TABLE T");
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `b` VARCHAR(2147483647),\n"
+                                + "  `c` VARCHAR(2147483647)\n"
+                                + ")");
+        result = sql("SELECT * FROM T");
+        assertThat(result.toString()).isEqualTo("[+I[aaa, bbb, ccc]]");
+    }
+
+    @Test
+    public void testModifyPrimaryKey() {
+        sql("CREATE TABLE T (a STRING, b STRING, c STRING , PRIMARY KEY (`a`, `b`) NOT ENFORCED)");
+        sql("INSERT INTO T VALUES('aaa', 'bbb', 'ccc')");
+        sql("ALTER TABLE T MODIFY PRIMARY KEY (a) NOT ENFORCED");
+        List<Row> result = sql("SHOW CREATE TABLE T");
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `b` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `c` VARCHAR(2147483647),\n");
+        assertThat(result.toString()).contains("PRIMARY KEY (`a`) NOT ENFORCED");
+        result = sql("SELECT * FROM T");
+        assertThat(result.toString()).isEqualTo("[+I[aaa, bbb, ccc]]");
     }
 
     @Test

@@ -135,6 +135,23 @@ ALTER TABLE my_table ADD COLUMNS (
 
 {{< /tabs >}}
 
+## Adding Primary Key
+
+The following SQL adds primary key `c1` and `c2` for table `my_table`, these columns which are added to primary key should be not nullable.
+
+{{< tabs "add-primary-key" >}}
+
+{{< tab "Flink" >}}
+
+```sql
+CREATE TABLE my_table (c1 STRING NOT NULL, c2 STRING NOT NULL, c3 STRING);
+ALTER TABLE my_table ADD PRIMARY KEY (c1, c2) NOT ENFORCED;
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 ## Adding Column Position
 
 To add a new column with specified position, use FIRST or AFTER col_name.
@@ -206,6 +223,23 @@ ALTER TABLE my_table DROP (c1, c2);
 
 ```sql
 ALTER TABLE my_table DROP COLUMNS (c1, c2);
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+
+## Dropping Primary Key
+
+The following SQL drops primary key from table `my_table`.
+
+{{< tabs "drop-primary-key" >}}
+
+{{< tab "Flink" >}}
+
+```sql
+ALTER TABLE my_table DROP PRIMARY KEY;
 ```
 
 {{< /tab >}}
@@ -301,6 +335,24 @@ ALTER TABLE my_table MODIFY col_a DOUBLE;
 
 ```sql
 ALTER TABLE my_table ALTER COLUMN col_a TYPE 'DOUBLE';
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+
+## Changing Primary Key
+
+The following SQL changes primary key `c1` and `c2` to `c1` for table `my_table`, these columns which are added to primary key should be not nullable.
+
+{{< tabs "change-primary-key" >}}
+
+{{< tab "Flink" >}}
+
+```sql
+CREATE TABLE my_table (c1 STRING, c2 STRING, c3 STRING, PRIMARY KEY (`c1`, `c2`) NOT ENFORCED);
+ALTER TABLE my_table MODIFY PRIMARY KEY (c1) NOT ENFORCED;
 ```
 
 {{< /tab >}}

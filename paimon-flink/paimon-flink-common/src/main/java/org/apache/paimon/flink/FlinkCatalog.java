@@ -45,13 +45,16 @@ import org.apache.flink.table.catalog.CatalogTableImpl;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.TableChange;
 import org.apache.flink.table.catalog.TableChange.AddColumn;
+import org.apache.flink.table.catalog.TableChange.AddUniqueConstraint;
 import org.apache.flink.table.catalog.TableChange.After;
 import org.apache.flink.table.catalog.TableChange.ColumnPosition;
 import org.apache.flink.table.catalog.TableChange.DropColumn;
+import org.apache.flink.table.catalog.TableChange.DropConstraint;
 import org.apache.flink.table.catalog.TableChange.First;
 import org.apache.flink.table.catalog.TableChange.ModifyColumnName;
 import org.apache.flink.table.catalog.TableChange.ModifyColumnPosition;
 import org.apache.flink.table.catalog.TableChange.ModifyPhysicalColumnType;
+import org.apache.flink.table.catalog.TableChange.ModifyUniqueConstraint;
 import org.apache.flink.table.catalog.TableChange.ResetOption;
 import org.apache.flink.table.catalog.TableChange.SetOption;
 import org.apache.flink.table.catalog.exceptions.CatalogException;
@@ -287,6 +290,15 @@ public class FlinkCatalog extends AbstractCatalog {
         } else if (change instanceof ResetOption) {
             ResetOption resetOption = (ResetOption) change;
             return SchemaChange.removeOption(resetOption.getKey());
+        } else if (change instanceof AddUniqueConstraint) {
+            AddUniqueConstraint addUniqueConstraint = (AddUniqueConstraint) change;
+            return SchemaChange.addConstraint(addUniqueConstraint.getConstraint().getColumns());
+        } else if (change instanceof ModifyUniqueConstraint) {
+            ModifyUniqueConstraint modifyUniqueConstraint = (ModifyUniqueConstraint) change;
+            return SchemaChange.modifyConstraint(
+                    modifyUniqueConstraint.getNewConstraint().getColumns());
+        } else if (change instanceof DropConstraint) {
+            return SchemaChange.dropConstraint();
         } else {
             throw new UnsupportedOperationException(
                     "Change is not supported: " + change.getClass());
@@ -381,23 +393,9 @@ public class FlinkCatalog extends AbstractCatalog {
     private static void validateAlterTable(CatalogTable ct1, CatalogTable ct2) {
         org.apache.flink.table.api.TableSchema ts1 = ct1.getSchema();
         org.apache.flink.table.api.TableSchema ts2 = ct2.getSchema();
-        boolean pkEquality = false;
 
-        if (ts1.getPrimaryKey().isPresent() && ts2.getPrimaryKey().isPresent()) {
-            pkEquality =
-                    Objects.equals(
-                                    ts1.getPrimaryKey().get().getType(),
-                                    ts2.getPrimaryKey().get().getType())
-                            && Objects.equals(
-                                    ts1.getPrimaryKey().get().getColumns(),
-                                    ts2.getPrimaryKey().get().getColumns());
-        } else if (!ts1.getPrimaryKey().isPresent() && !ts2.getPrimaryKey().isPresent()) {
-            pkEquality = true;
-        }
-
-        if (!(Objects.equals(ts1.getWatermarkSpecs(), ts2.getWatermarkSpecs()) && pkEquality)) {
-            throw new UnsupportedOperationException(
-                    "Altering Watermark or primary key is not supported yet.");
+        if (!(Objects.equals(ts1.getWatermarkSpecs(), ts2.getWatermarkSpecs()))) {
+            throw new UnsupportedOperationException("Altering Watermark is not supported yet.");
         }
 
         if (!ct1.getPartitionKeys().equals(ct2.getPartitionKeys())) {
