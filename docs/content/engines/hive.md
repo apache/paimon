@@ -230,7 +230,7 @@ OK
 
 ## Hive Type Conversion
 
-This section lists all supported type conversion between Hive and Flink.
+This section lists all supported type conversion between Hive and Paimon.
 All Hive's data types are available in package `org.apache.hadoop.hive.serde2.typeinfo`.
 
 <table class="table table-bordered">
