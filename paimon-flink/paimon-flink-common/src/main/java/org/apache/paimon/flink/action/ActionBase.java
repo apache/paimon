@@ -78,12 +78,10 @@ public abstract class ActionBase implements Action {
         this(warehouse, databaseName, tableName, new Options());
     }
 
-    ActionBase(String warehouse, String databaseName, String tableName, Options options) {
+    ActionBase(String warehouse, String databaseName, String tableName, Options catalogOptions) {
+        catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
         identifier = new Identifier(databaseName, tableName);
-        catalog =
-                CatalogFactory.createCatalog(
-                        CatalogContext.create(
-                                new Options().set(CatalogOptions.WAREHOUSE, warehouse)));
+        catalog = CatalogFactory.createCatalog(CatalogContext.create(catalogOptions));
         flinkCatalog = new FlinkCatalog(catalog, catalogName, DEFAULT_DATABASE);
 
         env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -95,9 +93,6 @@ public abstract class ActionBase implements Action {
 
         try {
             table = catalog.getTable(identifier);
-            if (options.toMap().size() > 0) {
-                table = table.copy(options.toMap());
-            }
         } catch (Catalog.TableNotExistException e) {
             LOG.error("Table doesn't exist in given path.", e);
             System.err.println("Table doesn't exist in given path.");
