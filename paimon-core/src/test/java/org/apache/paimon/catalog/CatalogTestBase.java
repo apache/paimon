@@ -409,8 +409,9 @@ public abstract class CatalogTestBase {
                 false);
         catalog.alterTable(
                 identifier,
-                Lists.newArrayList(SchemaChange.addColumn("col2", DataTypes.DATE()),
-                    SchemaChange.addColumn("col3", DataTypes.STRING(), "col3 field")),
+                Lists.newArrayList(
+                        SchemaChange.addColumn("col2", DataTypes.DATE()),
+                        SchemaChange.addColumn("col3", DataTypes.STRING(), "col3 field")),
                 false);
         Table table = catalog.getTable(identifier);
         assertThat(table.rowType().getFields()).hasSize(3);
@@ -421,7 +422,6 @@ public abstract class CatalogTestBase {
         assertThat(table.rowType().getTypeAt(index)).isEqualTo(DataTypes.DATE());
         assertThat(table.rowType().getTypeAt(index2)).isEqualTo(DataTypes.STRING());
         assertThat(table.rowType().getFields().get(2).description()).isEqualTo("col3 field");
-
 
         // Alter table throws Exception when table is system table
         assertThatExceptionOfType(IllegalArgumentException.class)
