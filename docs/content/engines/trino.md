@@ -26,6 +26,5 @@ under the License.
 
 # Trino
 
-Because Trino's dependency is JDK 11, it is not possible to include the trino connector in [paimon](https://github.com/apache/incubator-paimon).
+This documentation is a guide for using Paimon in Trino.
 
-See [paimon-trino](https://github.com/JingsongLi/paimon-trino).
