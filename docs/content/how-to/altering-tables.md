@@ -52,6 +52,14 @@ ALTER TABLE my_table SET TBLPROPERTIES (
 
 {{< /tab >}}
 
+{{< tab "Trino" >}}
+
+```sql
+ALTER TABLE my_table SET PROPERTIES write-buffer-size = '256 MB';
+```
+
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ## Rename Table Name
@@ -234,7 +242,7 @@ ALTER TABLE my_table DROP COLUMNS (c1, c2);
 
 {{< /tab >}}
 
-{{< tab "Spark3" >}}
+{{< tab "Trino" >}}
 
 ```sql
 ALTER TABLE my_table DROP COLUMN c1;
