@@ -62,9 +62,9 @@ Download the jar file with corresponding version.
 
 {{< /unstable >}}
 
-You can also manually build bundled jar from the source code.But before compiling, you need to do a few things first:
+You can also manually build a bundled jar from the source code. However, there are a few preliminary steps that need to be taken before compiling:
 
-- To build from source code, [clone the git repository]({{< trino_github_repo >}}).
+- To build from the source code, [clone the git repository]({{< trino_github_repo >}}).
 - Install JDK11 and JDK17 locally, and configure JDK11 as a global environment variable;
 - Configure the toolchains.xml file in ${{ MAVEN_HOME }}, the content is as follows.
 
