@@ -128,6 +128,18 @@ SELECT * FROM t TIMESTAMP AS OF 1678883047;
 
 {{< /tab >}}
 
+{{< tab "Trino" >}}
+
+you can use `VERSION AS OF` and `TIMESTAMP AS OF` in query to do time travel:
+
+```sql
+-- travel to specified timestamp with a long value in milliseconds
+SET SESSION paimon.scan_timestamp_millis=1679486589444;
+SELECT * FROM t;
+```
+
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ## Consumer ID
