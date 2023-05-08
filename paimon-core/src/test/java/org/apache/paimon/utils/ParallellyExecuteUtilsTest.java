@@ -22,6 +22,7 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -143,5 +144,19 @@ public class ParallellyExecuteUtilsTest {
                         Collections.singletonList(1),
                         null);
         re.forEach(i -> Assertions.assertThat(i).isEqualTo(2));
+    }
+
+    @Test
+    public void testDifferentQueueSizeWithFilterElement() {
+        for (int queueSize = 1; queueSize < 20; queueSize++) {
+            Iterable<Integer> re =
+                    ParallellyExecuteUtils.parallelismBatchIterable(
+                            l -> l.parallelStream().filter(i -> i > 5).collect(Collectors.toList()),
+                            Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
+                            queueSize);
+            Integer[] result = new Integer[]{6, 7, 8, 9, 10};
+
+            Assertions.assertThat(re).hasSameElementsAs(Arrays.asList(result));
+        }
     }
 }
