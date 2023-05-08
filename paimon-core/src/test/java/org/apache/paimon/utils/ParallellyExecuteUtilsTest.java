@@ -154,7 +154,7 @@ public class ParallellyExecuteUtilsTest {
                             l -> l.parallelStream().filter(i -> i > 5).collect(Collectors.toList()),
                             Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
                             queueSize);
-            Integer[] result = new Integer[]{6, 7, 8, 9, 10};
+            Integer[] result = new Integer[] {6, 7, 8, 9, 10};
 
             Assertions.assertThat(re).hasSameElementsAs(Arrays.asList(result));
         }
