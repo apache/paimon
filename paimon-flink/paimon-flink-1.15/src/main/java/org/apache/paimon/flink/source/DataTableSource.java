@@ -18,22 +18,19 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.table.catalog.ObjectIdentifier;
-import org.apache.flink.table.connector.source.abilities.SupportsStatisticReport;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.plan.stats.TableStats;
 
 import javax.annotation.Nullable;
 
-/** Data table source with table statistics. */
-public class DataTableSource extends AbstractDataTableSource implements SupportsStatisticReport {
+/** Data table source. */
+public class DataTableSource extends AbstractDataTableSource {
     public DataTableSource(
             ObjectIdentifier tableIdentifier,
             Table table,
@@ -43,8 +40,7 @@ public class DataTableSource extends AbstractDataTableSource implements Supports
         super(tableIdentifier, table, streaming, context, logStoreTableFactory);
     }
 
-    @VisibleForTesting
-    public DataTableSource(
+    protected DataTableSource(
             ObjectIdentifier tableIdentifier,
             Table table,
             boolean streaming,
@@ -64,15 +60,5 @@ public class DataTableSource extends AbstractDataTableSource implements Supports
                 projectFields,
                 limit,
                 watermarkStrategy);
-    }
-
-    @Override
-    public TableStats reportStatistics() {
-        if (streaming) {
-            return TableStats.UNKNOWN;
-        }
-
-        splitsForScan();
-        return new TableStats(rowCount);
     }
 }
