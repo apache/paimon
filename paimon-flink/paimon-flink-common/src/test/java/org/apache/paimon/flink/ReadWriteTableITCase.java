@@ -1570,6 +1570,10 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
     }
 
+    // ----------------------------------------------------------------------------------------------------------------
+    // Delete statement
+    // ----------------------------------------------------------------------------------------------------------------
+
     @ParameterizedTest
     @EnumSource(CoreOptions.MergeEngine.class)
     public void testDeleteWithPrimaryKey(CoreOptions.MergeEngine mergeEngine) throws Exception {
