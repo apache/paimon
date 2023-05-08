@@ -54,7 +54,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
-            boolean checkNumOfBuckets) {
+            boolean checkNumOfBuckets,
+            Integer scanManifestParallelism) {
         super(
                 partitionType,
                 bucketKeyType,
@@ -63,7 +64,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 manifestFileFactory,
                 manifestListFactory,
                 numOfBuckets,
-                checkNumOfBuckets);
+                checkNumOfBuckets,
+                scanManifestParallelism);
         this.fieldStatsConverters =
                 new FieldStatsConverters(
                         sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)), schemaId);

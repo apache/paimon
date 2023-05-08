@@ -52,7 +52,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
-            boolean checkNumOfBuckets) {
+            boolean checkNumOfBuckets,
+            Integer scanManifestParallelism) {
         super(
                 partitionType,
                 bucketKeyType,
@@ -61,7 +62,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 manifestFileFactory,
                 manifestListFactory,
                 numOfBuckets,
-                checkNumOfBuckets);
+                checkNumOfBuckets,
+                scanManifestParallelism);
         this.rowType = rowType;
         this.fieldStatsConverters =
                 new FieldStatsConverters(sid -> scanTableSchema(sid).fields(), schemaId);
