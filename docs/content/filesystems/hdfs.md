@@ -41,6 +41,7 @@ configure your HDFS:
 
 1. Set environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR`.
 2. Configure `'hadoop-conf-dir'` in the paimon catalog.
+3. Configure Hadoop options through prefix `'hadoop.'` in the paimon catalog.
 
 The first approach is recommended.
 
