@@ -1571,6 +1571,89 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     // ----------------------------------------------------------------------------------------------------------------
+    // Delete statement
+    // ----------------------------------------------------------------------------------------------------------------
+
+    @ParameterizedTest
+    @EnumSource(CoreOptions.MergeEngine.class)
+    public void testDeleteWithPrimaryKey(CoreOptions.MergeEngine mergeEngine) throws Exception {
+        Set<CoreOptions.MergeEngine> supportUpdateEngines = new HashSet<>();
+        supportUpdateEngines.add(CoreOptions.MergeEngine.DEDUPLICATE);
+
+        // Step1: define table schema
+        Map<String, String> options = new HashMap<>();
+        options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
+        options.put(MERGE_ENGINE.key(), mergeEngine.toString());
+        String table =
+                createTable(
+                        Arrays.asList(
+                                "id BIGINT NOT NULL",
+                                "currency STRING",
+                                "rate BIGINT",
+                                "dt String"),
+                        Arrays.asList("id", "dt"),
+                        Collections.singletonList("dt"),
+                        options);
+
+        // Step2: batch write some historical data
+        insertInto(
+                table,
+                "(1, 'US Dollar', 114, '2022-01-01')",
+                "(2, 'UNKNOWN', -1, '2022-01-01')",
+                "(3, 'Euro', 119, '2022-01-02')");
+
+        // Step3: prepare delete statement
+        String deleteStatement = String.format("DELETE FROM %s WHERE currency = 'UNKNOWN'", table);
+
+        // Step4: execute delete statement and verify result
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01"),
+                        changelogRow("+I", 3L, "Euro", 119L, "2022-01-02"));
+        if (supportUpdateEngines.contains(mergeEngine)) {
+            bEnv.executeSql(deleteStatement).await();
+            String querySql = String.format("SELECT * FROM %s", table);
+            testBatchRead(querySql, expectedRecords);
+        } else {
+            assertThatThrownBy(() -> bEnv.executeSql(deleteStatement).await())
+                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(WriteMode.class)
+    public void testDeleteWithoutPrimaryKey(WriteMode writeMode) throws Exception {
+        // Step1: define table schema
+        Map<String, String> options = new HashMap<>();
+        options.put(WRITE_MODE.key(), writeMode.toString());
+        options.put(MERGE_ENGINE.key(), MERGE_ENGINE.defaultValue().toString());
+        String table =
+                createTable(
+                        Arrays.asList(
+                                "id BIGINT NOT NULL",
+                                "currency STRING",
+                                "rate BIGINT",
+                                "dt String"),
+                        Collections.emptyList(),
+                        Collections.singletonList("dt"),
+                        options);
+
+        // Step2: batch write some historical data
+        insertInto(
+                table,
+                "(1, 'US Dollar', 114, '2022-01-01')",
+                "(2, 'UNKNOWN', -1, '2022-01-01')",
+                "(3, 'Euro', 119, '2022-01-02')");
+
+        // Step3: prepare delete statement
+        String deleteStatement = String.format("DELETE FROM %s WHERE currency = 'UNKNOWN'", table);
+
+        // Step4: execute delete statement and verify result
+        assertThatThrownBy(() -> bEnv.executeSql(deleteStatement).await())
+                .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+    }
+
+    // ----------------------------------------------------------------------------------------------------------------
     // Tools
     // ----------------------------------------------------------------------------------------------------------------
 

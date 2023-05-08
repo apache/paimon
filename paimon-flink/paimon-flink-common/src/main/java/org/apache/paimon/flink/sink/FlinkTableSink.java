@@ -29,6 +29,7 @@ import org.apache.paimon.table.Table;
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.RowLevelModificationScanContext;
+import org.apache.flink.table.connector.sink.abilities.SupportsRowLevelDelete;
 import org.apache.flink.table.connector.sink.abilities.SupportsRowLevelUpdate;
 import org.apache.flink.table.factories.DynamicTableFactory;
 
@@ -42,7 +43,8 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 
 /** Table sink to create sink. */
-public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLevelUpdate {
+public class FlinkTableSink extends FlinkTableSinkBase
+        implements SupportsRowLevelUpdate, SupportsRowLevelDelete {
 
     public FlinkTableSink(
             ObjectIdentifier tableIdentifier,
@@ -103,6 +105,32 @@ public class FlinkTableSink extends FlinkTableSinkBase implements SupportsRowLev
             throw new UnsupportedOperationException(
                     String.format(
                             "%s can not support update, because it is an unknown subclass of FileStoreTable.",
+                            table.getClass().getName()));
+        }
+    }
+
+    @Override
+    public RowLevelDeleteInfo applyRowLevelDelete(
+            @Nullable RowLevelModificationScanContext rowLevelModificationScanContext) {
+        if (table instanceof ChangelogWithKeyFileStoreTable) {
+            Options options = Options.fromMap(table.options());
+            if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE) {
+                return new RowLevelDeleteInfo() {};
+            }
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "merge engine '%s' can not support delete, currently only %s can support delete.",
+                            options.get(MERGE_ENGINE), MergeEngine.DEDUPLICATE));
+        } else if (table instanceof AppendOnlyFileStoreTable
+                || table instanceof ChangelogValueCountFileStoreTable) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "table '%s' can not support delete, because there is no primary key.",
+                            table.getClass().getName()));
+        } else {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "%s can not support delete, because it is an unknown subclass of FileStoreTable.",
                             table.getClass().getName()));
         }
     }
