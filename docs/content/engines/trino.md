@@ -180,7 +180,7 @@ SET SESSION paimon.scan_timestamp_millis=1679486589444;
 SELECT * FROM paimon.test_db.orders;
 ```
 
-## Trino Type Conversion
+## Trino to Paimon type mapping
 
 This section lists all supported type conversion between Trino and Paimon.
 All Trino's data types are available in package `io.trino.spi.type`.

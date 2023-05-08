@@ -155,14 +155,14 @@ spark.sql("SELECT * FROM my_table").show()
 
 ## Spark Type Conversion
 
-This section lists all supported type conversion between Spark and Flink.
+This section lists all supported type conversion between Spark and Paimon.
 All Spark's data types are available in package `org.apache.spark.sql.types`.
 
 <table class="table table-bordered">
     <thead>
     <tr>
       <th class="text-left" style="width: 10%">Spark Data Type</th>
-      <th class="text-left" style="width: 10%">Flink Data Type</th>
+      <th class="text-left" style="width: 10%">Paimon Data Type</th>
       <th class="text-left" style="width: 5%">Atomic Type</th>
     </tr>
     </thead>
@@ -248,6 +248,6 @@ All Spark's data types are available in package `org.apache.spark.sql.types`.
 {{< hint info >}}
 
 - Currently, Spark's field comment cannot be described under Flink CLI.
-- Conversion between Spark's `UserDefinedType` and Flink's `UserDefinedType` is not supported.
+- Conversion between Spark's `UserDefinedType` and Paimon's `UserDefinedType` is not supported.
 
 {{< /hint >}}

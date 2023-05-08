@@ -24,6 +24,8 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+# Presto
+
 This documentation is a guide for using Paimon in Presto.
 
 ## Version
@@ -36,27 +38,27 @@ Paimon currently supports Presto 0.236 and above.
 
 Download the jar file with corresponding version.
 
-|     Version      | Jar                                                                                                                                                                                                            |
-|------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [0.236,0.268)    | [paimon-presto-0.236-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.236/{{< version >}}/paimon-presto-0.236-{{< version >}}.jar) |
-| [0.268,0.273)    | [paimon-presto-0.268-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.268/{{< version >}}/paimon-presto-0.268-{{< version >}}.jar) |
-| [0.273,0.279]    | [paimon-presto-0.273-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.273/{{< version >}}/paimon-presto-0.273-{{< version >}}.jar) |
+| Version        | Jar                                                                                                                                                                                                            |
+|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [0.236, 0.268) | [paimon-presto-0.236-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.236/{{< version >}}/paimon-presto-0.236-{{< version >}}.jar) |
+| [0.268, 0.273) | [paimon-presto-0.268-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.268/{{< version >}}/paimon-presto-0.268-{{< version >}}.jar) |
+| [0.273, latest] | [paimon-presto-0.273-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.273/{{< version >}}/paimon-presto-0.273-{{< version >}}.jar) |
 
 {{< /stable >}}
 
 {{< unstable >}}
 
-|     Version      | Jar                                                                                                                                                                                                            |
-|------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
-| [0.236,0.268)    | [paimon-presto-0.236-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.236/{{< version >}}/) |
-| [0.268,0.273)    | [paimon-presto-0.268-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.268/{{< version >}}/) |
-| [0.273,0.279]    | [paimon-presto-0.273-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.273/{{< version >}}/) |
+| Version        | Jar                                                                                                                                                                                                            |
+|----------------|-------------------------------------------------------------------------------------------------------------------------------------------|
+| [0.236, 0.268) | [paimon-presto-0.236-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.236/{{< version >}}/) |
+| [0.268, 0.273) | [paimon-presto-0.268-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.268/{{< version >}}/) |
+| [0.273, latest] | [paimon-presto-0.273-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.273/{{< version >}}/) |
 
 {{< /unstable >}}
 
-You can also manually build bundled jar from the source code.
+You can also manually build a bundled jar from the source code.
 
-To build from source code, [clone the git repository]({{< github_repo >}}).
+To build from the source code, [clone the git repository]({{< presto_github_repo >}}).
 
 Build bundled jar with the following command.
 
@@ -64,7 +66,7 @@ Build bundled jar with the following command.
 mvn clean install -DskipTests
 ```
 
-You can find Presto connector jar in `./paimon-presto/paimon-presto-<presto-version>/target/paimon-presto-*.jar`.
+You can find Presto connector jar in `./paimon-presto-<presto-version>/target/paimon-presto-*.jar`.
 
 Then, copy `paimon-presto-*.jar and flink-shaded-hadoop-*-uber-*.jar` to plugin/paimon.
 
@@ -95,3 +97,110 @@ security.kerberos.login.keytab=/etc/presto/hdfs.keytab
 ```
 SELECT * FROM paimon.default.MyTable
 ```
+
+## Presto to Paimon type mapping
+
+This section lists all supported type conversion between Presto and Paimon.
+All Presto's data types are available in package ` com.facebook.presto.common.type`.
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 10%">Presto Data Type</th>
+      <th class="text-left" style="width: 10%">Paimon Data Type</th>
+      <th class="text-left" style="width: 5%">Atomic Type</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><code>RowType</code></td>
+      <td><code>RowType</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>MapType</code></td>
+      <td><code>MapType</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>ArrayType</code></td>
+      <td><code>ArrayType</code></td>
+      <td>false</td>
+    </tr>
+    <tr>
+      <td><code>BooleanType</code></td>
+      <td><code>BooleanType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>TinyintType</code></td>
+      <td><code>TinyIntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>SmallintType</code></td>
+      <td><code>SmallIntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>IntegerType</code></td>
+      <td><code>IntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>BigintType</code></td>
+      <td><code>BigIntType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>RealType</code></td>
+      <td><code>FloatType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>DoubleType</code></td>
+      <td><code>DoubleType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>CharType(length)</code></td>
+      <td><code>CharType(length)</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>VarCharType(VarCharType.MAX_LENGTH)</code></td>
+      <td><code>VarCharType(VarCharType.MAX_LENGTH)</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>VarCharType(length)</code></td>
+      <td><code>VarCharType(length), length is less than VarCharType.MAX_LENGTH</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>DateType</code></td>
+      <td><code>DateType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>TimestampType</code></td>
+      <td><code>TimestampType</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>DecimalType(precision, scale)</code></td>
+      <td><code>DecimalType(precision, scale)</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>VarBinaryType(length)</code></td>
+      <td><code>VarBinaryType(length)</code></td>
+      <td>true</td>
+    </tr>
+    <tr>
+      <td><code>TimestampWithTimeZoneType</code></td>
+      <td><code>LocalZonedTimestampType</code></td>
+      <td>true</td>
+    </tr>
+    </tbody>
+</table>

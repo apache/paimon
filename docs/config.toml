@@ -50,6 +50,8 @@ pygmentsUseClasses = true
 
   TrinoGithubRepo = "https://github.com/apache/incubator-paimon-trino.git"
 
+  PrestoGithubRepo = "https://github.com/apache/incubator-paimon-presto.git"
+
   # This suffix is appended to the Scala-dependent Maven artifact names
   ScalaVersion = "_2.12"
 
