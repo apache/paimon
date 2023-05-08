@@ -266,6 +266,29 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testConflictOption() {
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "CREATE TABLE T (a INT) TBLPROPERTIES ('write-mode' = 'append-only', 'changelog-producer' = 'input')"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "Can not set the write-mode to append-only and changelog-producer at the same time.");
+
+        spark.sql("CREATE TABLE T (a INT) TBLPROPERTIES ('write-mode' = 'append-only')");
+
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "ALTER TABLE T SET TBLPROPERTIES('changelog-producer' 'input')"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "Can not set the write-mode to append-only and changelog-producer at the same time.");
+    }
+
+    @Test
     public void testCreateTableWithNullablePk() {
         spark.sql(
                 "CREATE TABLE PkTable (\n"

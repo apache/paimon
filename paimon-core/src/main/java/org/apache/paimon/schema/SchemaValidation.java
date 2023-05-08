@@ -37,11 +37,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
+import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
+import static org.apache.paimon.CoreOptions.WRITE_MODE;
 import static org.apache.paimon.WriteMode.APPEND_ONLY;
 import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 import static org.apache.paimon.schema.SystemColumns.SYSTEM_FIELD_NAMES;
@@ -76,6 +78,14 @@ public class SchemaValidation {
         } else {
             checkOptionNotExistInMode(options, SCAN_TIMESTAMP_MILLIS, options.startupMode());
             checkOptionNotExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
+        }
+
+        if (options.writeMode() == WriteMode.APPEND_ONLY
+                && options.changelogProducer() != CoreOptions.ChangelogProducer.NONE) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Can not set the %s to %s and %s at the same time.",
+                            WRITE_MODE.key(), APPEND_ONLY, CHANGELOG_PRODUCER.key()));
         }
 
         checkArgument(
