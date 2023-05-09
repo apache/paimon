@@ -293,6 +293,25 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testConflictOption() {
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CREATE TABLE T (a INT) WITH ('write-mode' = 'append-only', 'changelog-producer' = 'input')"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "Can not set the write-mode to append-only and changelog-producer at the same time.");
+
+        sql("CREATE TABLE T (a INT) WITH ('write-mode' = 'append-only')");
+        assertThatThrownBy(() -> sql("ALTER TABLE T SET ('changelog-producer'='input')"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "Can not set the write-mode to append-only and changelog-producer at the same time.");
+    }
+
+    @Test
     public void testFilesTable() throws Exception {
         sql(
                 "CREATE TABLE T_VALUE_COUNT (a INT, p INT, b BIGINT, c STRING) "
