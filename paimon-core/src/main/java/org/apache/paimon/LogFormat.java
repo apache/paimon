@@ -23,6 +23,7 @@ import org.apache.paimon.options.description.InlineElement;
 
 import static org.apache.paimon.options.description.TextElement.text;
 
+/** Defines format of log system. */
 public enum LogFormat implements DescribedEnum {
     DEBEZIUM_JSON("debezium-json", "The `debezium-json` format of log system."),
     CANAL_JSON("canal-json", "The `canal-json` format of log system.");
