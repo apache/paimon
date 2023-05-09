@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.flink.table.api.TableException;
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
 
 import org.apache.flink.types.Row;
@@ -283,7 +285,13 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 + "  `c` VARCHAR(2147483647),\n"
                                 + "  `d` INT,\n"
                                 + "  `e` FLOAT NOT NULL,");
+        assertThatThrownBy(() -> sql("INSERT INTO T VALUES('aaa', 'bbb', 'ccc', 1, CAST(NULL AS FLOAT))"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                TableException.class,
+                                "Column 'e' is NOT NULL, however, a null value is being written into it."));
 
+        // Not null -> nullable
         sql("ALTER TABLE T MODIFY e FLOAT");
         result = sql("SHOW CREATE TABLE T");
         assertThat(result.toString())
@@ -295,10 +303,34 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 + "  `d` INT,\n"
                                 + "  `e` FLOAT");
 
-        assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY c STRING NOT NULL"))
-                .hasMessageContaining(
-                        "Could not execute ALTER TABLE PAIMON.default.T\n"
-                                + "  MODIFY `c` STRING NOT NULL");
+        // Nullable -> not null
+        sql("ALTER TABLE T MODIFY c STRING NOT NULL");
+        result = sql("SHOW CREATE TABLE T");
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `b` VARCHAR(2147483647),\n"
+                                + "  `c` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `d` INT,\n"
+                                + "  `e` FLOAT");
+        assertThatThrownBy(() -> sql("INSERT INTO T VALUES('aaa', 'bbb', CAST(NULL AS STRING), 1, CAST(NULL AS FLOAT))"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                TableException.class,
+                                "Column 'c' is NOT NULL, however, a null value is being written into it."));
+
+        // Insert a null value
+        sql("INSERT INTO T VALUES('aaa', 'bbb', 'ccc', 1, CAST(NULL AS FLOAT))");
+        result = sql("select * from T");
+        assertThat(result.toString()).isEqualTo("[+I[aaa, bbb, ccc, 1, null]]");
+
+        // Then nullable -> not null
+        tEnv.getConfig().set(ExecutionConfigOptions.TABLE_EXEC_SINK_NOT_NULL_ENFORCER, ExecutionConfigOptions.NotNullEnforcer.DROP);
+        sql("ALTER TABLE T MODIFY e FLOAT NOT NULL;\n");
+        sql("INSERT INTO T VALUES('aa2', 'bb2', 'cc2', 2, 2.5)");
+        result = sql("select * from T");
+        assertThat(result.toString()).isEqualTo("[+I[aa2, bb2, cc2, 2, 2.5]]");
     }
 
     @Test

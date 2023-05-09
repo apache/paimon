@@ -250,37 +250,47 @@ public class FlinkCatalog extends AbstractCatalog {
         }
     }
 
-    private SchemaChange toSchemaChange(TableChange change) {
+    private List<SchemaChange> toSchemaChange(TableChange change) {
+        List<SchemaChange> schemaChanges = new ArrayList<>();
         if (change instanceof AddColumn) {
             AddColumn add = (AddColumn) change;
             String comment = add.getColumn().getComment().orElse(null);
             SchemaChange.Move move = getMove(add.getPosition(), add.getColumn().getName());
-            return SchemaChange.addColumn(
+            schemaChanges.add(SchemaChange.addColumn(
                     add.getColumn().getName(),
                     LogicalTypeConversion.toDataType(
                             add.getColumn().getDataType().getLogicalType()),
                     comment,
-                    move);
+                    move));
+            return schemaChanges;
         } else if (change instanceof DropColumn) {
             DropColumn drop = (DropColumn) change;
-            return SchemaChange.dropColumn(drop.getColumnName());
+            schemaChanges.add(SchemaChange.dropColumn(drop.getColumnName()));
+            return schemaChanges;
         } else if (change instanceof ModifyColumnName) {
             ModifyColumnName modify = (ModifyColumnName) change;
-            return SchemaChange.renameColumn(modify.getOldColumnName(), modify.getNewColumnName());
+            schemaChanges.add(SchemaChange.renameColumn(modify.getOldColumnName(), modify.getNewColumnName()));
+            return schemaChanges;
         } else if (change instanceof ModifyPhysicalColumnType) {
             ModifyPhysicalColumnType modify = (ModifyPhysicalColumnType) change;
-            return SchemaChange.updateColumnType(
+            schemaChanges.add(SchemaChange.updateColumnNullability(
+                    new String[]{modify.getNewColumn().getName()},
+                    modify.getNewType().getLogicalType().isNullable()));
+            schemaChanges.add(SchemaChange.updateColumnType(
                     modify.getOldColumn().getName(),
-                    LogicalTypeConversion.toDataType(modify.getNewType().getLogicalType()));
+                    LogicalTypeConversion.toDataType(modify.getNewType().getLogicalType())));
+            return schemaChanges;
         } else if (change instanceof ModifyColumnPosition) {
             ModifyColumnPosition modify = (ModifyColumnPosition) change;
             SchemaChange.Move move =
                     getMove(modify.getNewPosition(), modify.getNewColumn().getName());
-            return SchemaChange.updateColumnPosition(move);
+            schemaChanges.add(SchemaChange.updateColumnPosition(move));
+            return schemaChanges;
         } else if (change instanceof TableChange.ModifyColumnComment) {
             ModifyColumnComment modify = (ModifyColumnComment) change;
-            return SchemaChange.updateColumnComment(
-                    new String[] {modify.getNewColumn().getName()}, modify.getNewComment());
+            schemaChanges.add(SchemaChange.updateColumnComment(
+                    new String[] {modify.getNewColumn().getName()}, modify.getNewComment()));
+            return schemaChanges;
         } else if (change instanceof SetOption) {
             SetOption setOption = (SetOption) change;
             String key = setOption.getKey();
@@ -288,10 +298,12 @@ public class FlinkCatalog extends AbstractCatalog {
 
             SchemaManager.checkAlterTablePath(key);
 
-            return SchemaChange.setOption(key, value);
+            schemaChanges.add(SchemaChange.setOption(key, value));
+            return schemaChanges;
         } else if (change instanceof ResetOption) {
             ResetOption resetOption = (ResetOption) change;
-            return SchemaChange.removeOption(resetOption.getKey());
+            schemaChanges.add(SchemaChange.removeOption(resetOption.getKey()));
+            return schemaChanges;
         } else {
             throw new UnsupportedOperationException(
                     "Change is not supported: " + change.getClass());
@@ -362,7 +374,7 @@ public class FlinkCatalog extends AbstractCatalog {
         List<SchemaChange> changes = new ArrayList<>();
         if (null != tableChanges) {
             List<SchemaChange> schemaChanges =
-                    tableChanges.stream().map(this::toSchemaChange).collect(Collectors.toList());
+                    tableChanges.stream().flatMap(tableChange -> (toSchemaChange(tableChange).stream())).collect(Collectors.toList());
             changes.addAll(schemaChanges);
         }
 
