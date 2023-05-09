@@ -48,27 +48,28 @@ This project bundles the following dependencies under the Apache Software Licens
 - software.amazon.ion:ion-java:1.0.2
 
 This project bundles the following dependencies under BSD-2 License (https://opensource.org/licenses/BSD-2-Clause).
-See bundled license files for details.
+You find it under licenses/LICENSE.dnsjava.
 
 - dnsjava:dnsjava:2.1.7
 
 This project bundles the following dependencies under the MIT (https://opensource.org/licenses/MIT)
+You find them under licenses/LICENSE.checker-framework-qualifiers and licenses/LICENSE.animal-sniffer.
 
 - org.checkerframework:checker-qual:2.5.2
 - org.codehaus.mojo:animal-sniffer-annotations:1.17
 
 This project bundles the following dependencies under the CDDL 1.1 license.
-See bundled license files for details.
+You find it under licenses/LICENSE.jaxb.
 
 - javax.xml.bind:jaxb-api:2.3.1
 
 This project bundles the following dependencies under the Go License (https://golang.org/LICENSE).
-See bundled license files for details.
+You find it under licenses/LICENSE.re2j.
 
 - com.google.re2j:re2j:1.1
 
 This project bundles the following dependencies under BSD License (https://opensource.org/licenses/bsd-license.php).
-See bundled license files for details.
+You find it under licenses/LICENSE.stax2api.
 
 - org.codehaus.woodstox:stax2-api:4.2.1 (https://github.com/FasterXML/stax2-api/tree/stax2-api-4.2.1)
 
