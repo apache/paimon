@@ -34,7 +34,7 @@ This project bundles the following dependencies under the Apache Software Licens
 - org.xerial.snappy:snappy-java:1.1.8.3
 
 This project bundles the following dependencies under the MIT (https://opensource.org/licenses/MIT).
-You find them under licenses/LICENSE.checker-framework and licenses/LICENSE.animal-sniffer.
+You find them under licenses/LICENSE.checker-framework-qualifiers and licenses/LICENSE.animal-sniffer.
 
 - org.checkerframework:checker-qual:2.5.2
 - org.codehaus.mojo:animal-sniffer-annotations:1.17
