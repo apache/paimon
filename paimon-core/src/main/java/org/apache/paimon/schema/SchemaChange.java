@@ -47,6 +47,10 @@ public interface SchemaChange extends Serializable {
         return addColumn(fieldName, dataType, null, null);
     }
 
+    static SchemaChange addColumn(String fieldName, DataType dataType, String comment) {
+        return new AddColumn(fieldName, dataType, comment, null);
+    }
+
     static SchemaChange addColumn(String fieldName, DataType dataType, String comment, Move move) {
         return new AddColumn(fieldName, dataType, comment, move);
     }
