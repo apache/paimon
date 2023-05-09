@@ -45,6 +45,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.LogFormat.DEBEZIUM_JSON;
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.description.TextElement.text;
 
@@ -427,8 +428,28 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<String> LOG_FORMAT =
             key("log.format")
                     .stringType()
-                    .defaultValue("debezium-json")
-                    .withDescription("Specify the message format of log system.");
+                    .defaultValue(DEBEZIUM_JSON.toString())
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Specify the key message format of log system with primary key.")
+                                    .linebreak()
+                                    .linebreak()
+                                    .text("Possible values:")
+                                    .linebreak()
+                                    .list(
+                                            text(
+                                                    LogFormat.DEBEZIUM_JSON
+                                                            + ": "
+                                                            + LogFormat.DEBEZIUM_JSON
+                                                                    .getDescription()))
+                                    .list(
+                                            text(
+                                                    LogFormat.CANAL_JSON
+                                                            + ": "
+                                                            + LogFormat.CANAL_JSON
+                                                                    .getDescription()))
+                                    .build());
 
     public static final ConfigOption<Boolean> AUTO_CREATE =
             key("auto-create")

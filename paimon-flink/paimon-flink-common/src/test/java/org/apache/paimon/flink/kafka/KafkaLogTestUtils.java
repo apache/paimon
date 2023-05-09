@@ -20,6 +20,7 @@ package org.apache.paimon.flink.kafka;
 
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
+import org.apache.paimon.LogFormat;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.table.sink.SinkRecord;
@@ -58,6 +59,7 @@ import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
+import static org.apache.paimon.CoreOptions.LOG_FORMAT;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.flink.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.paimon.flink.kafka.KafkaLogOptions.TOPIC;
@@ -162,8 +164,9 @@ public class KafkaLogTestUtils {
     }
 
     static DynamicTableFactory.Context testContext(
-            String servers, LogChangelogMode changelogMode, boolean keyed) {
-        return testContext("table", servers, changelogMode, LogConsistency.TRANSACTIONAL, keyed);
+            String servers, LogChangelogMode changelogMode, LogFormat format, boolean keyed) {
+        return testContext(
+                "table", servers, changelogMode, LogConsistency.TRANSACTIONAL, format, keyed);
     }
 
     static DynamicTableFactory.Context testContext(
@@ -171,6 +174,7 @@ public class KafkaLogTestUtils {
             String servers,
             LogChangelogMode changelogMode,
             LogConsistency consistency,
+            LogFormat format,
             boolean keyed) {
         return testContext(
                 name,
@@ -178,6 +182,7 @@ public class KafkaLogTestUtils {
                 changelogMode,
                 consistency,
                 RowType.of(new IntType(), new IntType()),
+                format,
                 keyed ? new int[] {0} : new int[0],
                 new HashMap<>());
     }
@@ -188,6 +193,7 @@ public class KafkaLogTestUtils {
             LogChangelogMode changelogMode,
             LogConsistency consistency,
             RowType type,
+            LogFormat format,
             int[] keys,
             Map<String, String> dynamicOptions) {
         Map<String, String> options = new HashMap<>();
@@ -195,6 +201,7 @@ public class KafkaLogTestUtils {
         options.put(LOG_CONSISTENCY.key(), consistency.toString());
         options.put(BOOTSTRAP_SERVERS.key(), servers);
         options.put(TOPIC.key(), UUID.randomUUID().toString());
+        options.put(LOG_FORMAT.key(), format.toString());
         options.putAll(dynamicOptions);
         return createContext(name, type, keys, options);
     }

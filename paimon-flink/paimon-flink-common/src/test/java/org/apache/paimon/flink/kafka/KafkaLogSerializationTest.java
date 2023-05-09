@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.kafka;
 
 import org.apache.paimon.CoreOptions.LogChangelogMode;
+import org.apache.paimon.LogFormat;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.types.RowKind;
 
@@ -46,48 +47,66 @@ public class KafkaLogSerializationTest {
 
     @Test
     public void testKeyed() throws Exception {
-        checkKeyed(LogChangelogMode.AUTO, 1, 3, 5);
-        checkKeyed(LogChangelogMode.UPSERT, 3, 6, 9);
-        checkKeyed(LogChangelogMode.ALL, 2, 5, 3);
+        checkKeyed(LogChangelogMode.AUTO, 1, 3, 5, LogFormat.DEBEZIUM_JSON);
+        checkKeyed(LogChangelogMode.UPSERT, 3, 6, 9, LogFormat.DEBEZIUM_JSON);
+        checkKeyed(LogChangelogMode.ALL, 2, 5, 3, LogFormat.DEBEZIUM_JSON);
+
+        checkKeyed(LogChangelogMode.AUTO, 1, 3, 5, LogFormat.CANAL_JSON);
+        checkKeyed(LogChangelogMode.UPSERT, 3, 6, 9, LogFormat.CANAL_JSON);
+        checkKeyed(LogChangelogMode.ALL, 2, 5, 3, LogFormat.CANAL_JSON);
     }
 
     @Test
     public void testNonKeyedUpsert() {
         Assertions.assertThrows(
                 IllegalArgumentException.class,
-                () -> checkNonKeyed(LogChangelogMode.UPSERT, 3, 6, 9));
+                () -> checkNonKeyed(LogChangelogMode.UPSERT, 3, 6, 9, LogFormat.DEBEZIUM_JSON));
+
+        Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> checkNonKeyed(LogChangelogMode.UPSERT, 3, 6, 9, LogFormat.CANAL_JSON));
     }
 
     @Test
     public void testNonKeyed() throws Exception {
-        checkNonKeyed(LogChangelogMode.AUTO, 1, 3, 5);
-        checkNonKeyed(LogChangelogMode.ALL, 2, 5, 3);
+        checkNonKeyed(LogChangelogMode.AUTO, 1, 3, 5, LogFormat.DEBEZIUM_JSON);
+        checkNonKeyed(LogChangelogMode.ALL, 2, 5, 3, LogFormat.DEBEZIUM_JSON);
+
+        checkNonKeyed(LogChangelogMode.AUTO, 1, 3, 5, LogFormat.CANAL_JSON);
+        checkNonKeyed(LogChangelogMode.ALL, 2, 5, 3, LogFormat.CANAL_JSON);
     }
 
-    private void checkKeyed(LogChangelogMode mode, int bucket, int key, int value)
+    private void checkKeyed(LogChangelogMode mode, int bucket, int key, int value, LogFormat format)
             throws Exception {
-        check(mode, true, bucket, key, value, RowKind.INSERT);
-        check(mode, true, bucket, key, value, RowKind.UPDATE_BEFORE);
-        check(mode, true, bucket, key, value, RowKind.UPDATE_AFTER);
-        check(mode, true, bucket, key, value, RowKind.DELETE);
+        check(mode, true, bucket, key, value, RowKind.INSERT, format);
+        check(mode, true, bucket, key, value, RowKind.UPDATE_BEFORE, format);
+        check(mode, true, bucket, key, value, RowKind.UPDATE_AFTER, format);
+        check(mode, true, bucket, key, value, RowKind.DELETE, format);
     }
 
-    private void checkNonKeyed(LogChangelogMode mode, int bucket, int key, int value)
+    private void checkNonKeyed(
+            LogChangelogMode mode, int bucket, int key, int value, LogFormat format)
             throws Exception {
-        check(mode, false, bucket, key, value, RowKind.INSERT);
-        check(mode, false, bucket, key, value, RowKind.UPDATE_BEFORE);
-        check(mode, false, bucket, key, value, RowKind.UPDATE_AFTER);
-        check(mode, false, bucket, key, value, RowKind.DELETE);
+        check(mode, false, bucket, key, value, RowKind.INSERT, format);
+        check(mode, false, bucket, key, value, RowKind.UPDATE_BEFORE, format);
+        check(mode, false, bucket, key, value, RowKind.UPDATE_AFTER, format);
+        check(mode, false, bucket, key, value, RowKind.DELETE, format);
     }
 
     private void check(
-            LogChangelogMode mode, boolean keyed, int bucket, int key, int value, RowKind rowKind)
+            LogChangelogMode mode,
+            boolean keyed,
+            int bucket,
+            int key,
+            int value,
+            RowKind rowKind,
+            LogFormat format)
             throws Exception {
         KafkaLogSerializationSchema serializer =
-                createTestSerializationSchema(testContext("", mode, keyed));
+                createTestSerializationSchema(testContext("", mode, format, keyed));
         serializer.open(null);
         KafkaRecordDeserializationSchema<RowData> deserializer =
-                createTestDeserializationSchema(testContext("", mode, keyed));
+                createTestDeserializationSchema(testContext("", mode, format, keyed));
         deserializer.open(null);
 
         SinkRecord input = testRecord(keyed, bucket, key, value, rowKind);

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.LogFormat;
 import org.apache.paimon.flink.kafka.KafkaLogStoreFactory;
 import org.apache.paimon.flink.kafka.KafkaLogTestUtils;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
@@ -91,6 +92,7 @@ public class AbstractFlinkTableFactoryTest {
                         LogChangelogMode.AUTO,
                         LogConsistency.TRANSACTIONAL,
                         RowType.of(new IntType(), new IntType()),
+                        LogFormat.DEBEZIUM_JSON,
                         new int[] {0},
                         dynamicOptions);
 
