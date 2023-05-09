@@ -42,7 +42,7 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
     private final MergeFunction<KeyValue> mergeFunction;
     private final int maxLevel;
     private final Comparator<InternalRow> valueComparator;
-    private final boolean rowDeduplicate;
+    private final boolean changelogRowDeduplicate;
 
     // only full compaction will write files into maxLevel, see UniversalCompaction class
     private KeyValue topLevelKv;
@@ -57,7 +57,7 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
             MergeFunction<KeyValue> mergeFunction,
             int maxLevel,
             Comparator<InternalRow> valueComparator,
-            boolean rowDeduplicate) {
+            boolean changelogRowDeduplicate) {
         Preconditions.checkArgument(
                 !(mergeFunction instanceof ValueCountMergeFunction),
                 "Value count merge function does not need to produce changelog from full compaction. "
@@ -65,7 +65,7 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
         this.mergeFunction = mergeFunction;
         this.maxLevel = maxLevel;
         this.valueComparator = valueComparator;
-        this.rowDeduplicate = rowDeduplicate;
+        this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
 
     @Override
@@ -112,7 +112,7 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
             } else {
                 if (merged == null || !isAdd(merged)) {
                     reusedResult.addChangelog(replace(reusedBefore, RowKind.DELETE, topLevelKv));
-                } else if (!rowDeduplicate
+                } else if (!changelogRowDeduplicate
                         || valueComparator.compare(topLevelKv.value(), merged.value()) != 0) {
                     reusedResult
                             .addChangelog(replace(reusedBefore, RowKind.UPDATE_BEFORE, topLevelKv))

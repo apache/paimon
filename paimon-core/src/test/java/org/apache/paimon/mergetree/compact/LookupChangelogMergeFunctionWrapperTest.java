@@ -49,14 +49,14 @@ public class LookupChangelogMergeFunctionWrapperTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testDeduplicate(boolean rowDeduplicate) {
+    public void testDeduplicate(boolean changelogRowDeduplicate) {
         Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
                         LookupMergeFunction.wrap(DeduplicateMergeFunction.factory()),
                         highLevel::get,
                         COMPARATOR,
-                        rowDeduplicate);
+                        changelogRowDeduplicate);
 
         // Without level-0
         function.reset();
@@ -158,7 +158,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
         result = function.getResult();
         assertThat(result).isNotNull();
         changelogs = result.changelogs();
-        if (rowDeduplicate) {
+        if (changelogRowDeduplicate) {
             assertThat(changelogs).isEmpty();
         } else {
             assertThat(changelogs).hasSize(2);
@@ -179,7 +179,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
         result = function.getResult();
         assertThat(result).isNotNull();
         changelogs = result.changelogs();
-        if (rowDeduplicate) {
+        if (changelogRowDeduplicate) {
             assertThat(changelogs).isEmpty();
         } else {
             assertThat(changelogs).hasSize(2);
@@ -196,7 +196,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testSum(boolean rowDeduplicate) {
+    public void testSum(boolean changlogRowDeduplicate) {
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
                         LookupMergeFunction.wrap(
@@ -210,7 +210,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                 })),
                         key -> null,
                         COMPARATOR,
-                        rowDeduplicate);
+                        changlogRowDeduplicate);
 
         // Without level-0
         function.reset();
@@ -264,7 +264,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
         result = function.getResult();
         assertThat(result).isNotNull();
         changelogs = result.changelogs();
-        if (rowDeduplicate) {
+        if (changlogRowDeduplicate) {
             assertThat(changelogs).isEmpty();
         } else {
             assertThat(changelogs).hasSize(2);

@@ -52,13 +52,13 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
     private final KeyValue reusedBefore = new KeyValue();
     private final KeyValue reusedAfter = new KeyValue();
     private final Comparator<InternalRow> valueComparator;
-    private final boolean rowDeduplicate;
+    private final boolean changelogRowDeduplicate;
 
     public LookupChangelogMergeFunctionWrapper(
             MergeFunctionFactory<KeyValue> mergeFunctionFactory,
             Function<InternalRow, KeyValue> lookup,
             Comparator<InternalRow> valueComparator,
-            boolean rowDeduplicate) {
+            boolean changelogRowDeduplicate) {
         MergeFunction<KeyValue> mergeFunction = mergeFunctionFactory.create();
         checkArgument(
                 mergeFunction instanceof LookupMergeFunction,
@@ -68,7 +68,7 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
         this.mergeFunction2 = mergeFunctionFactory.create();
         this.lookup = lookup;
         this.valueComparator = valueComparator;
-        this.rowDeduplicate = rowDeduplicate;
+        this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
 
     @Override
@@ -123,7 +123,7 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
         } else {
             if (!isAdd(after)) {
                 reusedResult.addChangelog(replaceBefore(RowKind.DELETE, before));
-            } else if (!rowDeduplicate
+            } else if (!changelogRowDeduplicate
                     || valueComparator.compare(before.value(), after.value()) != 0) {
                 reusedResult
                         .addChangelog(replaceBefore(RowKind.UPDATE_BEFORE, before))

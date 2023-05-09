@@ -32,7 +32,7 @@ public class LookupChangelogWithAggITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testMultipleCompaction(boolean rowDeduplicate) throws Exception {
+    public void testMultipleCompaction(boolean changelogRowDeduplicate) throws Exception {
         sql(
                 "CREATE TABLE T (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ("
                         + "'bucket'='3', "
@@ -40,7 +40,7 @@ public class LookupChangelogWithAggITCase extends CatalogITCaseBase {
                         + "'changelog-producer.row-deduplicate'='%s', "
                         + "'merge-engine'='aggregation', "
                         + "'fields.v.aggregate-function'='sum')",
-                rowDeduplicate);
+                changelogRowDeduplicate);
         BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM T");
 
         sql("INSERT INTO T VALUES (1, 1), (2, 2)");
@@ -59,7 +59,7 @@ public class LookupChangelogWithAggITCase extends CatalogITCaseBase {
         for (int i = 5; i < 10; i++) {
             // insert (1,0) to keep the result of sum unchanged.
             sql("INSERT INTO T VALUES (1, 0), (2, 2)");
-            if (rowDeduplicate) {
+            if (changelogRowDeduplicate) {
                 assertThat(iterator.collect(2))
                         .containsExactlyInAnyOrder(
                                 Row.ofKind(RowKind.UPDATE_BEFORE, 2, 2 * i),

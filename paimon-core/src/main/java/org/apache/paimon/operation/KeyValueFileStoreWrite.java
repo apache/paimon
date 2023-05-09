@@ -216,7 +216,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         mfFactory,
                         options.sortEngine(),
                         valueComparatorSupplier.get(),
-                        options.rowDeduplicate());
+                        options.changelogRowDeduplicate());
             case LOOKUP:
                 LookupLevels lookupLevels = createLookupLevels(levels, readerFactory);
                 return new LookupMergeTreeCompactRewriter(
@@ -227,7 +227,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         mfFactory,
                         options.sortEngine(),
                         valueComparatorSupplier.get(),
-                        options.rowDeduplicate());
+                        options.changelogRowDeduplicate());
             default:
                 return new MergeTreeCompactRewriter(
                         readerFactory,

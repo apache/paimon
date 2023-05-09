@@ -81,10 +81,10 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testUpdate(boolean rowDeduplicate) throws Exception {
+    public void testUpdate(boolean changelogRowDeduplicate) throws Exception {
         sql(
                 "ALTER TABLE %s SET ('changelog-producer.row-deduplicate' = '%s')",
-                table, rowDeduplicate);
+                table, changelogRowDeduplicate);
 
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(streamSqlIter("SELECT * FROM %s", table));
@@ -102,7 +102,7 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
         // insert duplicate record
         for (int i = 1; i < 5; i++) {
             sql("INSERT INTO %s VALUES ('1', '4', '5'), ('4', '5', '%s')", table, i + 1);
-            if (rowDeduplicate) {
+            if (changelogRowDeduplicate) {
                 assertThat(iterator.collect(2))
                         .containsExactlyInAnyOrder(
                                 Row.ofKind(RowKind.UPDATE_BEFORE, "4", "5", String.valueOf(i)),

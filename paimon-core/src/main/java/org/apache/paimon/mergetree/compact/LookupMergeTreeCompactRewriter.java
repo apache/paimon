@@ -48,7 +48,7 @@ public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
             MergeFunctionFactory<KeyValue> mfFactory,
             SortEngine sortEngine,
             Comparator<InternalRow> valueComparator,
-            boolean rowDeduplicate) {
+            boolean changelogRowDeduplicate) {
         super(
                 readerFactory,
                 writerFactory,
@@ -56,7 +56,7 @@ public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
                 mfFactory,
                 sortEngine,
                 valueComparator,
-                rowDeduplicate);
+                changelogRowDeduplicate);
         this.lookupLevels = lookupLevels;
     }
 
@@ -96,7 +96,7 @@ public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
                     }
                 },
                 valueComparator,
-                rowDeduplicate);
+                changelogRowDeduplicate);
     }
 
     @Override

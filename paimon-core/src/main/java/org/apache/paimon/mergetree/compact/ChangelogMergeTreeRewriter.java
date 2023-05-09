@@ -40,7 +40,7 @@ import java.util.List;
 public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewriter {
 
     protected final Comparator<InternalRow> valueComparator;
-    protected final boolean rowDeduplicate;
+    protected final boolean changelogRowDeduplicate;
 
     public ChangelogMergeTreeRewriter(
             KeyValueFileReaderFactory readerFactory,
@@ -49,10 +49,10 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             MergeFunctionFactory<KeyValue> mfFactory,
             SortEngine sortEngine,
             Comparator<InternalRow> valueComparator,
-            boolean rowDeduplicate) {
+            boolean changelogRowDeduplicate) {
         super(readerFactory, writerFactory, keyComparator, mfFactory, sortEngine);
         this.valueComparator = valueComparator;
-        this.rowDeduplicate = rowDeduplicate;
+        this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
 
     protected abstract boolean rewriteChangelog(
