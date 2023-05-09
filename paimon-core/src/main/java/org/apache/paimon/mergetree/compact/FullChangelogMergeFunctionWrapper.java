@@ -19,8 +19,11 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Preconditions;
+
+import java.util.Comparator;
 
 /**
  * Wrapper for {@link MergeFunction}s to produce changelog during a full compaction.
@@ -38,6 +41,8 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
 
     private final MergeFunction<KeyValue> mergeFunction;
     private final int maxLevel;
+    private final Comparator<InternalRow> valueComparator;
+    private final boolean changelogRowDeduplicate;
 
     // only full compaction will write files into maxLevel, see UniversalCompaction class
     private KeyValue topLevelKv;
@@ -48,13 +53,19 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
     private final KeyValue reusedBefore = new KeyValue();
     private final KeyValue reusedAfter = new KeyValue();
 
-    public FullChangelogMergeFunctionWrapper(MergeFunction<KeyValue> mergeFunction, int maxLevel) {
+    public FullChangelogMergeFunctionWrapper(
+            MergeFunction<KeyValue> mergeFunction,
+            int maxLevel,
+            Comparator<InternalRow> valueComparator,
+            boolean changelogRowDeduplicate) {
         Preconditions.checkArgument(
                 !(mergeFunction instanceof ValueCountMergeFunction),
                 "Value count merge function does not need to produce changelog from full compaction. "
                         + "Please set changelog producer to 'input'.");
         this.mergeFunction = mergeFunction;
         this.maxLevel = maxLevel;
+        this.valueComparator = valueComparator;
+        this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
 
     @Override
@@ -99,12 +110,13 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
                     reusedResult.addChangelog(replace(reusedAfter, RowKind.INSERT, merged));
                 }
             } else {
-                if (merged != null && isAdd(merged)) {
+                if (merged == null || !isAdd(merged)) {
+                    reusedResult.addChangelog(replace(reusedBefore, RowKind.DELETE, topLevelKv));
+                } else if (!changelogRowDeduplicate
+                        || valueComparator.compare(topLevelKv.value(), merged.value()) != 0) {
                     reusedResult
                             .addChangelog(replace(reusedBefore, RowKind.UPDATE_BEFORE, topLevelKv))
                             .addChangelog(replace(reusedAfter, RowKind.UPDATE_AFTER, merged));
-                } else {
-                    reusedResult.addChangelog(replace(reusedBefore, RowKind.DELETE, topLevelKv));
                 }
             }
             return reusedResult.setResultIfNotRetract(merged);

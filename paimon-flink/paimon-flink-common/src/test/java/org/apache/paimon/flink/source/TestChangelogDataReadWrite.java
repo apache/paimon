@@ -177,6 +177,7 @@ public class TestChangelogDataReadWrite {
                                 KEY_TYPE,
                                 VALUE_TYPE,
                                 () -> COMPARATOR,
+                                () -> COMPARATOR,
                                 DeduplicateMergeFunction.factory(),
                                 pathFactory,
                                 snapshotManager,

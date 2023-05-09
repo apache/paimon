@@ -24,6 +24,8 @@ import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 
@@ -77,20 +79,43 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
                         Row.of("1", "2", "3"), Row.of("4", "5", "6"), Row.of("7", "8", "9"));
     }
 
-    @Test
-    public void testUpdate() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testUpdate(boolean changelogRowDeduplicate) throws Exception {
+        sql(
+                "ALTER TABLE %s SET ('changelog-producer.row-deduplicate' = '%s')",
+                table, changelogRowDeduplicate);
+
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(streamSqlIter("SELECT * FROM %s", table));
 
-        sql("INSERT INTO %s VALUES ('1', '2', '3')", table);
-        assertThat(iterator.collect(1))
-                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "1", "2", "3"));
+        sql("INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '1')", table);
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "1"));
 
         sql("INSERT INTO %s VALUES ('1', '4', '5')", table);
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(
                         Row.ofKind(RowKind.UPDATE_BEFORE, "1", "2", "3"),
                         Row.ofKind(RowKind.UPDATE_AFTER, "1", "4", "5"));
+
+        // insert duplicate record
+        for (int i = 1; i < 5; i++) {
+            sql("INSERT INTO %s VALUES ('1', '4', '5'), ('4', '5', '%s')", table, i + 1);
+            if (changelogRowDeduplicate) {
+                assertThat(iterator.collect(2))
+                        .containsExactlyInAnyOrder(
+                                Row.ofKind(RowKind.UPDATE_BEFORE, "4", "5", String.valueOf(i)),
+                                Row.ofKind(RowKind.UPDATE_AFTER, "4", "5", String.valueOf(i + 1)));
+            } else {
+                assertThat(iterator.collect(4))
+                        .containsExactlyInAnyOrder(
+                                Row.ofKind(RowKind.UPDATE_BEFORE, "1", "4", "5"),
+                                Row.ofKind(RowKind.UPDATE_AFTER, "1", "4", "5"),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, "4", "5", String.valueOf(i)),
+                                Row.ofKind(RowKind.UPDATE_AFTER, "4", "5", String.valueOf(i + 1)));
+            }
+        }
 
         iterator.close();
     }

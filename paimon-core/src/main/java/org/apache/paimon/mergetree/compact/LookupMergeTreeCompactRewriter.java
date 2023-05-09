@@ -46,8 +46,17 @@ public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
-            SortEngine sortEngine) {
-        super(readerFactory, writerFactory, keyComparator, mfFactory, sortEngine);
+            SortEngine sortEngine,
+            Comparator<InternalRow> valueComparator,
+            boolean changelogRowDeduplicate) {
+        super(
+                readerFactory,
+                writerFactory,
+                keyComparator,
+                mfFactory,
+                sortEngine,
+                valueComparator,
+                changelogRowDeduplicate);
         this.lookupLevels = lookupLevels;
     }
 
@@ -85,7 +94,9 @@ public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
                     } catch (IOException e) {
                         throw new UncheckedIOException(e);
                     }
-                });
+                },
+                valueComparator,
+                changelogRowDeduplicate);
     }
 
     @Override

@@ -26,8 +26,10 @@ import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldSumAgg;
 import org.apache.paimon.types.DataTypes;
 
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,13 +44,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link LookupChangelogMergeFunctionWrapper}. */
 public class LookupChangelogMergeFunctionWrapperTest {
 
-    @Test
-    public void testDeduplicate() {
+    private static final Comparator<InternalRow> COMPARATOR =
+            Comparator.comparingInt(o -> o.getInt(0));
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testDeduplicate(boolean changelogRowDeduplicate) {
         Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
                         LookupMergeFunction.wrap(DeduplicateMergeFunction.factory()),
-                        highLevel::get);
+                        highLevel::get,
+                        COMPARATOR,
+                        changelogRowDeduplicate);
 
         // Without level-0
         function.reset();
@@ -142,10 +150,53 @@ public class LookupChangelogMergeFunctionWrapperTest {
         assertThat(kv).isNotNull();
         assertThat(kv.valueKind()).isEqualTo(DELETE);
         assertThat(kv.value().getInt(0)).isEqualTo(2);
+
+        // With level-0 'insert' record, with level-x (x > 0) same record
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(0));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(2));
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        changelogs = result.changelogs();
+        if (changelogRowDeduplicate) {
+            assertThat(changelogs).isEmpty();
+        } else {
+            assertThat(changelogs).hasSize(2);
+            assertThat(changelogs.get(0).valueKind()).isEqualTo(UPDATE_BEFORE);
+            assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(2);
+            assertThat(changelogs.get(1).valueKind()).isEqualTo(UPDATE_AFTER);
+            assertThat(changelogs.get(1).value().getInt(0)).isEqualTo(2);
+        }
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.valueKind()).isEqualTo(INSERT);
+        assertThat(kv.value().getInt(0)).isEqualTo(2);
+
+        // With level-0 'insert' record, without level-x (x > 0) record, query success
+        function.reset();
+        highLevel.put(row(1), new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(2));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(0));
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        changelogs = result.changelogs();
+        if (changelogRowDeduplicate) {
+            assertThat(changelogs).isEmpty();
+        } else {
+            assertThat(changelogs).hasSize(2);
+            assertThat(changelogs.get(0).valueKind()).isEqualTo(UPDATE_BEFORE);
+            assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(2);
+            assertThat(changelogs.get(1).valueKind()).isEqualTo(UPDATE_AFTER);
+            assertThat(changelogs.get(1).value().getInt(0)).isEqualTo(2);
+        }
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.valueKind()).isEqualTo(INSERT);
+        assertThat(kv.value().getInt(0)).isEqualTo(2);
     }
 
-    @Test
-    public void testSum() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testSum(boolean changlogRowDeduplicate) {
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
                         LookupMergeFunction.wrap(
@@ -157,7 +208,9 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                 new FieldAggregator[] {
                                                     new FieldSumAgg(DataTypes.INT())
                                                 })),
-                        key -> null);
+                        key -> null,
+                        COMPARATOR,
+                        changlogRowDeduplicate);
 
         // Without level-0
         function.reset();
@@ -203,5 +256,25 @@ public class LookupChangelogMergeFunctionWrapperTest {
         kv = result.result();
         assertThat(kv).isNotNull();
         assertThat(kv.value().getInt(0)).isEqualTo(4);
+
+        // With level-0 record, with the result is not changed
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(2)).setLevel(1));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(0)).setLevel(0));
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        changelogs = result.changelogs();
+        if (changlogRowDeduplicate) {
+            assertThat(changelogs).isEmpty();
+        } else {
+            assertThat(changelogs).hasSize(2);
+            assertThat(changelogs.get(0).valueKind()).isEqualTo(UPDATE_BEFORE);
+            assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(2);
+            assertThat(changelogs.get(1).valueKind()).isEqualTo(UPDATE_AFTER);
+            assertThat(changelogs.get(1).value().getInt(0)).isEqualTo(2);
+        }
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(2);
     }
 }

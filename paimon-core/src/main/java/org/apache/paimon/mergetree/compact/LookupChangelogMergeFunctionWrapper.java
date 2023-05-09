@@ -22,6 +22,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowKind;
 
+import java.util.Comparator;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -50,10 +51,14 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
     private final ChangelogResult reusedResult = new ChangelogResult();
     private final KeyValue reusedBefore = new KeyValue();
     private final KeyValue reusedAfter = new KeyValue();
+    private final Comparator<InternalRow> valueComparator;
+    private final boolean changelogRowDeduplicate;
 
     public LookupChangelogMergeFunctionWrapper(
             MergeFunctionFactory<KeyValue> mergeFunctionFactory,
-            Function<InternalRow, KeyValue> lookup) {
+            Function<InternalRow, KeyValue> lookup,
+            Comparator<InternalRow> valueComparator,
+            boolean changelogRowDeduplicate) {
         MergeFunction<KeyValue> mergeFunction = mergeFunctionFactory.create();
         checkArgument(
                 mergeFunction instanceof LookupMergeFunction,
@@ -62,6 +67,8 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
         this.mergeFunction = (LookupMergeFunction) mergeFunction;
         this.mergeFunction2 = mergeFunctionFactory.create();
         this.lookup = lookup;
+        this.valueComparator = valueComparator;
+        this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
 
     @Override
@@ -114,12 +121,13 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
                 reusedResult.addChangelog(replaceAfter(RowKind.INSERT, after));
             }
         } else {
-            if (isAdd(after)) {
+            if (!isAdd(after)) {
+                reusedResult.addChangelog(replaceBefore(RowKind.DELETE, before));
+            } else if (!changelogRowDeduplicate
+                    || valueComparator.compare(before.value(), after.value()) != 0) {
                 reusedResult
                         .addChangelog(replaceBefore(RowKind.UPDATE_BEFORE, before))
                         .addChangelog(replaceAfter(RowKind.UPDATE_AFTER, after));
-            } else {
-                reusedResult.addChangelog(replaceBefore(RowKind.DELETE, before));
             }
         }
     }

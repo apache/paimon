@@ -348,6 +348,13 @@ public class CoreOptions implements Serializable {
                                     + "This changelog file keeps the details of data changes, "
                                     + "it can be read directly during stream reads.");
 
+    public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_ROW_DEDUPLICATE =
+            key("changelog-producer.row-deduplicate")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to generate -U, +U changelog for the same record. This configuration is only valid for the changelog-producer is lookup or full-compaction.");
+
     @Immutable
     public static final ConfigOption<String> SEQUENCE_FIELD =
             key("sequence.field")
@@ -814,6 +821,10 @@ public class CoreOptions implements Serializable {
 
     public ChangelogProducer changelogProducer() {
         return options.get(CHANGELOG_PRODUCER);
+    }
+
+    public boolean changelogRowDeduplicate() {
+        return options.get(CHANGELOG_PRODUCER_ROW_DEDUPLICATE);
     }
 
     public boolean scanPlanSortPartition() {

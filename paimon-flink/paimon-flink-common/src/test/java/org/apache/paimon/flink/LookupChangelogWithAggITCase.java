@@ -22,21 +22,25 @@ import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test Lookup changelog producer with aggregation tables. */
 public class LookupChangelogWithAggITCase extends CatalogITCaseBase {
 
-    @Test
-    public void testMultipleCompaction() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testMultipleCompaction(boolean changelogRowDeduplicate) throws Exception {
         sql(
                 "CREATE TABLE T (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ("
                         + "'bucket'='3', "
                         + "'changelog-producer'='lookup', "
+                        + "'changelog-producer.row-deduplicate'='%s', "
                         + "'merge-engine'='aggregation', "
-                        + "'fields.v.aggregate-function'='sum')");
+                        + "'fields.v.aggregate-function'='sum')",
+                changelogRowDeduplicate);
         BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM T");
 
         sql("INSERT INTO T VALUES (1, 1), (2, 2)");
@@ -50,6 +54,24 @@ public class LookupChangelogWithAggITCase extends CatalogITCaseBase {
                             Row.ofKind(RowKind.UPDATE_BEFORE, 2, 2 * i),
                             Row.ofKind(RowKind.UPDATE_AFTER, 1, i + 1),
                             Row.ofKind(RowKind.UPDATE_AFTER, 2, 2 * (i + 1)));
+        }
+
+        for (int i = 5; i < 10; i++) {
+            // insert (1,0) to keep the result of sum unchanged.
+            sql("INSERT INTO T VALUES (1, 0), (2, 2)");
+            if (changelogRowDeduplicate) {
+                assertThat(iterator.collect(2))
+                        .containsExactlyInAnyOrder(
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 2, 2 * i),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 2, 2 * (i + 1)));
+            } else {
+                assertThat(iterator.collect(4))
+                        .containsExactlyInAnyOrder(
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 1, 5),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 2, 2 * i),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 1, 5),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 2, 2 * (i + 1)));
+            }
         }
 
         iterator.close();

@@ -19,6 +19,7 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowKind;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
@@ -36,13 +38,20 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
 
     private static final int MAX_LEVEL = 3;
 
+    private static final Comparator<InternalRow> COMPARATOR =
+            Comparator.comparingInt(o -> o.getInt(0));
+
     protected FullChangelogMergeFunctionWrapper wrapper;
 
     protected abstract MergeFunction<KeyValue> createMergeFunction();
 
+    protected abstract boolean changelogRowDeduplicate();
+
     @BeforeEach
     public void beforeEach() {
-        wrapper = new FullChangelogMergeFunctionWrapper(createMergeFunction(), MAX_LEVEL);
+        wrapper =
+                new FullChangelogMergeFunctionWrapper(
+                        createMergeFunction(), MAX_LEVEL, COMPARATOR, changelogRowDeduplicate());
     }
 
     private static final List<List<KeyValue>> INPUT_KVS =
@@ -82,6 +91,13 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
                                     .setLevel(MAX_LEVEL),
                             new KeyValue()
                                     .replace(row(7), 13, RowKind.UPDATE_BEFORE, row(3))
+                                    .setLevel(0)),
+                    Arrays.asList(
+                            new KeyValue()
+                                    .replace(row(8), 14, RowKind.INSERT, row(3))
+                                    .setLevel(MAX_LEVEL),
+                            new KeyValue()
+                                    .replace(row(8), 15, RowKind.INSERT, row(3))
                                     .setLevel(0)));
 
     protected abstract KeyValue getExpectedBefore(int idx);
@@ -112,10 +128,10 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
     /**
      * Tests for {@link FullChangelogMergeFunctionWrapper} with {@link DeduplicateMergeFunction}.
      */
-    public static class WithDeduplicateMergeFunctionTest
+    public abstract static class WithDeduplicateMergeFunctionTestBase
             extends FullChangelogMergeFunctionWrapperTestBase {
 
-        private static final List<KeyValue> EXPECTED_BEFORE =
+        private final List<KeyValue> expectedBefore =
                 Arrays.asList(
                         null,
                         null,
@@ -124,9 +140,13 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
                         null,
                         new KeyValue().replace(row(6), 8, RowKind.UPDATE_BEFORE, row(3)),
                         new KeyValue().replace(row(7), 10, RowKind.DELETE, row(3)),
-                        new KeyValue().replace(row(7), 12, RowKind.DELETE, row(3)));
+                        new KeyValue().replace(row(7), 12, RowKind.DELETE, row(3)),
+                        changelogRowDeduplicate()
+                                ? null
+                                : new KeyValue()
+                                        .replace(row(8), 14, RowKind.UPDATE_BEFORE, row(3)));
 
-        private static final List<KeyValue> EXPECTED_AFTER =
+        private final List<KeyValue> expectedAfter =
                 Arrays.asList(
                         new KeyValue().replace(row(1), 1, RowKind.INSERT, row(1)),
                         null,
@@ -135,9 +155,12 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
                         null,
                         new KeyValue().replace(row(6), 9, RowKind.UPDATE_AFTER, row(-3)),
                         null,
-                        null);
+                        null,
+                        changelogRowDeduplicate()
+                                ? null
+                                : new KeyValue().replace(row(8), 15, RowKind.UPDATE_AFTER, row(3)));
 
-        private static final List<KeyValue> EXPECTED_RESULT =
+        private final List<KeyValue> expectedResult =
                 Arrays.asList(
                         new KeyValue().replace(row(1), 1, RowKind.INSERT, row(1)),
                         null,
@@ -146,7 +169,8 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
                         null,
                         new KeyValue().replace(row(6), 9, RowKind.INSERT, row(-3)),
                         null,
-                        null);
+                        null,
+                        new KeyValue().replace(row(8), 15, RowKind.INSERT, row(3)));
 
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
@@ -155,17 +179,41 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
 
         @Override
         protected KeyValue getExpectedBefore(int idx) {
-            return EXPECTED_BEFORE.get(idx);
+            return expectedBefore.get(idx);
         }
 
         @Override
         protected KeyValue getExpectedAfter(int idx) {
-            return EXPECTED_AFTER.get(idx);
+            return expectedAfter.get(idx);
         }
 
         @Override
         protected KeyValue getExpectedResult(int idx) {
-            return EXPECTED_RESULT.get(idx);
+            return expectedResult.get(idx);
+        }
+    }
+
+    /**
+     * Tests for {@link WithDeduplicateMergeFunctionTestBase} with changelog deduplication disabled.
+     */
+    public static class WithoutChangelogRowDeduplicateMergeFunctionTest
+            extends WithDeduplicateMergeFunctionTestBase {
+
+        @Override
+        protected boolean changelogRowDeduplicate() {
+            return false;
+        }
+    }
+
+    /**
+     * Tests for {@link WithDeduplicateMergeFunctionTestBase} with changelog deduplication enabled.
+     */
+    public static class WithChangelogRowDeduplicateMergeFunctionTest
+            extends WithDeduplicateMergeFunctionTestBase {
+
+        @Override
+        protected boolean changelogRowDeduplicate() {
+            return true;
         }
     }
 }

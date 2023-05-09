@@ -42,8 +42,17 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
-            SortEngine sortEngine) {
-        super(readerFactory, writerFactory, keyComparator, mfFactory, sortEngine);
+            SortEngine sortEngine,
+            Comparator<InternalRow> valueComparator,
+            boolean changelogRowDeduplicate) {
+        super(
+                readerFactory,
+                writerFactory,
+                keyComparator,
+                mfFactory,
+                sortEngine,
+                valueComparator,
+                changelogRowDeduplicate);
         this.maxLevel = maxLevel;
     }
 
@@ -66,7 +75,8 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
 
     @Override
     protected MergeFunctionWrapper<ChangelogResult> createMergeWrapper(int outputLevel) {
-        return new FullChangelogMergeFunctionWrapper(mfFactory.create(), maxLevel);
+        return new FullChangelogMergeFunctionWrapper(
+                mfFactory.create(), maxLevel, valueComparator, changelogRowDeduplicate);
     }
 
     @Override

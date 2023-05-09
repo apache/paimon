@@ -71,6 +71,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
     private final KeyValueFileWriterFactory.Builder writerFactoryBuilder;
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
+    private final Supplier<Comparator<InternalRow>> valueComparatorSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final CoreOptions options;
     private final FileIO fileIO;
@@ -85,6 +86,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             RowType keyType,
             RowType valueType,
             Supplier<Comparator<InternalRow>> keyComparatorSupplier,
+            Supplier<Comparator<InternalRow>> valueComparatorSupplier,
             MergeFunctionFactory<KeyValue> mfFactory,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
@@ -115,6 +117,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         pathFactory,
                         options.targetFileSize());
         this.keyComparatorSupplier = keyComparatorSupplier;
+        this.valueComparatorSupplier = valueComparatorSupplier;
         this.mfFactory = mfFactory;
         this.options = options;
     }
@@ -211,7 +214,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         writerFactory,
                         keyComparator,
                         mfFactory,
-                        options.sortEngine());
+                        options.sortEngine(),
+                        valueComparatorSupplier.get(),
+                        options.changelogRowDeduplicate());
             case LOOKUP:
                 LookupLevels lookupLevels = createLookupLevels(levels, readerFactory);
                 return new LookupMergeTreeCompactRewriter(
@@ -220,7 +225,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         writerFactory,
                         keyComparator,
                         mfFactory,
-                        options.sortEngine());
+                        options.sortEngine(),
+                        valueComparatorSupplier.get(),
+                        options.changelogRowDeduplicate());
             default:
                 return new MergeTreeCompactRewriter(
                         readerFactory,

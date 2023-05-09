@@ -39,13 +39,20 @@ import java.util.List;
 /** A {@link MergeTreeCompactRewriter} which produces changelog files for the compaction. */
 public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewriter {
 
+    protected final Comparator<InternalRow> valueComparator;
+    protected final boolean changelogRowDeduplicate;
+
     public ChangelogMergeTreeRewriter(
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
-            SortEngine sortEngine) {
+            SortEngine sortEngine,
+            Comparator<InternalRow> valueComparator,
+            boolean changelogRowDeduplicate) {
         super(readerFactory, writerFactory, keyComparator, mfFactory, sortEngine);
+        this.valueComparator = valueComparator;
+        this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
 
     protected abstract boolean rewriteChangelog(
