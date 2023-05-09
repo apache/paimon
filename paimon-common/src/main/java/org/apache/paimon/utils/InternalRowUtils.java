@@ -181,7 +181,8 @@ public class InternalRowUtils {
                 return dataGetters.getString(pos);
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) fieldType;
-                return dataGetters.getDecimal(pos, decimalType.getPrecision(), decimalType.getScale());
+                return dataGetters.getDecimal(
+                        pos, decimalType.getPrecision(), decimalType.getScale());
             case ARRAY:
                 return dataGetters.getArray(pos);
             case MAP:
