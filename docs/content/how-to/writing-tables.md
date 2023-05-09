@@ -235,7 +235,7 @@ For more information of drop-partition, see
 {{< /tabs >}}
 
 ## Updating tables
-Currently, Paimon supports updating records by using `UPDATE` in Flink. You can perform `UPDATE` in Flink's `batch` mode.
+Currently, Paimon supports updating records by using `UPDATE` in Flink 1.17 and later versions. You can perform `UPDATE` in Flink's `batch` mode.
 
 {{< hint info >}}
 Important table properties setting:
