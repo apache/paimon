@@ -95,6 +95,7 @@ public class MySqlSyncTableAction implements Action {
     private final String table;
     private final List<String> partitionKeys;
     private final List<String> primaryKeys;
+    private final List<String> computedColumnArgs;
     private final Map<String, String> catalogConfig;
     private final Map<String, String> tableConfig;
 
@@ -107,12 +108,35 @@ public class MySqlSyncTableAction implements Action {
             List<String> primaryKeys,
             Map<String, String> catalogConfig,
             Map<String, String> tableConfig) {
+        this(
+                mySqlConfig,
+                warehouse,
+                database,
+                table,
+                partitionKeys,
+                primaryKeys,
+                Collections.emptyList(),
+                catalogConfig,
+                tableConfig);
+    }
+
+    MySqlSyncTableAction(
+            Map<String, String> mySqlConfig,
+            String warehouse,
+            String database,
+            String table,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            List<String> computedColumnArgs,
+            Map<String, String> catalogConfig,
+            Map<String, String> tableConfig) {
         this.mySqlConfig = Configuration.fromMap(mySqlConfig);
         this.warehouse = warehouse;
         this.database = database;
         this.table = table;
         this.partitionKeys = partitionKeys;
         this.primaryKeys = primaryKeys;
+        this.computedColumnArgs = computedColumnArgs;
         this.catalogConfig = catalogConfig;
         this.tableConfig = tableConfig;
     }
@@ -143,13 +167,33 @@ public class MySqlSyncTableAction implements Action {
 
         Identifier identifier = new Identifier(database, table);
         FileStoreTable table;
-        Schema fromMySql =
-                MySqlActionUtils.buildPaimonSchema(
-                        mySqlSchema, partitionKeys, primaryKeys, tableConfig, caseSensitive);
+        List<ComputedColumn> computedColumns = new ArrayList<>();
         try {
             table = (FileStoreTable) catalog.getTable(identifier);
+            checkArgument(
+                    computedColumnArgs.isEmpty(),
+                    "Cannot add computed column when table already exists.");
+            Schema fromMySql =
+                    MySqlActionUtils.buildPaimonSchema(
+                            mySqlSchema,
+                            partitionKeys,
+                            primaryKeys,
+                            Collections.emptyList(),
+                            tableConfig,
+                            caseSensitive);
             MySqlActionUtils.assertSchemaCompatible(table.schema(), fromMySql);
         } catch (Catalog.TableNotExistException e) {
+            computedColumns.addAll(
+                    MySqlActionUtils.buildComputedColumns(
+                            computedColumnArgs, mySqlSchema.typeMapping()));
+            Schema fromMySql =
+                    MySqlActionUtils.buildPaimonSchema(
+                            mySqlSchema,
+                            partitionKeys,
+                            primaryKeys,
+                            computedColumns,
+                            tableConfig,
+                            caseSensitive);
             catalog.createTable(identifier, fromMySql, false);
             table = (FileStoreTable) catalog.getTable(identifier);
         }
@@ -157,7 +201,7 @@ public class MySqlSyncTableAction implements Action {
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
         EventParser.Factory<String> parserFactory =
-                () -> new MySqlDebeziumJsonEventParser(zoneId, caseSensitive);
+                () -> new MySqlDebeziumJsonEventParser(zoneId, caseSensitive, computedColumns);
 
         FlinkCdcSyncTableSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncTableSinkBuilder<String>()
@@ -260,6 +304,11 @@ public class MySqlSyncTableAction implements Action {
                             .collect(Collectors.toList());
         }
 
+        List<String> computedColumnArgs = Collections.emptyList();
+        if (params.has("computed-column")) {
+            computedColumnArgs = new ArrayList<>(params.getMultiParameter("computed-column"));
+        }
+
         Optional<Map<String, String>> mySqlConfig = getConfigMap(params, "mysql-conf");
         Optional<Map<String, String>> catalogConfig = getConfigMap(params, "catalog-conf");
         Optional<Map<String, String>> tableConfig = getConfigMap(params, "table-conf");
@@ -275,6 +324,7 @@ public class MySqlSyncTableAction implements Action {
                         tablePath.f2,
                         partitionKeys,
                         primaryKeys,
+                        computedColumnArgs,
                         catalogConfig.orElse(Collections.emptyMap()),
                         tableConfig.orElse(Collections.emptyMap())));
     }
@@ -291,6 +341,7 @@ public class MySqlSyncTableAction implements Action {
                         + "--table <table-name> "
                         + "[--partition-keys <partition-keys>] "
                         + "[--primary-keys <primary-keys>] "
+                        + "[--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
@@ -306,6 +357,9 @@ public class MySqlSyncTableAction implements Action {
         System.out.println("Primary keys syntax:");
         System.out.println("  key1,key2,...");
         System.out.println("Primary keys will be derived from MySQL tables if not specified.");
+        System.out.println();
+
+        System.out.println("Please see doc for usage of --computed-column.");
         System.out.println();
 
         System.out.println("MySQL CDC source conf syntax:");

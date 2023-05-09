@@ -416,6 +416,10 @@ public class DateTimeUtils {
                 fromTemporalAccessor(DEFAULT_TIMESTAMP_FORMATTER.parse(dateStr), precision));
     }
 
+    public static LocalDateTime toLocalDateTime(String dateStr) {
+        return fromTemporalAccessor(DEFAULT_TIMESTAMP_FORMATTER.parse(dateStr), 0);
+    }
+
     /**
      * This is similar to {@link LocalDateTime#from(TemporalAccessor)}, but it's less strict and
      * introduces default values.

@@ -26,6 +26,7 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -86,6 +87,12 @@ public class MySqlSchema {
 
     public LinkedHashMap<String, Tuple2<DataType, String>> fields() {
         return fields;
+    }
+
+    public Map<String, DataType> typeMapping() {
+        Map<String, DataType> typeMapping = new HashMap<>();
+        fields.forEach((name, tuple) -> typeMapping.put(name, tuple.f0));
+        return typeMapping;
     }
 
     public List<String> primaryKeys() {

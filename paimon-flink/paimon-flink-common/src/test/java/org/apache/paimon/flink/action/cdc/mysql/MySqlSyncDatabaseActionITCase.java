@@ -29,7 +29,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -81,14 +80,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         tableConfig);
         action.build(env);
         JobClient client = env.executeAsync();
-
-        while (true) {
-            JobStatus status = client.getJobStatus().get();
-            if (status == JobStatus.RUNNING) {
-                break;
-            }
-            Thread.sleep(1000);
-        }
+        waitJobRunning(client);
 
         try (Connection conn =
                 DriverManager.getConnection(
@@ -305,14 +297,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         tableConfig);
         action.build(env);
         JobClient client = env.executeAsync();
-
-        while (true) {
-            JobStatus status = client.getJobStatus().get();
-            if (status == JobStatus.RUNNING) {
-                break;
-            }
-            Thread.sleep(1000);
-        }
+        waitJobRunning(client);
 
         // validate `compatible` can be synchronized
         try (Connection conn =
@@ -384,14 +369,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         tableConfig);
         action.build(env);
         JobClient client = env.executeAsync();
-
-        while (true) {
-            JobStatus status = client.getJobStatus().get();
-            if (status == JobStatus.RUNNING) {
-                break;
-            }
-            Thread.sleep(1000);
-        }
+        waitJobRunning(client);
 
         try (Connection conn =
                         DriverManager.getConnection(
@@ -568,14 +546,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         tableConfig);
         action.build(env);
         JobClient client = env.executeAsync();
-
-        while (true) {
-            JobStatus status = client.getJobStatus().get();
-            if (status == JobStatus.RUNNING) {
-                break;
-            }
-            Thread.sleep(1000);
-        }
+        waitJobRunning(client);
 
         // check paimon tables
         assertTableExists(existedTables);

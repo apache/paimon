@@ -32,7 +32,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
-import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -88,14 +87,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         tableConfig);
         action.build(env);
         JobClient client = env.executeAsync();
-
-        while (true) {
-            JobStatus status = client.getJobStatus().get();
-            if (status == JobStatus.RUNNING) {
-                break;
-            }
-            Thread.sleep(1000);
-        }
+        waitJobRunning(client);
 
         checkTableSchema(
                 "[{\"id\":0,\"name\":\"pt\",\"type\":\"INT NOT NULL\",\"description\":\"primary\"},{\"id\":1,\"name\":\"_id\",\"type\":\"INT NOT NULL\",\"description\":\"_id\"},{\"id\":2,\"name\":\"v1\",\"type\":\"VARCHAR(10)\",\"description\":\"v1\"}]");
@@ -283,14 +275,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         Collections.emptyMap());
         action.build(env);
         JobClient client = env.executeAsync();
-
-        while (true) {
-            JobStatus status = client.getJobStatus().get();
-            if (status == JobStatus.RUNNING) {
-                break;
-            }
-            Thread.sleep(1000);
-        }
+        waitJobRunning(client);
 
         checkTableSchema(
                 "[{\"id\":0,\"name\":\"_id\",\"type\":\"INT NOT NULL\",\"description\":\"primary\"},{\"id\":1,\"name\":\"v1\",\"type\":\"VARCHAR(10)\",\"description\":\"v1\"},{\"id\":2,\"name\":\"v2\",\"type\":\"INT\",\"description\":\"v2\"},{\"id\":3,\"name\":\"v3\",\"type\":\"VARCHAR(10)\",\"description\":\"v3\"}]");
@@ -388,14 +373,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         Collections.emptyMap());
         action.build(env);
         JobClient client = env.executeAsync();
-
-        while (true) {
-            JobStatus status = client.getJobStatus().get();
-            if (status == JobStatus.RUNNING) {
-                break;
-            }
-            Thread.sleep(1000);
-        }
+        waitJobRunning(client);
 
         try (Connection conn =
                 DriverManager.getConnection(
@@ -788,6 +766,80 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "Primary keys are not specified. "
                                 + "Also, can't infer primary keys from MySQL table schemas because "
                                 + "MySQL tables have no primary keys or have different primary keys.");
+    }
+
+    @Test
+    @Timeout(30)
+    public void testComputedColumn() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "test_computed_column");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        List<String> computedColumnDefs =
+                Arrays.asList(
+                        "_year_date=year(_date)",
+                        "_year_datetime=year(_datetime)",
+                        "_year_timestamp=year(_timestamp)");
+
+        MySqlSyncTableAction action =
+                new MySqlSyncTableAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.singletonList("_year_date"),
+                        Arrays.asList("pk", "_year_date"),
+                        computedColumnDefs,
+                        Collections.emptyMap(),
+                        Collections.emptyMap());
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+
+        try (Connection conn =
+                        DriverManager.getConnection(
+                                MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
+                                MYSQL_CONTAINER.getUsername(),
+                                MYSQL_CONTAINER.getPassword());
+                Statement statement = conn.createStatement()) {
+            statement.execute("USE paimon_sync_table");
+            statement.executeUpdate(
+                    "INSERT INTO test_computed_column VALUES (1, '2023-03-23', '2022-01-01 14:30', '2021-09-15 15:00:10')");
+            statement.executeUpdate(
+                    "INSERT INTO test_computed_column VALUES (2, '2023-03-23', null, null)");
+
+            FileStoreTable table = getFileStoreTable();
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(),
+                                DataTypes.DATE(),
+                                DataTypes.TIMESTAMP(0),
+                                DataTypes.TIMESTAMP(0),
+                                DataTypes.INT().notNull(),
+                                DataTypes.INT(),
+                                DataTypes.INT()
+                            },
+                            new String[] {
+                                "pk",
+                                "_date",
+                                "_datetime",
+                                "_timestamp",
+                                "_year_date",
+                                "_year_datetime",
+                                "_year_timestamp"
+                            });
+            List<String> expected =
+                    Arrays.asList(
+                            "+I[1, 19439, 2022-01-01T14:30, 2021-09-15T15:00:10, 2023, 2022, 2021]",
+                            "+I[2, 19439, NULL, NULL, 2023, NULL, NULL]");
+            waitForResult(expected, table, rowType, Arrays.asList("pk", "_year_date"));
+        }
     }
 
     private FileStoreTable getFileStoreTable() throws Exception {

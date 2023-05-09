@@ -266,6 +266,14 @@ CREATE TABLE incompatible_pk_2 (
     PRIMARY KEY (a)
 );
 
+CREATE TABLE test_computed_column (
+    pk INT,
+    _date DATE,
+    _datetime DATETIME,
+    _timestamp TIMESTAMP,
+    PRIMARY KEY (pk)
+);
+
 -- ################################################################################
 --  MySqlSyncDatabaseActionITCase
 -- ################################################################################

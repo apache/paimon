@@ -100,3 +100,16 @@ CREATE TABLE T (
     UPPERCASE_V0 VARCHAR(20),
     PRIMARY KEY (k)
 );
+
+-- ################################################################################
+--  MySqlComputedColumnE2ETest#testSyncTable
+-- ################################################################################
+
+CREATE DATABASE test_computed_column;
+USE test_computed_column;
+
+CREATE TABLE T (
+    pk INT,
+    _datetime DATETIME,
+    PRIMARY KEY (pk)
+);
