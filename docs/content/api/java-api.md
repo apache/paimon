@@ -374,10 +374,11 @@ public class AlterTable {
         // update nested column nullability
         SchemaChange updateNestedColumnNullability = 
             SchemaChange.updateColumnNullability(new String[]{"col5", "f2"}, false);
-        SchemaChange[] schemaChanges = new SchemaChange[] {addOption, removeOption, addColumn, addColumnAfterField,
-            renameColumn, dropColumn, updateColumnComment, updateNestedColumnComment, updateColumnType, updateColumnPosition,
+
+        SchemaChange[] schemaChanges = new SchemaChange[] {
+            addOption, removeOption, addColumn, addColumnAfterField, renameColumn, dropColumn,
+            updateColumnComment, updateNestedColumnComment, updateColumnType, updateColumnPosition,
             updateColumnNullability, updateNestedColumnNullability};
-        
         try {
             catalog.alterTable(identifier, Arrays.asList(schemaChanges), false);
         } catch (Catalog.TableNotExistException e) {
@@ -419,6 +420,10 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.types.DataTypes;
+import com.google.common.collect.Lists;
 
 import java.io.IOException;
 import java.util.List;
@@ -428,9 +433,15 @@ public class ReadTable {
     public static void main(String[] args) {
         // 1. Create a ReadBuilder and push filter (`withFilter`)
         // and projection (`withProjection`) if necessary
+        // [{"Alice", 12},{"Bob", 5},{"Emily", 18}]
+         PredicateBuilder builder = 
+            new PredicateBuilder(RowType.of(DataTypes.STRING(),DataTypes.INT()));
+         Predicate notNull = builder.isNotNull(0);
+         Predicate greaterOrEqual = builder.greaterOrEqual(1, 12);
+
         ReadBuilder readBuilder = table.newReadBuilder()
                 .withProjection(projection)
-                .withFilter(filter);
+                .withFilter(Lists.newArrayList(notNull, greaterOrEqual));
 
         // 2. Plan splits in 'Coordinator' (or named 'Driver')
         List<Split> splits = readBuilder.newScan().plan().splits();
@@ -460,6 +471,8 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 
 public class WriteTable {
 
@@ -470,9 +483,15 @@ public class WriteTable {
 
         // 2. Write records in distributed tasks
         BatchTableWrite write = writeBuilder.newWrite();
+
+        GenericRow record1 = GenericRow.of(BinaryString.fromString("Alice"), 12);
+        GenericRow record2 = GenericRow.of(BinaryString.fromString("Bob"), 5);
+        GenericRow record3 = GenericRow.of(BinaryString.fromString("Emily"), 18);
+
         write.write(record1);
         write.write(record2);
         write.write(record3);
+
         List<CommitMessage> messages = write.prepareCommit();
 
         // 3. Collect all CommitMessages to a global node and commit
@@ -599,5 +618,22 @@ public class StreamWriteTable {
 | array        | org.apache.paimon.data.InternalArray |
 | map          | org.apache.paimon.data.InternalMap   |
 | InternalRow  | org.apache.paimon.data.InternalRow   |
+
+## Predicate Types
+
+| SQL Predicate| Paimon Predicate                                             | 
+|:-------------|:-------------------------------------------------------------|
+| and          | org.apache.paimon.predicate.PredicateBuilder.And             |
+| or           | org.apache.paimon.predicate.PredicateBuilder.Or              |
+| is null      | org.apache.paimon.predicate.PredicateBuilder.IsNull          |
+| is not null  | org.apache.paimon.predicate.PredicateBuilder.IsNotNull       |
+| in           | org.apache.paimon.predicate.PredicateBuildere.In             |
+| not in       | org.apache.paimon.predicate.PredicateBuilder.NotIn           |
+| =            | org.apache.paimon.predicate.PredicateBuilder.Equal           |
+| <>           | org.apache.paimon.predicate.PredicateBuilder.NotEqual        |
+| <            | org.apache.paimon.predicate.PredicateBuilder.LessThan        |
+| <=           | org.apache.paimon.predicate.PredicateBuilder.LessOrEqual     |
+| >            | org.apache.paimon.predicate.PredicateBuilder.GreaterThan     |
+| >=           | org.apache.paimon.predicate.PredicateBuilder.GreaterOrEqual  |
 
 
