@@ -85,6 +85,22 @@ TBLPROPERTIES (
 
 {{< /tab >}}
 
+{{< tab "Trino" >}}
+
+```sql
+CREATE TABLE MyTable (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior VARCHAR,
+    dt VARCHAR,
+    hh VARCHAR
+) WITH (
+    primary_key = ARRAY['dt', 'hh', 'user_id']
+);
+```
+
+{{< /tab >}}
+
 {{< /tabs >}}
 
 {{< hint info >}}
@@ -144,6 +160,23 @@ STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
 TBLPROPERTIES (
     'primary-key' = 'dt,hh,user_id',
     'partition'='dt,hh'
+);
+```
+
+{{< /tab >}}
+
+{{< tab "Trino" >}}
+
+```sql
+CREATE TABLE MyTable (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior VARCHAR,
+    dt VARCHAR,
+    hh VARCHAR
+) WITH (
+    primary_key = ARRAY['dt', 'hh', 'user_id'],
+    partitioned_by = ARRAY['dt', 'hh']
 );
 ```
 
@@ -366,6 +399,25 @@ TBLPROPERTIES (
     'partition'='dt,hh',
     'bucket' = '2',
     'bucket-key' = 'user_id'
+);
+```
+
+{{< /tab >}}
+
+{{< tab "Trino" >}}
+
+```sql
+CREATE TABLE MyTable (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior VARCHAR,
+    dt VARCHAR,
+    hh VARCHAR
+) WITH (
+    primary_key = ARRAY['dt', 'hh', 'user_id'],
+    partitioned_by = ARRAY['dt', 'hh'],
+    bucket = '2',
+    bucket_key = 'user_id'
 );
 ```
 
