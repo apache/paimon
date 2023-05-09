@@ -27,6 +27,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
@@ -612,5 +613,125 @@ public abstract class CatalogTestBase {
                                         false))
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Cannot update partition column [dt] type in the table");
+    }
+
+    @Test
+    public void testAlterTableUpdateColumnComment() throws Exception {
+        catalog.createDatabase("test_db", false);
+
+        // Alter table update a column comment in an existing table
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "col1", DataTypes.STRING(), "field1"),
+                                new DataField(1, "col2", DataTypes.STRING(), "field2"),
+                                new DataField(
+                                        2,
+                                        "col3",
+                                        DataTypes.ROW(
+                                                new DataField(4, "f1", DataTypes.STRING(), "f1"),
+                                                new DataField(5, "f2", DataTypes.STRING(), "f2"),
+                                                new DataField(6, "f3", DataTypes.STRING(), "f3")),
+                                        "field3")),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Maps.newHashMap(),
+                        ""),
+                false);
+
+        catalog.alterTable(
+                identifier,
+                Lists.newArrayList(SchemaChange.updateColumnComment("col2", "col2 field")),
+                false);
+
+        // Update nested column
+        String[] fields = new String[] {"col3", "f1"};
+        catalog.alterTable(
+                identifier,
+                Lists.newArrayList(SchemaChange.updateColumnComment(fields, "col3 f1 field")),
+                false);
+
+        Table table = catalog.getTable(identifier);
+        assertThat(table.rowType().getFields().get(1).description()).isEqualTo("col2 field");
+        RowType rowType = (RowType) table.rowType().getFields().get(2).type();
+        assertThat(rowType.getFields().get(0).description()).isEqualTo("col3 f1 field");
+
+        // Alter table update a column comment throws Exception when column does not exist
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Lists.newArrayList(
+                                                SchemaChange.updateColumnComment(
+                                                        new String[] {"non_existing_col"}, "")),
+                                        false))
+                .hasMessageContaining("Can not find column: [non_existing_col]");
+    }
+
+    @Test
+    public void testAlterTableUpdateColumnNullability() throws Exception {
+        catalog.createDatabase("test_db", false);
+
+        // Alter table update a column nullability in an existing table
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "col1", DataTypes.STRING(), "field1"),
+                                new DataField(1, "col2", DataTypes.STRING(), "field2"),
+                                new DataField(
+                                        2,
+                                        "col3",
+                                        DataTypes.ROW(
+                                                new DataField(4, "f1", DataTypes.STRING(), "f1"),
+                                                new DataField(5, "f2", DataTypes.STRING(), "f2"),
+                                                new DataField(6, "f3", DataTypes.STRING(), "f3")),
+                                        "field3")),
+                        Lists.newArrayList("col1"),
+                        Lists.newArrayList("col1", "col2"),
+                        Maps.newHashMap(),
+                        ""),
+                false);
+
+        catalog.alterTable(
+                identifier,
+                Lists.newArrayList(SchemaChange.updateColumnNullability("col1", false)),
+                false);
+
+        // Update nested column
+        String[] fields = new String[] {"col3", "f1"};
+        catalog.alterTable(
+                identifier,
+                Lists.newArrayList(SchemaChange.updateColumnNullability(fields, false)),
+                false);
+
+        Table table = catalog.getTable(identifier);
+        assertThat(table.rowType().getFields().get(0).type().isNullable()).isEqualTo(false);
+
+        // Alter table update a column nullability throws Exception when column does not exist
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Lists.newArrayList(
+                                                SchemaChange.updateColumnNullability(
+                                                        new String[] {"non_existing_col"}, false)),
+                                        false))
+                .hasMessageContaining("Can not find column: [non_existing_col]");
+
+        // Alter table update a column nullability throws Exception when column is pk columns
+        assertThatThrownBy(
+                        () ->
+                                catalog.alterTable(
+                                        identifier,
+                                        Lists.newArrayList(
+                                                SchemaChange.updateColumnNullability(
+                                                        new String[] {"col2"}, true)),
+                                        false))
+                .hasRootCauseInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Cannot change nullability of primary key");
     }
 }
