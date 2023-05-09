@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.CommitIncrement;
@@ -80,6 +81,11 @@ public abstract class AbstractFileStoreWrite<T>
     @Override
     public FileStoreWrite<T> withIOManager(IOManager ioManager) {
         this.ioManager = ioManager;
+        return this;
+    }
+
+    @Override
+    public FileStoreWrite<T> withMemoryPool(MemorySegmentPool memoryPool) {
         return this;
     }
 

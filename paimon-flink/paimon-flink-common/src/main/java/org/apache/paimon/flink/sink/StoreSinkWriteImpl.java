@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -70,6 +71,10 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                         (part, bucket) ->
                                 state.stateValueFilter().filter(table.name(), part, bucket))
                 .withIOManager(new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()))
+                .withMemoryPool(
+                        new HeapMemorySegmentPool(
+                                table.coreOptions().writeBufferSize(),
+                                table.coreOptions().pageSize()))
                 .withOverwrite(isOverwrite);
     }
 

@@ -23,10 +23,14 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Iterator;
 import java.util.Map;
@@ -40,9 +44,11 @@ import static org.apache.paimon.CoreOptions.LOOKUP_CACHE_MAX_MEMORY_SIZE;
  * @param <T> type of record to write.
  */
 public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> {
+    private static final Logger LOG = LoggerFactory.getLogger(MemoryFileStoreWrite.class);
 
-    private final MemoryPoolFactory writeBufferPool;
+    private final CoreOptions options;
     protected final CacheManager cacheManager;
+    private MemoryPoolFactory writeBufferPool;
 
     public MemoryFileStoreWrite(
             String commitUser,
@@ -50,13 +56,17 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
             FileStoreScan scan,
             CoreOptions options) {
         super(commitUser, snapshotManager, scan);
-        HeapMemorySegmentPool memoryPool =
-                new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize());
-        this.writeBufferPool = new MemoryPoolFactory(memoryPool, this::memoryOwners);
+        this.options = options;
         this.cacheManager =
                 new CacheManager(
                         options.pageSize(),
                         options.toConfiguration().get(LOOKUP_CACHE_MAX_MEMORY_SIZE));
+    }
+
+    @Override
+    public MemoryFileStoreWrite<T> withMemoryPool(MemorySegmentPool memoryPool) {
+        this.writeBufferPool = new MemoryPoolFactory(memoryPool, this::memoryOwners);
+        return this;
     }
 
     private Iterator<MemoryOwner> memoryOwners() {
@@ -87,6 +97,14 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
                     "Should create a MemoryOwner for MemoryTableWrite,"
                             + " but this is: "
                             + writer.getClass());
+        }
+        if (writeBufferPool == null) {
+            LOG.debug("Use default heap memory segment pool for write buffer.");
+            writeBufferPool =
+                    new MemoryPoolFactory(
+                            new HeapMemorySegmentPool(
+                                    options.writeBufferSize(), options.pageSize()),
+                            this::memoryOwners);
         }
         writeBufferPool.notifyNewOwner((MemoryOwner) writer);
     }
