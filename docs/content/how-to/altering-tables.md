@@ -94,6 +94,14 @@ ALTER TABLE my_table RENAME TO my_table_new;
 
 {{< /tab >}}
 
+{{< tab "Presto" >}}
+
+```sql
+ALTER TABLE my_table RENAME TO my_table_new;
+```
+
+{{< /tab >}}
+
 {{< /tabs >}}
 
 {{< hint info >}}
@@ -152,6 +160,14 @@ ALTER TABLE my_table ADD COLUMNS (
 {{< /tab >}}
 
 {{< tab "Trino" >}}
+
+```sql
+ALTER TABLE my_table ADD COLUMN c1 VARCHAR;
+```
+
+{{< /tab >}}
+
+{{< tab "Presto" >}}
 
 ```sql
 ALTER TABLE my_table ADD COLUMN c1 VARCHAR;
@@ -220,6 +236,14 @@ ALTER TABLE my_table RENAME COLUMN c0 TO c1;
 
 {{< /tab >}}
 
+{{< tab "Presto" >}}
+
+```sql
+ALTER TABLE my_table RENAME COLUMN c0 TO c1;
+```
+
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ## Dropping Columns
@@ -245,6 +269,14 @@ ALTER TABLE my_table DROP COLUMNS (c1, c2);
 {{< /tab >}}
 
 {{< tab "Trino" >}}
+
+```sql
+ALTER TABLE my_table DROP COLUMN c1;
+```
+
+{{< /tab >}}
+
+{{< tab "Presto" >}}
 
 ```sql
 ALTER TABLE my_table DROP COLUMN c1;

@@ -85,11 +85,61 @@ If you are using HDFS, choose one of the following ways to configure your HDFS:
 - set environment variable HADOOP_CONF_DIR.
 - configure fs.hdfs.hadoopconf in the properties.
 
+## Kerberos
+
 You can configure kerberos keytag file when using KERBEROS authentication in the properties.
 
 ```
 security.kerberos.login.principal=hadoop-user
-security.kerberos.login.keytab=/etc/presto/hdfs.keytab
+security.kerberos.login.keytab=/etc/trino/hdfs.keytab
+```
+
+Keytab files must be distributed to every node in the cluster that runs Presto.
+
+## Create Schema
+
+```
+CREATE SCHEMA paimon.test_db;
+```
+
+## Create Table
+
+```
+CREATE TABLE paimon.test_db.orders (
+    order_key bigint,
+    orders_tatus varchar,
+    total_price decimal(18,4),
+    order_date date
+)
+WITH (
+    file_format = 'ORC',
+    primary_key = ARRAY['order_key','order_date'],
+    partitioned_by = ARRAY['orderdate'],
+    bucket = '2',
+    bucket_key = 'order_key',
+    changelog_producer = 'input'
+)
+```
+
+## Add Column
+
+```
+CREATE TABLE paimon.test_db.orders (
+    order_key bigint,
+    orders_tatus varchar,
+    total_price decimal(18,4),
+    order_date date
+)
+WITH (
+    file_format = 'ORC',
+    primary_key = ARRAY['order_key','order_date'],
+    partitioned_by = ARRAY['orderdate'],
+    bucket = '2',
+    bucket_key = 'order_key',
+    changelog_producer = 'input'
+)
+
+ALTER TABLE paimon.test_db.orders ADD COLUMN "shipping_address varchar;
 ```
 
 ## Query

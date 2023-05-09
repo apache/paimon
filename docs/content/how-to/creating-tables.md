@@ -101,6 +101,22 @@ CREATE TABLE MyTable (
 
 {{< /tab >}}
 
+{{< tab "Presto" >}}
+
+```sql
+CREATE TABLE MyTable (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior VARCHAR,
+    dt VARCHAR,
+    hh VARCHAR
+) WITH (
+    primary_key = ARRAY['dt', 'hh', 'user_id']
+);
+```
+
+{{< /tab >}}
+
 {{< /tabs >}}
 
 {{< hint info >}}
@@ -166,6 +182,23 @@ TBLPROPERTIES (
 {{< /tab >}}
 
 {{< tab "Trino" >}}
+
+```sql
+CREATE TABLE MyTable (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior VARCHAR,
+    dt VARCHAR,
+    hh VARCHAR
+) WITH (
+    primary_key = ARRAY['dt', 'hh', 'user_id'],
+    partitioned_by = ARRAY['dt', 'hh']
+);
+```
+
+{{< /tab >}}
+
+{{< tab "Presto" >}}
 
 ```sql
 CREATE TABLE MyTable (
@@ -405,6 +438,25 @@ TBLPROPERTIES (
 {{< /tab >}}
 
 {{< tab "Trino" >}}
+
+```sql
+CREATE TABLE MyTable (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior VARCHAR,
+    dt VARCHAR,
+    hh VARCHAR
+) WITH (
+    primary_key = ARRAY['dt', 'hh', 'user_id'],
+    partitioned_by = ARRAY['dt', 'hh'],
+    bucket = '2',
+    bucket_key = 'user_id'
+);
+```
+
+{{< /tab >}}
+
+{{< tab "Presto" >}}
 
 ```sql
 CREATE TABLE MyTable (
