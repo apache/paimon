@@ -234,6 +234,47 @@ For more information of drop-partition, see
 
 {{< /tabs >}}
 
+## Updating tables
+Currently, Paimon supports updating records by using `UPDATE` in Flink 1.17 and later versions. You can perform `UPDATE` in Flink's `batch` mode.
+
+{{< hint info >}}
+Important table properties setting:
+1. Only [primary key table]({{< ref "concepts/primary-key-table" >}}) supports this feature.
+2. [MergeEngine]({{< ref "concepts/primary-key-table#merge-engines" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table#deduplicate" >}}) or [partial-update]({{< ref "concepts/primary-key-table#partial-update" >}}) to support this feature.
+{{< /hint >}}
+
+{{< hint warning >}}
+Warning: we do not support updating primary keys.
+{{< /hint >}}
+
+{{< tabs "update-table-syntax" >}}
+
+{{< tab "Flink" >}}
+
+```sql
+-- Syntax
+UPDATE table_identifier SET column1 = value1, column2 = value2, ... WHERE condition;
+
+-- The following SQL is an example:
+-- table definition
+CREATE TABLE MyTable (
+	a STRING,
+	b INT,
+	c INT,
+	PRIMARY KEY (a) NOT ENFORCED
+) WITH ( 
+	'write-mode' = 'change-log',
+	'merge-engine' = 'deduplicate' 
+);
+
+-- you can use
+UPDATE MyTable SET b = 1, c = 2 WHERE a = 'myTable';
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 ## Deleting from table
 
 Currently, Paimon supports deleting records via submitting the 'delete' job through `flink run`.
