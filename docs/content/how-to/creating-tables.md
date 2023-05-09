@@ -383,7 +383,7 @@ Paimon external tables can be used in any catalog. If you do not want to create 
 
 {{< tab "Flink" >}}
 
-Flink SQL supports reading and writing an external table. External Paimon tables are created by specifying the `connector` and `path` table properties. The following SQL creates an external table named `MyTable` with five columns, where the base path of table files is `hdfs://path/to/table`.
+Flink SQL supports reading and writing an external table. External Paimon tables are created by specifying the `connector` and `path` table properties. The following SQL creates an external table named `MyTable` with five columns, where the base path of table files is `hdfs:///path/to/table`.
 
 ```sql
 CREATE TABLE MyTable (
@@ -395,7 +395,7 @@ CREATE TABLE MyTable (
     PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
 ) WITH (
     'connector' = 'paimon',
-    'path' = 'hdfs://path/to/table',
+    'path' = 'hdfs:///path/to/table',
     'auto-create' = 'true' -- this table property creates table files for an empty table if table path does not exist
                            -- currently only supported by Flink
 );
@@ -405,20 +405,20 @@ CREATE TABLE MyTable (
 
 {{< tab "Spark3" >}}
 
-Spark3 only supports creating external tables through Scala API. The following Scala code loads the table located at `hdfs://path/to/table` into a `DataSet`.
+Spark3 only supports creating external tables through Scala API. The following Scala code loads the table located at `hdfs:///path/to/table` into a `DataSet`.
 
 ```scala
-val dataset = spark.read.format("paimon").load("hdfs://path/to/table")
+val dataset = spark.read.format("paimon").load("hdfs:///path/to/table")
 ```
 
 {{< /tab >}}
 
 {{< tab "Spark2" >}}
 
-Spark2 only supports creating external tables through Scala API. The following Scala code loads the table located at `hdfs://path/to/table` into a `DataSet`.
+Spark2 only supports creating external tables through Scala API. The following Scala code loads the table located at `hdfs:///path/to/table` into a `DataSet`.
 
 ```scala
-val dataset = spark.read.format("paimon").load("hdfs://path/to/table")
+val dataset = spark.read.format("paimon").load("hdfs:///path/to/table")
 ```
 
 {{< /tab >}}
@@ -426,7 +426,7 @@ val dataset = spark.read.format("paimon").load("hdfs://path/to/table")
 {{< tab "Hive" >}}
 
 To access existing paimon table, you can also register them as external tables in Hive. The following SQL creates an
-external table named `my_table`, where the base path of table files is `hdfs://path/to/table`. As schemas are stored
+external table named `my_table`, where the base path of table files is `hdfs:///path/to/table`. As schemas are stored
 in table files, users do not need to write column definitions.
 
 ```sql
@@ -452,7 +452,7 @@ If you want to use Paimon catalog along with other tables but do not want to sto
 ```sql
 CREATE CATALOG my_catalog WITH (
     'type' = 'paimon',
-    'warehouse' = 'hdfs://path/to/warehouse'
+    'warehouse' = 'hdfs:///path/to/warehouse'
 );
 
 USE CATALOG my_catalog;
@@ -464,7 +464,7 @@ CREATE TEMPORARY TABLE temp_table (
     v STRING
 ) WITH (
     'connector' = 'filesystem',
-    'path' = 'hdfs://path/to/temp_table.csv',
+    'path' = 'hdfs:///path/to/temp_table.csv',
     'format' = 'csv'
 );
 

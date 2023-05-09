@@ -39,12 +39,12 @@ See [CatalogOptions]({{< ref "maintenance/configurations#catalogoptions" >}}) fo
 
 {{< tab "Flink" >}}
 
-The following Flink SQL registers and uses a Paimon catalog named `my_catalog`. Metadata and table files are stored under `hdfs://path/to/warehouse`.
+The following Flink SQL registers and uses a Paimon catalog named `my_catalog`. Metadata and table files are stored under `hdfs:///path/to/warehouse`.
 
 ```sql
 CREATE CATALOG my_catalog WITH (
     'type' = 'paimon',
-    'warehouse' = 'hdfs://path/to/warehouse'
+    'warehouse' = 'hdfs:///path/to/warehouse'
 );
 
 USE CATALOG my_catalog;
@@ -56,12 +56,12 @@ You can define any default table options with the prefix `table-default.` for ta
 
 {{< tab "Spark3" >}}
 
-The following shell command registers a paimon catalog named `paimon`. Metadata and table files are stored under `hdfs://path/to/warehouse`.
+The following shell command registers a paimon catalog named `paimon`. Metadata and table files are stored under `hdfs:///path/to/warehouse`.
 
 ```bash
 spark-sql ... \
     --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.paimon.warehouse=hdfs://path/to/warehouse
+    --conf spark.sql.catalog.paimon.warehouse=hdfs:///path/to/warehouse
 ```
 
 You can define any default table options with the prefix `spark.sql.catalog.paimon.table-default.` for tables created in the catalog.
@@ -88,7 +88,7 @@ To use Hive catalog, Database name, Table name and Field names should be lower c
 
 Paimon Hive catalog in Flink relies on Flink Hive connector bundled jar. You should first download Flink Hive connector bundled jar and add it to classpath. See [here](https://nightlies.apache.org/flink/flink-docs-master/docs/connectors/table/hive/overview/#using-bundled-hive-jar) for more info.
 
-The following Flink SQL registers and uses a Paimon Hive catalog named `my_hive`. Metadata and table files are stored under `hdfs://path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
+The following Flink SQL registers and uses a Paimon Hive catalog named `my_hive`. Metadata and table files are stored under `hdfs:///path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
 
 If your Hive requires security authentication such as Kerberos, LDAP, Ranger and so on. You can specify the hive-conf-dir parameter to the hive-site.xml file path.
 
@@ -97,7 +97,7 @@ CREATE CATALOG my_hive WITH (
     'type' = 'paimon',
     'metastore' = 'hive',
     'uri' = 'thrift://<hive-metastore-host-name>:<port>',
-    'warehouse' = 'hdfs://path/to/warehouse'
+    'warehouse' = 'hdfs:///path/to/warehouse'
 );
 
 USE CATALOG my_hive;
@@ -111,12 +111,12 @@ You can define any default table options with the prefix `table-default.` for ta
 
 Your Spark installation should be able to detect, or already contains Hive dependencies. See [here](https://spark.apache.org/docs/latest/sql-data-sources-hive-tables.html) for more information.
 
-The following shell command registers a Paimon Hive catalog named `paimon`. Metadata and table files are stored under `hdfs://path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
+The following shell command registers a Paimon Hive catalog named `paimon`. Metadata and table files are stored under `hdfs:///path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
 
 ```bash
 spark-sql ... \
     --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.paimon.warehouse=hdfs://path/to/warehouse \
+    --conf spark.sql.catalog.paimon.warehouse=hdfs:///path/to/warehouse \
     --conf spark.sql.catalog.paimon.metastore=hive \
     --conf spark.sql.catalog.paimon.uri=thrift://<hive-metastore-host-name>:<port>
 ```
