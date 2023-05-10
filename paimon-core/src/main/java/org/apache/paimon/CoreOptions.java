@@ -399,8 +399,8 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .noDefaultValue()
                     .withDescription(
-                            "The parallelism of scanning manifest files, default value is the size of cpu processor."
-                                    + "Note: Scale-up this parameter will increase memory usage while scanning manifest files."
+                            "The parallelism of scanning manifest files, default value is the size of cpu processor. "
+                                    + "Note: Scale-up this parameter will increase memory usage while scanning manifest files. "
                                     + "We can consider downsize it when we encounter an out of memory exception while scanning");
 
     public static final ConfigOption<LogConsistency> LOG_CONSISTENCY =
