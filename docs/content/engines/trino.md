@@ -93,7 +93,7 @@ You can find Trino connector jar in `./paimon-trino-<trino-version>/target/paimo
 
 Then, copy `paimon-trino-*.jar and flink-shaded-hadoop-*-uber-*.jar` to plugin/paimon.
 
-> NOTE: For JDK 17, when Deploying Trino, should add jvm options: --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED
+> NOTE: For JDK 17, when Deploying Trino, should add jvm options: `--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED`
 
 ## Configure Paimon Catalog
 
