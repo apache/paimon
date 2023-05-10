@@ -24,6 +24,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 
+import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.serde2.ColumnProjectionUtils;
 import org.apache.hadoop.mapred.InputFormat;
 import org.apache.hadoop.mapred.InputSplit;
@@ -48,8 +49,14 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
         FileStoreTable table = createFileStoreTable(jobConf);
         InnerTableScan scan = table.newScan();
         createPredicate(table.schema(), jobConf).ifPresent(scan::withFilter);
+        // If the path of the Paimon table is moved from the location of the Hive table to
+        // properties,Hive will add a location for this table based on the warehouse ,
+        // database,and table automatically.When querying by Hive, an exception may occur
+        // because the specified path for split for Paimon may not match the location of Hive.
+        // To work around this problem,we specify the path for split as the location of Hive.
+        String location = jobConf.get(hive_metastoreConstants.META_TABLE_LOCATION);
         return scan.plan().splits().stream()
-                .map(split -> new PaimonInputSplit(table.location().toString(), (DataSplit) split))
+                .map(split -> new PaimonInputSplit(location, (DataSplit) split))
                 .toArray(PaimonInputSplit[]::new);
     }
 
