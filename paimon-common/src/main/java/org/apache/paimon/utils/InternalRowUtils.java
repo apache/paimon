@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryMap;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -148,97 +149,50 @@ public class InternalRowUtils {
         return o;
     }
 
-    public static Object get(InternalRow row, int pos, DataType fieldType) {
-        if (row.isNullAt(pos)) {
+    public static Object get(DataGetters dataGetters, int pos, DataType fieldType) {
+        if (dataGetters.isNullAt(pos)) {
             return null;
         }
         switch (fieldType.getTypeRoot()) {
             case BOOLEAN:
-                return row.getBoolean(pos);
+                return dataGetters.getBoolean(pos);
             case TINYINT:
-                return row.getByte(pos);
+                return dataGetters.getByte(pos);
             case SMALLINT:
-                return row.getShort(pos);
+                return dataGetters.getShort(pos);
             case INTEGER:
             case DATE:
             case TIME_WITHOUT_TIME_ZONE:
-                return row.getInt(pos);
+                return dataGetters.getInt(pos);
             case BIGINT:
-                return row.getLong(pos);
+                return dataGetters.getLong(pos);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) fieldType;
-                return row.getTimestamp(pos, timestampType.getPrecision());
+                return dataGetters.getTimestamp(pos, timestampType.getPrecision());
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 LocalZonedTimestampType lzTs = (LocalZonedTimestampType) fieldType;
-                return row.getTimestamp(pos, lzTs.getPrecision());
+                return dataGetters.getTimestamp(pos, lzTs.getPrecision());
             case FLOAT:
-                return row.getFloat(pos);
+                return dataGetters.getFloat(pos);
             case DOUBLE:
-                return row.getDouble(pos);
+                return dataGetters.getDouble(pos);
             case CHAR:
             case VARCHAR:
-                return row.getString(pos);
+                return dataGetters.getString(pos);
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) fieldType;
-                return row.getDecimal(pos, decimalType.getPrecision(), decimalType.getScale());
+                return dataGetters.getDecimal(
+                        pos, decimalType.getPrecision(), decimalType.getScale());
             case ARRAY:
-                return row.getArray(pos);
+                return dataGetters.getArray(pos);
             case MAP:
             case MULTISET:
-                return row.getMap(pos);
+                return dataGetters.getMap(pos);
             case ROW:
-                return row.getRow(pos, ((RowType) fieldType).getFieldCount());
+                return dataGetters.getRow(pos, ((RowType) fieldType).getFieldCount());
             case BINARY:
             case VARBINARY:
-                return row.getBinary(pos);
-            default:
-                throw new UnsupportedOperationException("Unsupported type: " + fieldType);
-        }
-    }
-
-    public static Object get(InternalArray array, int pos, DataType fieldType) {
-        if (array.isNullAt(pos)) {
-            return null;
-        }
-        switch (fieldType.getTypeRoot()) {
-            case BOOLEAN:
-                return array.getBoolean(pos);
-            case TINYINT:
-                return array.getByte(pos);
-            case SMALLINT:
-                return array.getShort(pos);
-            case INTEGER:
-            case DATE:
-            case TIME_WITHOUT_TIME_ZONE:
-                return array.getInt(pos);
-            case BIGINT:
-                return array.getLong(pos);
-            case TIMESTAMP_WITHOUT_TIME_ZONE:
-                TimestampType timestampType = (TimestampType) fieldType;
-                return array.getTimestamp(pos, timestampType.getPrecision());
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                LocalZonedTimestampType lzTs = (LocalZonedTimestampType) fieldType;
-                return array.getTimestamp(pos, lzTs.getPrecision());
-            case FLOAT:
-                return array.getFloat(pos);
-            case DOUBLE:
-                return array.getDouble(pos);
-            case CHAR:
-            case VARCHAR:
-                return array.getString(pos);
-            case DECIMAL:
-                DecimalType decimalType = (DecimalType) fieldType;
-                return array.getDecimal(pos, decimalType.getPrecision(), decimalType.getScale());
-            case ARRAY:
-                return array.getArray(pos);
-            case MAP:
-            case MULTISET:
-                return array.getMap(pos);
-            case ROW:
-                return array.getRow(pos, ((RowType) fieldType).getFieldCount());
-            case BINARY:
-            case VARBINARY:
-                return array.getBinary(pos);
+                return dataGetters.getBinary(pos);
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + fieldType);
         }
