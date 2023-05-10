@@ -256,12 +256,13 @@ public class FlinkCatalog extends AbstractCatalog {
             AddColumn add = (AddColumn) change;
             String comment = add.getColumn().getComment().orElse(null);
             SchemaChange.Move move = getMove(add.getPosition(), add.getColumn().getName());
-            schemaChanges.add(SchemaChange.addColumn(
-                    add.getColumn().getName(),
-                    LogicalTypeConversion.toDataType(
-                            add.getColumn().getDataType().getLogicalType()),
-                    comment,
-                    move));
+            schemaChanges.add(
+                    SchemaChange.addColumn(
+                            add.getColumn().getName(),
+                            LogicalTypeConversion.toDataType(
+                                    add.getColumn().getDataType().getLogicalType()),
+                            comment,
+                            move));
             return schemaChanges;
         } else if (change instanceof DropColumn) {
             DropColumn drop = (DropColumn) change;
@@ -269,16 +270,21 @@ public class FlinkCatalog extends AbstractCatalog {
             return schemaChanges;
         } else if (change instanceof ModifyColumnName) {
             ModifyColumnName modify = (ModifyColumnName) change;
-            schemaChanges.add(SchemaChange.renameColumn(modify.getOldColumnName(), modify.getNewColumnName()));
+            schemaChanges.add(
+                    SchemaChange.renameColumn(
+                            modify.getOldColumnName(), modify.getNewColumnName()));
             return schemaChanges;
         } else if (change instanceof ModifyPhysicalColumnType) {
             ModifyPhysicalColumnType modify = (ModifyPhysicalColumnType) change;
-            schemaChanges.add(SchemaChange.updateColumnNullability(
-                    new String[]{modify.getNewColumn().getName()},
-                    modify.getNewType().getLogicalType().isNullable()));
-            schemaChanges.add(SchemaChange.updateColumnType(
-                    modify.getOldColumn().getName(),
-                    LogicalTypeConversion.toDataType(modify.getNewType().getLogicalType())));
+            schemaChanges.add(
+                    SchemaChange.updateColumnNullability(
+                            new String[] {modify.getNewColumn().getName()},
+                            modify.getNewType().getLogicalType().isNullable()));
+            schemaChanges.add(
+                    SchemaChange.updateColumnType(
+                            modify.getOldColumn().getName(),
+                            LogicalTypeConversion.toDataType(
+                                    modify.getNewType().getLogicalType())));
             return schemaChanges;
         } else if (change instanceof ModifyColumnPosition) {
             ModifyColumnPosition modify = (ModifyColumnPosition) change;
@@ -374,7 +380,9 @@ public class FlinkCatalog extends AbstractCatalog {
         List<SchemaChange> changes = new ArrayList<>();
         if (null != tableChanges) {
             List<SchemaChange> schemaChanges =
-                    tableChanges.stream().flatMap(tableChange -> (toSchemaChange(tableChange).stream())).collect(Collectors.toList());
+                    tableChanges.stream()
+                            .flatMap(tableChange -> (toSchemaChange(tableChange).stream()))
+                            .collect(Collectors.toList());
             changes.addAll(schemaChanges);
         }
 
