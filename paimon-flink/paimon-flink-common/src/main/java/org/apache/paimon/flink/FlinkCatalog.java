@@ -49,6 +49,7 @@ import org.apache.flink.table.catalog.TableChange.After;
 import org.apache.flink.table.catalog.TableChange.ColumnPosition;
 import org.apache.flink.table.catalog.TableChange.DropColumn;
 import org.apache.flink.table.catalog.TableChange.First;
+import org.apache.flink.table.catalog.TableChange.ModifyColumnComment;
 import org.apache.flink.table.catalog.TableChange.ModifyColumnName;
 import org.apache.flink.table.catalog.TableChange.ModifyColumnPosition;
 import org.apache.flink.table.catalog.TableChange.ModifyPhysicalColumnType;
@@ -276,6 +277,10 @@ public class FlinkCatalog extends AbstractCatalog {
             SchemaChange.Move move =
                     getMove(modify.getNewPosition(), modify.getNewColumn().getName());
             return SchemaChange.updateColumnPosition(move);
+        } else if (change instanceof TableChange.ModifyColumnComment) {
+            ModifyColumnComment modify = (ModifyColumnComment) change;
+            return SchemaChange.updateColumnComment(
+                    new String[] {modify.getNewColumn().getName()}, modify.getNewComment());
         } else if (change instanceof SetOption) {
             SetOption setOption = (SetOption) change;
             String key = setOption.getKey();

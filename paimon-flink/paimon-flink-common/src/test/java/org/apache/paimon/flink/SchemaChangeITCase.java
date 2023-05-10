@@ -25,6 +25,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -297,6 +299,33 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                 .hasMessageContaining(
                         "Could not execute ALTER TABLE PAIMON.default.T\n"
                                 + "  MODIFY `c` STRING NOT NULL");
+    }
+
+    @Test
+    public void testModifyColumnComment() {
+        sql("CREATE TABLE T (a STRING, b STRING COMMENT 'from column b')");
+        List<String> result =
+                sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[a, STRING, true, null, null, null, null]",
+                        "+I[b, STRING, true, null, null, null, from column b]");
+
+        // add column comment
+        sql("ALTER TABLE T MODIFY a STRING COMMENT 'from column a'");
+        result = sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[a, STRING, true, null, null, null, from column a]",
+                        "+I[b, STRING, true, null, null, null, from column b]");
+
+        // update column comment
+        sql("ALTER TABLE T MODIFY b STRING COMMENT 'from column b updated'");
+        result = sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[a, STRING, true, null, null, null, from column a]",
+                        "+I[b, STRING, true, null, null, null, from column b updated]");
     }
 
     @Test

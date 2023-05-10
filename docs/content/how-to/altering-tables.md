@@ -318,6 +318,14 @@ The following SQL changes comment of column `buy_count` to `buy count`.
 
 {{< tabs "change-comment-example" >}}
 
+{{< tab "Flink" >}}
+
+```sql
+ALTER TABLE my_table MODIFY buy_count BIGINT COMMENT 'buy count'
+```
+
+{{< /tab >}}
+
 {{< tab "Spark3" >}}
 
 ```sql
