@@ -381,7 +381,7 @@ public class FlinkCatalog extends AbstractCatalog {
         if (null != tableChanges) {
             List<SchemaChange> schemaChanges =
                     tableChanges.stream()
-                            .flatMap(tableChange -> (toSchemaChange(tableChange).stream()))
+                            .flatMap(tableChange -> toSchemaChange(tableChange).stream())
                             .collect(Collectors.toList());
             changes.addAll(schemaChanges);
         }
