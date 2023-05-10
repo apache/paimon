@@ -68,6 +68,7 @@ import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.ArrayList;
@@ -276,15 +277,18 @@ public class FlinkCatalog extends AbstractCatalog {
             return schemaChanges;
         } else if (change instanceof ModifyPhysicalColumnType) {
             ModifyPhysicalColumnType modify = (ModifyPhysicalColumnType) change;
-            schemaChanges.add(
-                    SchemaChange.updateColumnNullability(
-                            new String[] {modify.getNewColumn().getName()},
-                            modify.getNewType().getLogicalType().isNullable()));
+            LogicalType newColumnType = modify.getNewType().getLogicalType();
+            LogicalType oldColumnType = modify.getOldColumn().getDataType().getLogicalType();
+            if (newColumnType.isNullable() != oldColumnType.isNullable()) {
+                schemaChanges.add(
+                        SchemaChange.updateColumnNullability(
+                                new String[] {modify.getNewColumn().getName()},
+                                newColumnType.isNullable()));
+            }
             schemaChanges.add(
                     SchemaChange.updateColumnType(
                             modify.getOldColumn().getName(),
-                            LogicalTypeConversion.toDataType(
-                                    modify.getNewType().getLogicalType())));
+                            LogicalTypeConversion.toDataType(newColumnType)));
             return schemaChanges;
         } else if (change instanceof ModifyColumnPosition) {
             ModifyColumnPosition modify = (ModifyColumnPosition) change;
@@ -294,8 +298,10 @@ public class FlinkCatalog extends AbstractCatalog {
             return schemaChanges;
         } else if (change instanceof TableChange.ModifyColumnComment) {
             ModifyColumnComment modify = (ModifyColumnComment) change;
-            schemaChanges.add(SchemaChange.updateColumnComment(
-                    new String[] {modify.getNewColumn().getName()}, modify.getNewComment()));
+            schemaChanges.add(
+                    SchemaChange.updateColumnComment(
+                            new String[] {modify.getNewColumn().getName()},
+                            modify.getNewComment()));
             return schemaChanges;
         } else if (change instanceof SetOption) {
             SetOption setOption = (SetOption) change;
