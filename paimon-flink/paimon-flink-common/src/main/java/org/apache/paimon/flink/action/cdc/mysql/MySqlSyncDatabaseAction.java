@@ -70,8 +70,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * MySQL tables. If the Paimon table already exists, its schema will be compared against the schema
  * of all specified MySQL tables.
  *
- * <p>This action supports a limited number of schema changes. Unsupported schema changes will be
- * ignored. Currently supported schema changes includes:
+ * <p>This action supports a limited number of schema changes. Currently, the framework can not drop
+ * columns, so the behaviors of `DROP` will be ignored, `RENAME` will add a new column. Currently
+ * supported schema changes includes:
  *
  * <ul>
  *   <li>Adding columns.
@@ -86,7 +87,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *         <li>altering from a floating-point type (float, double) to another floating-point type
  *             with wider range,
  *       </ul>
- *       are supported. Other type changes will cause exceptions.
+ *       are supported.
  * </ul>
  *
  * <p>This action creates a Paimon table sink for each Paimon table to be written, so this action is
