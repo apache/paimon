@@ -20,6 +20,7 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.utils.ReusingTestData;
 import org.apache.paimon.utils.TestReusingRecordReader;
 
@@ -32,50 +33,92 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Test for {@link LoserTree}. */
 public class LoserTreeTest {
     private static final Comparator<KeyValue> KEY_COMPARATOR =
-            Comparator.comparingInt(o -> o.key().getInt(0));
+            Comparator.<KeyValue>comparingInt(o -> o.key().getInt(0)).reversed();
     private static final Comparator<KeyValue> SEQUENCE_COMPARATOR =
-            Comparator.comparingLong(KeyValue::sequenceNumber);
+            Comparator.comparingLong(KeyValue::sequenceNumber).reversed();
 
     @RepeatedTest(100)
     public void testLoserTreeIsOrdered() throws IOException {
-        List<ReusingTestData> reusingTestData = ReusingTestData.generateData(1000, false);
+        List<ReusingTestData> reusingTestData = new ArrayList<>();
+        List<RecordReader<KeyValue>> sortedTestReaders =
+                createSortedTestReaders(reusingTestData, 0, () -> Function::identity);
+        Collections.sort(reusingTestData);
+        try (LoserTree<KeyValue> loserTree =
+                new LoserTree<>(sortedTestReaders, KEY_COMPARATOR, SEQUENCE_COMPARATOR)) {
+            Iterator<ReusingTestData> expectedIterator = reusingTestData.iterator();
+            checkLoserTree(
+                    loserTree,
+                    kv -> {
+                        assertThat(expectedIterator.hasNext());
+                        expectedIterator.next().assertEquals(kv);
+                    });
+            assertThat(expectedIterator.hasNext()).isFalse();
+        }
+    }
+
+    @RepeatedTest(100)
+    public void testLoserTreeCloseNormally() {
+        List<RecordReader<KeyValue>> sortedTestReaders =
+                createSortedTestReaders(
+                        new ArrayList<>(),
+                        1,
+                        () ->
+                                new TestReusingRecordReader.ThrowingRunnable<IOException>() {
+                                    private boolean initialized = false;
+
+                                    @Override
+                                    public void run() throws IOException {
+                                        if (initialized) {
+                                            throw new IOException("ingest exception");
+                                        }
+                                        initialized = true;
+                                    }
+                                });
+        LoserTree<KeyValue> loserTree =
+                new LoserTree<>(sortedTestReaders, KEY_COMPARATOR, SEQUENCE_COMPARATOR);
+        assertThatThrownBy(() -> checkLoserTree(loserTree, kv -> {}))
+                .satisfies(AssertionUtils.anyCauseMatches(IOException.class));
+        assertDoesNotThrow(loserTree::close);
+    }
+
+    private List<RecordReader<KeyValue>> createSortedTestReaders(
+            List<ReusingTestData> reusingTestData,
+            int minNumberRecords,
+            Supplier<TestReusingRecordReader.ThrowingRunnable<IOException>> beforeReadBatch) {
         List<RecordReader<KeyValue>> sortedTestReaders = new ArrayList<>();
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int numberReaders = random.nextInt(20) + 1;
-        int lowerBound = 0, upperBound = reusingTestData.size();
         for (int i = 0; i < numberReaders; i++) {
-            int subUpperBound = random.nextInt(lowerBound, upperBound);
-            List<ReusingTestData> subReusingTestData =
-                    reusingTestData.subList(lowerBound, subUpperBound);
-            Collections.sort(subReusingTestData);
-            sortedTestReaders.add(new TestReusingRecordReader(subReusingTestData));
-            lowerBound = subUpperBound;
+            int numberRecords = Math.max(random.nextInt(100), minNumberRecords);
+            List<ReusingTestData> testData =
+                    ReusingTestData.generateOrderedNoDuplicatedKeys(numberRecords, false);
+            reusingTestData.addAll(testData);
+            sortedTestReaders.add(new TestReusingRecordReader(testData, beforeReadBatch.get()));
         }
-        Collections.sort(reusingTestData);
-        checkLoserTree(sortedTestReaders, reusingTestData);
+        return sortedTestReaders;
     }
 
-    private void checkLoserTree(
-            List<RecordReader<KeyValue>> sortedTestReaders, List<ReusingTestData> expectedData)
+    private void checkLoserTree(LoserTree<KeyValue> loserTree, Consumer<KeyValue> consumer)
             throws IOException {
-        try (LoserTree<KeyValue> loserTree =
-                new LoserTree<>(sortedTestReaders, KEY_COMPARATOR, SEQUENCE_COMPARATOR)) {
-            Iterator<ReusingTestData> expectedIterator = expectedData.iterator();
-            do {
-                loserTree.adjustForNextLoop();
-                for (KeyValue winner = loserTree.popWinner();
-                        winner != null;
-                        winner = loserTree.popWinner()) {
-                    assertThat(expectedIterator.hasNext());
-                    expectedIterator.next().assertEquals(winner);
-                }
-            } while (loserTree.peekWinner() != null && expectedIterator.hasNext());
-        }
+        loserTree.initializeIfNeeded();
+        do {
+            for (KeyValue winner = loserTree.popWinner();
+                    winner != null;
+                    winner = loserTree.popWinner()) {
+                consumer.accept(winner);
+            }
+            loserTree.adjustForNextLoop();
+        } while (loserTree.peekWinner() != null);
     }
 }
