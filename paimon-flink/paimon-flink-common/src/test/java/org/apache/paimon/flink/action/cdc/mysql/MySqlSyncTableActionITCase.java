@@ -735,7 +735,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         IllegalArgumentException.class,
                         () -> action.build(env),
                         "Expecting IllegalArgumentException");
-        assertThat(e).hasMessage("Specified primary key pk does not exist in MySQL tables");
+        assertThat(e)
+                .hasMessage(
+                        "Specified primary key pk does not exist in MySQL tables or computed columns.");
     }
 
     @Test
