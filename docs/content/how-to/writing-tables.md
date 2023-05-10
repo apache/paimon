@@ -277,11 +277,11 @@ UPDATE MyTable SET b = 1, c = 2 WHERE a = 'myTable';
 
 ## Deleting from table
 
-Currently, Paimon supports deleting records via submitting the 'delete' job through `flink run`.
-
 {{< tabs "delete-from-table" >}}
 
-{{< tab "Flink Job" >}}
+{{< tab "Flink 1.16-" >}}
+
+In Flink 1.16 and previous versions, Paimon only supports deleting records via submitting the 'delete' job through `flink run`.
 
 Run the following command to submit a 'delete' job for the table.
 
@@ -310,6 +310,40 @@ For more information of 'delete', see
     -Dclassloader.resolve-order=parent-first \
     /path/to/paimon-flink-**-{{< version >}}.jar \
     delete --help
+```
+
+{{< /tab >}}
+
+{{< tab "Flink 1.17+" >}}
+{{< hint info >}}
+Important table properties setting:
+1. Only [primary key table]({{< ref "concepts/primary-key-table" >}}) supports this feature.
+2. [MergeEngine]({{< ref "concepts/primary-key-table#merge-engines" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table#deduplicate" >}}) or [partial-update]({{< ref "concepts/primary-key-table#partial-update" >}}) to support this feature.
+   {{< /hint >}}
+
+{{< hint warning >}}
+Warning: we do not support deleting from table in streaming mode.
+{{< /hint >}}
+
+```sql
+-- Syntax
+DELETE FROM table_identifier WHERE conditions;
+
+-- The following SQL is an example:
+-- table definition
+CREATE TABLE MyTable (
+    id BIGINT NOT NULL,
+    currency STRING,
+    rate BIGINT,
+    dt String,
+    PRIMARY KEY (id, dt) NOT ENFORCED
+) PARTITIONED BY (dt) WITH ( 
+    'write-mode' = 'change-log',
+    'merge-engine' = 'deduplicate' 
+);
+
+-- you can use
+DELETE FROM MyTable WHERE currency = 'UNKNOWN;
 ```
 
 {{< /tab >}}
