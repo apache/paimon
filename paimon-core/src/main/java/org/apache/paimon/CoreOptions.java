@@ -170,7 +170,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Duration> CONTINUOUS_DISCOVERY_INTERVAL =
             key("continuous.discovery-interval")
                     .durationType()
-                    .defaultValue(Duration.ofSeconds(1))
+                    .defaultValue(Duration.ofSeconds(10))
                     .withDescription("The discovery interval of continuous reading.");
 
     @Immutable
