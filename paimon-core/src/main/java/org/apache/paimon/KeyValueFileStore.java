@@ -125,8 +125,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 manifestFileFactory(forWrite),
                 manifestListFactory(forWrite),
                 options.bucket(),
-                forWrite,
-                options.scanManifestParallelism());
+                forWrite);
     }
 
     @Override
