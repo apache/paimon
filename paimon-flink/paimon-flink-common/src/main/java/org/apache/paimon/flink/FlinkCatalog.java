@@ -280,7 +280,7 @@ public class FlinkCatalog extends AbstractCatalog {
         } else if (change instanceof TableChange.ModifyColumnComment) {
             ModifyColumnComment modify = (ModifyColumnComment) change;
             return SchemaChange.updateColumnComment(
-                    new String[]{modify.getNewColumn().getName()}, modify.getNewComment());
+                    new String[] {modify.getNewColumn().getName()}, modify.getNewComment());
         } else if (change instanceof SetOption) {
             SetOption setOption = (SetOption) change;
             String key = setOption.getKey();

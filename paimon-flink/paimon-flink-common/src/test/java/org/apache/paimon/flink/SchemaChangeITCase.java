@@ -303,9 +303,9 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
     @Test
     public void testModifyColumnComment() {
-        sql(
-                "CREATE TABLE T (a STRING, b STRING COMMENT 'from column b')");
-        List<String> result = sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
+        sql("CREATE TABLE T (a STRING, b STRING COMMENT 'from column b')");
+        List<String> result =
+                sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         "+I[a, STRING, true, null, null, null, null]",
