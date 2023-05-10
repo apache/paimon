@@ -62,7 +62,7 @@ To use this feature through `flink run`, run the following shell command.
 
 If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from all specified MySQL tables. If the Paimon table already exists, its schema will be compared against the schema of all specified MySQL tables.
 
-This action supports a limited number of schema changes. Unsupported schema changes will be ignored. Currently supported schema changes includes:
+This action supports a limited number of schema changes. Currently, the framework can not drop columns, so the behaviors of `DROP` will be ignored, `RENAME` will add a new column. Currently supported schema changes includes:
 
 * Adding columns.
 
@@ -73,7 +73,7 @@ This action supports a limited number of schema changes. Unsupported schema chan
   * altering from an integer type (tinyint, smallint, int, bigint) to another integer type with wider range,
   * altering from a floating-point type (float, double) to another floating-point type with wider range,
   
-  are supported. Other type changes will cause exceptions.
+  are supported. 
 
 Example
 
@@ -142,7 +142,7 @@ Only tables with primary keys will be synchronized.
 
 For each MySQL table to be synchronized, if the corresponding Paimon table does not exist, this action will automatically create the table. Its schema will be derived from all specified MySQL tables. If the Paimon table already exists, its schema will be compared against the schema of all specified MySQL tables.
 
-This action supports a limited number of schema changes. Unsupported schema changes will be ignored. Currently supported schema changes includes:
+This action supports a limited number of schema changes. Currently, the framework can not drop columns, so the behaviors of `DROP` will be ignored, `RENAME` will add a new column. Currently supported schema changes includes:
 
 * Adding columns.
 
@@ -153,7 +153,7 @@ This action supports a limited number of schema changes. Unsupported schema chan
   * altering from an integer type (tinyint, smallint, int, bigint) to another integer type with wider range,
   * altering from a floating-point type (float, double) to another floating-point type with wider range,
   
-  are supported. Other type changes will cause exceptions.
+  are supported.
 
 Example
 
