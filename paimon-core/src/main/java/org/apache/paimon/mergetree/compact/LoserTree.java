@@ -309,6 +309,7 @@ public class LoserTree<T> implements Closeable {
                 while (!endOfInput) {
                     if (iterator != null) {
                         iterator.releaseBatch();
+                        iterator = null;
                     }
 
                     iterator = reader.readBatch();
@@ -327,6 +328,7 @@ public class LoserTree<T> implements Closeable {
         public void close() throws IOException {
             if (this.iterator != null) {
                 this.iterator.releaseBatch();
+                this.iterator = null;
             }
             this.reader.close();
         }

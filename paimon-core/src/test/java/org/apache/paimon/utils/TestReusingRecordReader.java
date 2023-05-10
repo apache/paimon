@@ -42,16 +42,29 @@ public class TestReusingRecordReader implements RecordReader<KeyValue> {
 
     private final List<TestRecordIterator> producedBatches;
     private final Random random;
-
+    private final ThrowingRunnable<RuntimeException> beforeReadBatch;
     private int nextLowerBound;
     private boolean closed;
 
     public TestReusingRecordReader(List<ReusingTestData> testData) {
+        this(testData, () -> {});
+    }
+
+    public TestReusingRecordReader(
+            List<ReusingTestData> testData, ThrowingRunnable<?> beforeReadBatch) {
         this.testData = testData;
         this.reuse = new ReusingKeyValue();
 
         this.producedBatches = new ArrayList<>();
         this.random = new Random();
+        this.beforeReadBatch =
+                () -> {
+                    try {
+                        beforeReadBatch.run();
+                    } catch (Throwable t) {
+                        throw new RuntimeException(t);
+                    }
+                };
 
         this.nextLowerBound = 0;
         this.closed = false;
@@ -61,6 +74,7 @@ public class TestReusingRecordReader implements RecordReader<KeyValue> {
     @Override
     public RecordIterator<KeyValue> readBatch() {
         assertThat(nextLowerBound != -1).isTrue();
+        beforeReadBatch.run();
         if (nextLowerBound == testData.size() && random.nextBoolean()) {
             nextLowerBound = -1;
             return null;
@@ -112,7 +126,18 @@ public class TestReusingRecordReader implements RecordReader<KeyValue> {
 
         @Override
         public void releaseBatch() {
+            if (released) {
+                throw new UnsupportedOperationException("Unsupported release twice.");
+            }
             this.released = true;
         }
+    }
+
+    /**
+     * Similar to a {@link Runnable}, this interface is used to capture a block of code to be
+     * executed. In contrast to {@code Runnable}, this interface allows throwing checked exceptions.
+     */
+    public interface ThrowingRunnable<E extends Throwable> {
+        void run() throws E;
     }
 }
