@@ -96,7 +96,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                             + "forces a new compaction. This is unexpected.");
             if (LOG.isDebugEnabled()) {
                 LOG.debug(
-                        "Trigger forced full compaciton. Picking from the following runs\n{}",
+                        "Trigger forced full compaction. Picking from the following runs\n{}",
                         runs);
             }
             optionalUnit = CompactStrategy.pickFullCompaction(levels.numberOfLevels(), runs);
@@ -105,7 +105,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                 return;
             }
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Trigger normal compaciton. Picking from the following runs\n{}", runs);
+                LOG.debug("Trigger normal compaction. Picking from the following runs\n{}", runs);
             }
             optionalUnit =
                     strategy.pick(levels.numberOfLevels(), runs)
