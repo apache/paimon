@@ -112,14 +112,14 @@ public class ManifestEntry {
         return String.format("{%s, %s, %d, %d, %s}", kind, partition, bucket, totalBuckets, file);
     }
 
-    public static Collection<ManifestEntry> mergeEntries(List<ManifestEntry> entries) {
+    public static Collection<ManifestEntry> mergeEntries(Iterable<ManifestEntry> entries) {
         LinkedHashMap<Identifier, ManifestEntry> map = new LinkedHashMap<>();
         mergeEntries(entries, map);
         return map.values();
     }
 
     public static void mergeEntries(
-            List<ManifestEntry> entries, Map<Identifier, ManifestEntry> map) {
+            Iterable<ManifestEntry> entries, Map<Identifier, ManifestEntry> map) {
         for (ManifestEntry entry : entries) {
             ManifestEntry.Identifier identifier = entry.identifier();
             switch (entry.kind()) {
