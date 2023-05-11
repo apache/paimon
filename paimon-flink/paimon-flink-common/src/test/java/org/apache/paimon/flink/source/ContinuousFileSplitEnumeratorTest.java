@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
@@ -312,6 +313,11 @@ public class ContinuousFileSplitEnumeratorTest {
                 throw new EndOfScanException();
             }
             return plan;
+        }
+
+        @Override
+        public List<BinaryRow> listPartitions() {
+            throw new UnsupportedOperationException();
         }
 
         @Override

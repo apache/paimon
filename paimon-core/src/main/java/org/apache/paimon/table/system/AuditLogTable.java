@@ -20,6 +20,7 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
@@ -222,6 +223,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         public List<DataSplit> overwriteSplits() {
             return snapshotSplitReader.overwriteSplits();
         }
+
+        @Override
+        public List<BinaryRow> partitions() {
+            return snapshotSplitReader.partitions();
+        }
     }
 
     private class AuditLogBatchScan implements InnerTableScan {
@@ -242,6 +248,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         public Plan plan() {
             return batchScan.plan();
         }
+
+        @Override
+        public List<BinaryRow> listPartitions() {
+            return batchScan.listPartitions();
+        }
     }
 
     private class AuditLogStreamScan implements InnerStreamTableScan {
@@ -261,6 +272,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public Plan plan() {
             return streamScan.plan();
+        }
+
+        @Override
+        public List<BinaryRow> listPartitions() {
+            return streamScan.listPartitions();
         }
 
         @Nullable

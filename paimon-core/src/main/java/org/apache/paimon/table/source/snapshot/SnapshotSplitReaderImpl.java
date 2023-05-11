@@ -27,6 +27,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.Predicate;
@@ -43,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiConsumer;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
@@ -157,6 +159,23 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
                 false,
                 splitGenerator,
                 files);
+    }
+
+    @Override
+    public List<BinaryRow> partitions() {
+        List<ManifestEntry> entryList = scan.plan().files();
+
+        return entryList.stream()
+                .collect(
+                        Collectors.groupingBy(
+                                ManifestEntry::partition,
+                                LinkedHashMap::new,
+                                Collectors.reducing((a, b) -> b)))
+                .values()
+                .stream()
+                .map(Optional::get)
+                .map(ManifestEntry::partition)
+                .collect(Collectors.toList());
     }
 
     /**

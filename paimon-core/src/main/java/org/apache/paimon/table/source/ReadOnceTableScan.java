@@ -18,6 +18,10 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.data.BinaryRow;
+
+import java.util.List;
+
 /** An {@link InnerTableScan} for reading only once, this is for batch scan. */
 public abstract class ReadOnceTableScan implements InnerTableScan {
 
@@ -34,4 +38,9 @@ public abstract class ReadOnceTableScan implements InnerTableScan {
     }
 
     protected abstract Plan innerPlan();
+
+    @Override
+    public List<BinaryRow> listPartitions() {
+        throw new UnsupportedOperationException();
+    }
 }

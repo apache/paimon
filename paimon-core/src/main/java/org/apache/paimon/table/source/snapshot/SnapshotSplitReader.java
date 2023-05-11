@@ -20,6 +20,7 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.DataSplit;
@@ -47,4 +48,7 @@ public interface SnapshotSplitReader {
 
     /** Get splits from an overwrite snapshot. */
     List<DataSplit> overwriteSplits();
+
+    /** Get partitions from a snapshot. */
+    List<BinaryRow> partitions();
 }
