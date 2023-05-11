@@ -50,7 +50,8 @@ public class TableScanListPartitionsTest extends ScannerTestBase {
 
         AtomicInteger ai = new AtomicInteger(0);
 
-        BinaryRow[] rows = table.newReadBuilder().newScan().partitions().toArray(new BinaryRow[0]);
+        BinaryRow[] rows =
+                table.newReadBuilder().newScan().listPartitions().toArray(new BinaryRow[0]);
         assertThat(rows.length).isEqualTo(1000);
         Arrays.sort(rows, Comparator.comparing(o -> o.getInt(0)));
 

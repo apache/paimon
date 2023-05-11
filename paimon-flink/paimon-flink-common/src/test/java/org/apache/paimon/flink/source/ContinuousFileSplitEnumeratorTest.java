@@ -316,7 +316,7 @@ public class ContinuousFileSplitEnumeratorTest {
         }
 
         @Override
-        public List<BinaryRow> partitions() {
+        public List<BinaryRow> listPartitions() {
             throw new UnsupportedOperationException();
         }
 

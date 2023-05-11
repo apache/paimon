@@ -36,7 +36,7 @@ public interface TableScan {
     Plan plan();
 
     /** Get partitions from simple manifest entries. */
-    List<BinaryRow> partitions();
+    List<BinaryRow> listPartitions();
 
     /**
      * Plan of scan.

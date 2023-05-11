@@ -250,8 +250,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public List<BinaryRow> partitions() {
-            return batchScan.partitions();
+        public List<BinaryRow> listPartitions() {
+            return batchScan.listPartitions();
         }
     }
 
@@ -275,8 +275,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public List<BinaryRow> partitions() {
-            return streamScan.partitions();
+        public List<BinaryRow> listPartitions() {
+            return streamScan.listPartitions();
         }
 
         @Nullable

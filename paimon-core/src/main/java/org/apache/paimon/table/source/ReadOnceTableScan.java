@@ -40,7 +40,7 @@ public abstract class ReadOnceTableScan implements InnerTableScan {
     protected abstract Plan innerPlan();
 
     @Override
-    public List<BinaryRow> partitions() {
+    public List<BinaryRow> listPartitions() {
         throw new UnsupportedOperationException();
     }
 }
