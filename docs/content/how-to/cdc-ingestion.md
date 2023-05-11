@@ -46,6 +46,7 @@ To use this feature through `flink run`, run the following shell command.
     --table <table-name> \
     [--partition-keys <partition-keys>] \
     [--primary-keys <primary-keys>] \
+    [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
     [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
@@ -56,6 +57,8 @@ To use this feature through `flink run`, run the following shell command.
 * `--table` is the Paimon table name.
 * `--partition-keys` are the partition keys for Paimon table. If there are multiple partition keys, connect them with comma, for example `dt,hh,mm`.
 * `--primary-keys` are the primary keys for Paimon table. If there are multiple primary keys, connect them with comma, for example `buyer_id,seller_id`.
+* `--computed-column` are the definitions of computed columns. The argument field is from MySQL table field name. Supported expressions are:
+  * year(date-column): Extract year from a DATE, DATETIME or TIMESTAMP. Output is an INT value represent the year.
 * `--mysql-conf` is the configuration for Flink CDC MySQL table sources. Each configuration should be specified in the format `key=value`. `hostname`, `username`, `password`, `database-name` and `table-name` are required configurations, others are optional. See its [document](https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options) for a complete list of configurations.
 * `--catalog-conf` is the configuration for Paimon catalog. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of catalog configurations.
 * `--table-conf` is the configuration for Paimon table sink. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of table configurations. 
@@ -87,6 +90,7 @@ Example
     --table test_table \
     --partition-keys pt \
     --primary-keys pt,uid \
+    --computed-columns '_year=year(age)' \
     --mysql-conf hostname=127.0.0.1 \
     --mysql-conf username=root \
     --mysql-conf password=123456 \

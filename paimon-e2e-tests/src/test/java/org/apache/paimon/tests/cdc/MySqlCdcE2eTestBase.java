@@ -52,8 +52,8 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
     protected MySqlContainer mySqlContainer;
 
     protected String warehousePath;
-    private String catalogDdl;
-    private String useCatalogCmd;
+    protected String catalogDdl;
+    protected String useCatalogCmd;
 
     protected MySqlCdcE2eTestBase(MySqlVersion mySqlVersion) {
         this(mySqlVersion, false);
