@@ -21,7 +21,6 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.catalog.Partition;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
@@ -36,10 +35,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.RowDataPartitionComputer;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.ArrayList;
@@ -166,15 +162,8 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
     }
 
     @Override
-    public List<Partition> partitions() {
+    public List<BinaryRow> partitions() {
         List<ManifestEntry> entryList = scan.plan().files();
-        RowType rowType = tableSchema.logicalPartitionType();
-
-        RowDataPartitionComputer rowDataPartitionComputer =
-                new RowDataPartitionComputer(
-                        FileStorePathFactory.PARTITION_DEFAULT_NAME.defaultValue(),
-                        rowType,
-                        rowType.getFieldNames().toArray(new String[0]));
 
         return entryList.stream()
                 .collect(
@@ -185,11 +174,7 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
                 .values()
                 .stream()
                 .map(Optional::get)
-                .map(
-                        row ->
-                                Partition.of(
-                                        rowDataPartitionComputer.generatePartValues(
-                                                row.partition())))
+                .map(ManifestEntry::partition)
                 .collect(Collectors.toList());
     }
 

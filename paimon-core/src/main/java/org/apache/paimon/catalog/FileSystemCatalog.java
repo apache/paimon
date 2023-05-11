@@ -200,12 +200,6 @@ public class FileSystemCatalog extends AbstractCatalog {
                                 .commitChanges(changes));
     }
 
-    @Override
-    public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
-        checkNotSystemTable(identifier, "listPartitions");
-        return getTable(identifier).newReadBuilder().newScan().partitions();
-    }
-
     private static <T> T uncheck(Callable<T> callable) {
         try {
             return callable.call();

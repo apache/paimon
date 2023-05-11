@@ -19,8 +19,8 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.Partition;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
@@ -225,7 +225,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public List<Partition> partitions() {
+        public List<BinaryRow> partitions() {
             return snapshotSplitReader.partitions();
         }
     }
@@ -250,7 +250,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public List<Partition> partitions() {
+        public List<BinaryRow> partitions() {
             return batchScan.partitions();
         }
     }
@@ -275,7 +275,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public List<Partition> partitions() {
+        public List<BinaryRow> partitions() {
             return streamScan.partitions();
         }
 

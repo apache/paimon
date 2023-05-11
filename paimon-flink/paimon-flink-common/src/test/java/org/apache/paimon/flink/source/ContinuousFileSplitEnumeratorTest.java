@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.catalog.Partition;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
@@ -316,7 +316,7 @@ public class ContinuousFileSplitEnumeratorTest {
         }
 
         @Override
-        public List<Partition> partitions() {
+        public List<BinaryRow> partitions() {
             throw new UnsupportedOperationException();
         }
 

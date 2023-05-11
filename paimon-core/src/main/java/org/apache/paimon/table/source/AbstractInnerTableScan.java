@@ -21,9 +21,9 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.catalog.Partition;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
@@ -131,7 +131,7 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
         }
     }
 
-    public List<Partition> partitions() {
+    public List<BinaryRow> partitions() {
         return snapshotSplitReader.partitions();
     }
 }

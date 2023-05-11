@@ -19,7 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.annotation.Public;
-import org.apache.paimon.catalog.Partition;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.table.Table;
 
 import java.util.List;
@@ -36,7 +36,7 @@ public interface TableScan {
     Plan plan();
 
     /** Get partitions from simple manifest entries. */
-    List<Partition> partitions();
+    List<BinaryRow> partitions();
 
     /**
      * Plan of scan.

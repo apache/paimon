@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.catalog.Partition;
+import org.apache.paimon.data.BinaryRow;
 
 import java.util.List;
 
@@ -40,7 +40,7 @@ public abstract class ReadOnceTableScan implements InnerTableScan {
     protected abstract Plan innerPlan();
 
     @Override
-    public List<Partition> partitions() {
+    public List<BinaryRow> partitions() {
         throw new UnsupportedOperationException();
     }
 }

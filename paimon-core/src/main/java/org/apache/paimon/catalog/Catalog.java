@@ -187,20 +187,6 @@ public interface Catalog extends AutoCloseable {
         return true;
     }
 
-    /**
-     * List partitions by the given identifier
-     *
-     * <p>NOTE: cause paimon use dynamic partition all the time, Exists Partitions is not a table
-     * properties cached in memory, the method will cause io read every time it called.
-     *
-     * @param identifier path of the table
-     * @return a list of partitions of the specified table in identifier
-     * @throws TableNotExistException if the table does not exist
-     */
-    default List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
-        throw new UnsupportedOperationException();
-    }
-
     /** Exception for trying to drop on a database that is not empty. */
     class DatabaseNotEmptyException extends Exception {
         private static final String MSG = "Database %s is not empty.";
