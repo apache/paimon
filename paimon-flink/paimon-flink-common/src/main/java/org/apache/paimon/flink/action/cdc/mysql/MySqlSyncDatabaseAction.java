@@ -193,6 +193,7 @@ public class MySqlSyncDatabaseAction implements Action {
                             mySqlSchema,
                             Collections.emptyList(),
                             Collections.emptyList(),
+                            Collections.emptyList(),
                             tableConfig,
                             caseSensitive);
             try {

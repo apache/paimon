@@ -44,6 +44,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,19 +67,30 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private final ZoneId serverTimeZone;
     private final boolean caseSensitive;
     private final TableNameConverter tableNameConverter;
+    private final List<ComputedColumn> computedColumns;
 
     private JsonNode payload;
     private Map<String, String> mySqlFieldTypes;
     private Map<String, String> fieldClassNames;
 
-    public MySqlDebeziumJsonEventParser(ZoneId serverTimeZone, boolean caseSensitive) {
-        this(serverTimeZone, caseSensitive, new TableNameConverter(caseSensitive));
+    public MySqlDebeziumJsonEventParser(
+            ZoneId serverTimeZone, boolean caseSensitive, List<ComputedColumn> computedColumns) {
+        this(serverTimeZone, caseSensitive, computedColumns, new TableNameConverter(caseSensitive));
     }
 
     public MySqlDebeziumJsonEventParser(
             ZoneId serverTimeZone, boolean caseSensitive, TableNameConverter tableNameConverter) {
+        this(serverTimeZone, caseSensitive, Collections.emptyList(), tableNameConverter);
+    }
+
+    public MySqlDebeziumJsonEventParser(
+            ZoneId serverTimeZone,
+            boolean caseSensitive,
+            List<ComputedColumn> computedColumns,
+            TableNameConverter tableNameConverter) {
         this.serverTimeZone = serverTimeZone;
         this.caseSensitive = caseSensitive;
+        this.computedColumns = computedColumns;
         this.tableNameConverter = tableNameConverter;
     }
 
@@ -329,6 +341,13 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             }
 
             resultMap.put(fieldName, newValue);
+        }
+
+        // generate values of computed columns
+        for (ComputedColumn computedColumn : computedColumns) {
+            resultMap.put(
+                    computedColumn.columnName(),
+                    computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
         }
 
         return resultMap;

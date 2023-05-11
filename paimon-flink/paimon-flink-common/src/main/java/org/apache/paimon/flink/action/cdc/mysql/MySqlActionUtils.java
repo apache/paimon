@@ -23,6 +23,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.Preconditions;
 
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.MySqlSourceBuilder;
@@ -39,6 +40,7 @@ import org.apache.kafka.connect.json.JsonConverterConfig;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -90,6 +92,7 @@ class MySqlActionUtils {
             MySqlSchema mySqlSchema,
             List<String> specifiedPartitionKeys,
             List<String> specifiedPrimaryKeys,
+            List<ComputedColumn> computedColumns,
             Map<String, String> paimonConfig,
             boolean caseSensitive) {
         Schema.Builder builder = Schema.newBuilder();
@@ -123,11 +126,18 @@ class MySqlActionUtils {
             builder.column(entry.getKey(), entry.getValue().f0, entry.getValue().f1);
         }
 
+        for (ComputedColumn computedColumn : computedColumns) {
+            builder.column(computedColumn.columnName(), computedColumn.columnType());
+        }
+
         if (specifiedPrimaryKeys.size() > 0) {
             for (String key : specifiedPrimaryKeys) {
-                if (!mySqlFields.containsKey(key)) {
+                if (!mySqlFields.containsKey(key)
+                        && computedColumns.stream().noneMatch(c -> c.columnName().equals(key))) {
                     throw new IllegalArgumentException(
-                            "Specified primary key " + key + " does not exist in MySQL tables");
+                            "Specified primary key "
+                                    + key
+                                    + " does not exist in MySQL tables or computed columns.");
                 }
             }
             builder.primaryKey(specifiedPrimaryKeys);
@@ -261,5 +271,57 @@ class MySqlActionUtils {
                 mySqlConfig.get(MySqlSourceOptions.TABLE_NAME) != null,
                 String.format(
                         "mysql-conf [%s] must be specified.", MySqlSourceOptions.TABLE_NAME.key()));
+    }
+
+    static List<ComputedColumn> buildComputedColumns(
+            List<String> computedColumnArgs, Map<String, DataType> typeMapping) {
+        List<ComputedColumn> computedColumns = new ArrayList<>();
+        for (String columnArg : computedColumnArgs) {
+            String[] kv = columnArg.split("=");
+            if (kv.length != 2) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Invalid computed column argument: %s. Please use format 'column-name=expr-name(args, ...)'.",
+                                columnArg));
+            }
+            String columnName = kv[0].trim();
+            String expression = kv[1].trim();
+            // parse expression
+            int left = expression.indexOf('(');
+            int right = expression.indexOf(')');
+            Preconditions.checkArgument(
+                    left > 0 && right > left,
+                    String.format(
+                            "Invalid expression: %s. Please use format 'expr-name(args, ...)'.",
+                            expression));
+
+            String exprName = expression.substring(0, left);
+            String[] args = expression.substring(left + 1, right).split(",");
+            for (int i = 0; i < args.length; i++) {
+                args[i] = args[i].trim();
+            }
+            checkArgument(
+                    args.length >= 1 && args.length <= 2,
+                    "Currently, computed column only supports one or two arguments.");
+
+            String fieldReference = args[0];
+            String literal = args.length == 2 ? args[1] : null;
+            checkArgument(
+                    typeMapping.containsKey(fieldReference),
+                    String.format(
+                            "Referenced field '%s' is not in given MySQL fields: %s.",
+                            fieldReference, typeMapping.keySet()));
+
+            computedColumns.add(
+                    new ComputedColumn(
+                            columnName,
+                            Expression.create(
+                                    exprName,
+                                    fieldReference,
+                                    typeMapping.get(fieldReference),
+                                    literal)));
+        }
+
+        return computedColumns;
     }
 }

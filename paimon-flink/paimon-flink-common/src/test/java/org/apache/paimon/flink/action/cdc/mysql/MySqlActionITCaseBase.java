@@ -25,6 +25,8 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.api.common.JobStatus;
+import org.apache.flink.core.execution.JobClient;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.slf4j.Logger;
@@ -130,5 +132,15 @@ public class MySqlActionITCaseBase extends ActionITCaseBase {
         // see mysql/my.cnf in test resources
         config.put("server-time-zone", ZoneId.of("America/New_York").toString());
         return config;
+    }
+
+    protected void waitJobRunning(JobClient client) throws Exception {
+        while (true) {
+            JobStatus status = client.getJobStatus().get();
+            if (status == JobStatus.RUNNING) {
+                break;
+            }
+            Thread.sleep(1000);
+        }
     }
 }
