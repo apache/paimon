@@ -53,6 +53,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.Action.getConfigMap;
@@ -196,7 +197,8 @@ public class MySqlSyncDatabaseAction implements Action {
                             caseSensitive);
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
-                String errMsg = incompatibleMessage(table.schema(), mySqlSchema, identifier);
+                Supplier<String> errMsg =
+                        incompatibleMessage(table.schema(), mySqlSchema, identifier);
                 if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {
                     monitoredTables.add(mySqlSchema.tableName());
                 }
@@ -289,30 +291,32 @@ public class MySqlSyncDatabaseAction implements Action {
         return shouldMonitor;
     }
 
-    private boolean shouldMonitorTable(TableSchema tableSchema, Schema mySqlSchema, String errMsg) {
+    private boolean shouldMonitorTable(
+            TableSchema tableSchema, Schema mySqlSchema, Supplier<String> errMsg) {
         if (MySqlActionUtils.schemaCompatible(tableSchema, mySqlSchema)) {
             return true;
         } else if (ignoreIncompatible) {
-            LOG.warn(errMsg + "This table will be ignored.");
+            LOG.warn(errMsg.get() + "This table will be ignored.");
             return false;
         } else {
             throw new IllegalArgumentException(
-                    errMsg
+                    errMsg.get()
                             + "If you want to ignore the incompatible tables, please specify --ignore-incompatible to true.");
         }
     }
 
-    private String incompatibleMessage(
+    private Supplier<String> incompatibleMessage(
             TableSchema paimonSchema, MySqlSchema mySqlSchema, Identifier identifier) {
-        return String.format(
-                "Incompatible schema found.\n"
-                        + "Paimon table is: %s, fields are: %s.\n"
-                        + "MySQL table is: %s.%s, fields are: %s.\n",
-                identifier.getFullName(),
-                paimonSchema.fields(),
-                mySqlSchema.databaseName(),
-                mySqlSchema.tableName(),
-                mySqlSchema.fields());
+        return () ->
+                String.format(
+                        "Incompatible schema found.\n"
+                                + "Paimon table is: %s, fields are: %s.\n"
+                                + "MySQL table is: %s.%s, fields are: %s.\n",
+                        identifier.getFullName(),
+                        paimonSchema.fields(),
+                        mySqlSchema.databaseName(),
+                        mySqlSchema.tableName(),
+                        mySqlSchema.fields());
     }
 
     // ------------------------------------------------------------------------
