@@ -53,6 +53,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.Action.getConfigMap;
@@ -170,7 +171,7 @@ public class MySqlSyncDatabaseAction implements Action {
             validateCaseInsensitive();
         }
 
-        List<MySqlSchema> mySqlSchemas = getMySqlSchemaList(caseSensitive);
+        List<MySqlSchema> mySqlSchemas = getMySqlSchemaList();
         checkArgument(
                 mySqlSchemas.size() > 0,
                 "No tables found in MySQL database "
@@ -187,19 +188,22 @@ public class MySqlSyncDatabaseAction implements Action {
             String paimonTableName = tableNameConverter.convert(mySqlSchema.tableName());
             Identifier identifier = new Identifier(database, paimonTableName);
             FileStoreTable table;
+            Schema fromMySql =
+                    MySqlActionUtils.buildPaimonSchema(
+                            mySqlSchema,
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            tableConfig,
+                            caseSensitive);
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
-                if (shouldMonitorTable(table.schema(), mySqlSchema, identifier)) {
+                Supplier<String> errMsg =
+                        incompatibleMessage(table.schema(), mySqlSchema, identifier);
+                if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {
                     monitoredTables.add(mySqlSchema.tableName());
                 }
             } catch (Catalog.TableNotExistException e) {
-                Schema schema =
-                        MySqlActionUtils.buildPaimonSchema(
-                                mySqlSchema,
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                tableConfig);
-                catalog.createTable(identifier, schema, false);
+                catalog.createTable(identifier, fromMySql, false);
                 table = (FileStoreTable) catalog.getTable(identifier);
                 monitoredTables.add(mySqlSchema.tableName());
             }
@@ -252,7 +256,7 @@ public class MySqlSyncDatabaseAction implements Action {
                         tablePrefix));
     }
 
-    private List<MySqlSchema> getMySqlSchemaList(boolean caseSensitive) throws Exception {
+    private List<MySqlSchema> getMySqlSchemaList() throws Exception {
         String databaseName = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME);
         List<MySqlSchema> mySqlSchemaList = new ArrayList<>();
         try (Connection conn = MySqlActionUtils.getConnection(mySqlConfig)) {
@@ -264,8 +268,7 @@ public class MySqlSyncDatabaseAction implements Action {
                     if (!shouldMonitorTable(tableName)) {
                         continue;
                     }
-                    MySqlSchema mySqlSchema =
-                            new MySqlSchema(metaData, databaseName, tableName, caseSensitive);
+                    MySqlSchema mySqlSchema = new MySqlSchema(metaData, databaseName, tableName);
                     if (mySqlSchema.primaryKeys().size() > 0) {
                         // only tables with primary keys will be considered
                         mySqlSchemaList.add(mySqlSchema);
@@ -289,34 +292,31 @@ public class MySqlSyncDatabaseAction implements Action {
     }
 
     private boolean shouldMonitorTable(
-            TableSchema tableSchema, MySqlSchema mySqlSchema, Identifier identifier) {
+            TableSchema tableSchema, Schema mySqlSchema, Supplier<String> errMsg) {
         if (MySqlActionUtils.schemaCompatible(tableSchema, mySqlSchema)) {
             return true;
         } else if (ignoreIncompatible) {
-            LOG.warn(
-                    "Incompatible schema found. This table will be ignored.\n"
-                            + "Paimon table is: {}, fields are: {}.\n"
-                            + "MySQL table is: {}.{}, fields are: {}.",
-                    identifier.getFullName(),
-                    tableSchema.fields(),
-                    mySqlSchema.databaseName(),
-                    mySqlSchema.tableName(),
-                    mySqlSchema.fields());
+            LOG.warn(errMsg.get() + "This table will be ignored.");
             return false;
         } else {
             throw new IllegalArgumentException(
-                    String.format(
-                            "Incompatible schema found.\n"
-                                    + "Paimon table is: %s, fields are: %s.\n"
-                                    + "MySQL table is: %s.%s, fields are: %s.\n"
-                                    + "If you want to ignore the incompatible tables, "
-                                    + "please specify --ignore-incompatible to true.",
-                            identifier.getFullName(),
-                            tableSchema.fields(),
-                            mySqlSchema.databaseName(),
-                            mySqlSchema.tableName(),
-                            mySqlSchema.fields()));
+                    errMsg.get()
+                            + "If you want to ignore the incompatible tables, please specify --ignore-incompatible to true.");
         }
+    }
+
+    private Supplier<String> incompatibleMessage(
+            TableSchema paimonSchema, MySqlSchema mySqlSchema, Identifier identifier) {
+        return () ->
+                String.format(
+                        "Incompatible schema found.\n"
+                                + "Paimon table is: %s, fields are: %s.\n"
+                                + "MySQL table is: %s.%s, fields are: %s.\n",
+                        identifier.getFullName(),
+                        paimonSchema.fields(),
+                        mySqlSchema.databaseName(),
+                        mySqlSchema.tableName(),
+                        mySqlSchema.fields());
     }
 
     // ------------------------------------------------------------------------
