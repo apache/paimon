@@ -288,7 +288,7 @@ ALTER TABLE my_table DROP COLUMN c1;
 
 ## Changing Column Nullability
 
-The following SQL sets column `coupon_info` to be nullable.
+The following SQL changes nullability of column `coupon_info`.
 
 {{< tabs "change-nullability-example" >}}
 
@@ -296,7 +296,14 @@ The following SQL sets column `coupon_info` to be nullable.
 
 ```sql
 CREATE TABLE my_table (id INT PRIMARY KEY NOT ENFORCED, coupon_info FLOAT NOT NULL);
+
+-- Change column `coupon_info` from NOT NULL to nullable
 ALTER TABLE my_table MODIFY coupon_info FLOAT;
+
+-- Change column `coupon_info` from nullable to NOT NULL
+-- If there are NULL values already, set table option as below to drop those records silently before altering table.
+SET 'table.exec.sink.not-null-enforcer' = 'DROP';
+ALTER TABLE my_table MODIFY coupon_info FLOAT NOT NULL;
 ```
 
 {{< /tab >}}
@@ -311,6 +318,12 @@ ALTER TABLE my_table ALTER COLUMN coupon_info DROP NOT NULL;
 {{< /tab >}}
 
 {{< /tabs >}}
+
+{{< hint info >}}
+
+Changing nullable column to NOT NULL is only supported by Flink currently.
+
+{{< /hint >}}
 
 ## Changing Column Comment
 
