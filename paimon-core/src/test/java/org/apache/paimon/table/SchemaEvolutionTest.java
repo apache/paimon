@@ -18,6 +18,8 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -62,12 +64,14 @@ public class SchemaEvolutionTest {
     @TempDir java.nio.file.Path tempDir;
 
     private Path tablePath;
+    private Identifier identifier;
     private SchemaManager schemaManager;
     private String commitUser;
 
     @BeforeEach
     public void beforeEach() {
         tablePath = new Path(tempDir.toUri());
+        identifier = SchemaManager.fromPath(tablePath.getPath(), true);
         schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         commitUser = UUID.randomUUID().toString();
     }
@@ -153,8 +157,10 @@ public class SchemaEvolutionTest {
                                         Collections.singletonList(
                                                 SchemaChange.addColumn(
                                                         columnName, new FloatType()))))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("The column [%s] exists in the table[%s].", columnName, tablePath);
+                .isInstanceOf(Catalog.ColumnAlreadyExistException.class)
+                .hasMessage(
+                        "Column %s already exists in the %s table.",
+                        columnName, identifier.getFullName());
     }
 
     @Test
@@ -210,9 +216,11 @@ public class SchemaEvolutionTest {
                                 schemaManager.commitChanges(
                                         Collections.singletonList(
                                                 SchemaChange.renameColumn("f0", "f1"))))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(Catalog.ColumnAlreadyExistException.class)
                 .hasMessage(
-                        String.format("The column [%s] exists in the table[%s].", "f1", tablePath));
+                        String.format(
+                                "Column %s already exists in the %s table.",
+                                "f0", identifier.getFullName()));
     }
 
     @Test
@@ -266,11 +274,11 @@ public class SchemaEvolutionTest {
                         () ->
                                 schemaManager.commitChanges(
                                         Collections.singletonList(SchemaChange.dropColumn("f100"))))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(Catalog.ColumnNotExistException.class)
                 .hasMessage(
                         String.format(
-                                "The column [%s] doesn't exist in the table[%s].",
-                                "f100", tablePath));
+                                "Column %s does not exist in the %s table.",
+                                "f100", identifier.getFullName()));
 
         assertThatThrownBy(
                         () ->
