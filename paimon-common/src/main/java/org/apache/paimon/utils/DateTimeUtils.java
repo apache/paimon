@@ -416,8 +416,8 @@ public class DateTimeUtils {
                 fromTemporalAccessor(DEFAULT_TIMESTAMP_FORMATTER.parse(dateStr), precision));
     }
 
-    public static LocalDateTime toLocalDateTime(String dateStr) {
-        return fromTemporalAccessor(DEFAULT_TIMESTAMP_FORMATTER.parse(dateStr), 0);
+    public static LocalDateTime toLocalDateTime(String dateStr, int precision) {
+        return fromTemporalAccessor(DEFAULT_TIMESTAMP_FORMATTER.parse(dateStr), precision);
     }
 
     /**

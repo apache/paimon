@@ -22,33 +22,32 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.DateTimeUtils;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
-/** Compute value for computed column. */
-public interface ColumnValueComputer extends Serializable {
+/** Produce a computation result for computed column. */
+public interface Expression extends Serializable {
 
     List<String> SUPPORTED_EXPRESSION = Collections.singletonList("year");
 
-    /** Return input column name. */
-    String inputName();
+    /** Return name of referenced field. */
+    String fieldReference();
 
     /** Return {@link DataType} of computed value. */
     DataType outputType();
 
-    /** Compute value from given input. Input and output are serialize to string. */
-    String computeValue(String input);
+    /** Compute value from given input. Input and output are serialized to string. */
+    String eval(String input);
 
-    static ColumnValueComputer create(
-            String exprName, Map<String, DataType> typeMapping, String[] args) {
+    static Expression create(
+            String exprName, String fieldReference, DataType fieldType, @Nullable String literal) {
         switch (exprName) {
             case "year":
-                return year(args, typeMapping);
+                return year(fieldReference);
                 // TODO: support more expression
             default:
                 throw new UnsupportedOperationException(
@@ -58,30 +57,24 @@ public interface ColumnValueComputer extends Serializable {
         }
     }
 
-    static ColumnValueComputer year(String[] args, Map<String, DataType> typeMapping) {
-        checkArgument(args.length == 1, "'year' computer only support single argument.");
-        checkArgument(
-                typeMapping.containsKey(args[0]),
-                String.format(
-                        "Input column '%s' is not in given fields: %s.",
-                        args[0], typeMapping.keySet()));
-        return new YearComputer(args[0]);
+    static Expression year(String fieldReference) {
+        return new YearComputer(fieldReference);
     }
 
     /** Compute year from a time input. */
-    final class YearComputer implements ColumnValueComputer {
+    final class YearComputer implements Expression {
 
         private static final long serialVersionUID = 1L;
 
-        private final String inputName;
+        private final String fieldReference;
 
-        private YearComputer(String inputName) {
-            this.inputName = inputName;
+        private YearComputer(String fieldReference) {
+            this.fieldReference = fieldReference;
         }
 
         @Override
-        public String inputName() {
-            return inputName;
+        public String fieldReference() {
+            return fieldReference;
         }
 
         @Override
@@ -90,8 +83,8 @@ public interface ColumnValueComputer extends Serializable {
         }
 
         @Override
-        public String computeValue(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input);
+        public String eval(String input) {
+            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
             return String.valueOf(localDateTime.getYear());
         }
     }

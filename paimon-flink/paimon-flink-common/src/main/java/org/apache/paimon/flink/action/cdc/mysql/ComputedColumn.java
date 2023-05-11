@@ -25,21 +25,35 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.Map;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
- * A Computed column's value is computed from input columns. Only single input is supported
- * currently.
+ * A Computed column's value is computed from input columns. Only expression with at most two inputs
+ * (with referenced field at the first) is supported currently.
  */
 public class ComputedColumn implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
     private final String columnName;
-    private final ColumnValueComputer columnValueComputer;
+    private final Expression expression;
 
     public ComputedColumn(
             String columnName, String exprName, Map<String, DataType> typeMapping, String[] args) {
+        checkArgument(
+                args.length >= 1 && args.length <= 2,
+                "Currently, computed column only supports one or two arguments.");
+        String fieldReference = args[0];
+        String literal = args.length == 2 ? args[1] : null;
+        checkArgument(
+                typeMapping.containsKey(fieldReference),
+                String.format(
+                        "Referenced field '%s' is not in given MySQL fields: %s.",
+                        fieldReference, typeMapping.keySet()));
         this.columnName = columnName;
-        this.columnValueComputer = ColumnValueComputer.create(exprName, typeMapping, args);
+        this.expression =
+                Expression.create(
+                        exprName, fieldReference, typeMapping.get(fieldReference), literal);
     }
 
     public String columnName() {
@@ -47,19 +61,19 @@ public class ComputedColumn implements Serializable {
     }
 
     public DataType columnType() {
-        return columnValueComputer.outputType();
+        return expression.outputType();
     }
 
-    String inputName() {
-        return columnValueComputer.inputName();
+    String fieldReference() {
+        return expression.fieldReference();
     }
 
     /** Compute column's value from given argument. Return null if input is null. */
     @Nullable
-    String computeValue(@Nullable String input) {
+    String eval(@Nullable String input) {
         if (input == null) {
             return null;
         }
-        return columnValueComputer.computeValue(input);
+        return expression.eval(input);
     }
 }

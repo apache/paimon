@@ -347,7 +347,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         for (ComputedColumn computedColumn : computedColumns) {
             resultMap.put(
                     computedColumn.columnName(),
-                    computedColumn.computeValue(resultMap.get(computedColumn.inputName())));
+                    computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
         }
 
         return resultMap;
