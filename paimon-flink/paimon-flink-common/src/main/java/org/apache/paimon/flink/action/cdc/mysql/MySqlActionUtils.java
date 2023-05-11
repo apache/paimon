@@ -300,7 +300,26 @@ class MySqlActionUtils {
             for (int i = 0; i < args.length; i++) {
                 args[i] = args[i].trim();
             }
-            computedColumns.add(new ComputedColumn(columnName, exprName, typeMapping, args));
+            checkArgument(
+                    args.length >= 1 && args.length <= 2,
+                    "Currently, computed column only supports one or two arguments.");
+
+            String fieldReference = args[0];
+            String literal = args.length == 2 ? args[1] : null;
+            checkArgument(
+                    typeMapping.containsKey(fieldReference),
+                    String.format(
+                            "Referenced field '%s' is not in given MySQL fields: %s.",
+                            fieldReference, typeMapping.keySet()));
+
+            computedColumns.add(
+                    new ComputedColumn(
+                            columnName,
+                            Expression.create(
+                                    exprName,
+                                    fieldReference,
+                                    typeMapping.get(fieldReference),
+                                    literal)));
         }
 
         return computedColumns;

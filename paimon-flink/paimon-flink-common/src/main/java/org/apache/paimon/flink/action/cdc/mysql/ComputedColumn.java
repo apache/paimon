@@ -23,9 +23,6 @@ import org.apache.paimon.types.DataType;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
-import java.util.Map;
-
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * A Computed column's value is computed from input columns. Only expression with at most two inputs
@@ -38,22 +35,9 @@ public class ComputedColumn implements Serializable {
     private final String columnName;
     private final Expression expression;
 
-    public ComputedColumn(
-            String columnName, String exprName, Map<String, DataType> typeMapping, String[] args) {
-        checkArgument(
-                args.length >= 1 && args.length <= 2,
-                "Currently, computed column only supports one or two arguments.");
-        String fieldReference = args[0];
-        String literal = args.length == 2 ? args[1] : null;
-        checkArgument(
-                typeMapping.containsKey(fieldReference),
-                String.format(
-                        "Referenced field '%s' is not in given MySQL fields: %s.",
-                        fieldReference, typeMapping.keySet()));
+    public ComputedColumn(String columnName, Expression expression) {
         this.columnName = columnName;
-        this.expression =
-                Expression.create(
-                        exprName, fieldReference, typeMapping.get(fieldReference), literal);
+        this.expression = expression;
     }
 
     public String columnName() {

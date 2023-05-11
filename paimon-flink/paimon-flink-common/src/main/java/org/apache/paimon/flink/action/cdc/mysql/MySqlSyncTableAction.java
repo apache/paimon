@@ -167,33 +167,24 @@ public class MySqlSyncTableAction implements Action {
 
         Identifier identifier = new Identifier(database, table);
         FileStoreTable table;
-        List<ComputedColumn> computedColumns = new ArrayList<>();
+        List<ComputedColumn> computedColumns =
+                MySqlActionUtils.buildComputedColumns(
+                        computedColumnArgs, mySqlSchema.typeMapping());
+        Schema fromMySql =
+                MySqlActionUtils.buildPaimonSchema(
+                        mySqlSchema,
+                        partitionKeys,
+                        primaryKeys,
+                        computedColumns,
+                        tableConfig,
+                        caseSensitive);
         try {
             table = (FileStoreTable) catalog.getTable(identifier);
             checkArgument(
                     computedColumnArgs.isEmpty(),
                     "Cannot add computed column when table already exists.");
-            Schema fromMySql =
-                    MySqlActionUtils.buildPaimonSchema(
-                            mySqlSchema,
-                            partitionKeys,
-                            primaryKeys,
-                            Collections.emptyList(),
-                            tableConfig,
-                            caseSensitive);
             MySqlActionUtils.assertSchemaCompatible(table.schema(), fromMySql);
         } catch (Catalog.TableNotExistException e) {
-            computedColumns.addAll(
-                    MySqlActionUtils.buildComputedColumns(
-                            computedColumnArgs, mySqlSchema.typeMapping()));
-            Schema fromMySql =
-                    MySqlActionUtils.buildPaimonSchema(
-                            mySqlSchema,
-                            partitionKeys,
-                            primaryKeys,
-                            computedColumns,
-                            tableConfig,
-                            caseSensitive);
             catalog.createTable(identifier, fromMySql, false);
             table = (FileStoreTable) catalog.getTable(identifier);
         }
