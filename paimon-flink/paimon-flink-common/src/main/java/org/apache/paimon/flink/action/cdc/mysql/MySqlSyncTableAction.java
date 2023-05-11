@@ -131,7 +131,7 @@ public class MySqlSyncTableAction implements Action {
         }
 
         MySqlSchema mySqlSchema =
-                getMySqlSchemaList(caseSensitive).stream()
+                getMySqlSchemaList().stream()
                         .reduce(MySqlSchema::merge)
                         .orElseThrow(
                                 () ->
@@ -142,14 +142,14 @@ public class MySqlSyncTableAction implements Action {
 
         Identifier identifier = new Identifier(database, table);
         FileStoreTable table;
+        Schema fromMySql =
+                MySqlActionUtils.buildPaimonSchema(
+                        mySqlSchema, partitionKeys, primaryKeys, tableConfig, caseSensitive);
         try {
             table = (FileStoreTable) catalog.getTable(identifier);
-            MySqlActionUtils.assertSchemaCompatible(table.schema(), mySqlSchema);
+            MySqlActionUtils.assertSchemaCompatible(table.schema(), fromMySql);
         } catch (Catalog.TableNotExistException e) {
-            Schema schema =
-                    MySqlActionUtils.buildPaimonSchema(
-                            mySqlSchema, partitionKeys, primaryKeys, tableConfig);
-            catalog.createTable(identifier, schema, false);
+            catalog.createTable(identifier, fromMySql, false);
             table = (FileStoreTable) catalog.getTable(identifier);
         }
 
@@ -199,7 +199,7 @@ public class MySqlSyncTableAction implements Action {
         }
     }
 
-    private List<MySqlSchema> getMySqlSchemaList(boolean caseSensitive) throws Exception {
+    private List<MySqlSchema> getMySqlSchemaList() throws Exception {
         Pattern databasePattern =
                 Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME));
         Pattern tablePattern = Pattern.compile(mySqlConfig.get(MySqlSourceOptions.TABLE_NAME));
@@ -217,11 +217,7 @@ public class MySqlSyncTableAction implements Action {
                                 Matcher tableMatcher = tablePattern.matcher(tableName);
                                 if (tableMatcher.matches()) {
                                     mySqlSchemaList.add(
-                                            new MySqlSchema(
-                                                    metaData,
-                                                    databaseName,
-                                                    tableName,
-                                                    caseSensitive));
+                                            new MySqlSchema(metaData, databaseName, tableName));
                                 }
                             }
                         }
