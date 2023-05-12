@@ -52,6 +52,8 @@ public interface Expression extends Serializable {
                 return year(fieldReference);
             case "substring":
                 return substring(fieldReference, literals);
+            case "truncate":
+                return truncate(fieldReference, fieldType, literals);
                 // TODO: support more expression
             default:
                 throw new UnsupportedOperationException(
@@ -67,10 +69,10 @@ public interface Expression extends Serializable {
 
     static Expression substring(String fieldReference, String... literals) {
         checkArgument(
-                literals.length == 1 || literals.length == 2,
-                String.format(
-                        "'substring' expression supports one or two arguments, but found '%s'.",
-                        literals.length));
+          literals.length == 1 || literals.length == 2,
+          String.format(
+            "'substring' expression supports one or two arguments, but found '%s'.",
+            literals.length));
         int beginInclusive;
         Integer endExclusive;
         try {
@@ -78,21 +80,29 @@ public interface Expression extends Serializable {
             endExclusive = literals.length == 1 ? null : Integer.parseInt(literals[1]);
         } catch (NumberFormatException e) {
             throw new RuntimeException(
-                    String.format(
-                            "The index arguments '%s' contain non integer value.",
-                            Arrays.toString(literals)),
-                    e);
+              String.format(
+                "The index arguments '%s' contain non integer value.",
+                Arrays.toString(literals)),
+              e);
         }
         checkArgument(
-                beginInclusive >= 0,
-                "begin index argument (%s) of 'substring' must be >= 0.",
-                beginInclusive);
+          beginInclusive >= 0,
+          "begin index argument (%s) of 'substring' must be >= 0.",
+          beginInclusive);
         checkArgument(
-                endExclusive == null || endExclusive > beginInclusive,
-                "end index (%s) must be larger than begin index (%s).",
-                endExclusive,
-                beginInclusive);
+          endExclusive == null || endExclusive > beginInclusive,
+          "end index (%s) must be larger than begin index (%s).",
+          endExclusive,
+          beginInclusive);
         return new Substring(fieldReference, beginInclusive, endExclusive);
+    }
+    static Expression truncate(String fieldReference, DataType fieldType, String... literals) {
+        checkArgument(
+          literals.length == 1,
+          String.format(
+            "'substring' expression supports one argument, but found '%s'.",
+            literals.length));
+        return new TruncateComputer(fieldReference, fieldType, literals[0]);
     }
 
     /** Compute year from a time input. */

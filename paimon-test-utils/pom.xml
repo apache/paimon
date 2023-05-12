@@ -68,6 +68,12 @@ under the License.
             <artifactId>testcontainers</artifactId>
             <version>${testcontainers.version}</version>
         </dependency>
+
+        <dependency>
+            <groupId>com.tngtech.java</groupId>
+            <artifactId>junit-dataprovider</artifactId>
+            <version>${junit.dataprovider.version}</version>
+        </dependency>
     </dependencies>
 
     <build>
