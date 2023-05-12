@@ -789,8 +789,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "_year_timestamp=year(_timestamp)",
                         "_substring_date1=substring(_date,2)",
                         "_substring_date2=substring(_timestamp,5,10)",
-                        "_truncate_date=truncate(_date,2)"
-                    );
+                        "_truncate_date=truncate(_date,2)");
 
         MySqlSyncTableAction action =
                 new MySqlSyncTableAction(
@@ -843,7 +842,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 "_year_timestamp",
                                 "_substring_date1",
                                 "_substring_date2",
-                              "_truncate_date"
+                                "_truncate_date"
                             });
             List<String> expected =
                     Arrays.asList(
