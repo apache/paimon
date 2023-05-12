@@ -18,11 +18,37 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
+
+import java.util.Map;
+import java.util.Properties;
+
 /**
  * declaring the name of the key in the parameters of the Hive metastore table, which indicates
  * where the Paimon table is stored.
  */
 public class LocationKeyExtractor {
-    // special at the tbproperties with the name paimon_meta_location.
-    public static final String TBPROPERTIES_LOCATION_KEY = "paimon_meta_location";
+    // special at the tbproperties with the name paimon_location.
+    public static final String TBPROPERTIES_LOCATION_KEY = "paimon_location";
+
+    public static String getLocation(Properties properties) {
+        String storageLocation =
+                properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION);
+        String propertiesLocation = properties.getProperty(TBPROPERTIES_LOCATION_KEY);
+        return propertiesLocation != null ? propertiesLocation : storageLocation;
+    }
+
+    public static String getLocation(Table table) {
+        String sdLocation = table.getSd().getLocation();
+
+        Map<String, String> params = table.getParameters();
+
+        String propertiesLocation = null;
+        if (params != null) {
+            propertiesLocation = params.get(TBPROPERTIES_LOCATION_KEY);
+        }
+
+        return propertiesLocation != null ? propertiesLocation : sdLocation;
+    }
 }

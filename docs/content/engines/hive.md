@@ -202,6 +202,16 @@ To access existing paimon table, you can also register them as external tables i
 CREATE EXTERNAL TABLE external_test_table
 STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
 LOCATION '/path/to/table/store/warehouse/default.db/test_table';
+    
+-- In addition to the way setting location above, you can also place the location setting in TBProperties
+-- to avoid Hive accessing Paimon's location through its own file system when creating tables.
+-- This method is effective in scenarios using Object storage,such as s3.
+
+CREATE EXTERNAL TABLE external_test_table
+STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
+TBLPROPERTIES (
+ 'paimon_location' ='s3://xxxxx/path/to/table/store/warehouse/default.db/test_table'
+);
 
 -- Read records from external_test_table
 

@@ -37,12 +37,10 @@ public class FileStoreTestUtils {
 
     public static final String DATABASE_NAME = "default";
 
-    private static final Identifier TABLE_IDENTIFIER = Identifier.create(DATABASE_NAME, TABLE_NAME);
-
     public static Table createFileStoreTable(
             Options conf, RowType rowType, List<String> partitionKeys, List<String> primaryKeys)
             throws Exception {
-        return createFileStoreTable(conf, rowType, partitionKeys, primaryKeys, null);
+        return createFileStoreTable(conf, rowType, partitionKeys, primaryKeys, null, null, false);
     }
 
     public static Table createFileStoreTable(
@@ -52,18 +50,40 @@ public class FileStoreTestUtils {
             List<String> primaryKeys,
             Identifier identifier)
             throws Exception {
-        Identifier identifierNotNull = identifier == null ? TABLE_IDENTIFIER : identifier;
+        return createFileStoreTable(
+                conf,
+                rowType,
+                partitionKeys,
+                primaryKeys,
+                identifier.getDatabaseName(),
+                identifier.getObjectName(),
+                false);
+    }
+
+    public static Table createFileStoreTable(
+            Options conf,
+            RowType rowType,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            String db,
+            String tbl,
+            boolean ignoreDbExist)
+            throws Exception {
+        String pdb = db == null ? DATABASE_NAME : db;
+        String ptbl = tbl == null ? TABLE_NAME : tbl;
         // create CatalogContext using the options
         CatalogContext catalogContext = CatalogContext.create(conf);
         Catalog catalog = CatalogFactory.createCatalog(catalogContext);
         // create database
-        catalog.createDatabase(DATABASE_NAME, false);
+        catalog.createDatabase(pdb, ignoreDbExist);
+        Identifier tableIdentifier = Identifier.create(pdb, ptbl);
+
         // create table
         catalog.createTable(
-                identifierNotNull,
+                tableIdentifier,
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, conf.toMap(), ""),
                 false);
-        Table table = catalog.getTable(identifierNotNull);
+        Table table = catalog.getTable(tableIdentifier);
         catalog.close();
         return table;
     }
