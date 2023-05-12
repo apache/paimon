@@ -77,7 +77,7 @@ public class PaimonMetaHook implements HiveMetaHook {
         table.getSd().setInputFormat(PaimonInputFormat.class.getCanonicalName());
         table.getSd().setOutputFormat(PaimonOutputFormat.class.getCanonicalName());
 
-        String location = table.getSd().getLocation();
+        String location = LocationKeyExtractor.getLocation(table);
         if (location == null) {
             String warehouse = conf.get(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
             Identifier identifier = Identifier.create(table.getDbName(), table.getTableName());
@@ -86,7 +86,7 @@ public class PaimonMetaHook implements HiveMetaHook {
         }
 
         Path path = new Path(location);
-        CatalogContext context = catalogContext(table);
+        CatalogContext context = catalogContext(table, location);
         FileIO fileIO;
         try {
             fileIO = FileIO.get(path, context);
@@ -127,8 +127,10 @@ public class PaimonMetaHook implements HiveMetaHook {
         }
 
         // we have created a paimon table, so we delete it to roll back;
-        Path path = new Path(table.getSd().getLocation());
-        CatalogContext context = catalogContext(table);
+        String location = LocationKeyExtractor.getLocation(table);
+
+        Path path = new Path(location);
+        CatalogContext context = catalogContext(table, location);
         try {
             FileIO fileIO = FileIO.get(path, context);
             if (fileIO.exists(path)) {
@@ -151,9 +153,9 @@ public class PaimonMetaHook implements HiveMetaHook {
     @Override
     public void commitDropTable(Table table, boolean b) throws MetaException {}
 
-    private CatalogContext catalogContext(Table table) {
+    private CatalogContext catalogContext(Table table, String location) {
         Options options = PaimonJobConf.extractCatalogConfig(conf);
-        options.set(CoreOptions.PATH, table.getSd().getLocation());
+        options.set(CoreOptions.PATH, location);
         table.getParameters().forEach(options::set);
         return CatalogContext.create(options, conf);
     }

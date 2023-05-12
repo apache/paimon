@@ -34,7 +34,7 @@ import java.util.Map;
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
 
-    protected static final String DB_SUFFIX = ".db";
+    public static final String DB_SUFFIX = ".db";
 
     protected static final String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
 

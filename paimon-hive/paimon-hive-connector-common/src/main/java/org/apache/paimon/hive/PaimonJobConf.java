@@ -23,7 +23,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.mapred.JobConf;
 
 import java.util.HashMap;
@@ -56,16 +55,12 @@ public class PaimonJobConf {
         map.put(
                 INTERNAL_CATALOG_CONFIG,
                 JsonSerdeUtil.toJson(extractCatalogConfig(configuration).toMap()));
-        map.put(
-                INTERNAL_LOCATION,
-                properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION));
+        map.put(INTERNAL_LOCATION, LocationKeyExtractor.getLocation(properties));
     }
 
     public static void configureOutputJobProperties(
             Configuration configuration, Properties properties, Map<String, String> map) {
-        map.put(
-                INTERNAL_LOCATION,
-                properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION));
+        map.put(INTERNAL_LOCATION, LocationKeyExtractor.getLocation(properties));
         map.put(MAPRED_OUTPUT_COMMITTER, PaimonOutputCommitter.class.getName());
         map.put(PAIMON_WRITE, Boolean.TRUE.toString());
         properties.put(PAIMON_WRITE, Boolean.TRUE.toString());

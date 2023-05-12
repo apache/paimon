@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.schema.SchemaManager;
 
 /** Utils for {@link Catalog}. */
 public class CatalogUtils {
@@ -40,18 +41,18 @@ public class CatalogUtils {
     }
 
     public static String database(Path path) {
-        return Identifier.fromPath(path).getDatabaseName();
+        return SchemaManager.fromPath(path.getPath(), false).getDatabaseName();
     }
 
     public static String database(String path) {
-        return Identifier.fromPath(path).getDatabaseName();
+        return SchemaManager.fromPath(path, false).getDatabaseName();
     }
 
     public static String table(Path path) {
-        return Identifier.fromPath(path).getObjectName();
+        return SchemaManager.fromPath(path.getPath(), false).getObjectName();
     }
 
     public static String table(String path) {
-        return Identifier.fromPath(path).getObjectName();
+        return SchemaManager.fromPath(path, false).getObjectName();
     }
 }

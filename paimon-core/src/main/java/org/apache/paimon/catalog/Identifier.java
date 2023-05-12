@@ -19,13 +19,11 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Public;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.Serializable;
 import java.util.Objects;
 
-import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -37,6 +35,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class Identifier implements Serializable {
 
     private static final long serialVersionUID = 1L;
+
+    public static final String UNKNOWN_DATABASE = "unknown";
 
     private final String database;
     private final String table;
@@ -55,7 +55,9 @@ public class Identifier implements Serializable {
     }
 
     public String getFullName() {
-        return String.format("%s.%s", database, table);
+        return UNKNOWN_DATABASE.equals(this.database)
+                ? table
+                : String.format("%s.%s", database, table);
     }
 
     public String getEscapedFullName() {
@@ -84,25 +86,6 @@ public class Identifier implements Serializable {
         }
 
         return new Identifier(paths[0], paths[1]);
-    }
-
-    public static Identifier fromPath(Path tablePath) {
-        return fromPath(tablePath.getPath());
-    }
-
-    public static Identifier fromPath(String tablePath) {
-        String[] paths = tablePath.split("/");
-        if (paths.length < 2) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Path '%s' is not a legacy path, please use catalog table path instead: 'warehouse_path/your_database.db/your_table'.",
-                            tablePath));
-        }
-
-        String database = paths[paths.length - 2];
-        database = database.substring(0, database.length() - DB_SUFFIX.length());
-
-        return new Identifier(database, paths[paths.length - 1]);
     }
 
     @Override

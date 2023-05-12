@@ -34,7 +34,6 @@ import org.apache.paimon.shade.guava30.com.google.common.base.Splitter;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.serde.serdeConstants;
 import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
@@ -89,7 +88,7 @@ public class HiveSchema {
 
     /** Extract {@link HiveSchema} from Hive serde properties. */
     public static HiveSchema extract(@Nullable Configuration configuration, Properties properties) {
-        String location = properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION);
+        String location = LocationKeyExtractor.getLocation(properties);
         Optional<TableSchema> tableSchema = getExistsSchema(configuration, location);
         String columnProperty = properties.getProperty(serdeConstants.LIST_COLUMNS);
         // Create hive external table with empty ddl

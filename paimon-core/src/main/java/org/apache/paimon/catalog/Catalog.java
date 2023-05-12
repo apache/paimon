@@ -288,4 +288,58 @@ public interface Catalog extends AutoCloseable {
             return identifier;
         }
     }
+
+    /** Exception for trying to alter a column that already exists. */
+    class ColumnAlreadyExistException extends Exception {
+
+        private static final String MSG = "Column %s already exists in the %s table.";
+
+        private final Identifier identifier;
+        private final String column;
+
+        public ColumnAlreadyExistException(Identifier identifier, String column) {
+            this(identifier, column, null);
+        }
+
+        public ColumnAlreadyExistException(Identifier identifier, String column, Throwable cause) {
+            super(String.format(MSG, column, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.column = column;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public String column() {
+            return column;
+        }
+    }
+
+    /** Exception for trying to operate on a column that doesn't exist. */
+    class ColumnNotExistException extends Exception {
+
+        private static final String MSG = "Column %s does not exist in the %s table.";
+
+        private final Identifier identifier;
+        private final String column;
+
+        public ColumnNotExistException(Identifier identifier, String column) {
+            this(identifier, column, null);
+        }
+
+        public ColumnNotExistException(Identifier identifier, String column, Throwable cause) {
+            super(String.format(MSG, column, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.column = column;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public String column() {
+            return column;
+        }
+    }
 }
