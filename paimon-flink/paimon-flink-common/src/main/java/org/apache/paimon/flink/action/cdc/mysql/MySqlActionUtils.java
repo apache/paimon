@@ -41,6 +41,7 @@ import org.apache.kafka.connect.json.JsonConverterConfig;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -297,15 +298,11 @@ class MySqlActionUtils {
 
             String exprName = expression.substring(0, left);
             String[] args = expression.substring(left + 1, right).split(",");
-            for (int i = 0; i < args.length; i++) {
-                args[i] = args[i].trim();
-            }
-            checkArgument(
-                    args.length >= 1 && args.length <= 2,
-                    "Currently, computed column only supports one or two arguments.");
+            checkArgument(args.length >= 1, "Computed column need at least one argument.");
 
-            String fieldReference = args[0];
-            String literal = args.length == 2 ? args[1] : null;
+            String fieldReference = args[0].trim();
+            String[] literals =
+                    Arrays.stream(args).skip(1).map(String::trim).toArray(String[]::new);
             checkArgument(
                     typeMapping.containsKey(fieldReference),
                     String.format(
@@ -319,7 +316,7 @@ class MySqlActionUtils {
                                     exprName,
                                     fieldReference,
                                     typeMapping.get(fieldReference),
-                                    literal)));
+                                    literals)));
         }
 
         return computedColumns;

@@ -22,12 +22,12 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.DateTimeUtils;
 
-import javax.annotation.Nullable;
-
 import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Produce a computation result for computed column. */
 public interface Expression extends Serializable {
@@ -44,10 +44,12 @@ public interface Expression extends Serializable {
     String eval(String input);
 
     static Expression create(
-            String exprName, String fieldReference, DataType fieldType, @Nullable String literal) {
+            String exprName, String fieldReference, DataType fieldType, String... literals) {
         switch (exprName) {
             case "year":
                 return year(fieldReference);
+            case "substring":
+                return substring(fieldReference, literals);
                 // TODO: support more expression
             default:
                 throw new UnsupportedOperationException(
@@ -61,20 +63,54 @@ public interface Expression extends Serializable {
         return new YearComputer(fieldReference);
     }
 
-    /** Compute year from a time input. */
-    final class YearComputer implements Expression {
+    static Expression substring(String fieldReference, String... literals) {
+        checkArgument(
+                literals.length == 2,
+                "'substring' expression needs begin index and end index arguments.");
+        int beginInclusive, endExclusive;
+        try {
+            beginInclusive = Integer.parseInt(literals[0]);
+            endExclusive = Integer.parseInt(literals[1]);
+        } catch (NumberFormatException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "begin index (%s) or end index (%s) is not an integer.",
+                            literals[0], literals[1]),
+                    e);
+        }
+        checkArgument(
+                beginInclusive >= 0,
+                "begin index argument (%s) of 'substring' must be >= 0.",
+                beginInclusive);
+        checkArgument(
+                endExclusive > beginInclusive,
+                "end index (%s) must be larger than begin index (%s).",
+                endExclusive,
+                beginInclusive);
+        return new Substring(fieldReference, beginInclusive, endExclusive);
+    }
 
-        private static final long serialVersionUID = 1L;
-
+    /** Expression that only reference single field. */
+    abstract class SingleFieldReferenceExpression implements Expression {
         private final String fieldReference;
 
-        private YearComputer(String fieldReference) {
+        private SingleFieldReferenceExpression(String fieldReference) {
             this.fieldReference = fieldReference;
         }
 
         @Override
         public String fieldReference() {
             return fieldReference;
+        }
+    }
+
+    /** Compute year from a time input. */
+    final class YearComputer extends SingleFieldReferenceExpression {
+
+        private static final long serialVersionUID = 1L;
+
+        private YearComputer(String fieldReference) {
+            super(fieldReference);
         }
 
         @Override
@@ -86,6 +122,37 @@ public interface Expression extends Serializable {
         public String eval(String input) {
             LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
             return String.valueOf(localDateTime.getYear());
+        }
+    }
+
+    /** Get substring using {@link String#substring(int, int)}. */
+    final class Substring extends SingleFieldReferenceExpression {
+
+        private static final long serialVersionUID = 1L;
+
+        private final int beginInclusive;
+        private final int endExclusive;
+
+        private Substring(String fieldReference, int beginInclusive, int endExclusive) {
+            super(fieldReference);
+            this.beginInclusive = beginInclusive;
+            this.endExclusive = endExclusive;
+        }
+
+        @Override
+        public DataType outputType() {
+            return DataTypes.VARCHAR(endExclusive - beginInclusive);
+        }
+
+        @Override
+        public String eval(String input) {
+            if (endExclusive > input.length()) {
+                throw new RuntimeException(
+                        String.format(
+                                "Cannot get substring from '%s' because the end index '%s' is out of range.",
+                                input, endExclusive));
+            }
+            return input.substring(beginInclusive, endExclusive);
         }
     }
 }

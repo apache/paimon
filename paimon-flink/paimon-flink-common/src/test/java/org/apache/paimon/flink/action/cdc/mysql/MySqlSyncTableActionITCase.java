@@ -786,7 +786,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 Arrays.asList(
                         "_year_date=year(_date)",
                         "_year_datetime=year(_datetime)",
-                        "_year_timestamp=year(_timestamp)");
+                        "_year_timestamp=year(_timestamp)",
+                        "_substring_date=substring(_timestamp,5,10)");
 
         MySqlSyncTableAction action =
                 new MySqlSyncTableAction(
@@ -825,7 +826,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 DataTypes.TIMESTAMP(0),
                                 DataTypes.INT().notNull(),
                                 DataTypes.INT(),
-                                DataTypes.INT()
+                                DataTypes.INT(),
+                                DataTypes.VARCHAR(5)
                             },
                             new String[] {
                                 "pk",
@@ -834,12 +836,13 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 "_timestamp",
                                 "_year_date",
                                 "_year_datetime",
-                                "_year_timestamp"
+                                "_year_timestamp",
+                                "_substring_date"
                             });
             List<String> expected =
                     Arrays.asList(
-                            "+I[1, 19439, 2022-01-01T14:30, 2021-09-15T15:00:10, 2023, 2022, 2021]",
-                            "+I[2, 19439, NULL, NULL, 2023, NULL, NULL]");
+                            "+I[1, 19439, 2022-01-01T14:30, 2021-09-15T15:00:10, 2023, 2022, 2021, 09-15]",
+                            "+I[2, 19439, NULL, NULL, 2023, NULL, NULL, NULL]");
             waitForResult(expected, table, rowType, Arrays.asList("pk", "_year_date"));
         }
     }
