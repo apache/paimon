@@ -21,6 +21,8 @@ package org.apache.paimon.schema;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.casting.CastExecutors;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
@@ -58,6 +60,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
+import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -187,7 +191,9 @@ public class SchemaManager implements Serializable {
         while (true) {
             TableSchema schema =
                     latest().orElseThrow(
-                                    () -> new RuntimeException("Table not exists: " + tableRoot));
+                                    () ->
+                                            new Catalog.TableNotExistException(
+                                                    fromPath(tableRoot.getPath(), true)));
             Map<String, String> newOptions = new HashMap<>(schema.options());
             List<DataField> newFields = new ArrayList<>(schema.fields());
             AtomicInteger highestFieldId = new AtomicInteger(schema.highestFieldId());
@@ -204,10 +210,8 @@ public class SchemaManager implements Serializable {
                     AddColumn addColumn = (AddColumn) change;
                     SchemaChange.Move move = addColumn.move();
                     if (newFields.stream().anyMatch(f -> f.name().equals(addColumn.fieldName()))) {
-                        throw new IllegalArgumentException(
-                                String.format(
-                                        "The column [%s] exists in the table[%s].",
-                                        addColumn.fieldName(), tableRoot));
+                        throw new Catalog.ColumnAlreadyExistException(
+                                fromPath(tableRoot.getPath(), true), addColumn.fieldName());
                     }
                     Preconditions.checkArgument(
                             addColumn.dataType().isNullable(),
@@ -241,10 +245,8 @@ public class SchemaManager implements Serializable {
                     RenameColumn rename = (RenameColumn) change;
                     validateNotPrimaryAndPartitionKey(schema, rename.fieldName());
                     if (newFields.stream().anyMatch(f -> f.name().equals(rename.newName()))) {
-                        throw new IllegalArgumentException(
-                                String.format(
-                                        "The column [%s] exists in the table[%s].",
-                                        rename.newName(), tableRoot));
+                        throw new Catalog.ColumnAlreadyExistException(
+                                fromPath(tableRoot.getPath(), true), rename.fieldName());
                     }
 
                     updateNestedColumn(
@@ -262,10 +264,8 @@ public class SchemaManager implements Serializable {
                     validateNotPrimaryAndPartitionKey(schema, drop.fieldName());
                     if (!newFields.removeIf(
                             f -> f.name().equals(((DropColumn) change).fieldName()))) {
-                        throw new IllegalArgumentException(
-                                String.format(
-                                        "The column [%s] doesn't exist in the table[%s].",
-                                        drop.fieldName(), tableRoot));
+                        throw new Catalog.ColumnNotExistException(
+                                fromPath(tableRoot.getPath(), true), drop.fieldName());
                     }
                     if (newFields.isEmpty()) {
                         throw new IllegalArgumentException("Cannot drop all fields in table");
@@ -276,7 +276,7 @@ public class SchemaManager implements Serializable {
                         throw new IllegalArgumentException(
                                 String.format(
                                         "Cannot update partition column [%s] type in the table[%s].",
-                                        update.fieldName(), tableRoot));
+                                        update.fieldName(), tableRoot.getName()));
                     }
                     updateColumn(
                             newFields,
@@ -403,7 +403,8 @@ public class SchemaManager implements Serializable {
             List<DataField> newFields,
             String[] updateFieldNames,
             int index,
-            Function<DataField, DataField> updateFunc) {
+            Function<DataField, DataField> updateFunc)
+            throws Catalog.ColumnNotExistException {
         boolean found = false;
         for (int i = 0; i < newFields.size(); i++) {
             DataField field = newFields.get(i);
@@ -429,14 +430,16 @@ public class SchemaManager implements Serializable {
             }
         }
         if (!found) {
-            throw new RuntimeException("Can not find column: " + Arrays.asList(updateFieldNames));
+            throw new Catalog.ColumnNotExistException(
+                    fromPath(tableRoot.getPath(), true), Arrays.toString(updateFieldNames));
         }
     }
 
     private void updateColumn(
             List<DataField> newFields,
             String updateFieldName,
-            Function<DataField, DataField> updateFunc) {
+            Function<DataField, DataField> updateFunc)
+            throws Catalog.ColumnNotExistException {
         updateNestedColumn(newFields, new String[] {updateFieldName}, 0, updateFunc);
     }
 
@@ -490,5 +493,32 @@ public class SchemaManager implements Serializable {
         if (CoreOptions.PATH.key().equalsIgnoreCase(key)) {
             throw new UnsupportedOperationException("Change path is not supported yet.");
         }
+    }
+
+    public static Identifier fromPath(String tablePath, boolean ignoreIfUnknownDatabase) {
+        String[] paths = tablePath.split("/");
+        if (paths.length < 2) {
+            if (!ignoreIfUnknownDatabase) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Path '%s' is not a legacy path, please use catalog table path instead: 'warehouse_path/your_database.db/your_table'.",
+                                tablePath));
+            }
+            return new Identifier(UNKNOWN_DATABASE, paths[0]);
+        }
+
+        String database = paths[paths.length - 2];
+        int index = database.lastIndexOf(DB_SUFFIX);
+        if (index == -1) {
+            if (!ignoreIfUnknownDatabase) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Path '%s' is not a legacy path, please use catalog table path instead: 'warehouse_path/your_database.db/your_table'.",
+                                tablePath));
+            }
+            return new Identifier(UNKNOWN_DATABASE, paths[paths.length - 1]);
+        }
+        database = database.substring(0, index);
+        return new Identifier(database, paths[paths.length - 1]);
     }
 }
