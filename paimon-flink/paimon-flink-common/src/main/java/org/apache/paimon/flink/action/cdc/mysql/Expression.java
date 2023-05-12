@@ -209,7 +209,7 @@ public interface Expression extends Serializable {
 
         @Override
         public DataType outputType() {
-            return DataTypes.STRING();
+            return fieldType;
         }
 
         @Override
