@@ -179,6 +179,7 @@ public interface Expression extends Serializable {
         }
     }
 
+    /** Truncate numeric/decimal/string value. */
     final class TruncateComputer implements Expression {
         private static final long serialVersionUID = 1L;
 
