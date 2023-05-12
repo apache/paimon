@@ -298,7 +298,7 @@ class MySqlActionUtils {
 
             String exprName = expression.substring(0, left);
             String[] args = expression.substring(left + 1, right).split(",");
-            checkArgument(args.length >= 1, "Computed column need at least one argument.");
+            checkArgument(args.length >= 1, "Computed column needs at least one argument.");
 
             String fieldReference = args[0].trim();
             String[] literals =
