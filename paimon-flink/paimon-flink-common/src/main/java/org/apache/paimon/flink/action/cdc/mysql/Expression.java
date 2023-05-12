@@ -103,7 +103,7 @@ public interface Expression extends Serializable {
         checkArgument(
                 literals.length == 1,
                 String.format(
-                        "'substring' expression supports one argument, but found '%s'.",
+                        "'truncate' expression supports one argument, but found '%s'.",
                         literals.length));
         return new TruncateComputer(fieldReference, fieldType, literals[0]);
     }
