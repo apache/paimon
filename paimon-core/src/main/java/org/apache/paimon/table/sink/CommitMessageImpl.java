@@ -23,14 +23,16 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.io.NewFilesIncrement;
+import org.apache.paimon.utils.SerializationUtils;
+
+import com.esotericsoftware.kryo.Kryo;
+import com.esotericsoftware.kryo.io.Input;
+import com.esotericsoftware.kryo.io.Output;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.Objects;
-
-import static org.apache.paimon.utils.SerializationUtils.deserializedBytes;
-import static org.apache.paimon.utils.SerializationUtils.serializeBytes;
 
 /** File committable for sink. */
 public class CommitMessageImpl implements CommitMessage {
@@ -82,13 +84,14 @@ public class CommitMessageImpl implements CommitMessage {
         out.defaultWriteObject();
         CommitMessageSerializer serializer = CACHE.get();
         out.writeInt(serializer.getVersion());
-        serializeBytes(new DataOutputViewStreamWrapper(out), serializer.serialize(this));
+        SerializationUtils.serializeBytes(
+                new DataOutputViewStreamWrapper(out), serializer.serialize(this));
     }
 
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
         in.defaultReadObject();
         int version = in.readInt();
-        byte[] bytes = deserializedBytes(new DataInputViewStreamWrapper(in));
+        byte[] bytes = SerializationUtils.deserializedBytes(new DataInputViewStreamWrapper(in));
         CommitMessageImpl message = (CommitMessageImpl) CACHE.get().deserialize(version, bytes);
         this.partition = message.partition;
         this.bucket = message.bucket;
@@ -126,5 +129,31 @@ public class CommitMessageImpl implements CommitMessage {
                         + "newFilesIncrement = %s, "
                         + "compactIncrement = %s}",
                 partition, bucket, newFilesIncrement, compactIncrement);
+    }
+
+    @Override
+    public void write(Kryo kryo, Output output) {
+        CommitMessageSerializer serializer = CACHE.get();
+        output.writeInt(serializer.getVersion());
+        try {
+            SerializationUtils.serializeBytes(output, serializer.serialize(this));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public void read(Kryo kryo, Input input) {
+        try {
+            int version = input.readInt();
+            byte[] bytes = SerializationUtils.deserializeBytes(input);
+            CommitMessageImpl message = (CommitMessageImpl) CACHE.get().deserialize(version, bytes);
+            this.partition = message.partition;
+            this.bucket = message.bucket;
+            this.newFilesIncrement = message.newFilesIncrement;
+            this.compactIncrement = message.compactIncrement;
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 }

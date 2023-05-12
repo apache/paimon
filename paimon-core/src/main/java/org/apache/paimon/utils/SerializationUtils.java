@@ -25,6 +25,9 @@ import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 
+import com.esotericsoftware.kryo.io.Input;
+import com.esotericsoftware.kryo.io.Output;
+
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -56,6 +59,16 @@ public class SerializationUtils {
             toRead -= ret;
         }
         return buf;
+    }
+
+    public static void serializeBytes(Output output, byte[] bytes) {
+        output.writeInt(bytes.length);
+        output.write(bytes);
+    }
+
+    public static byte[] deserializeBytes(Input input) {
+        int len = input.readInt();
+        return input.readBytes(len);
     }
 
     /** Create a bytes type VarBinaryType(VarBinaryType.MAX_LENGTH). */

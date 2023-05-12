@@ -21,6 +21,8 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
 
+import com.esotericsoftware.kryo.KryoSerializable;
+
 import java.io.Serializable;
 
 /**
@@ -29,7 +31,7 @@ import java.io.Serializable;
  * @since 0.4.0
  */
 @Public
-public interface CommitMessage extends Serializable {
+public interface CommitMessage extends Serializable, KryoSerializable {
 
     /** Partition of this commit message. */
     BinaryRow partition();
