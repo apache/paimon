@@ -37,6 +37,7 @@ import org.junit.runner.RunWith;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+/** Tests for {@link TruncateComputer}. */
 @RunWith(DataProviderRunner.class)
 public class TruncateComputerTest {
 

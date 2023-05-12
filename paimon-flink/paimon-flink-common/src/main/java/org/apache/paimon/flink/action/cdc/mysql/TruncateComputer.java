@@ -26,6 +26,7 @@ import java.math.BigInteger;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
+/** TruncateComputer is used to truncate a numeric/decimal/string value to a specified width. */
 public class TruncateComputer implements Expression {
     private static final long serialVersionUID = 1L;
 
