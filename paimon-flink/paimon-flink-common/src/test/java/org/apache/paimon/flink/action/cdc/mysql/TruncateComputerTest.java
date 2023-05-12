@@ -37,7 +37,7 @@ import org.junit.runner.RunWith;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link TruncateComputer}. */
+/** Tests for {@link Expression.TruncateComputer}. */
 @RunWith(DataProviderRunner.class)
 public class TruncateComputerTest {
 
@@ -116,7 +116,8 @@ public class TruncateComputerTest {
             DataType dataType,
             String literal,
             String expected) {
-        TruncateComputer truncateComputer = new TruncateComputer(fieldReference, dataType, literal);
+        Expression.TruncateComputer truncateComputer =
+                new Expression.TruncateComputer(fieldReference, dataType, literal);
         assertThat(truncateComputer.eval(value)).isEqualTo(expected);
     }
 
@@ -124,7 +125,8 @@ public class TruncateComputerTest {
     public void testTruncateWithException() {
         String fieldReference = "computedColumnField";
         DataType dataType = new CharType(true, 5);
-        TruncateComputer truncateComputer = new TruncateComputer(fieldReference, dataType, "7");
+        Expression.TruncateComputer truncateComputer =
+                new Expression.TruncateComputer(fieldReference, dataType, "7");
 
         assertThatThrownBy(() -> truncateComputer.eval("abcde"))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -132,8 +134,8 @@ public class TruncateComputerTest {
                         "Invalid width value for truncate function: 7, expected less than or equal to 5.");
 
         DataType notSupportedDataType = new BooleanType();
-        TruncateComputer notSupportTruncateComputer =
-                new TruncateComputer(fieldReference, notSupportedDataType, "7");
+        Expression.TruncateComputer notSupportTruncateComputer =
+                new Expression.TruncateComputer(fieldReference, notSupportedDataType, "7");
         assertThatThrownBy(() -> notSupportTruncateComputer.eval("true"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unsupported field type for truncate function: BOOLEAN");
