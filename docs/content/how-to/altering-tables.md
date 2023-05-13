@@ -412,14 +412,17 @@ ALTER TABLE my_table ALTER COLUMN col_a SET DATA TYPE DOUBLE;
 
 ## Adding watermark
 
-The following SQL adds a watermark with strategy `ts - INTERVAL '1' HOUR` on column `ts` which is marked as event time attribute of table `my_table`.
+The following SQL adds a computed column `ts` from existing column `log_ts`, and a watermark with strategy `ts - INTERVAL '1' HOUR` on column `ts` which is marked as event time attribute of table `my_table`.
 
 {{< tabs "add-watermark" >}}
 
 {{< tab "Flink" >}}
 
 ```sql
-ALTER TABLE my_table ADD WATERMARK FOR ts AS ts - INTERVAL '1' HOUR
+ALTER TABLE my_table ADD (
+    ts AS TO_TIMESTAMP(log_ts) AFTER log_ts,
+    WATERMARK FOR ts AS ts - INTERVAL '1' HOUR
+);
 ```
 
 {{< /tab >}}
