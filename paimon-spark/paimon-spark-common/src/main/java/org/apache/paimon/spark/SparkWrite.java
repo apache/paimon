@@ -24,6 +24,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.InnerTableCommit;
 
 import org.apache.spark.api.java.function.Function;
@@ -32,14 +33,19 @@ import org.apache.spark.sql.Row;
 import org.apache.spark.sql.connector.write.V1Write;
 import org.apache.spark.sql.sources.InsertableRelation;
 
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /** Spark {@link V1Write}, it is required to use v1 write for grouping by bucket. */
 public class SparkWrite implements V1Write {
 
     private final Table table;
     private final Lock.Factory lockFactory;
+
+    private final CommitMessageSerializer serializer = new CommitMessageSerializer();
 
     public SparkWrite(Table table, Lock.Factory lockFactory) {
         this.table = table;
@@ -55,11 +61,11 @@ public class SparkWrite implements V1Write {
 
             BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
             List<CommitMessage> committables =
-                    data.toJavaRDD()
-                            .groupBy(new ComputeBucket(writeBuilder))
-                            .mapValues(new WriteRecords(writeBuilder))
-                            .values()
-                            .reduce(new ListConcat<>());
+                    data.toJavaRDD().groupBy(new ComputeBucket(writeBuilder))
+                            .mapValues(new WriteRecords(writeBuilder)).values()
+                            .mapPartitions(SparkWrite::serializeCommitMessages).collect().stream()
+                            .map(this::deserializeCommitMessage)
+                            .collect(Collectors.toList());
             try (BatchTableCommit tableCommit =
                     ((InnerTableCommit) writeBuilder.newCommit()).withLock(lockFactory.create())) {
                 tableCommit.commit(committables);
@@ -67,6 +73,30 @@ public class SparkWrite implements V1Write {
                 throw new RuntimeException(e);
             }
         };
+    }
+
+    private static Iterator<byte[]> serializeCommitMessages(Iterator<List<CommitMessage>> iters) {
+        List<byte[]> serialized = new ArrayList<>();
+        CommitMessageSerializer innerSerializer = new CommitMessageSerializer();
+        while (iters.hasNext()) {
+            List<CommitMessage> commitMessages = iters.next();
+            for (CommitMessage commitMessage : commitMessages) {
+                try {
+                    serialized.add(innerSerializer.serialize(commitMessage));
+                } catch (IOException e) {
+                    throw new RuntimeException("Failed to serialize CommitMessage's object", e);
+                }
+            }
+        }
+        return serialized.iterator();
+    }
+
+    private CommitMessage deserializeCommitMessage(byte[] bytes) {
+        try {
+            return serializer.deserialize(serializer.getVersion(), bytes);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to deserialize CommitMessage's object", e);
+        }
     }
 
     private static class ComputeBucket implements Function<Row, Integer> {
