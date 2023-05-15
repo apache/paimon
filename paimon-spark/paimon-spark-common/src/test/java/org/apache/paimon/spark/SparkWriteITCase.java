@@ -26,6 +26,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Comparator;
@@ -33,13 +34,14 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** ITCase for spark reader. */
+/** ITCase for spark writer. */
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class SparkWriteITCase {
 
-    private static SparkSession spark = null;
+    protected SparkSession spark = null;
 
     @BeforeAll
-    public static void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
+    public void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
         Path warehousePath = new Path("file:" + tempDir.toString());
         spark = SparkSession.builder().master("local[2]").getOrCreate();
         spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
@@ -49,7 +51,7 @@ public class SparkWriteITCase {
     }
 
     @AfterAll
-    public static void stopMetastoreAndSpark() {
+    public void stopMetastoreAndSpark() {
         if (spark != null) {
             spark.stop();
             spark = null;
