@@ -148,7 +148,7 @@ and the job's latency keeps increasing. To improve the data freshness, users can
   FROM verified_orders
   WHERE dt IN ('2022-06-20', '2022-06-21', '2022-06-22');
   ```
-- After overwrite job finished, switch back to streaming mode. And now, the parallelism can be increased alongside with bucket number to restore the streaming job from the savepoint 
+- After overwrite job has finished, switch back to streaming mode. And now, the parallelism can be increased alongside with bucket number to restore the streaming job from the savepoint 
 ( see [Start a SQL Job from a savepoint](https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/sqlclient/#start-a-sql-job-from-a-savepoint) )
   ```sql
   SET 'execution.runtime-mode' = 'streaming';
