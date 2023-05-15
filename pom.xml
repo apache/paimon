@@ -436,6 +436,8 @@ under the License.
                         <test.flink.main.version>${test.flink.main.version}</test.flink.main.version>
                         <test.flink.version>${test.flink.version}</test.flink.version>
                         <jacoco-agent.destfile>${project.build.directory}/jacoco.exec</jacoco-agent.destfile>
+                        <!-- for junit5 -->
+                        <junit.jupiter.extensions.autodetection.enabled>true</junit.jupiter.extensions.autodetection.enabled>
                     </systemPropertyVariables>
                     <argLine>-Xms256m -Xmx2048m -Dmvn.forkNumber=${surefire.forkNumber} -XX:+UseG1GC</argLine>
                 </configuration>
