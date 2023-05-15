@@ -428,4 +428,65 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'sequence.field' is not supported yet.");
     }
+
+    @Test
+    public void testAlterTableSchema() {
+        sql("CREATE TABLE T (a STRING, b STRING COMMENT 'from column b')");
+        List<String> result =
+                sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[a, STRING, true, null, null, null, null]",
+                        "+I[b, STRING, true, null, null, null, from column b]");
+
+        // add columns at different positions
+        sql("ALTER TABLE T ADD (c INT AFTER b)");
+        result = sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[a, STRING, true, null, null, null, null]",
+                        "+I[b, STRING, true, null, null, null, from column b]",
+                        "+I[c, INT, true, null, null, null, null]");
+
+        sql("ALTER TABLE T ADD (d INT FIRST)");
+        result = sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[d, INT, true, null, null, null, null]",
+                        "+I[a, STRING, true, null, null, null, null]",
+                        "+I[b, STRING, true, null, null, null, from column b]",
+                        "+I[c, INT, true, null, null, null, null]");
+
+        // drop previously added column
+        sql("ALTER TABLE T DROP d");
+        result = sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[a, STRING, true, null, null, null, null]",
+                        "+I[b, STRING, true, null, null, null, from column b]",
+                        "+I[c, INT, true, null, null, null, null]");
+
+        // change column type
+        sql("ALTER TABLE T MODIFY (c BIGINT)");
+        result = sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[a, STRING, true, null, null, null, null]",
+                        "+I[b, STRING, true, null, null, null, from column b]",
+                        "+I[c, BIGINT, true, null, null, null, null]");
+
+        // invalid type change: BIGINT to INT
+        assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY (c INT)"))
+                .getRootCause()
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage(
+                        "Column type c[BIGINT] cannot be converted to INT without loosing information.");
+
+        // invalid type change: BIGINT to STRING
+        assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY (c STRING)"))
+                .getRootCause()
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage(
+                        "Column type c[BIGINT] cannot be converted to STRING without loosing information.");
+    }
 }
