@@ -126,7 +126,6 @@ under the License.
         <avro.version>1.11.1</avro.version>
         <kafka.version>3.2.3</kafka.version>
         <jacoco.version>0.8.8</jacoco.version>
-        <junit.dataprovider.version>1.13.1</junit.dataprovider.version>
     </properties>
 
     <dependencies>

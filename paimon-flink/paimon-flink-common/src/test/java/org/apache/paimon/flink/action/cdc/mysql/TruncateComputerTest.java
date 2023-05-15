@@ -28,21 +28,15 @@ import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
 
-import com.tngtech.java.junit.dataprovider.DataProvider;
-import com.tngtech.java.junit.dataprovider.DataProviderRunner;
-import com.tngtech.java.junit.dataprovider.UseDataProvider;
-import org.junit.Test;
-import org.junit.runner.RunWith;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link Expression.TruncateComputer}. */
-@RunWith(DataProviderRunner.class)
 public class TruncateComputerTest {
 
-    @DataProvider
-    public static Object[][] provideTestGetTruncateCaseData() {
+    private static Object[][] prepareData() {
         return new Object[][] {
             {"computedColumnField", "0", new TinyIntType(true), "10", "0"},
             {"computedColumnField", "1", new TinyIntType(true), "10", "0"},
@@ -109,16 +103,19 @@ public class TruncateComputerTest {
     }
 
     @Test
-    @UseDataProvider("provideTestGetTruncateCaseData")
-    public void testTruncate(
-            String fieldReference,
-            String value,
-            DataType dataType,
-            String literal,
-            String expected) {
-        Expression.TruncateComputer truncateComputer =
-                new Expression.TruncateComputer(fieldReference, dataType, literal);
-        assertThat(truncateComputer.eval(value)).isEqualTo(expected);
+    public void testTruncate() {
+        Object[][] testData = prepareData();
+        for (int i = 0; i < testData.length; i++) {
+            String field = (String) testData[i][0];
+            String value = (String) testData[i][1];
+            DataType dataType = (DataType) testData[i][2];
+            String literal = (String) testData[i][3];
+            String expected = (String) testData[i][4];
+
+            Expression.TruncateComputer truncateComputer =
+                    new Expression.TruncateComputer(field, dataType, literal);
+            assertThat(truncateComputer.eval(value)).isEqualTo(expected);
+        }
     }
 
     @Test
