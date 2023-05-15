@@ -21,22 +21,24 @@ package org.apache.paimon.spark;
 import org.apache.paimon.fs.Path;
 
 import org.apache.spark.sql.SparkSession;
-
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.io.TempDir;
 
+/** ITCase for spark writer with kryo serializer. */
 public class SparkWriteWIthKyroITCase extends SparkWriteITCase {
 
-  @BeforeAll
-  public void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
-    Path warehousePath = new Path("file:" + tempDir.toString());
-    spark = SparkSession.builder()
-        .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-        .master("local[2]").getOrCreate();
-    spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
-    spark.conf().set("spark.sql.catalog.paimon.warehouse", warehousePath.toString());
-    spark.sql("CREATE DATABASE paimon.db");
-    spark.sql("USE paimon.db");
-  }
-
+    @BeforeAll
+    @Override
+    public void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        spark =
+                SparkSession.builder()
+                        .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+                        .master("local[2]")
+                        .getOrCreate();
+        spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
+        spark.conf().set("spark.sql.catalog.paimon.warehouse", warehousePath.toString());
+        spark.sql("CREATE DATABASE paimon.db");
+        spark.sql("USE paimon.db");
+    }
 }

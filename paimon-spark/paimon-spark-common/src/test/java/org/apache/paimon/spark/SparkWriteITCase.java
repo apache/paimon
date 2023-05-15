@@ -34,7 +34,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** ITCase for spark reader. */
+/** ITCase for spark writer. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class SparkWriteITCase {
 
