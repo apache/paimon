@@ -319,7 +319,56 @@ can notice two snapshots created in the next commit.
 
 
 
-## When Data Files are Deleted
+## Physical Deletion of Files
 
 Remind that the marked data files are not truly deleted until the snapshot expires and 
-no consumer depends on the snapshot.
+no consumer depends on the snapshot. For more information, see [Expiring Snapshots]({{< ref "maintenance/expiring-snapshots" >}}).
+
+
+
+## Flink Stream Write
+
+Finally, we will examine Flink Stream Write by utilizing the example
+of CDC ingestion. This section will address the capturing and writing of 
+change data into Paimon, as well as the mechanisms behind asynchronous compact 
+and snapshot commit and expiration.
+
+To begin, let's take a closer look at the CDC ingestion workflow and 
+the unique roles played by each component involved.
+
+{{< img src="/img/cdc-ingestion-topology.png">}}
+
+1. `MySQL CDC Source` uniformly reads snapshot and incremental data, with `SnapshotReader` reading snapshot data 
+   and `BinlogReader` reading incremental data, respectively.
+2. `Paimon Sink` writes data into Paimon table in bucket level. The `CompactManager` within it will trigger compaction
+   asynchronously.
+3. `Committer Operator` is a singleton responsible for committing and expiring snapshots.
+
+Next, we will go over end-to-end data flow. 
+
+
+{{< img src="/img/cdc-ingestion-source.png">}}
+
+`MySQL Cdc Source` read snapshot and incremental data and emit them to downstream after normalization.
+
+{{< img src="/img/cdc-ingestion-write.png">}}
+
+
+`Paimon Sink` first buffers new records in a heap-based LSM tree, and flushes them to disk when 
+the memory buffer is full. Note that each data file written is a sorted run. At this point, no manifest file and snapshot
+is created. Right before Flink checkpoint takes places, `Paimon Sink` will flush all buffered records and send committable message 
+to downstream, which is read and committed by `Committer Operator` during checkpoint.
+
+{{< img src="/img/cdc-ingestion-commit.png">}}
+
+During checkpoint, `Committer Operator` will create a new snapshot and associate it with manifest lists so that the snapshot  
+contains information about all data files in the table. `Committer Operator` will check against snapshot expiration and perform 
+physical deletion of marked data files.
+
+{{< img src="/img/cdc-ingestion-compact.png">}}
+
+At later point asynchronous compaction might take place, and the committable produced by `CompactManager` contains information 
+about previous files and merged files so that `Committer Operator` can construct corresponding manifest entries. In this case 
+`Committer Operator` might produce two snapshot during Flink checkpoint, one for data written (snapshot of kind `Append`) and the 
+other for compact (snapshot of kind `Compact`). If no data file is written during checkpoint interval, only snapshot of kind `Compact` 
+will be created.
