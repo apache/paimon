@@ -1,3 +1,4 @@
+{{ $ref := ref . "maintenance/configurations.md" }}
 <table class="configuration table table-bordered">
     <thead>
     <tr>
@@ -36,11 +37,11 @@
     </tr>
     <tr>
         <td><h5>--catalog-conf</h5></td>
-        <td>The configuration for Paimon catalog. Each configuration should be specified in the format "key=value". See [here]({{< ref "maintenance/configurations" >}}) for a complete list of catalog configurations.</td>
+        <td>The configuration for Paimon catalog. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}">here</a> for a complete list of catalog configurations.</td>
     </tr>
     <tr>
         <td><h5>--table-conf</h5></td>
-        <td>The configuration for Paimon table sink. Each configuration should be specified in the format "key=value". See [here]({{< ref "maintenance/configurations" >}}) for a complete list of table configurations.</td>
+        <td>The configuration for Paimon table sink. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}">here</a> for a complete list of table configurations.</td>
     </tr>
     </tbody>
 </table>
