@@ -788,7 +788,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "_year_datetime=year(_datetime)",
                         "_year_timestamp=year(_timestamp)",
                         "_substring_date1=substring(_date,2)",
-                        "_substring_date2=substring(_timestamp,5,10)");
+                        "_substring_date2=substring(_timestamp,5,10)",
+                        "_truncate_date=truncate(pk,2)");
 
         MySqlSyncTableAction action =
                 new MySqlSyncTableAction(
@@ -829,7 +830,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 DataTypes.INT(),
                                 DataTypes.INT(),
                                 DataTypes.STRING(),
-                                DataTypes.STRING()
+                                DataTypes.STRING(),
+                                DataTypes.INT()
                             },
                             new String[] {
                                 "pk",
@@ -840,12 +842,13 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 "_year_datetime",
                                 "_year_timestamp",
                                 "_substring_date1",
-                                "_substring_date2"
+                                "_substring_date2",
+                                "_truncate_date"
                             });
             List<String> expected =
                     Arrays.asList(
-                            "+I[1, 19439, 2022-01-01T14:30, 2021-09-15T15:00:10, 2023, 2022, 2021, 23-03-23, 09-15]",
-                            "+I[2, 19439, NULL, NULL, 2023, NULL, NULL, 23-03-23, NULL]");
+                            "+I[1, 19439, 2022-01-01T14:30, 2021-09-15T15:00:10, 2023, 2022, 2021, 23-03-23, 09-15, 0]",
+                            "+I[2, 19439, NULL, NULL, 2023, NULL, NULL, 23-03-23, NULL, 2]");
             waitForResult(expected, table, rowType, Arrays.asList("pk", "_year_date"));
         }
     }
