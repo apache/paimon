@@ -74,6 +74,15 @@ public class ManifestListTest {
         }
     }
 
+    @RepeatedTest(10)
+    public void testManifestListNaming() {
+        List<ManifestFileMeta> metas = generateData();
+        ManifestList manifestList = createManifestList(tempDir.toString());
+
+        String manifestListName = manifestList.write(metas);
+        assertThat(manifestListName.startsWith("manifest-list-")).isTrue();
+    }
+
     private List<ManifestFileMeta> generateData() {
         Random random = new Random();
         List<ManifestFileMeta> metas = new ArrayList<>();
