@@ -26,6 +26,11 @@ import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
 
+import javax.annotation.Nullable;
+
+import java.util.Collections;
+import java.util.Set;
+
 /** Records construction and emitter in source. */
 public interface RecordsFunction<T> extends RecordEmitter<T, RowData, FileStoreSourceSplitState> {
 
@@ -101,6 +106,27 @@ public interface RecordsFunction<T> extends RecordEmitter<T, RowData, FileStoreS
                 output.collect(record.getRecord());
                 state.setPosition(record);
             }
+        }
+    }
+
+    /** Indicates that the {@link FileStoreSourceSplitReader} is paused. */
+    class RecordsWithPausedSplit<T> implements RecordsWithSplitIds<T> {
+
+        @Nullable
+        @Override
+        public String nextSplit() {
+            return null;
+        }
+
+        @Nullable
+        @Override
+        public T nextRecordFromSplit() {
+            return null;
+        }
+
+        @Override
+        public Set<String> finishedSplits() {
+            return Collections.emptySet();
         }
     }
 }

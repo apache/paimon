@@ -375,6 +375,71 @@ public class FileStoreSourceSplitReaderTest {
         reader.close();
     }
 
+    @Test
+    public void testPauseOrResumeSplits() throws Exception {
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
+        FileStoreSourceSplitReader<RecordAndPosition<RowData>> reader =
+                createReader(rw.createReadWithKey(), null);
+
+        List<Tuple2<Long, Long>> input1 = kvs();
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input1);
+
+        List<Tuple2<Long, Long>> input2 = kvs(6);
+        List<DataFileMeta> files2 = rw.writeFiles(row(1), 0, input2);
+        files.addAll(files2);
+
+        FileStoreSourceSplit split1 = newSourceSplit("id1", row(1), 0, files);
+        assignSplit(reader, split1);
+
+        RecordsWithSplitIds<RecordAndPosition<RowData>> records = reader.fetch();
+        assertRecords(
+                records,
+                null,
+                "id1",
+                0,
+                input1.stream().map(t -> t.f1).collect(Collectors.toList()));
+
+        // pause split1
+        reader.pauseOrResumeSplits(Collections.singletonList(split1), Collections.emptyList());
+        records = reader.fetch();
+        assertRecords(records, null, null, 0, Collections.emptyList());
+
+        // assign next split
+        List<Tuple2<Long, Long>> input3 = kvs(12);
+        List<DataFileMeta> files3 = rw.writeFiles(row(1), 0, input3);
+        FileStoreSourceSplit split2 = newSourceSplit("id2", row(1), 0, files3);
+        assignSplit(reader, split2);
+
+        records = reader.fetch();
+        assertRecords(records, null, null, 0, Collections.emptyList());
+
+        // resume split1
+        reader.pauseOrResumeSplits(Collections.emptyList(), Collections.singletonList(split1));
+        records = reader.fetch();
+        assertRecords(
+                records,
+                null,
+                "id1",
+                6,
+                input2.stream().map(t -> t.f1).collect(Collectors.toList()));
+
+        records = reader.fetch();
+        assertRecords(records, "id1", "id1", 0, null);
+
+        // fetch split2
+        records = reader.fetch();
+        assertRecords(
+                records,
+                null,
+                "id2",
+                0,
+                input3.stream().map(t -> t.f1).collect(Collectors.toList()));
+        records = reader.fetch();
+        assertRecords(records, "id2", "id2", 0, null);
+
+        reader.close();
+    }
+
     private void assertRecords(
             RecordsWithSplitIds<RecordAndPosition<RowData>> records,
             String finishedSplit,
