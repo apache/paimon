@@ -29,6 +29,7 @@ import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -72,6 +73,15 @@ public class ManifestListTest {
             Path manifestDir = new Path(tempDir.toString() + "/manifest");
             assertThat(LocalFileIO.create().listStatus(manifestDir)).isEmpty();
         }
+    }
+
+    @Test
+    public void testManifestListNaming() {
+        List<ManifestFileMeta> metas = generateData();
+        ManifestList manifestList = createManifestList(tempDir.toString());
+
+        String manifestListName = manifestList.write(metas);
+        assertThat(manifestListName.startsWith("manifest-list-")).isTrue();
     }
 
     private List<ManifestFileMeta> generateData() {
