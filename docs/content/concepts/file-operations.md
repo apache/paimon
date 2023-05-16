@@ -1,5 +1,5 @@
 ---
-title: "A Deep-Dive into Paimon's Small Files"
+title: "File Operations"
 weight: 2
 type: docs
 aliases:
@@ -23,24 +23,27 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 -->
-# A Deep-Dive into Paimon's Small Files
+# File Operations
 
-Paimon table relies heavily on file management mechanisms such as 
-checkpoint and snapshot expiration, but users are often left wondering 
-about the origin of the numerous small files that result from these 
-operations. In response, we have created a dedicated page to explain 
-the sources of these files and offer tips on how to manage them effectively. 
-Using concrete examples, we will delve into the details of how different 
-operations such as commit and compact can create small files and provide 
-insights into their updates.
+This article is specifically designed to clarify 
+the impact that various file operations have on files. 
+In order to make user better understand the origins of the 
+multitude of small files that result from these operations, 
+we will provide concrete examples and practical tips for 
+effectively managing them. Furthermore, through an in-depth 
+exploration of operations such as commit and compact, 
+we aim to offer insights into the creation and updates of 
+these small files.
 
 
 ## Prerequisite
 
-Before go deeper in to this page, make sure you have read through the 
-[Basic Concepts]({{< ref "concepts/basic-concepts" >}}), 
-[File Layouts]({{< ref "concepts/file-layouts" >}}) and 
-how to use Paimon in [Flink]({{< ref "engines/flink" >}}).
+Before delving further into this page, please ensure that you have read through the
+following sections:
+
+1. [Basic Concepts]({{< ref "concepts/basic-concepts" >}}), 
+2. [File Layouts]({{< ref "concepts/file-layouts" >}}) and 
+3. how to use Paimon in [Flink]({{< ref "engines/flink" >}}).
 
 {{< img src="/img/file-layout.png">}}
 
@@ -91,7 +94,7 @@ as can be verified by `SELECT * FROM T` which return a single row.
 The commit creates a snapshot under path `/tmp/paimon/default.db/T/snapshot/snapshot-1`. 
 The resulting file layout as of snapshot-1 is as follows:
 
-{{< img src="/img/small-file-0.png">}}
+{{< img src="/img/file-operations-0.png">}}
 
 The content of snapshot-1 contains metadata of the snapshot, such as manifest list and schema id:
 ```json
@@ -201,7 +204,7 @@ data-b75b7381-7c8b-430f-b7e5-a204cb65843c-0.orc
 schema-0
 ```
 The new file layout as of snapshot-2 looks like
-{{< img src="/img/small-file-1.png">}}
+{{< img src="/img/file-operations-1.png">}}
 
 ## Delete Records From Paimon Table
 
@@ -230,7 +233,7 @@ the record in the third commit. Executing `SELECT * FROM T` will return 2 rows, 
 ```
 
 The new file layout as of snapshot-3 looks like
-{{< img src="/img/small-file-2.png">}}
+{{< img src="/img/file-operations-2.png">}}
 
 Note that `manifest-3-0` contains 8 manifest entries of `ADD` operation type, 
 corresponding to 8 newly written data files. 
@@ -303,7 +306,7 @@ made and contains the following information:
 ```
 
 The new file layout as of snapshot-4 looks like
-{{< img src="/img/small-file-3.png">}}
+{{< img src="/img/file-operations-3.png">}}
 
 Note that `manifest-4-0` contains 20 manifest entries (18 `DELETE` operations and 2 `ADD` operations) 
 1. For partition `20230503` to `20230510`, two `DELETE` operations for two data files
