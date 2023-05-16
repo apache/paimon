@@ -110,7 +110,7 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
                     new ManifestFileMetaSerializer(),
                     fileFormat.createReaderFactory(metaType),
                     fileFormat.createWriterFactory(metaType),
-                    pathFactory.manifestFileFactory(),
+                    pathFactory.manifestListFactory(),
                     cache);
         }
     }
