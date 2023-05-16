@@ -65,12 +65,16 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
         tEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
         String catalog = "PAIMON";
         path = getTempDirPath();
+        String inferScan =
+                !inferScanParallelism() ? ",\n'table-default.scan.infer-parallelism'='false'" : "";
         tEnv.executeSql(
                 String.format(
                         "CREATE CATALOG %s WITH ("
-                                + "'type'='paimon', 'warehouse'='%s',"
-                                + " 'table-default.scan.infer-parallelism'='false')",
-                        catalog, path));
+                                + "'type'='paimon', 'warehouse'='%s'"
+                                + inferScan
+                                + ")",
+                        catalog,
+                        path));
         tEnv.useCatalog(catalog);
 
         sEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inStreamingMode().build());
@@ -80,6 +84,10 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
 
         setParallelism(defaultParallelism());
         prepareEnv();
+    }
+
+    protected boolean inferScanParallelism() {
+        return false;
     }
 
     private void prepareEnv() {
