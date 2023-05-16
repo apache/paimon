@@ -1146,7 +1146,12 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT"),
                         Collections.emptyList(),
-                        Collections.emptyList());
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(INFER_SCAN_PARALLELISM.key(), "false");
+                            }
+                        });
 
         insertInto(
                 table,
