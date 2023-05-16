@@ -48,7 +48,7 @@ following sections:
 {{< img src="/img/file-layout.png">}}
 
 
-## Create Paimon Catalog
+## Create Catalog
 Start Flink SQL client via `./sql-client.sh` and execute the following 
 statements one by one to create a Paimon catalog.  
 ```sql
@@ -62,7 +62,7 @@ USE CATALOG paimon;
 
 This will only create a directory at given path `file:///tmp/paimon`.
 
-## Create Paimon Table
+## Create Table
 
 Execute the following create table statement will create a Paimon table with 3 fields:
 
@@ -80,7 +80,7 @@ This will create Paimon table `T` under the path `/tmp/paimon/default.db/T`,
 with its schema stored in `/tmp/paimon/default.db/T/schema/schema-0` 
 
 
-## Insert Records Into Paimon Table
+## Insert Records Into Table
 
 Run the following insert statement in Flink SQL:
 
@@ -161,8 +161,6 @@ The second `commit` takes place and executing `SELECT * FROM T` will return
 following physical file layout:
 ```bash
  % ls -atR . 
-T	.	..
-
 ./T:
 dt=20230501
 dt=20230502	
@@ -206,7 +204,7 @@ schema-0
 The new file layout as of snapshot-2 looks like
 {{< img src="/img/file-operations-1.png">}}
 
-## Delete Records From Paimon Table
+## Delete Records From Table
 
 Now let's delete records that meet the condition `dt>=20230503`. 
 In Flink SQL, execute the following statement:
@@ -238,23 +236,13 @@ The new file layout as of snapshot-3 looks like
 Note that `manifest-3-0` contains 8 manifest entries of `ADD` operation type, 
 corresponding to 8 newly written data files. 
 
-## Alter Paimon Table
-As you may have noticed, the number of small files will augment over successive 
-snapshots, which may lead to decreased read performance. Therefore, a full-compaction 
+
+
+## Compact Table
+
+As you may have noticed, the number of small files will augment over successive
+snapshots, which may lead to decreased read performance. Therefore, a full-compaction
 is needed in order to reduce the number of small files.
-
-Execute the following statement to configure full-compaction:
-```sql
-ALTER TABLE T SET ('full-compaction.delta-commits' = '1');
-```
-
-It will create a new schema for Paimon table, namely `schema-1`, but no snapshot 
-has actually used this schema yet until the next commit.
-
-This configuration will ensure that partitions are full compacted before writing 
-ends, and since we haven't done any compaction yet, the next commit will produce 
-two snapshots, one for data written and one for full-compaction. However, we will 
-not use this configuration since Flink does not support running compaction in Flink SQL.
 
 Let's trigger the full-compaction now. Make sure you have set execution mode to `batch` 
 (add an entry `execution.runtime-mode: batch`  in `flink-conf.yaml`) and run a 
@@ -312,6 +300,28 @@ Note that `manifest-4-0` contains 20 manifest entries (18 `DELETE` operations an
 1. For partition `20230503` to `20230510`, two `DELETE` operations for two data files
 2. For partition `20230501` to `20230502`, one `DELETE` operation and one `ADD` operation 
    for the same data file.
+
+
+## Alter Table
+Execute the following statement to configure full-compaction:
+```sql
+ALTER TABLE T SET ('full-compaction.delta-commits' = '1');
+```
+
+It will create a new schema for Paimon table, namely `schema-1`, but no snapshot
+has actually used this schema yet until the next commit.
+
+This configuration will ensure that partitions are full compacted before writing
+ends, and since we haven't done any compaction yet, the next commit will produce
+two snapshots, one for data written and the other for full-compaction. We will
+not use it in this example since Flink does not support running compaction in 
+Flink SQL. However, when performing CDC ingestion with this table property, you 
+can notice two snapshots created in the next commit.
+
+{{< img src="/img/file-operations-4.png">}}
+
+
+
 
 ## When Data Files are Deleted
 
