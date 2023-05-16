@@ -1,9 +1,9 @@
 ---
 title: "File Operations"
-weight: 2
+weight: 4
 type: docs
 aliases:
-- /maintenance/read-performance.html
+- /concepts/file-operations.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -23,18 +23,16 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 -->
+
 # File Operations
 
 This article is specifically designed to clarify 
 the impact that various file operations have on files. 
-In order to make user better understand the origins of the 
-multitude of small files that result from these operations, 
-we will provide concrete examples and practical tips for 
+
+This page provides concrete examples and practical tips for 
 effectively managing them. Furthermore, through an in-depth 
 exploration of operations such as commit and compact, 
-we aim to offer insights into the creation and updates of 
-these small files.
-
+we aim to offer insights into the creation and updates of files.
 
 ## Prerequisite
 
@@ -43,12 +41,10 @@ following sections:
 
 1. [Basic Concepts]({{< ref "concepts/basic-concepts" >}}), 
 2. [File Layouts]({{< ref "concepts/file-layouts" >}}) and 
-3. how to use Paimon in [Flink]({{< ref "engines/flink" >}}).
-
-{{< img src="/img/file-layout.png">}}
-
+3. How to use Paimon in [Flink]({{< ref "engines/flink" >}}).
 
 ## Create Catalog
+
 Start Flink SQL client via `./sql-client.sh` and execute the following 
 statements one by one to create a Paimon catalog.  
 ```sql
