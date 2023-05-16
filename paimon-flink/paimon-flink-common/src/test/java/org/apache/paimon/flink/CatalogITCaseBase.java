@@ -67,7 +67,9 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
         path = getTempDirPath();
         tEnv.executeSql(
                 String.format(
-                        "CREATE CATALOG %s WITH (" + "'type'='paimon', 'warehouse'='%s')",
+                        "CREATE CATALOG %s WITH ("
+                                + "'type'='paimon', 'warehouse'='%s',"
+                                + " 'table-default.scan.infer-parallelism'='false')",
                         catalog, path));
         tEnv.useCatalog(catalog);
 
