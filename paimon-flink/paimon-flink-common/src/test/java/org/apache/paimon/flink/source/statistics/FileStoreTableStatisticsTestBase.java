@@ -26,8 +26,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.TableCommitImpl;
-import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
@@ -132,8 +132,8 @@ public abstract class FileStoreTableStatisticsTestBase {
     protected FileStoreTable writeData() throws Exception {
         FileStoreTable table = createStoreTable();
 
-        TableWriteImpl write = table.newWrite(commitUser);
-        TableCommitImpl commit = table.newCommit(commitUser);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 100L, "S1"));
         write.write(rowData(1, 20, 200L, null));
