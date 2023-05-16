@@ -72,7 +72,7 @@ public class DataTableSource extends AbstractDataTableSource implements Supports
             return TableStats.UNKNOWN;
         }
 
-        splitsForScan();
-        return new TableStats(rowCount);
+        scanSplitsForInference();
+        return new TableStats(splitStatistics.totalRowCount());
     }
 }

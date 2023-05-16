@@ -83,8 +83,7 @@ public abstract class AbstractDataTableSource extends FlinkTableSource
 
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
 
-    protected long rowCount = -1;
-    protected List<Split> splits = null;
+    protected SplitStatistics splitStatistics;
 
     public AbstractDataTableSource(
             ObjectIdentifier tableIdentifier,
@@ -216,35 +215,29 @@ public abstract class AbstractDataTableSource extends FlinkTableSource
         Options options = Options.fromMap(this.table.options());
         Integer parallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);
         if (options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
-            // for streaming mode, set the default parallelism to the bucket number.
             if (streaming) {
                 parallelism = options.get(CoreOptions.BUCKET);
             } else {
-                splitsForScan();
-                if (null != splits) {
-                    parallelism = splits.size();
-                }
+                scanSplitsForInference();
+                parallelism = splitStatistics.splitNumber();
                 if (null != limit && limit > 0) {
                     int limitCount =
                             limit >= Integer.MAX_VALUE ? Integer.MAX_VALUE : limit.intValue();
                     parallelism = Math.min(parallelism, limitCount);
                 }
 
-                parallelism = null == parallelism ? 1 : Math.max(1, parallelism);
+                parallelism = Math.max(1, parallelism);
             }
         }
 
-        return sourceBuilder.withParallelism(parallelism).withSplits(splits).withEnv(env).build();
+        return sourceBuilder.withParallelism(parallelism).withEnv(env).build();
     }
 
-    protected void splitsForScan() {
-        if (splits == null && rowCount == -1) {
-            splits = table.newReadBuilder().withFilter(predicate).newScan().plan().splits();
-            if (splits == null) {
-                rowCount = 0;
-            } else {
-                rowCount = splits.stream().mapToLong(Split::rowCount).sum();
-            }
+    protected void scanSplitsForInference() {
+        if (splitStatistics == null) {
+            List<Split> splits =
+                    table.newReadBuilder().withFilter(predicate).newScan().plan().splits();
+            splitStatistics = new SplitStatistics(splits);
         }
     }
 
@@ -285,5 +278,25 @@ public abstract class AbstractDataTableSource extends FlinkTableSource
         int[] joinKey = Projection.of(context.getKeys()).toTopLevelIndexes();
         return LookupRuntimeProviderFactory.create(
                 new FileStoreLookupFunction(table, projection, joinKey, predicate));
+    }
+
+    /** Split statistics for inferring row count and parallelism size. */
+    protected static class SplitStatistics {
+
+        private final int splitNumber;
+        private final long totalRowCount;
+
+        private SplitStatistics(List<Split> splits) {
+            this.splitNumber = splits.size();
+            this.totalRowCount = splits.stream().mapToLong(Split::rowCount).sum();
+        }
+
+        public int splitNumber() {
+            return splitNumber;
+        }
+
+        public long totalRowCount() {
+            return totalRowCount;
+        }
     }
 }
