@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -65,6 +66,12 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             SnapshotManager snapshotManager,
             SnapshotDeletion snapshotDeletion,
             TagManager tagManager) {
+        Preconditions.checkArgument(
+                numRetainedMin >= 1,
+                "The minimum number of completed snapshots to retain should be >= 1.");
+        Preconditions.checkArgument(
+                numRetainedMax >= numRetainedMin,
+                "The maximum number of snapshots to retain should be >= the minimum number.");
         this.numRetainedMin = numRetainedMin;
         this.numRetainedMax = numRetainedMax;
         this.millisRetained = millisRetained;
@@ -96,7 +103,9 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             return;
         }
 
-        // find the earliest snapshot to retain
+        // locate the first snapshot between the numRetainedMax th and (numRetainedMin+1) th latest
+        // snapshots to be retained. This snapshot needs to be preserved because it
+        // doesn't fulfill the time threshold condition for expiration.
         for (long id = Math.max(latestSnapshotId - numRetainedMax + 1, earliest);
                 id <= latestSnapshotId - numRetainedMin;
                 id++) {
@@ -110,7 +119,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
         }
 
-        // no snapshot can be retained, expire until there are only numRetainedMin snapshots left
+        // by default, expire until there are only numRetainedMin snapshots left
         expireUntil(earliest, latestSnapshotId - numRetainedMin + 1);
     }
 

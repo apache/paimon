@@ -165,13 +165,15 @@ public class CoreOptions implements Serializable {
             key("snapshot.num-retained.min")
                     .intType()
                     .defaultValue(10)
-                    .withDescription("The minimum number of completed snapshots to retain.");
+                    .withDescription(
+                            "The minimum number of completed snapshots to retain. Should be greater than or equal to 1.");
 
     public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED_MAX =
             key("snapshot.num-retained.max")
                     .intType()
                     .defaultValue(Integer.MAX_VALUE)
-                    .withDescription("The maximum number of completed snapshots to retain.");
+                    .withDescription(
+                            "The maximum number of completed snapshots to retain. Should be greater than or equal to the minimum number.");
 
     public static final ConfigOption<Duration> SNAPSHOT_TIME_RETAINED =
             key("snapshot.time-retained")
