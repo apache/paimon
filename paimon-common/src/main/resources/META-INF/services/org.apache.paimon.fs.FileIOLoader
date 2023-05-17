@@ -16,3 +16,4 @@
 org.apache.paimon.fs.local.LocalFileIOLoader
 org.apache.paimon.fs.hadoop.HadoopFileIOLoader
 org.apache.paimon.fs.hadoop.HadoopViewFsFileIOLoader
+org.apache.paimon.fs.hadoop.ChdfsFileIOLoader
