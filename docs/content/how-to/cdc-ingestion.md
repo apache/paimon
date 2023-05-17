@@ -30,6 +30,12 @@ Paimon supports synchronizing changes from different databases using change data
 
 ## MySQL
 
+### Prepare CDC Bundled Jar
+
+```
+flink-sql-connector-mysql-cdc-*.jar
+```
+
 ### Synchronizing Tables
 
 By using [MySqlSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction) in a Flink DataStream job or directly through `flink run`, users can synchronize one or multiple tables from MySQL into one Paimon table.
@@ -52,22 +58,7 @@ To use this feature through `flink run`, run the following shell command.
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
 ```
 
-* `--warehouse` is the path to Paimon warehouse.
-* `--database` is the database name in Paimon catalog.
-* `--table` is the Paimon table name.
-* `--partition-keys` are the partition keys for Paimon table. If there are multiple partition keys, connect them with comma, for example `dt,hh,mm`.
-* `--primary-keys` are the primary keys for Paimon table. If there are multiple primary keys, connect them with comma, for example `buyer_id,seller_id`.
-* `--computed-column` are the definitions of computed columns. The argument field is from MySQL table field name. Supported expressions are:
-  * year(date-column): Extract year from a DATE, DATETIME or TIMESTAMP. Output is an INT value represent the year.
-  * substring(column,beginInclusive): Get column.substring(beginInclusive). Output is a STRING.
-  * substring(column,beginInclusive,endExclusive): Get column.substring(beginInclusive,endExclusive). Output is a STRING.
-  * truncate(column,width): truncate column by width. Output type is same with column.
-    * If the column is a STRING, truncate(column,width) will truncate the string to width characters, namely `value.substring(0, width)`.
-    * If the column is an INT or LONG, truncate(column,width) will truncate the number with the algorithm `v - (((v % W) + W) % W)`. The `redundant` compute part is to keep the result always positive.
-    * If the column is a DECIMAL, truncate(column,width) will truncate the decimal with the algorithm: let `scaled_W = decimal(W, scale(v))`, then return `v - (v % scaled_W)`.
-* `--mysql-conf` is the configuration for Flink CDC MySQL table sources. Each configuration should be specified in the format `key=value`. `hostname`, `username`, `password`, `database-name` and `table-name` are required configurations, others are optional. See its [document](https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options) for a complete list of configurations.
-* `--catalog-conf` is the configuration for Paimon catalog. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of catalog configurations.
-* `--table-conf` is the configuration for Paimon table sink. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of table configurations. 
+{{< generated/mysql_sync_table >}}
 
 If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from all specified MySQL tables. If the Paimon table already exists, its schema will be compared against the schema of all specified MySQL tables.
 
@@ -132,21 +123,7 @@ To use this feature through `flink run`, run the following shell command.
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
 ```
 
-* `--warehouse` is the path to Paimon warehouse.
-* `--database` is the database name in Paimon catalog.
-* `--ignore-incompatible` is default false, in this case, if MySQL table name exists in Paimon and their schema is incompatible, 
-an exception will be thrown. You can specify it to true explicitly to ignore the incompatible tables and exception.
-* `--table-prefix` is the prefix of all Paimon tables to be synchronized. For example, if you want all synchronized tables 
-to have "ods_" as prefix, you can specify `--table-prefix ods_`.
-* `--table-suffix` is the suffix of all Paimon tables to be synchronized. The usage is same as `--table-prefix`.
-* `--including-tables` is used to specify which source tables are to be synchronized. You must use '|' to separate multiple
-tables. Regular expression is supported, for example, specifying `--including-tables test|paimon.*` means to synchronize
-table 'test' and all tables start with 'paimon'.
-* `--excluding-tables` is used to specify which source tables are not to be synchronized. The usage is same as `--including-tables`.
-`--excluding-tables` has higher priority than `--including-tables` if you specified both.
-* `--mysql-conf` is the configuration for Flink CDC MySQL table sources. Each configuration should be specified in the format `key=value`. `hostname`, `username`, `password` and `database-name` are required configurations, others are optional. Note that `database-name` should be the exact name of the MySQL databse you want to synchronize. It can't be a regular expression. See its [document](https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options) for a complete list of configurations.
-* `--catalog-conf` is the configuration for Paimon catalog. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of catalog configurations.
-* `--table-conf` is the configuration for Paimon table sink. Each configuration should be specified in the format `key=value`. All Paimon sink table will be applied the same set of configurations. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of table configurations.
+{{< generated/mysql_sync_database >}}
 
 Only tables with primary keys will be synchronized.
 
