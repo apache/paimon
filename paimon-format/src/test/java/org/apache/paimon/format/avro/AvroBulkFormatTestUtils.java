@@ -35,8 +35,15 @@ public class AvroBulkFormatTestUtils {
             (RowType)
                     RowType.builder()
                             .fields(
-                                    new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
-                                    new String[] {"a", "b"})
+                                    new DataType[] {
+                                        DataTypes.STRING(),
+                                        DataTypes.STRING(),
+                                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3),
+                                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(6),
+                                    },
+                                    new String[] {
+                                        "a", "b", "local_timestamp_millis", "local_timestamp_micros"
+                                    })
                             .build()
                             .notNull();
 

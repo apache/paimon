@@ -28,6 +28,8 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.avro.LogicalType;
+import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
@@ -35,6 +37,7 @@ import org.apache.avro.util.Utf8;
 
 import java.io.Serializable;
 import java.nio.ByteBuffer;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -143,6 +146,37 @@ public class RowDataToAvroConverters {
                             @Override
                             public Object convert(Schema schema, Object object) {
                                 return ((Timestamp) object).toInstant().toEpochMilli();
+                            }
+                        };
+                break;
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                converter =
+                        new RowDataToAvroConverter() {
+                            private static final long serialVersionUID = 1L;
+
+                            @Override
+                            public Object convert(Schema schema, Object object) {
+                                LogicalType logicalType = schema.getLogicalType();
+
+                                if (logicalType instanceof LogicalTypes.LocalTimestampMillis) {
+                                    return ((Timestamp) object)
+                                            .toInstant()
+                                            .atZone(ZoneId.systemDefault())
+                                            .toInstant()
+                                            .toEpochMilli();
+                                } else if (logicalType
+                                        instanceof LogicalTypes.LocalTimestampMicros) {
+                                    return ((Timestamp) object)
+                                                            .toInstant()
+                                                            .atZone(ZoneId.systemDefault())
+                                                            .toInstant()
+                                                            .toEpochMilli()
+                                                    * 1000
+                                            + ((Timestamp) object).getNanoOfMillisecond() / 1000;
+                                } else {
+                                    throw new UnsupportedOperationException(
+                                            "Unsupported timestamp type: " + logicalType);
+                                }
                             }
                         };
                 break;

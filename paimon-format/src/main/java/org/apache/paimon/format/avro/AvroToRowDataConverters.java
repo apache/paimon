@@ -30,6 +30,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
 
 import org.apache.avro.generic.GenericFixed;
@@ -42,7 +43,10 @@ import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoField;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -97,7 +101,7 @@ public class AvroToRowDataConverters {
     }
 
     /** Creates a runtime converter which assuming input object is not null. */
-    private static AvroToRowDataConverter createConverter(DataType type) {
+    public static AvroToRowDataConverter createConverter(DataType type) {
         switch (type.getTypeRoot()) {
             case TINYINT:
                 return avroObject -> ((Integer) avroObject).byteValue();
@@ -115,6 +119,15 @@ public class AvroToRowDataConverters {
                 return AvroToRowDataConverters::convertToTime;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 return AvroToRowDataConverters::convertToTimestamp;
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                int precision = ((LocalZonedTimestampType) type).getPrecision();
+                if (precision == 3) {
+                    return AvroToRowDataConverters::convertToTimestampFromMillis;
+                } else if (precision == 6) {
+                    return AvroToRowDataConverters::convertToTimestampFromMicros;
+                } else {
+                    throw new UnsupportedOperationException("Unsupported precision: " + precision);
+                }
             case CHAR:
             case VARCHAR:
                 return avroObject -> BinaryString.fromString(avroObject.toString());
@@ -202,6 +215,39 @@ public class AvroToRowDataConverters {
             }
         }
         return Timestamp.fromEpochMillis(millis);
+    }
+
+    private static Object convertToTimestampFromMillis(Object object) {
+        if (object instanceof Long) {
+            return Timestamp.fromInstant(
+                    OffsetDateTime.ofInstant(
+                                    Instant.ofEpochMilli((Long) object), ZoneOffset.systemDefault())
+                            .toInstant());
+        } else if (object instanceof Instant) {
+            return Timestamp.fromInstant(
+                    OffsetDateTime.ofInstant((Instant) object, ZoneOffset.systemDefault())
+                            .toInstant());
+        } else {
+            throw new IllegalArgumentException(
+                    "Unexpected object type for TIMESTAMP_WITH_LOCAL_TIME_ZONE logical type. Received: "
+                            + object);
+        }
+    }
+
+    private static Object convertToTimestampFromMicros(Object object) {
+        if (object instanceof Long) {
+            Instant instant = Instant.EPOCH.plus((Long) object, ChronoUnit.MICROS);
+            return Timestamp.fromInstant(
+                    OffsetDateTime.ofInstant(instant, ZoneOffset.systemDefault()).toInstant());
+        } else if (object instanceof Instant) {
+            return Timestamp.fromInstant(
+                    OffsetDateTime.ofInstant((Instant) object, ZoneOffset.systemDefault())
+                            .toInstant());
+        } else {
+            throw new IllegalArgumentException(
+                    "Unexpected object type for TIMESTAMP_WITH_LOCAL_TIME_ZONE logical type. Received: "
+                            + object);
+        }
     }
 
     private static int convertToDate(Object object) {

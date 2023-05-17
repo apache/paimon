@@ -89,6 +89,7 @@ public class HiveTypeUtils {
             case DATE:
                 return TypeInfoFactory.dateTypeInfo;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 return TypeInfoFactory.timestampTypeInfo;
             case ARRAY:
                 ArrayType arrayType = (ArrayType) logicalType;
