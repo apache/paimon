@@ -38,6 +38,7 @@ import org.apache.flink.table.data.RowData;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collection;
 import java.util.LinkedList;
 import java.util.Queue;
 
@@ -59,6 +60,8 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
     private long currentNumRead;
     private RecordIterator<InternalRow> currentFirstBatch;
 
+    private boolean paused;
+
     public FileStoreSourceSplitReader(
             RecordsFunction<T> recordsFunction,
             TableRead tableRead,
@@ -69,10 +72,15 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
         this.pool.add(new FileStoreRecordIterator());
+        this.paused = false;
     }
 
     @Override
     public RecordsWithSplitIds<T> fetch() throws IOException {
+        if (paused) {
+            return new RecordsFunction.RecordsWithPausedSplit<>();
+        }
+
         checkSplitOrStartNext();
 
         // pool first, pool size is 1, the underlying implementation does not allow multiple batches
@@ -116,6 +124,27 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
         }
 
         splits.addAll(splitsChange.splits());
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.7-.
+     */
+    public void pauseOrResumeSplits(
+            Collection<FileStoreSourceSplit> splitsToPause,
+            Collection<FileStoreSourceSplit> splitsToResume) {
+        for (FileStoreSourceSplit split : splitsToPause) {
+            if (split.splitId().equals(currentSplitId)) {
+                paused = true;
+                break;
+            }
+        }
+
+        for (FileStoreSourceSplit split : splitsToResume) {
+            if (split.splitId().equals(currentSplitId)) {
+                paused = false;
+                break;
+            }
+        }
     }
 
     @Override
