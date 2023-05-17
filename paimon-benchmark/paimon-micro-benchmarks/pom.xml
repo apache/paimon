@@ -131,6 +131,15 @@ under the License.
             <artifactId>paimon-bundle</artifactId>
             <version>${project.version}</version>
         </dependency>
+
+        <!-- Test -->
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-test-utils</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <profiles>
