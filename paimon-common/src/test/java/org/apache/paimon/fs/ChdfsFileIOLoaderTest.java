@@ -28,7 +28,7 @@ import org.junit.jupiter.api.Test;
 public class ChdfsFileIOLoaderTest {
 
     @Test
-    public void loadFromClasspathByDefault() {
+    public void testOfsSchema() {
         FileIO fileIO = FileIOFinder.find(new Path("ofs://user/warehouse"));
         Assert.assertEquals(HadoopFileIO.class, fileIO.getClass());
     }

@@ -22,7 +22,7 @@ import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.Path;
 
 /**
- *  {@link ChdfsFileIOLoader} to support tencent cloud chdfs scheme.
+ *  {@link ChdfsFileIOLoader} to support tencent cloud chdfs schema.
  *  tencent cloud chdfs product : https://cloud.tencent.com/document/product/1105
  * */
 public class ChdfsFileIOLoader implements FileIOLoader {
