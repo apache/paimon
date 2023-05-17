@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -66,6 +67,12 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             SnapshotManager snapshotManager,
             SnapshotDeletion snapshotDeletion,
             TagFileKeeper tagFileKeeper) {
+        Preconditions.checkArgument(
+                numRetainedMin >= 1,
+                "The minimum number of completed snapshots to retain should be >= 1.");
+        Preconditions.checkArgument(
+                numRetainedMax > numRetainedMin,
+                "The maximum number of snapshots to retain should be > the minimum number.");
         this.numRetainedMin = numRetainedMin;
         this.numRetainedMax = numRetainedMax;
         this.millisRetained = millisRetained;
