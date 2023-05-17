@@ -40,6 +40,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** ITCase for catalog tables. */
 public class CatalogTableITCase extends CatalogITCaseBase {
 
+    @Override
+    protected boolean inferScanParallelism() {
+        return true;
+    }
+
     @Test
     public void testNotExistMetadataTable() {
         assertThatThrownBy(() -> sql("SELECT snapshot_id, schema_id, commit_kind FROM T$snapshots"))

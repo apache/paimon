@@ -89,7 +89,7 @@ public class FlinkConnectorOptions {
     public static final ConfigOption<Boolean> INFER_SCAN_PARALLELISM =
             ConfigOptions.key("scan.infer-parallelism")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription(
                             "If it is false, parallelism of source are set by "
                                     + SCAN_PARALLELISM.key()

@@ -30,7 +30,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -48,7 +47,6 @@ import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
-import java.util.List;
 import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.StreamingReadMode.FILE;
@@ -72,7 +70,6 @@ public class FlinkSourceBuilder {
     @Nullable private Integer parallelism;
     @Nullable private Long limit;
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
-    @Nullable private List<Split> splits;
 
     public FlinkSourceBuilder(ObjectIdentifier tableIdentifier, Table table) {
         this.tableIdentifier = tableIdentifier;
@@ -121,11 +118,6 @@ public class FlinkSourceBuilder {
         return this;
     }
 
-    public FlinkSourceBuilder withSplits(List<Split> splits) {
-        this.splits = splits;
-        return this;
-    }
-
     private ReadBuilder createReadBuilder() {
         return table.newReadBuilder().withProjection(projectedFields).withFilter(predicate);
     }
@@ -136,8 +128,7 @@ public class FlinkSourceBuilder {
                         createReadBuilder(),
                         limit,
                         Options.fromMap(table.options())
-                                .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
-                        splits));
+                                .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE)));
     }
 
     private DataStream<RowData> buildContinuousFileSource() {

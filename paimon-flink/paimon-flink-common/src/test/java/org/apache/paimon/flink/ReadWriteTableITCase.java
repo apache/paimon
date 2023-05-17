@@ -1146,7 +1146,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 createTable(
                         Arrays.asList("currency STRING", "rate BIGINT"),
                         Collections.emptyList(),
-                        Collections.emptyList());
+                        Collections.emptyList(),
+                        Collections.singletonMap(INFER_SCAN_PARALLELISM.key(), "false"));
 
         insertInto(
                 table,
@@ -1198,11 +1199,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                         table,
                                         "*",
                                         "",
-                                        new HashMap<String, String>() {
-                                            {
-                                                put(INFER_SCAN_PARALLELISM.key(), "true");
-                                            }
-                                        })))
+                                        Collections.singletonMap(
+                                                INFER_SCAN_PARALLELISM.key(), "true"))))
                 .isEqualTo(1);
 
         // error scan.parallelism, infer parallelism should be at least 1
@@ -1229,11 +1227,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                         table,
                                         "*",
                                         "",
-                                        new HashMap<String, String>() {
-                                            {
-                                                put(INFER_SCAN_PARALLELISM.key(), "true");
-                                            }
-                                        })))
+                                        Collections.singletonMap(
+                                                INFER_SCAN_PARALLELISM.key(), "true"))))
                 .isEqualTo(2);
         assertThat(
                         sourceParallelism(
@@ -1241,11 +1236,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                         table,
                                         "*",
                                         "WHERE currency='Euro'",
-                                        new HashMap<String, String>() {
-                                            {
-                                                put(INFER_SCAN_PARALLELISM.key(), "true");
-                                            }
-                                        })))
+                                        Collections.singletonMap(
+                                                INFER_SCAN_PARALLELISM.key(), "true"))))
                 .isEqualTo(1);
 
         // 2 splits and limit is 1, the parallelism is the limit value : 1
@@ -1256,11 +1248,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                         "*",
                                         "",
                                         1L,
-                                        new HashMap<String, String>() {
-                                            {
-                                                put(INFER_SCAN_PARALLELISM.key(), "true");
-                                            }
-                                        })))
+                                        Collections.singletonMap(
+                                                INFER_SCAN_PARALLELISM.key(), "true"))))
                 .isEqualTo(1);
 
         // 2 splits, limit is 3, the parallelism is infer parallelism : 2
@@ -1271,11 +1260,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                         "*",
                                         "",
                                         3L,
-                                        new HashMap<String, String>() {
-                                            {
-                                                put(INFER_SCAN_PARALLELISM.key(), "true");
-                                            }
-                                        })))
+                                        Collections.singletonMap(
+                                                INFER_SCAN_PARALLELISM.key(), "true"))))
                 .isEqualTo(1);
 
         // 2 splits, infer parallelism is disabled, the parallelism is scan.parallelism
