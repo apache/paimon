@@ -98,8 +98,8 @@ The content of snapshot-1 contains metadata of the snapshot, such as manifest li
   "version" : 3,
   "id" : 1,
   "schemaId" : 0,
-  "baseManifestList" : "manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-0",
-  "deltaManifestList" : "manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-1",
+  "baseManifestList" : "manifest-list-4ccc-c07f-4090-958c-cfe3ce3889e5-0",
+  "deltaManifestList" : "manifest-list-4ccc-c07f-4090-958c-cfe3ce3889e5-1",
   "changelogManifestList" : null,
   "commitUser" : "7d758485-981d-4b1a-a0c6-d34c3eb254bf",
   "commitIdentifier" : 9223372036854775807,
@@ -120,17 +120,17 @@ created (the file names might differ from those in your experiment):
 
 ```bash
 ./T/manifest:
-manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-1	
-manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-0
+manifest-list-4ccc-c07f-4090-958c-cfe3ce3889e5-1	
+manifest-list-4ccc-c07f-4090-958c-cfe3ce3889e5-0
 manifest-2b833ea4-d7dc-4de0-ae0d-ad76eced75cc-0
 ```
 `manifest-2b833ea4-d7dc-4de0-ae0d-ad76eced75cc-0` is the manifest 
 file (manifest-1-0 in the above graph), which stores the information about the data files in the snapshot.
 
-`manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-0` is the 
+`manifest-list-4ccc-c07f-4090-958c-cfe3ce3889e5-0` is the 
 baseManifestList (manifest-list-1-base in the above graph), which is effectively empty.
 
-`manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-1` is the 
+`manifest-list-4ccc-c07f-4090-958c-cfe3ce3889e5-1` is the 
 deltaManifestList (manifest-list-1-delta in the above graph), which 
 contains a list of manifest entries that perform operations on data 
 files, which, in this case, is `manifest-B-0`.
@@ -179,12 +179,12 @@ EARLIEST
 snapshot-1
 
 ./T/manifest:
-manifest-list9ac2-5e79-4978-a3bc-86c25f1a303f-1	 # delta manifest list for snapshot-2
-manifest-list9ac2-5e79-4978-a3bc-86c25f1a303f-0  # base manifest list for snapshot-2	
+manifest-list-9ac2-5e79-4978-a3bc-86c25f1a303f-1	 # delta manifest list for snapshot-2
+manifest-list-9ac2-5e79-4978-a3bc-86c25f1a303f-0  # base manifest list for snapshot-2	
 manifest-f1267033-e246-4470-a54c-5c27fdbdd074-0	 # manifest file for snapshot-2
 
-manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-1	 # delta manifest list for snapshot-1 
-manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-0  # base manifest list for snapshot-1
+manifest-list-4ccc-c07f-4090-958c-cfe3ce3889e5-1	 # delta manifest list for snapshot-1 
+manifest-list-4ccc-c07f-4090-958c-cfe3ce3889e5-0  # base manifest list for snapshot-1
 manifest-2b833ea4-d7dc-4de0-ae0d-ad76eced75cc-0  # manifest file for snapshot-1
 
 ./T/dt=20230501/bucket-0:
@@ -274,8 +274,8 @@ made and contains the following information:
   "version" : 3,
   "id" : 4,
   "schemaId" : 0,
-  "baseManifestList" : "manifest-list9be16-82e7-4941-8b0a-7ce1c1d0fa6d-0",
-  "deltaManifestList" : "manifest-list9be16-82e7-4941-8b0a-7ce1c1d0fa6d-1",
+  "baseManifestList" : "manifest-list-9be16-82e7-4941-8b0a-7ce1c1d0fa6d-0",
+  "deltaManifestList" : "manifest-list-9be16-82e7-4941-8b0a-7ce1c1d0fa6d-1",
   "changelogManifestList" : null,
   "commitUser" : "a3d951d5-aa0e-4071-a5d4-4c72a4233d48",
   "commitIdentifier" : 9223372036854775807,
@@ -307,18 +307,6 @@ ALTER TABLE T SET ('full-compaction.delta-commits' = '1');
 It will create a new schema for Paimon table, namely `schema-1`, but no snapshot
 has actually used this schema yet until the next commit.
 
-This configuration will ensure that partitions are full compacted before writing
-ends, and since we haven't done any compaction yet, the next commit will produce
-two snapshots, one for data written and the other for full-compaction. We will
-not use it in this example since Flink does not support running compaction in 
-Flink SQL. However, when performing CDC ingestion with this table property, you 
-can notice two snapshots created in the next commit.
-
-{{< img src="/img/file-operations-4.png">}}
-
-
-
-
 ## Expire Snapshots
 
 Remind that the marked data files are not truly deleted until the snapshot expires and 
@@ -344,7 +332,7 @@ Let's say another snapshot, `snapshot-5` is created and snapshot expiration is t
 to be deleted. For simplicity, we will only focus on files from previous snapshots, the final layout after snapshot 
 expiration looks like:
 
-{{< img src="/img/file-operations-5.png">}}
+{{< img src="/img/file-operations-4.png">}}
 
 As a result, partition `20230503` to `20230510` are physically deleted.
 
