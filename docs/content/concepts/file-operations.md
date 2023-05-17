@@ -98,8 +98,8 @@ The content of snapshot-1 contains metadata of the snapshot, such as manifest li
   "version" : 3,
   "id" : 1,
   "schemaId" : 0,
-  "baseManifestList" : "manifest-09184ccc-c07f-4090-958c-cfe3ce3889e5-0",
-  "deltaManifestList" : "manifest-09184ccc-c07f-4090-958c-cfe3ce3889e5-1",
+  "baseManifestList" : "manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-0",
+  "deltaManifestList" : "manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-1",
   "changelogManifestList" : null,
   "commitUser" : "7d758485-981d-4b1a-a0c6-d34c3eb254bf",
   "commitIdentifier" : 9223372036854775807,
@@ -120,17 +120,17 @@ created (the file names might differ from those in your experiment):
 
 ```bash
 ./T/manifest:
-manifest-09184ccc-c07f-4090-958c-cfe3ce3889e5-1	
-manifest-09184ccc-c07f-4090-958c-cfe3ce3889e5-0
+manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-1	
+manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-0
 manifest-2b833ea4-d7dc-4de0-ae0d-ad76eced75cc-0
 ```
 `manifest-2b833ea4-d7dc-4de0-ae0d-ad76eced75cc-0` is the manifest 
 file (manifest-1-0 in the above graph), which stores the information about the data files in the snapshot.
 
-`manifest-09184ccc-c07f-4090-958c-cfe3ce3889e5-0` is the 
+`manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-0` is the 
 baseManifestList (manifest-list-1-base in the above graph), which is effectively empty.
 
-`manifest-09184ccc-c07f-4090-958c-cfe3ce3889e5-1` is the 
+`manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-1` is the 
 deltaManifestList (manifest-list-1-delta in the above graph), which 
 contains a list of manifest entries that perform operations on data 
 files, which, in this case, is `manifest-B-0`.
@@ -179,12 +179,12 @@ EARLIEST
 snapshot-1
 
 ./T/manifest:
-manifest-96739ac2-5e79-4978-a3bc-86c25f1a303f-1	 # delta manifest list for snapshot-2
-manifest-96739ac2-5e79-4978-a3bc-86c25f1a303f-0  # base manifest list for snapshot-2	
+manifest-list9ac2-5e79-4978-a3bc-86c25f1a303f-1	 # delta manifest list for snapshot-2
+manifest-list9ac2-5e79-4978-a3bc-86c25f1a303f-0  # base manifest list for snapshot-2	
 manifest-f1267033-e246-4470-a54c-5c27fdbdd074-0	 # manifest file for snapshot-2
 
-manifest-09184ccc-c07f-4090-958c-cfe3ce3889e5-1	 # delta manifest list for snapshot-1 
-manifest-09184ccc-c07f-4090-958c-cfe3ce3889e5-0  # base manifest list for snapshot-1
+manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-1	 # delta manifest list for snapshot-1 
+manifest-list4ccc-c07f-4090-958c-cfe3ce3889e5-0  # base manifest list for snapshot-1
 manifest-2b833ea4-d7dc-4de0-ae0d-ad76eced75cc-0  # manifest file for snapshot-1
 
 ./T/dt=20230501/bucket-0:
@@ -274,8 +274,8 @@ made and contains the following information:
   "version" : 3,
   "id" : 4,
   "schemaId" : 0,
-  "baseManifestList" : "manifest-aa28be16-82e7-4941-8b0a-7ce1c1d0fa6d-0",
-  "deltaManifestList" : "manifest-aa28be16-82e7-4941-8b0a-7ce1c1d0fa6d-1",
+  "baseManifestList" : "manifest-list9be16-82e7-4941-8b0a-7ce1c1d0fa6d-0",
+  "deltaManifestList" : "manifest-list9be16-82e7-4941-8b0a-7ce1c1d0fa6d-1",
   "changelogManifestList" : null,
   "commitUser" : "a3d951d5-aa0e-4071-a5d4-4c72a4233d48",
   "commitIdentifier" : 9223372036854775807,
@@ -319,12 +319,34 @@ can notice two snapshots created in the next commit.
 
 
 
-## Physical Deletion of Files
+## Expire Snapshots
 
 Remind that the marked data files are not truly deleted until the snapshot expires and 
 no consumer depends on the snapshot. For more information, see [Expiring Snapshots]({{< ref "maintenance/expiring-snapshots" >}}).
 
+During snapshot expire, the range of snapshots are determined first and then marked data files in these snapshots will be 
+deleted. A data file is `marked` only when there's a manifest entry of kind `DELETE` pointing to that data file, so that it 
+will not be used by next snapshots and can be safely deleted.
 
+
+Let's say all 4 snapshots in the above diagram are about to expire. The expire process is as follows:
+
+1. It first deletes all marked data files, and records any changed buckets. 
+   
+2. It then deletes any changelog files and associated manifests. 
+   
+3. Finally, it deletes the snapshots themselves and writes the earliest hint file.
+
+If any directories are left empty after the deletion process, they will be deleted as well.
+
+
+Let's say another snapshot, `snapshot-5` is created and snapshot expiration is triggered. `snapshot-1` to `snapshot-4` are  
+to be deleted. For simplicity, we will only focus on files from previous snapshots, the final layout after snapshot 
+expiration looks like:
+
+{{< img src="/img/file-operations-5.png">}}
+
+As a result, partition `20230503` to `20230510` are physically deleted.
 
 ## Flink Stream Write
 
@@ -362,8 +384,7 @@ to downstream, which is read and committed by `Committer Operator` during checkp
 {{< img src="/img/cdc-ingestion-commit.png">}}
 
 During checkpoint, `Committer Operator` will create a new snapshot and associate it with manifest lists so that the snapshot  
-contains information about all data files in the table. `Committer Operator` will check against snapshot expiration and perform 
-physical deletion of marked data files.
+contains information about all data files in the table.
 
 {{< img src="/img/cdc-ingestion-compact.png">}}
 
@@ -371,4 +392,5 @@ At later point asynchronous compaction might take place, and the committable pro
 about previous files and merged files so that `Committer Operator` can construct corresponding manifest entries. In this case 
 `Committer Operator` might produce two snapshot during Flink checkpoint, one for data written (snapshot of kind `Append`) and the 
 other for compact (snapshot of kind `Compact`). If no data file is written during checkpoint interval, only snapshot of kind `Compact` 
-will be created.
+will be created. `Committer Operator` will check against snapshot expiration and perform
+physical deletion of marked data files.
