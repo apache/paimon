@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.flink.action.FlinkActions;
+import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.FailingFileIO;
@@ -144,7 +144,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
         StreamExecutionEnvironment env = createStreamExecutionEnvironment(2000);
         env.setParallelism(1);
         env.setRestartStrategy(RestartStrategies.noRestart());
-        FlinkActions.compact(path, "default", "T").build(env);
+        new CompactAction(path, "default", "T").build(env);
         JobClient client = env.executeAsync();
 
         // write records for a while
@@ -388,7 +388,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
             StreamExecutionEnvironment env =
                     createStreamExecutionEnvironment(random.nextInt(1900) + 100);
             env.setParallelism(2);
-            FlinkActions.compact(path, "default", "T").build(env);
+            new CompactAction(path, "default", "T").build(env);
             env.executeAsync();
         }
 
@@ -422,7 +422,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
             StreamExecutionEnvironment env =
                     createStreamExecutionEnvironment(random.nextInt(1900) + 100);
             env.setParallelism(2);
-            FlinkActions.compact(path, "default", "T").build(env);
+            new CompactAction(path, "default", "T").build(env);
             env.executeAsync();
         }
 

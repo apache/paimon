@@ -161,8 +161,7 @@ Run the following command to submit a compaction job for the table.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     compact \
     --warehouse <warehouse-path> \
     --database <database-name> \ 
@@ -184,8 +183,7 @@ Example
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     compact \
     --warehouse s3:///path/to/warehouse \
     --database test_db \
@@ -201,8 +199,7 @@ For more usage of the compact action, see
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     compact --help
 ```
 

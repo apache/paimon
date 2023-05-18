@@ -146,7 +146,7 @@ public interface Action {
             }
         }
 
-        static void printHelp() {
+        public static void printHelp() {
             System.out.println("Usage: <action> [OPTIONS]");
             System.out.println();
 
