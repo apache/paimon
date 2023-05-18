@@ -125,7 +125,7 @@ public class AvroSchemaConverter {
                             "Avro does not support TIMESTAMP type "
                                     + "with precision: "
                                     + precision
-                                    + ", it only supports precision less than 3.");
+                                    + ", it only supports precision less than 6.");
                 }
                 Schema localTimestampSchema =
                         localTimestampLogicalType.addToSchema(SchemaBuilder.builder().longType());
