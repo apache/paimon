@@ -44,8 +44,7 @@ To use this feature through `flink run`, run the following shell command.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     mysql-sync-table
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -79,8 +78,7 @@ Example
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     mysql-sync-table \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
@@ -108,8 +106,7 @@ To use this feature through `flink run`, run the following shell command.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     mysql-sync-database
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -146,8 +143,7 @@ Example
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     mysql-sync-database \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \

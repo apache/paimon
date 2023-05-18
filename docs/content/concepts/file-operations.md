@@ -246,8 +246,7 @@ dedicated compaction job through `flink run`:
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     compact \
     --warehouse <warehouse-path> \
     --database <database-name> \ 
@@ -260,8 +259,7 @@ an example would be (suppose you're already in Flink home)
 
 ```bash
 ./bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    ./lib/paimon-flink-1.17-0.5-SNAPSHOT.jar \
+    ./lib/paimon-flink-action-{{< version >}}.jar \
     compact \
     --path file:///tmp/paimon/default.db/T
 ```
