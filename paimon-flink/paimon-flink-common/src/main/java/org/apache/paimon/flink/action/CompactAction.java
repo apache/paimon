@@ -53,11 +53,11 @@ public class CompactAction extends ActionBase {
     private final CompactorSourceBuilder sourceBuilder;
     private final CompactorSinkBuilder sinkBuilder;
 
-    CompactAction(String warehouse, String database, String tableName) {
+    public CompactAction(String warehouse, String database, String tableName) {
         this(warehouse, database, tableName, new Options());
     }
 
-    CompactAction(String warehouse, String database, String tableName, Options catalogOptions) {
+    public CompactAction(String warehouse, String database, String tableName, Options catalogOptions) {
         super(warehouse, database, tableName, catalogOptions);
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(

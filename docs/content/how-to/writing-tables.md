@@ -206,9 +206,7 @@ Run the following command to submit a drop-partition job for the table.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    -Dclassloader.resolve-order=parent-first \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     drop-partition \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -224,9 +222,7 @@ For more information of drop-partition, see
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    -Dclassloader.resolve-order=parent-first \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     drop-partition --help
 ```
 
@@ -287,9 +283,7 @@ Run the following command to submit a 'delete' job for the table.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    -Dclassloader.resolve-order=parent-first \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     delete \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -306,9 +300,7 @@ For more information of 'delete', see
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    -Dclassloader.resolve-order=parent-first \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     delete --help
 ```
 
@@ -389,9 +381,7 @@ Run the following command to submit a 'merge-into' job for the table.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    -Dclassloader.resolve-order=parent-first \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     merge-into \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -416,9 +406,7 @@ You can pass sqls by '--source-sql <sql> [, --source-sql <sql> ...]' to config e
 -- Find all orders mentioned in the source table, then mark as important if the price is above 100 
 -- or delete if the price is under 10.
 ./flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    -Dclassloader.resolve-order=parent-first \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     merge-into \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -434,9 +422,7 @@ You can pass sqls by '--source-sql <sql> [, --source-sql <sql> ...]' to config e
 -- For matched order rows, increase the price, and if there is no match, insert the order from the 
 -- source table:
 ./flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    -Dclassloader.resolve-order=parent-first \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     merge-into \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -451,9 +437,7 @@ You can pass sqls by '--source-sql <sql> [, --source-sql <sql> ...]' to config e
 -- For not matched by source order rows (which are in the target table and does not match any row in the
 -- source table based on the merge-condition), decrease the price or if the mark is 'trivial', delete them:
 ./flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    -Dclassloader.resolve-order=parent-first \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     merge-into \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -469,9 +453,7 @@ You can pass sqls by '--source-sql <sql> [, --source-sql <sql> ...]' to config e
 -- A --source-sql example: 
 -- Create a temporary view S in new catalog and use it as source table
 ./flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    -Dclassloader.resolve-order=parent-first \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     merge-into \
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -543,9 +525,7 @@ For more information of 'merge-into', see
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    -Dclassloader.resolve-order=parent-first \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     merge-into --help
 ```
 {{< /tab >}}
