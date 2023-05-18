@@ -57,7 +57,8 @@ public class CompactAction extends ActionBase {
         this(warehouse, database, tableName, new Options());
     }
 
-    public CompactAction(String warehouse, String database, String tableName, Options catalogOptions) {
+    public CompactAction(
+            String warehouse, String database, String tableName, Options catalogOptions) {
         super(warehouse, database, tableName, catalogOptions);
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
