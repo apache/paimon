@@ -66,7 +66,7 @@ Snapshot expiration is controlled by the following table properties.
       <td>No</td>
       <td style="word-wrap: break-word;">Integer.MAX_VALUE</td>
       <td>Integer</td>
-      <td>The maximum number of completed snapshots to retain. Should be greater than the minimum number.</td>
+      <td>The maximum number of completed snapshots to retain. Should be greater than or equal to the minimum number.</td>
     </tr>
     </tbody>
 </table>

@@ -173,7 +173,7 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(Integer.MAX_VALUE)
                     .withDescription(
-                            "The maximum number of completed snapshots to retain. Should be greater than the minimum number.");
+                            "The maximum number of completed snapshots to retain. Should be greater than or equal to the minimum number.");
 
     public static final ConfigOption<Duration> SNAPSHOT_TIME_RETAINED =
             key("snapshot.time-retained")
