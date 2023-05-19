@@ -127,7 +127,8 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
     }
 
     protected List<Row> sql(String query, Object... args) {
-        try (CloseableIterator<Row> iter = tEnv.executeSql(String.format(query, args)).collect()) {
+        String sql = args.length > 0 ? String.format(query, args) : query;
+        try (CloseableIterator<Row> iter = tEnv.executeSql(sql).collect()) {
             return ImmutableList.copyOf(iter);
         } catch (Exception e) {
             throw new RuntimeException(e);

@@ -228,7 +228,8 @@ public class ParquetReadWriteTest {
                         RowType.builder()
                                 .fields(fieldTypes, new String[] {"f7", "f2", "f4"})
                                 .build(),
-                        500);
+                        500,
+                        null);
 
         AtomicInteger cnt = new AtomicInteger(0);
         RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), testPath);
@@ -266,7 +267,8 @@ public class ParquetReadWriteTest {
                         RowType.builder()
                                 .fields(fieldTypes, new String[] {"f7", "f2", "f4", "f99"})
                                 .build(),
-                        500);
+                        500,
+                        null);
 
         AtomicInteger cnt = new AtomicInteger(0);
         RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), testPath);
@@ -309,7 +311,7 @@ public class ParquetReadWriteTest {
     }
 
     private int testReadingFile(List<Integer> expected, Path path) throws IOException {
-        ParquetReaderFactory format = new ParquetReaderFactory(new Options(), ROW_TYPE, 500);
+        ParquetReaderFactory format = new ParquetReaderFactory(new Options(), ROW_TYPE, 500, null);
 
         // validate java serialization
         try {
