@@ -27,11 +27,11 @@ import java.time.Instant;
 
 /** Test for avro to row data converters. */
 public class AvroToRowDataConvertersTest {
-    private static Timestamp NOW = Timestamp.now();
-    private static long TS_MILLIS = NOW.getMillisecond();
-    private static long TS_MICROS = NOW.toMicros() + 123L;
-    private static Timestamp NOW_MICROS = Timestamp.fromMicros(TS_MICROS);
-    private static Instant INSTANT = Instant.ofEpochMilli(TS_MILLIS);
+    private static final Timestamp NOW = Timestamp.now();
+    private static final long TS_MILLIS = NOW.getMillisecond();
+    private static final long TS_MICROS = NOW.toMicros() + 123L;
+    private static final Timestamp NOW_MICROS = Timestamp.fromMicros(TS_MICROS);
+    private static final Instant INSTANT = Instant.ofEpochMilli(TS_MILLIS);
 
     @Test
     public void testConvertToTimestamp() {
