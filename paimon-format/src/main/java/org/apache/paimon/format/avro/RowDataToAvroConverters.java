@@ -37,7 +37,6 @@ import org.apache.avro.util.Utf8;
 
 import java.io.Serializable;
 import java.nio.ByteBuffer;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -169,19 +168,10 @@ public class RowDataToAvroConverters {
                                 LogicalType logicalType = schema.getLogicalType();
 
                                 if (logicalType instanceof LogicalTypes.LocalTimestampMillis) {
-                                    return ((Timestamp) object)
-                                            .toInstant()
-                                            .atZone(ZoneId.systemDefault())
-                                            .toInstant()
-                                            .toEpochMilli();
+                                    return ((Timestamp) object).toInstant().toEpochMilli();
                                 } else if (logicalType
                                         instanceof LogicalTypes.LocalTimestampMicros) {
-                                    return ((Timestamp) object)
-                                                            .toInstant()
-                                                            .atZone(ZoneId.systemDefault())
-                                                            .toInstant()
-                                                            .toEpochMilli()
-                                                    * 1000
+                                    return ((Timestamp) object).toInstant().toEpochMilli() * 1000
                                             + ((Timestamp) object).getNanoOfMillisecond() / 1000;
                                 } else {
                                     throw new UnsupportedOperationException(
