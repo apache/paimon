@@ -145,7 +145,17 @@ public class RowDataToAvroConverters {
 
                             @Override
                             public Object convert(Schema schema, Object object) {
-                                return ((Timestamp) object).toInstant().toEpochMilli();
+                                LogicalType logicalType = schema.getLogicalType();
+
+                                if (logicalType instanceof LogicalTypes.TimestampMillis) {
+                                    return ((Timestamp) object).toInstant().toEpochMilli();
+                                } else if (logicalType instanceof LogicalTypes.TimestampMicros) {
+                                    return ((Timestamp) object).toInstant().toEpochMilli() * 1000
+                                            + ((Timestamp) object).getNanoOfMillisecond() / 1000;
+                                } else {
+                                    throw new UnsupportedOperationException(
+                                            "Unsupported timestamp type: " + logicalType);
+                                }
                             }
                         };
                 break;

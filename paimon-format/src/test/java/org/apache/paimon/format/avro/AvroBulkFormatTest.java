@@ -59,10 +59,14 @@ class AvroBulkFormatTest {
                             BinaryString.fromString("AvroBulk"),
                             BinaryString.fromString("FormatTest"),
                             Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
                             Timestamp.fromMicros(TIMESTAMP * 1000 + 123)),
                     GenericRow.of(
                             BinaryString.fromString("Apache"),
                             BinaryString.fromString("Paimon"),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123),
                             Timestamp.fromEpochMillis(TIMESTAMP),
                             Timestamp.fromMicros(TIMESTAMP * 1000 + 123)),
                     GenericRow.of(
@@ -73,11 +77,15 @@ class AvroBulkFormatTest {
                                             + "叙幽情。"),
                             BinaryString.fromString(""),
                             Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
                             Timestamp.fromMicros(TIMESTAMP * 1000 + 123)),
                     // -------- batch 1, block start 593 --------
                     GenericRow.of(
                             BinaryString.fromString("File"),
                             BinaryString.fromString("Format"),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123),
                             Timestamp.fromEpochMillis(TIMESTAMP),
                             Timestamp.fromMicros(TIMESTAMP * 1000 + 123)),
                     GenericRow.of(
@@ -85,16 +93,20 @@ class AvroBulkFormatTest {
                             BinaryString.fromString(
                                     "This is a string with English, 中文 and even 🍎🍌🍑🥝🍍🥭🍐"),
                             Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
                             Timestamp.fromMicros(TIMESTAMP * 1000 + 123)),
                     // -------- batch 2, block start 705 --------
                     GenericRow.of(
                             BinaryString.fromString("block with"),
                             BinaryString.fromString("only one record"),
                             Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
                             Timestamp.fromMicros(TIMESTAMP * 1000 + 123))
                     // -------- file length 752 --------
                     );
-    private static final List<Long> BLOCK_STARTS = Arrays.asList(473L, 883L, 1027L);
+    private static final List<Long> BLOCK_STARTS = Arrays.asList(689L, 1147L, 1323L);
 
     private File tmpFile;
 
