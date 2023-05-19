@@ -56,7 +56,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     private static final String DATABASE_NAME = "paimon_sync_database";
 
     @Test
-    @Timeout(600)
+    @Timeout(60)
     public void testSchemaEvolution() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
@@ -551,6 +551,102 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         // check paimon tables
         assertTableExists(existedTables);
         assertTableNotExists(notExistedTables);
+    }
+
+    @Test
+    @Timeout(600)
+    public void testNewlyAddedTable() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        MySqlSyncDatabaseAction action =
+                new MySqlSyncDatabaseAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        false,
+                        null,
+                        null,
+                        "t.+",
+                        null,
+                        Collections.emptyMap(),
+                        tableConfig);
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+
+        try (Connection conn =
+                DriverManager.getConnection(
+                        MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
+                        MYSQL_CONTAINER.getUsername(),
+                        MYSQL_CONTAINER.getPassword())) {
+            try (Statement statement = conn.createStatement()) {
+                testNewlyAddedTableImpl(statement);
+            }
+        }
+    }
+
+    private void testNewlyAddedTableImpl(Statement statement) throws Exception {
+        FileStoreTable table1 = getFileStoreTable("t1");
+        FileStoreTable table2 = getFileStoreTable("t2");
+
+        statement.executeUpdate("USE paimon_sync_database");
+
+        statement.executeUpdate("INSERT INTO t1 VALUES (1, 'one')");
+        statement.executeUpdate("INSERT INTO t2 VALUES (2, 'two', 20, 200)");
+        statement.executeUpdate("INSERT INTO t1 VALUES (3, 'three')");
+        statement.executeUpdate("INSERT INTO t2 VALUES (4, 'four', 40, 400)");
+        RowType rowType1 =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new String[] {"k", "v1"});
+        List<String> primaryKeys1 = Collections.singletonList("k");
+        List<String> expected = Arrays.asList("+I[1, one]", "+I[3, three]");
+        waitForResult(expected, table1, rowType1, primaryKeys1);
+
+        RowType rowType2 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10).notNull(),
+                            DataTypes.INT(),
+                            DataTypes.BIGINT()
+                        },
+                        new String[] {"k1", "k2", "v1", "v2"});
+        List<String> primaryKeys2 = Arrays.asList("k1", "k2");
+        expected = Arrays.asList("+I[2, two, 20, 200]", "+I[4, four, 40, 400]");
+        waitForResult(expected, table2, rowType2, primaryKeys2);
+
+        statement.executeUpdate("CREATE TABLE t4 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+        statement.executeUpdate("INSERT INTO t2 VALUES (8, 'eight', 80, 800)");
+
+        // wait until table t2 contains the updated record, and then check for existence of table t4
+        expected =
+                Arrays.asList(
+                        "+I[2, two, 20, 200]", "+I[4, four, 40, 400]", "+I[8, eight, 80, 800]");
+        waitForResult(expected, table2, rowType2, primaryKeys2);
+
+        statement.executeUpdate("INSERT INTO t4 VALUES (5, 'five')");
+        statement.executeUpdate("INSERT INTO t4 VALUES (7, 'seven')");
+
+        FileStoreTable table4 = getFileStoreTable("t4");
+        List<String> primaryKeys4 = Collections.singletonList("k");
+        RowType rowType4 =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new String[] {"k", "v1"});
+        expected = Arrays.asList("+I[5, five]", "+I[7, seven]");
+
+        waitForResult(expected, table4, rowType4, primaryKeys4);
     }
 
     private FileStoreTable getFileStoreTable(String tableName) throws Exception {

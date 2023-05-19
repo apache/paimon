@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 
@@ -47,6 +49,7 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     private final EventParser.Factory<T> parserFactory;
     private final Set<String> initialTables;
     private final String database;
+    private final Catalog catalog;
 
     private transient EventParser<T> parser;
     private transient Map<String, OutputTag<List<DataField>>> updatedDataFieldsOutputTags;
@@ -55,9 +58,13 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
             new OutputTag<>("paimon-newly-added-table", TypeInformation.of(CdcRecord.class));
 
     public CdcMultiTableParsingProcessFunction(
-            String database, List<FileStoreTable> tables, EventParser.Factory<T> parserFactory) {
+            String database,
+            Catalog catalog,
+            List<FileStoreTable> tables,
+            EventParser.Factory<T> parserFactory) {
         // for now, only support single database
         this.database = database;
+        this.catalog = catalog;
         this.initialTables = tables.stream().map(FileStoreTable::name).collect(Collectors.toSet());
         this.parserFactory = parserFactory;
     }
@@ -80,14 +87,24 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
         String databaseName = parser.databaseName();
 
         if (parser.isUpdatedDataFields()) {
+            // check for newly added table
+            parser.getNewlyAddedTableSchema(database)
+                    .ifPresent(
+                            schema -> {
+                                Identifier identifier =
+                                        new Identifier(database, parser.tableName());
+                                try {
+                                    catalog.createTable(identifier, schema, true);
+                                } catch (Throwable ignored) {
+                                }
+                            });
             parser.getUpdatedDataFields()
                     .ifPresent(t -> context.output(getUpdatedDataFieldsOutputTag(tableName), t));
         } else {
             for (CdcRecord record : parser.getRecords()) {
                 // Get the output tag for a given table. Need to differentiate whether the table
                 //     is newly discovered during runtime.
-                if (true) {
-                    //                if (isTableNewlyAdded(tableName)) {
+                if (isTableNewlyAdded(tableName)) {
                     context.output(NEW_TABLE_OUTPUT_TAG, wrapRecord(database, tableName, record));
                 } else {
                     context.output(getRecordOutputTag(tableName), record);

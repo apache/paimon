@@ -38,6 +38,7 @@ under the License.
         <flink.cdc.version>2.3.0</flink.cdc.version>
         <frocksdbjni.version>6.20.3-ververica-2.0</frocksdbjni.version>
         <geometry.version>2.2.0</geometry.version>
+        <fastsql.version>2.0.0_preview_973</fastsql.version>
     </properties>
 
     <dependencies>
@@ -266,6 +267,12 @@ under the License.
             <artifactId>mysql</artifactId>
             <version>${testcontainers.version}</version>
             <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.alibaba.fastsql</groupId>
+            <artifactId>fastsql</artifactId>
+            <version>${fastsql.version}</version>
         </dependency>
     </dependencies>
 

@@ -92,7 +92,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                 input.forward()
                         .process(
                                 new CdcMultiTableParsingProcessFunction<>(
-                                        database, tables, parserFactory))
+                                        database, catalog, tables, parserFactory))
                         .setParallelism(input.getParallelism());
 
         for (FileStoreTable table : tables) {

@@ -25,18 +25,32 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.EventParser;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.paimon.shade.guava30.com.google.common.base.Strings;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectWriter;
 
+import com.alibaba.fastsql.sql.SQLUtils;
+import com.alibaba.fastsql.sql.ast.SQLDataType;
+import com.alibaba.fastsql.sql.ast.SQLExpr;
+import com.alibaba.fastsql.sql.ast.SQLName;
+import com.alibaba.fastsql.sql.ast.SQLStatement;
+import com.alibaba.fastsql.sql.ast.expr.SQLCharExpr;
+import com.alibaba.fastsql.sql.ast.expr.SQLIntegerExpr;
+import com.alibaba.fastsql.sql.ast.statement.SQLColumnDefinition;
+import com.alibaba.fastsql.sql.ast.statement.SQLTableElement;
+import com.alibaba.fastsql.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
+import com.alibaba.fastsql.util.JdbcConstants;
 import com.esri.core.geometry.ogc.OGCGeometry;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +65,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -198,6 +213,82 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             result.add(new DataField(i, caseSensitive ? fieldName : fieldName.toLowerCase(), type));
         }
         return Optional.of(result);
+    }
+
+    @Override
+    public Optional<Schema> getNewlyAddedTableSchema(String databaseName) {
+        JsonNode historyRecord = payload.get("historyRecord");
+        if (historyRecord == null) {
+            return Optional.empty();
+        }
+
+        try {
+            String historyRecordString = historyRecord.asText();
+            String ddl = objectMapper.readTree(historyRecordString).get("ddl").asText();
+            if (Strings.isNullOrEmpty(ddl)) {
+                return Optional.empty();
+            }
+
+            SQLStatement statement = SQLUtils.parseSingleStatement(ddl, JdbcConstants.MYSQL);
+
+            if (!(statement instanceof MySqlCreateTableStatement)) {
+                return Optional.empty();
+            }
+
+            MySqlCreateTableStatement createTableStatement = (MySqlCreateTableStatement) statement;
+
+            // TODO: add default table config, partitions, and computed column
+            //     for newly added table;
+            MySqlSchema mySqlSchema = buildMySqlSchema(databaseName, createTableStatement);
+            Schema fromMySql =
+                    MySqlActionUtils.buildPaimonSchema(
+                            mySqlSchema,
+                            Collections.emptyList(),
+                            mySqlSchema.getPrimaryKeys(),
+                            computedColumns,
+                            Collections.emptyMap(),
+                            caseSensitive);
+
+            return Optional.of(fromMySql);
+
+        } catch (Exception e) {
+            LOG.info("Failed to parse history record for schema changes", e);
+            return Optional.empty();
+        }
+    }
+
+    private MySqlSchema buildMySqlSchema(String database, MySqlCreateTableStatement statement) {
+        LinkedHashMap<String, Tuple2<DataType, String>> fields = new LinkedHashMap<>();
+
+        List<SQLTableElement> columns = statement.getTableElementList();
+        for (SQLTableElement element : columns) {
+            if (element instanceof SQLColumnDefinition) {
+                SQLColumnDefinition column = (SQLColumnDefinition) element;
+                SQLName name = column.getName();
+                SQLDataType dataType = column.getDataType();
+                List<SQLExpr> arguments = dataType.getArguments();
+                Integer precision = null;
+                Integer scale = null;
+                if (arguments.size() >= 1) {
+                    precision = (int) (((SQLIntegerExpr) arguments.get(0)).getValue());
+                }
+
+                if (arguments.size() >= 2) {
+                    scale = (int) (((SQLIntegerExpr) arguments.get(1)).getValue());
+                }
+
+                SQLCharExpr comment = (SQLCharExpr) column.getComment();
+                fields.put(
+                        name.getSimpleName(),
+                        Tuple2.of(
+                                MySqlTypeUtils.toDataType(
+                                        column.getDataType().getName(), precision, scale),
+                                comment == null ? null : String.valueOf(comment.getValue())));
+            }
+        }
+
+        return new MySqlSchema(
+                database, statement.getTableName(), fields, statement.getPrimaryKeyNames());
     }
 
     @Override

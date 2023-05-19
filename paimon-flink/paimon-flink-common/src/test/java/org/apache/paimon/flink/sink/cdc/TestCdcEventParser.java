@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 
 import java.util.List;
@@ -56,5 +57,10 @@ public class TestCdcEventParser implements EventParser<TestCdcEvent> {
     @Override
     public List<CdcRecord> getRecords() {
         return raw.records();
+    }
+
+    @Override
+    public Optional<Schema> getNewlyAddedTableSchema(String databaseName) {
+        return Optional.empty();
     }
 }

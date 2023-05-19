@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 
 import java.io.Serializable;
@@ -42,6 +43,8 @@ public interface EventParser<T> {
     Optional<List<DataField>> getUpdatedDataFields();
 
     List<CdcRecord> getRecords();
+
+    Optional<Schema> getNewlyAddedTableSchema(String databaseName);
 
     /** Factory to create an {@link EventParser}. */
     interface Factory<T> extends Serializable {
