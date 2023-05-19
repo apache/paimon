@@ -25,32 +25,33 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 
+/** Test for avro to row data converters. */
 public class AvroToRowDataConvertersTest {
-    private static Timestamp now = Timestamp.now();
-    private static long ts_millis = now.getMillisecond();
-    private static long ts_micros = now.toMicros() + 123L;
-    private static Timestamp now_micros = Timestamp.fromMicros(ts_micros);
-    private static Instant instant = Instant.ofEpochMilli(ts_millis);
+    private static Timestamp NOW = Timestamp.now();
+    private static long TS_MILLIS = NOW.getMillisecond();
+    private static long TS_MICROS = NOW.toMicros() + 123L;
+    private static Timestamp NOW_MICROS = Timestamp.fromMicros(TS_MICROS);
+    private static Instant INSTANT = Instant.ofEpochMilli(TS_MILLIS);
 
     @Test
     public void testConvertToTimestamp() {
-        Assertions.assertEquals(now, AvroToRowDataConverters.convertToTimestamp(ts_millis, 3));
+        Assertions.assertEquals(NOW, AvroToRowDataConverters.convertToTimestamp(TS_MILLIS, 3));
 
         Assertions.assertEquals(
-                now_micros, AvroToRowDataConverters.convertToTimestamp(ts_micros, 6));
+                NOW_MICROS, AvroToRowDataConverters.convertToTimestamp(TS_MICROS, 6));
 
-        Assertions.assertEquals(now, AvroToRowDataConverters.convertToTimestamp(instant, 3));
+        Assertions.assertEquals(NOW, AvroToRowDataConverters.convertToTimestamp(INSTANT, 3));
 
-        Assertions.assertEquals(now, AvroToRowDataConverters.convertToTimestamp(instant, 6));
+        Assertions.assertEquals(NOW, AvroToRowDataConverters.convertToTimestamp(INSTANT, 6));
     }
 
     @Test
     public void testConvertToOffsetTimestampFromMillis() {
         Assertions.assertEquals(
-                now, AvroToRowDataConverters.convertToOffsetTimestampFromMillis(ts_millis));
+                NOW, AvroToRowDataConverters.convertToOffsetTimestampFromMillis(TS_MILLIS));
 
         Assertions.assertEquals(
-                now, AvroToRowDataConverters.convertToOffsetTimestampFromMillis(instant));
+                NOW, AvroToRowDataConverters.convertToOffsetTimestampFromMillis(INSTANT));
 
         Assertions.assertThrowsExactly(
                 IllegalArgumentException.class,
@@ -60,10 +61,10 @@ public class AvroToRowDataConvertersTest {
     @Test
     public void testConvertToOffsetTimestampFromMicros() {
         Assertions.assertEquals(
-                now_micros, AvroToRowDataConverters.convertToOffsetTimestampFromMicros(ts_micros));
+                NOW_MICROS, AvroToRowDataConverters.convertToOffsetTimestampFromMicros(TS_MICROS));
 
         Assertions.assertEquals(
-                now, AvroToRowDataConverters.convertToOffsetTimestampFromMicros(instant));
+                NOW, AvroToRowDataConverters.convertToOffsetTimestampFromMicros(INSTANT));
 
         Assertions.assertThrowsExactly(
                 IllegalArgumentException.class,
