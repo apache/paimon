@@ -213,7 +213,7 @@ paimon-common/src/main/java/org/apache/paimon/lookup/hash/HashLookupStoreWriter.
 paimon-common/src/main/java/org/apache/paimon/lookup/hash/HashLookupStoreReader.java
 paimon-common/src/main/java/org/apache/paimon/utils/VarLengthIntUtils.java
 paimon-filesystems/paimon-s3-impl/src/main/java/com/amazonaws/services/s3/model/transform/XmlResponsesSaxParser.java
-mvnw files from https://github.com/apache/maven-wrapper Apache 2.0
+mvnw and mvnw.cmd and .mvn/wrapper/maven-wrapper.properties from https://github.com/apache/maven-wrapper Apache 2.0
 
 
 MIT License
