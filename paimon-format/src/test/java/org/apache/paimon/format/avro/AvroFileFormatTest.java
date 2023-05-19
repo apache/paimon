@@ -94,7 +94,6 @@ public class AvroFileFormatTest {
         dataFields.add(new DataField(index++, "timestamp_type", DataTypes.TIMESTAMP(6)));
 
         RowType rowType = new RowType(dataFields);
-        Assertions.assertThrows(
-                IllegalArgumentException.class, () -> fileFormat.validateDataFields(rowType));
+        Assertions.assertDoesNotThrow(() -> fileFormat.validateDataFields(rowType));
     }
 }
