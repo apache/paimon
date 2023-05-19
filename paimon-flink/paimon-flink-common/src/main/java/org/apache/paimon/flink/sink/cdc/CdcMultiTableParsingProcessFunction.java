@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -30,6 +31,8 @@ import org.apache.flink.util.OutputTag;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * A {@link ProcessFunction} to parse CDC change event to either a list of {@link DataField}s or
@@ -42,12 +45,20 @@ import java.util.Map;
 public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, Void> {
 
     private final EventParser.Factory<T> parserFactory;
+    private final Set<String> initialTables;
+    private final String database;
 
     private transient EventParser<T> parser;
     private transient Map<String, OutputTag<List<DataField>>> updatedDataFieldsOutputTags;
     private transient Map<String, OutputTag<CdcRecord>> recordOutputTags;
+    public static transient OutputTag<CdcRecord> NEW_TABLE_OUTPUT_TAG =
+            new OutputTag<>("paimon-newly-added-table", TypeInformation.of(CdcRecord.class));
 
-    public CdcMultiTableParsingProcessFunction(EventParser.Factory<T> parserFactory) {
+    public CdcMultiTableParsingProcessFunction(
+            String database, List<FileStoreTable> tables, EventParser.Factory<T> parserFactory) {
+        // for now, only support single database
+        this.database = database;
+        this.initialTables = tables.stream().map(FileStoreTable::name).collect(Collectors.toSet());
         this.parserFactory = parserFactory;
     }
 
@@ -63,14 +74,30 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
         parser.setRawEvent(raw);
         String tableName = parser.tableName();
 
+        // CDC Ingestion only supports single database at this time being.
+        //    In the future, there will be a mapping between source databases
+        //    and target paimon databases
+        String databaseName = parser.databaseName();
+
         if (parser.isUpdatedDataFields()) {
             parser.getUpdatedDataFields()
                     .ifPresent(t -> context.output(getUpdatedDataFieldsOutputTag(tableName), t));
         } else {
             for (CdcRecord record : parser.getRecords()) {
-                context.output(getRecordOutputTag(tableName), record);
+                // Get the output tag for a given table. Need to differentiate whether the table
+                //     is newly discovered during runtime.
+                if (true) {
+                    //                if (isTableNewlyAdded(tableName)) {
+                    context.output(NEW_TABLE_OUTPUT_TAG, wrapRecord(database, tableName, record));
+                } else {
+                    context.output(getRecordOutputTag(tableName), record);
+                }
             }
         }
+    }
+
+    private CdcRecord wrapRecord(String databaseName, String tableName, CdcRecord record) {
+        return MultiplexCdcRecord.fromCdcRecord(databaseName, tableName, record);
     }
 
     private OutputTag<List<DataField>> getUpdatedDataFieldsOutputTag(String tableName) {
@@ -86,6 +113,10 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     private OutputTag<CdcRecord> getRecordOutputTag(String tableName) {
         return recordOutputTags.computeIfAbsent(
                 tableName, CdcMultiTableParsingProcessFunction::createRecordOutputTag);
+    }
+
+    private boolean isTableNewlyAdded(String tableName) {
+        return !initialTables.contains(tableName);
     }
 
     public static OutputTag<CdcRecord> createRecordOutputTag(String tableName) {

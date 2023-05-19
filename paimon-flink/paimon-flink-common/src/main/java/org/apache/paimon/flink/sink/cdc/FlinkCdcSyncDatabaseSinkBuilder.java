@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.sink.BucketingStreamPartitioner;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.operation.Lock;
@@ -52,6 +53,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     private Lock.Factory lockFactory = Lock.emptyFactory();
 
     @Nullable private Integer parallelism;
+    private Catalog catalog;
+    private String database;
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
@@ -87,7 +90,9 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
         SingleOutputStreamOperator<Void> parsed =
                 input.forward()
-                        .process(new CdcMultiTableParsingProcessFunction<>(parserFactory))
+                        .process(
+                                new CdcMultiTableParsingProcessFunction<>(
+                                        database, tables, parserFactory))
                         .setParallelism(input.getParallelism());
 
         for (FileStoreTable table : tables) {
@@ -119,5 +124,34 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
             FlinkCdcSink sink = new FlinkCdcSink(table, lockFactory);
             sink.sinkFrom(new DataStream<>(env, partitioned));
         }
+
+        // for newly-added tables, create a multiplexing operator that handles all their records
+        //     and writes to multiple tables
+        DataStream<MultiplexCdcRecord> newlyAddedTableStream =
+                SingleOutputStreamOperatorUtils.getSideOutput(
+                                parsed, CdcMultiTableParsingProcessFunction.NEW_TABLE_OUTPUT_TAG)
+                        .map(record -> (MultiplexCdcRecord) record);
+        BucketingStreamPartitioner<MultiplexCdcRecord> partitioner =
+                new BucketingStreamPartitioner<>(new CdcMultiplexRecordChannelComputer());
+        PartitionTransformation<MultiplexCdcRecord> partitioned =
+                new PartitionTransformation<>(
+                        newlyAddedTableStream.getTransformation(), partitioner);
+        if (parallelism != null) {
+            partitioned.setParallelism(parallelism);
+        }
+
+        FlinkCdcMutiplexSink sink = new FlinkCdcMutiplexSink(catalog, lockFactory);
+        sink.sinkFrom(newlyAddedTableStream);
+
+        // TODO: add multi-table compact operator
+    }
+
+    public void setCatalog(Catalog catalog) {
+        this.catalog = catalog;
+    }
+
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withDatabase(String database) {
+        this.database = database;
+        return this;
     }
 }

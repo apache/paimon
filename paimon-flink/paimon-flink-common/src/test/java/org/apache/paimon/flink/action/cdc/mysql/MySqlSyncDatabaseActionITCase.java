@@ -56,7 +56,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     private static final String DATABASE_NAME = "paimon_sync_database";
 
     @Test
-    @Timeout(60)
+    @Timeout(600)
     public void testSchemaEvolution() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);

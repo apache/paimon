@@ -34,16 +34,37 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 @Public
 public class Identifier implements Serializable {
 
-    private static final long serialVersionUID = 1L;
-
     public static final String UNKNOWN_DATABASE = "unknown";
-
+    private static final long serialVersionUID = 1L;
     private final String database;
     private final String table;
 
     public Identifier(String database, String table) {
         this.database = database;
         this.table = table;
+    }
+
+    public static Identifier create(String db, String table) {
+        return new Identifier(db, table);
+    }
+
+    public static Identifier fromString(String fullName) {
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(fullName), "fullName cannot be null or empty");
+
+        String[] paths = fullName.split("\\.");
+
+        if (paths.length != 2) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Cannot get splits from '%s' to get database and table", fullName));
+        }
+
+        return new Identifier(paths[0], paths[1]);
+    }
+
+    public String getTableName() {
+        return table;
     }
 
     public String getDatabaseName() {
@@ -67,25 +88,6 @@ public class Identifier implements Serializable {
     public String getEscapedFullName(char escapeChar) {
         return String.format(
                 "%c%s%c.%c%s%c", escapeChar, database, escapeChar, escapeChar, table, escapeChar);
-    }
-
-    public static Identifier create(String db, String table) {
-        return new Identifier(db, table);
-    }
-
-    public static Identifier fromString(String fullName) {
-        checkArgument(
-                !StringUtils.isNullOrWhitespaceOnly(fullName), "fullName cannot be null or empty");
-
-        String[] paths = fullName.split("\\.");
-
-        if (paths.length != 2) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Cannot get splits from '%s' to get database and table", fullName));
-        }
-
-        return new Identifier(paths[0], paths[1]);
     }
 
     @Override

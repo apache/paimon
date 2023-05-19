@@ -18,34 +18,31 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.types.DataField;
+import org.apache.paimon.flink.sink.ChannelComputer;
 
-import java.io.Serializable;
-import java.util.List;
-import java.util.Optional;
+import java.util.Objects;
 
-/**
- * Parse a CDC change event to a list of {@link DataField}s or {@link CdcRecord}.
- *
- * @param <T> CDC change event type
- */
-public interface EventParser<T> {
+/** {@link ChannelComputer} for {@link CdcRecord}. */
+public class CdcMultiplexRecordChannelComputer implements ChannelComputer<MultiplexCdcRecord> {
 
-    void setRawEvent(T rawEvent);
+    private static final long serialVersionUID = 1L;
 
-    String tableName();
+    private transient int numChannels;
 
-    String databaseName();
+    public CdcMultiplexRecordChannelComputer() {}
 
-    boolean isUpdatedDataFields();
+    @Override
+    public void setup(int numChannels) {
+        this.numChannels = numChannels;
+    }
 
-    Optional<List<DataField>> getUpdatedDataFields();
+    @Override
+    public int channel(MultiplexCdcRecord record) {
+        return Objects.hash(record.getDatabaseName(), record.getTableName()) % numChannels;
+    }
 
-    List<CdcRecord> getRecords();
-
-    /** Factory to create an {@link EventParser}. */
-    interface Factory<T> extends Serializable {
-
-        EventParser<T> create();
+    @Override
+    public String toString() {
+        return "shuffle by table";
     }
 }

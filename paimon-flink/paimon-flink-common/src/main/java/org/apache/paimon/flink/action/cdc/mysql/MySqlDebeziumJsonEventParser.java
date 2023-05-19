@@ -119,6 +119,12 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         return tableNameConverter.convert(tableName);
     }
 
+    @Override
+    public String databaseName() {
+        String databaseName = payload.get("source").get("db").asText();
+        return tableNameConverter.convert(databaseName);
+    }
+
     private void updateFieldTypes(JsonNode schema) {
         mySqlFieldTypes = new HashMap<>();
         fieldClassNames = new HashMap<>();

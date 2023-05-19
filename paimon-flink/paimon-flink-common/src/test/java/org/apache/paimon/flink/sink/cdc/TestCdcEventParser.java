@@ -39,6 +39,11 @@ public class TestCdcEventParser implements EventParser<TestCdcEvent> {
     }
 
     @Override
+    public String databaseName() {
+        return null;
+    }
+
+    @Override
     public boolean isUpdatedDataFields() {
         return raw.updatedDataFields() != null;
     }

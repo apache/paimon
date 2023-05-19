@@ -231,10 +231,16 @@ public class MySqlSyncDatabaseAction implements Action {
                                 env.fromSource(
                                         source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
                         .withParserFactory(parserFactory)
+                        .withDatabase(database)
                         .withTables(fileStoreTables);
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
+        }
+
+        boolean scanNewlyAddedTable = true;
+        if (scanNewlyAddedTable) {
+            sinkBuilder.setCatalog(catalog);
         }
         sinkBuilder.build();
     }
@@ -408,7 +414,7 @@ public class MySqlSyncDatabaseAction implements Action {
                 "'hostname', 'username', 'password' and 'database-name' "
                         + "are required configurations, others are optional. "
                         + "Note that 'database-name' should be the exact name "
-                        + "of the MySQL databse you want to synchronize. "
+                        + "of the MySQL database you want to synchronize. "
                         + "It can't be a regular expression.");
         System.out.println(
                 "For a complete list of supported configurations, "
