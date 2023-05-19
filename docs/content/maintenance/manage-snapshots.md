@@ -1,9 +1,9 @@
 ---
-title: "Expiring Snapshots"
+title: "Manage Snapshots"
 weight: 3
 type: docs
 aliases:
-- /maintenance/expiring-snapshots.html
+- /maintenance/manage-snapshots.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,7 +24,11 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Expiring Snapshots
+# Manage Snapshots
+
+This section will describe the management and behavior related to snapshots.
+
+## Expiring Snapshots
 
 Paimon writers generates one or two [snapshots]({{< ref "concepts/basic-concepts#snapshots" >}}) per commit. Each snapshot may add some new data files or mark some old data files as deleted. However, the marked data files are not truly deleted because Paimon also supports time traveling to an earlier snapshot. They are only deleted when the snapshot expires.
 
@@ -73,4 +77,57 @@ Please note that too short retain time or too small retain number may result in:
   the batch query takes 10 minutes to read, but the snapshot from 10 minutes ago
   expires, at which point the batch query will read a deleted snapshot.
 - Streaming reading jobs on table files (without the external log system) fail to restart.
-  When the job restarts, the snapshot it recorded may have expired.
+  When the job restarts, the snapshot it recorded may have expired. (You can use
+  [Consumer Id]({{< ref "how-to/querying-tables#consumer-id" >}}) to protect streaming reading
+  in a small retain time of snapshot expiration).
+
+## Rollback to Snapshot
+
+Rollback a table to a specific snapshot ID.
+
+{{< tabs "rollback-to" >}}
+
+{{< tab "Flink" >}}
+
+Run the following command:
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    rollback-to \
+    --warehouse <warehouse-path> \
+    --database <database-name> \ 
+    --table <table-name> \
+    [--snapshot <snapshot-id>]
+```
+
+{{< /tab >}}
+
+{{< tab "Java API" >}}
+
+```java
+import org.apache.paimon.table.Table;
+
+public class RollbackTo {
+
+    public static void main(String[] args) {
+        // before rollback:
+        // snapshot-3
+        // snapshot-4
+        // snapshot-5
+        // snapshot-6
+        // snapshot-7
+      
+        table.rollbackTo(5);
+        
+        // after rollback:
+        // snapshot-3
+        // snapshot-4
+        // snapshot-5
+    }
+}
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}

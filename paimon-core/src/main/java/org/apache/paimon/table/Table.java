@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
@@ -37,6 +38,8 @@ import java.util.Optional;
 @Public
 public interface Table extends Serializable {
 
+    // ================== Table Metadata =====================
+
     /** A name to identify this table. */
     String name();
 
@@ -55,8 +58,16 @@ public interface Table extends Serializable {
     /** Optional comment of this table. */
     Optional<String> comment();
 
+    // ================= Table Operations ====================
+
     /** Copy this table with adding dynamic options. */
     Table copy(Map<String, String> dynamicOptions);
+
+    /** Rollback table's state to a specific snapshot. */
+    @Experimental
+    void rollbackTo(long snapshotId);
+
+    // =============== Read & Write Operations ==================
 
     /** Returns a new read builder. */
     ReadBuilder newReadBuilder();

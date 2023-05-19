@@ -118,6 +118,7 @@ public interface Action {
         private static final String DROP_PARTITION = "drop-partition";
         private static final String DELETE = "delete";
         private static final String MERGE_INTO = "merge-into";
+        private static final String ROLLBACK = "rollback";
         // cdc actions
         private static final String MYSQL_SYNC_TABLE = "mysql-sync-table";
         private static final String MYSQL_SYNC_DATABASE = "mysql-sync-database";
@@ -135,6 +136,8 @@ public interface Action {
                     return DeleteAction.create(actionArgs);
                 case MERGE_INTO:
                     return MergeIntoAction.create(actionArgs);
+                case ROLLBACK:
+                    return RollbackToAction.create(actionArgs);
                 case MYSQL_SYNC_TABLE:
                     return MySqlSyncTableAction.create(actionArgs);
                 case MYSQL_SYNC_DATABASE:

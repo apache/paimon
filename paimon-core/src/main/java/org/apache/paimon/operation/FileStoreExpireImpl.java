@@ -23,34 +23,21 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.Triple;
-
-import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
-import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.stream.Collectors;
 
 /**
  * Default implementation of {@link FileStoreExpire}. It retains a certain number or period of
@@ -65,17 +52,14 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileStoreExpireImpl.class);
 
-    private final FileIO fileIO;
     private final int numRetainedMin;
     // snapshots exceeding any constraint will be expired
     private final int numRetainedMax;
     private final long millisRetained;
 
-    private final FileStorePathFactory pathFactory;
     private final SnapshotManager snapshotManager;
     private final ConsumerManager consumerManager;
-    private final ManifestFile manifestFile;
-    private final ManifestList manifestList;
+    private final SnapshotDeletion snapshotDeletion;
 
     private Lock lock;
 
@@ -88,16 +72,31 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             SnapshotManager snapshotManager,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory) {
-        this.fileIO = fileIO;
+        this(
+                numRetainedMin,
+                numRetainedMax,
+                millisRetained,
+                snapshotManager,
+                new SnapshotDeletion(
+                        fileIO,
+                        pathFactory,
+                        manifestFileFactory.create(),
+                        manifestListFactory.create()));
+    }
+
+    public FileStoreExpireImpl(
+            int numRetainedMin,
+            int numRetainedMax,
+            long millisRetained,
+            SnapshotManager snapshotManager,
+            SnapshotDeletion snapshotDeletion) {
         this.numRetainedMin = numRetainedMin;
         this.numRetainedMax = numRetainedMax;
         this.millisRetained = millisRetained;
-        this.pathFactory = pathFactory;
         this.snapshotManager = snapshotManager;
         this.consumerManager =
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
-        this.manifestFile = manifestFileFactory.create();
-        this.manifestList = manifestListFactory.create();
+        this.snapshotDeletion = snapshotDeletion;
     }
 
     @Override
@@ -175,19 +174,14 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
         // id should be (beginInclusiveId, endExclusiveId]
-        Map<BinaryRow, Set<Integer>> changedBuckets = new HashMap<>();
+        Map<BinaryRow, Set<Integer>> deletionBuckets = new HashMap<>();
         for (long id = beginInclusiveId + 1; id <= endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete merge tree files not used by snapshot #" + id);
             }
             Snapshot snapshot = snapshotManager.snapshot(id);
             // expire merge tree files and collect changed buckets
-            expireMergeTreeFiles(snapshot.deltaManifestList())
-                    .forEach(
-                            (partition, buckets) ->
-                                    changedBuckets
-                                            .computeIfAbsent(partition, p -> new HashSet<>())
-                                            .addAll(buckets));
+            snapshotDeletion.deleteExpiredDataFiles(snapshot.deltaManifestList(), deletionBuckets);
         }
 
         // delete changelog files
@@ -197,150 +191,34 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
             Snapshot snapshot = snapshotManager.snapshot(id);
             if (snapshot.changelogManifestList() != null) {
-                expireChangelogFiles(snapshot.changelogManifestList());
+                snapshotDeletion.deleteAddedDataFiles(
+                        snapshot.changelogManifestList(), deletionBuckets);
             }
         }
 
         // data files and changelog files in bucket directories has been deleted
         // then delete changed bucket directories if they are empty
-        tryDeleteDirectories(changedBuckets);
+        snapshotDeletion.tryDeleteDirectories(deletionBuckets);
 
         // delete manifests
-        Snapshot exclusiveSnapshot = snapshotManager.snapshot(endExclusiveId);
-        Set<ManifestFileMeta> manifestsInUse =
-                new HashSet<>(exclusiveSnapshot.dataManifests(manifestList));
-        // to avoid deleting twice
-        Set<ManifestFileMeta> deletedManifests = new HashSet<>();
+        Set<ManifestFileMeta> skipDeletion =
+                new HashSet<>(
+                        snapshotManager
+                                .snapshot(endExclusiveId)
+                                .dataManifests(snapshotDeletion.manifestList()));
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete manifests in snapshot #" + id);
             }
 
-            Snapshot toExpire = snapshotManager.snapshot(id);
-            // cannot call `toExpire.dataManifests` directly, it is possible that a job is
-            // killed during expiration, so some manifest files may have been deleted
-            List<ManifestFileMeta> toExpireManifests = new ArrayList<>();
-            toExpireManifests.addAll(tryReadManifestList(toExpire.baseManifestList()));
-            toExpireManifests.addAll(tryReadManifestList(toExpire.deltaManifestList()));
+            Snapshot snapshot = snapshotManager.snapshot(id);
+            snapshotDeletion.deleteManifestFiles(skipDeletion, snapshot);
 
-            // delete manifest
-            for (ManifestFileMeta manifest : toExpireManifests) {
-                if (!manifestsInUse.contains(manifest) && !deletedManifests.contains(manifest)) {
-                    manifestFile.delete(manifest.fileName());
-                    deletedManifests.add(manifest);
-                }
-            }
-            if (toExpire.changelogManifestList() != null) {
-                for (ManifestFileMeta manifest :
-                        tryReadManifestList(toExpire.changelogManifestList())) {
-                    manifestFile.delete(manifest.fileName());
-                }
-            }
-
-            // delete manifest lists
-            manifestList.delete(toExpire.baseManifestList());
-            manifestList.delete(toExpire.deltaManifestList());
-            if (toExpire.changelogManifestList() != null) {
-                manifestList.delete(toExpire.changelogManifestList());
-            }
-
-            // delete snapshot
-            fileIO.deleteQuietly(snapshotManager.snapshotPath(id));
+            // delete snapshot last
+            snapshotManager.fileIO().deleteQuietly(snapshotManager.snapshotPath(id));
         }
 
         writeEarliestHint(endExclusiveId);
-    }
-
-    // return a map of partition-buckets of which some data files have been deleted
-    private Map<BinaryRow, Set<Integer>> expireMergeTreeFiles(String manifestListName) {
-        return expireMergeTreeFiles(getManifestEntriesFromManifestList(manifestListName));
-    }
-
-    @VisibleForTesting
-    Map<BinaryRow, Set<Integer>> expireMergeTreeFiles(Iterable<ManifestEntry> dataFileLog) {
-        // we cannot delete a data file directly when we meet a DELETE entry, because that
-        // file might be upgraded
-        // data file path -> (partition, bucket, extra file paths)
-        Map<Path, Triple<BinaryRow, Integer, List<Path>>> dataFileToDelete = new HashMap<>();
-        for (ManifestEntry entry : dataFileLog) {
-            Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
-            Path dataFilePath = new Path(bucketPath, entry.file().fileName());
-            switch (entry.kind()) {
-                case ADD:
-                    dataFileToDelete.remove(dataFilePath);
-                    break;
-                case DELETE:
-                    List<Path> extraFiles = new ArrayList<>(entry.file().extraFiles().size());
-                    for (String file : entry.file().extraFiles()) {
-                        extraFiles.add(new Path(bucketPath, file));
-                    }
-                    dataFileToDelete.put(
-                            dataFilePath, Triple.of(entry.partition(), entry.bucket(), extraFiles));
-                    break;
-                default:
-                    throw new UnsupportedOperationException(
-                            "Unknown value kind " + entry.kind().name());
-            }
-        }
-
-        Map<BinaryRow, Set<Integer>> changedBuckets = new HashMap<>();
-        dataFileToDelete.forEach(
-                (path, triple) -> {
-                    // delete data files
-                    fileIO.deleteQuietly(path);
-                    triple.f2.forEach(fileIO::deleteQuietly);
-                    // record changed buckets
-                    changedBuckets.computeIfAbsent(triple.f0, p -> new HashSet<>()).add(triple.f1);
-                });
-
-        return changedBuckets;
-    }
-
-    private void expireChangelogFiles(String manifestListName) {
-        for (ManifestEntry changelogEntry : getManifestEntriesFromManifestList(manifestListName)) {
-            fileIO.deleteQuietly(
-                    new Path(
-                            pathFactory.bucketPath(
-                                    changelogEntry.partition(), changelogEntry.bucket()),
-                            changelogEntry.file().fileName()));
-        }
-    }
-
-    private Iterable<ManifestEntry> getManifestEntriesFromManifestList(String manifestListName) {
-        List<String> manifestFiles =
-                tryReadManifestList(manifestListName).stream()
-                        .map(ManifestFileMeta::fileName)
-                        .collect(Collectors.toList());
-        Queue<String> files = new LinkedList<>(manifestFiles);
-        return Iterables.concat(
-                (Iterable<Iterable<ManifestEntry>>)
-                        () ->
-                                new Iterator<Iterable<ManifestEntry>>() {
-                                    @Override
-                                    public boolean hasNext() {
-                                        return files.size() > 0;
-                                    }
-
-                                    @Override
-                                    public Iterable<ManifestEntry> next() {
-                                        String file = files.poll();
-                                        try {
-                                            return manifestFile.read(file);
-                                        } catch (Exception e) {
-                                            LOG.warn("Failed to read manifest file " + file, e);
-                                            return Collections.emptyList();
-                                        }
-                                    }
-                                });
-    }
-
-    private List<ManifestFileMeta> tryReadManifestList(String manifestListName) {
-        try {
-            return manifestList.read(manifestListName);
-        } catch (Exception e) {
-            LOG.warn("Failed to read manifest list file " + manifestListName, e);
-            return Collections.emptyList();
-        }
     }
 
     private void writeEarliestHint(long earliest) {
@@ -363,43 +241,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         }
     }
 
-    private void tryDeleteDirectories(Map<BinaryRow, Set<Integer>> changedBuckets) {
-        // All directory paths are deduplicated and sorted by hierarchy level
-        Map<Integer, Set<Path>> deduplicate = new HashMap<>();
-        for (Map.Entry<BinaryRow, Set<Integer>> entry : changedBuckets.entrySet()) {
-            // try to delete bucket directories
-            for (Integer bucket : entry.getValue()) {
-                tryDeleteEmptyDirectory(pathFactory.bucketPath(entry.getKey(), bucket));
-            }
-
-            List<Path> hierarchicalPaths = pathFactory.getHierarchicalPartitionPath(entry.getKey());
-            int hierarchies = hierarchicalPaths.size();
-            if (hierarchies == 0) {
-                continue;
-            }
-
-            if (tryDeleteEmptyDirectory(hierarchicalPaths.get(hierarchies - 1))) {
-                // deduplicate high level partition directories
-                for (int hierarchy = 0; hierarchy < hierarchies - 1; hierarchy++) {
-                    Path path = hierarchicalPaths.get(hierarchy);
-                    deduplicate.computeIfAbsent(hierarchy, i -> new HashSet<>()).add(path);
-                }
-            }
-        }
-
-        // from deepest to shallowest
-        for (int hierarchy = deduplicate.size() - 1; hierarchy >= 0; hierarchy--) {
-            deduplicate.get(hierarchy).forEach(this::tryDeleteEmptyDirectory);
-        }
-    }
-
-    private boolean tryDeleteEmptyDirectory(Path path) {
-        try {
-            fileIO.delete(path, false);
-            return true;
-        } catch (IOException e) {
-            LOG.debug("Failed to delete directory '{}'. Check whether it is empty.", path);
-            return false;
-        }
+    @VisibleForTesting
+    SnapshotDeletion snapshotDeletion() {
+        return snapshotDeletion;
     }
 }

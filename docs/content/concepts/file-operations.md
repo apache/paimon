@@ -308,7 +308,7 @@ has actually used this schema yet until the next commit.
 ## Expire Snapshots
 
 Remind that the marked data files are not truly deleted until the snapshot expires and 
-no consumer depends on the snapshot. For more information, see [Expiring Snapshots]({{< ref "maintenance/expiring-snapshots" >}}).
+no consumer depends on the snapshot. For more information, see [Expiring Snapshots]({{< ref "maintenance/manage-snapshots#expiring-snapshots" >}}).
 
 During snapshot expire, the range of snapshots are determined first and then marked data files in these snapshots will be 
 deleted. A data file is `marked` only when there's a manifest entry of kind `DELETE` pointing to that data file, so that it 

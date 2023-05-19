@@ -86,4 +86,12 @@ public interface ReadonlyTable extends InnerTable {
                         "Readonly Table %s does not support newStreamScan.",
                         this.getClass().getSimpleName()));
     }
+
+    @Override
+    default void rollbackTo(long snapshotId) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support rollbackTo snapshot.",
+                        this.getClass().getSimpleName()));
+    }
 }

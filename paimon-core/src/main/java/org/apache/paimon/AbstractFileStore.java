@@ -26,6 +26,7 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.FileStoreExpireImpl;
 import org.apache.paimon.operation.PartitionExpire;
+import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
@@ -145,14 +146,20 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public FileStoreExpireImpl newExpire() {
         return new FileStoreExpireImpl(
-                fileIO,
                 options.snapshotNumRetainMin(),
                 options.snapshotNumRetainMax(),
                 options.snapshotTimeRetain().toMillis(),
-                pathFactory(),
                 snapshotManager(),
-                manifestFileFactory(),
-                manifestListFactory());
+                newSnapshotDeletion());
+    }
+
+    @Override
+    public SnapshotDeletion newSnapshotDeletion() {
+        return new SnapshotDeletion(
+                fileIO,
+                pathFactory(),
+                manifestFileFactory().create(),
+                manifestListFactory().create());
     }
 
     public abstract Comparator<InternalRow> newKeyComparator();
