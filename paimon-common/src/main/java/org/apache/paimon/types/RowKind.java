@@ -97,6 +97,16 @@ public enum RowKind {
         return value;
     }
 
+    /** Is {@link #UPDATE_BEFORE} or {@link #DELETE}. */
+    public boolean isRetract() {
+        return this == RowKind.UPDATE_BEFORE || this == RowKind.DELETE;
+    }
+
+    /** Is {@link #INSERT} or {@link #UPDATE_AFTER}. */
+    public boolean isAdd() {
+        return this == RowKind.INSERT || this == RowKind.UPDATE_AFTER;
+    }
+
     /**
      * Creates a {@link RowKind} from the given byte value. Each {@link RowKind} has a byte value
      * representation.
