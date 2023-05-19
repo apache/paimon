@@ -303,7 +303,7 @@ public class FlinkCatalog extends AbstractCatalog {
             if (newColumnType.isNullable() != oldColumnType.isNullable()) {
                 schemaChanges.add(
                         SchemaChange.updateColumnNullability(
-                                new String[] {modify.getNewColumn().getName()},
+                                modify.getNewColumn().getName(),
                                 newColumnType.isNullable()));
             }
             schemaChanges.add(
@@ -321,7 +321,7 @@ public class FlinkCatalog extends AbstractCatalog {
             ModifyColumnComment modify = (ModifyColumnComment) change;
             schemaChanges.add(
                     SchemaChange.updateColumnComment(
-                            new String[] {modify.getNewColumn().getName()},
+                            modify.getNewColumn().getName(),
                             modify.getNewComment()));
             return schemaChanges;
         } else if (change instanceof ModifyWatermark) {
