@@ -27,8 +27,6 @@ import org.apache.paimon.flink.sink.PrepareCommitOperator;
 import org.apache.paimon.flink.sink.StateUtils;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteState;
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
@@ -36,7 +34,6 @@ import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -44,16 +41,14 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME;
+
 /**
  * A {@link PrepareCommitOperator} to write {@link CdcRecord}. Record schema may change. If current
  * known schema does not fit record schema, this operator will wait for schema changes.
  */
 public class CdcRecordStoreMultiWriteOperator extends PrepareCommitOperator<MultiplexCdcRecord> {
 
-    static final ConfigOption<Duration> RETRY_SLEEP_TIME =
-            ConfigOptions.key("cdc.retry-sleep-time")
-                    .durationType()
-                    .defaultValue(Duration.ofMillis(500));
     private static final long serialVersionUID = 1L;
     private final Catalog catalog;
     private final StoreSinkWrite.Provider storeSinkWriteProvider;

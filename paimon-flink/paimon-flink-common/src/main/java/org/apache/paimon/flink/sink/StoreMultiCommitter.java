@@ -24,7 +24,6 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.TableCommitImpl;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -33,19 +32,27 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/** {@link Committer} for dynamic store. */
+/**
+ * {@link StoreMultiCommitter} for multiple dynamic store. During the commit process, it will group
+ * the ManifestCommittables by their table identifier and use different committers to commit to
+ * different tables.
+ */
 public class StoreMultiCommitter implements Committer {
 
     private final Catalog catalog;
-    private TableCommitImpl commit;
-    private Map<Identifier, TableCommitImpl> tableCommits;
+    // To make the commit behavior consistent with that of Committer,
+    //    StoreMultiCommitter manages multiple committers which are
+    //    referenced by table id.
     private Map<Identifier, StoreCommitter> tableCommitters;
     private Lock.Factory lockFactory = Lock.emptyFactory();
-    private StoreCommitter committer;
 
     public StoreMultiCommitter(Catalog catalog) {
         this.catalog = catalog;
         this.tableCommitters = new HashMap<>();
+    }
+
+    public static Identifier getTableId(ManifestCommittable committable) {
+        return Identifier.create(committable.getDatabase(), committable.getTable());
     }
 
     @Override
@@ -135,10 +142,6 @@ public class StoreMultiCommitter implements Committer {
                             committable.getDatabase(), committable.getTable()));
         }
         return committer;
-    }
-
-    public static Identifier getTableId(ManifestCommittable committable) {
-        return Identifier.create(committable.getDatabase(), committable.getTable());
     }
 
     @Override

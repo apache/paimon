@@ -30,8 +30,10 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -39,13 +41,17 @@ import javax.annotation.Nullable;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -555,7 +561,19 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(600)
-    public void testNewlyAddedTable() throws Exception {
+    public void testNewlyAddedTableSingleTable() throws Exception {
+        testNewlyAddedTable(1, false, false);
+    }
+
+    @Test
+    @Timeout(600)
+    public void testNewlyAddedTableMultipleTables() throws Exception {
+        testNewlyAddedTable(3, false, false);
+    }
+
+    public void testNewlyAddedTable(
+            int numOfNewlyAddedTables, boolean testSavepointRecovery, boolean testSchemaChange)
+            throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
 
@@ -590,12 +608,13 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         MYSQL_CONTAINER.getUsername(),
                         MYSQL_CONTAINER.getPassword())) {
             try (Statement statement = conn.createStatement()) {
-                testNewlyAddedTableImpl(statement);
+                testNewlyAddedTableImpl(statement, 1);
             }
         }
     }
 
-    private void testNewlyAddedTableImpl(Statement statement) throws Exception {
+    private void testNewlyAddedTableImpl(Statement statement, int newlyAddedTableCount)
+            throws Exception {
         FileStoreTable table1 = getFileStoreTable("t1");
         FileStoreTable table2 = getFileStoreTable("t2");
 
@@ -626,27 +645,79 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         expected = Arrays.asList("+I[2, two, 20, 200]", "+I[4, four, 40, 400]");
         waitForResult(expected, table2, rowType2, primaryKeys2);
 
-        statement.executeUpdate("CREATE TABLE t4 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
-        statement.executeUpdate("INSERT INTO t2 VALUES (8, 'eight', 80, 800)");
+        // Create new tables at runtime. The Flink job is guaranteed to at incremental
+        //    sync phase, because the newly added table will not be captured in snapshot
+        //    phase.
+        List<String> newTablePrimaryKeys = Collections.singletonList("k");
+        RowType newTableRowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new String[] {"k", "v1"});
+        int newTableCount = 0;
+        String newTableName = getNewTableName(newTableCount);
 
-        // wait until table t2 contains the updated record, and then check for existence of table t4
+        createNewTable(statement, newTableName);
+        statement.executeUpdate("INSERT INTO t2 VALUES (8, 'eight', 80, 800)");
+        List<Tuple2<Integer, String>> newTableRecords = getNewTableRecords(newTableCount);
+        List<String> newTableExpected =
+                newTableRecords.stream()
+                        .map(tuple -> String.format("+I[%d, %s]", tuple.f0, tuple.f1))
+                        .collect(Collectors.toList());
+        insertRecordsIntoNewTable(statement, newTableName, newTableRecords);
+
+        // wait until table t2 contains the updated record, and then check
+        //     for existence of first newly added table
         expected =
                 Arrays.asList(
                         "+I[2, two, 20, 200]", "+I[4, four, 40, 400]", "+I[8, eight, 80, 800]");
         waitForResult(expected, table2, rowType2, primaryKeys2);
 
-        statement.executeUpdate("INSERT INTO t4 VALUES (5, 'five')");
-        statement.executeUpdate("INSERT INTO t4 VALUES (7, 'seven')");
+        FileStoreTable newTable = getFileStoreTable(newTableName);
+        waitForResult(newTableExpected, newTable, newTableRowType, newTablePrimaryKeys);
 
-        FileStoreTable table4 = getFileStoreTable("t4");
-        List<String> primaryKeys4 = Collections.singletonList("k");
-        RowType rowType4 =
-                RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
-                        new String[] {"k", "v1"});
-        expected = Arrays.asList("+I[5, five]", "+I[7, seven]");
+        for (newTableCount = 1; newTableCount < newlyAddedTableCount; ++newTableCount) {
+            // create new table
+            newTableName = getNewTableName(newTableCount);
+            createNewTable(statement, newTableName);
 
-        waitForResult(expected, table4, rowType4, primaryKeys4);
+            // insert records
+            insertRecordsIntoNewTable(statement, newTableName, newTableRecords);
+            newTable = getFileStoreTable(newTableName);
+            waitForResult(newTableExpected, newTable, newTableRowType, newTablePrimaryKeys);
+        }
+    }
+
+    private List<Tuple2<Integer, String>> getNewTableRecords(int newTableCount) {
+        List<Tuple2<Integer, String>> records = new LinkedList<>();
+        int count = new Random().nextInt(10);
+        for (int i = 0; i < count; i++) {
+            records.add(Tuple2.of(i, "varchar_" + i));
+        }
+        return records;
+    }
+
+    private void insertRecordsIntoNewTable(
+            Statement statement, String newTableName, List<Tuple2<Integer, String>> newTableRecords)
+            throws SQLException {
+        String sql =
+                String.format(
+                        "INSERT INTO %s VALUES %s",
+                        newTableName,
+                        newTableRecords.stream()
+                                .map(tuple -> String.format("(%d, '%s')", tuple.f0, tuple.f1))
+                                .collect(Collectors.joining(",")));
+        statement.executeUpdate(sql);
+    }
+
+    @NotNull
+    private String getNewTableName(int newTableCount) {
+        return "t_new_table_" + newTableCount;
+    }
+
+    private void createNewTable(Statement statement, String newTableName) throws SQLException {
+        statement.executeUpdate(
+                String.format(
+                        "CREATE TABLE %s (k INT, v1 VARCHAR(10), PRIMARY KEY (k))", newTableName));
     }
 
     private FileStoreTable getFileStoreTable(String tableName) throws Exception {
