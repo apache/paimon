@@ -26,14 +26,17 @@ import org.apache.flink.core.io.SimpleVersionedSerializer;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-/** {@link SimpleVersionedSerializer} for {@link Committable}. */
+/**
+ * {@link SimpleVersionedSerializer} for {@link MultiTableCommittable}. If a type info class is
+ * using this this serde of MultiTableCommittable. It should make sure that the operator that
+ * produces it will include the database, table, and commit user information. This can be done by
+ * calling MultiTableCommittable::fromCommittable.
+ */
 public class MultiTableCommittableSerializer implements SimpleVersionedSerializer<Committable> {
 
-    private final CommitMessageSerializer commitMessageSerializer;
     private final CommittableSerializer committableSerializer;
 
     public MultiTableCommittableSerializer(CommitMessageSerializer commitMessageSerializer) {
-        this.commitMessageSerializer = commitMessageSerializer;
         this.committableSerializer = new CommittableSerializer(commitMessageSerializer);
     }
 
@@ -46,6 +49,7 @@ public class MultiTableCommittableSerializer implements SimpleVersionedSerialize
     public byte[] serialize(Committable raw) throws IOException {
         MultiTableCommittable committable = (MultiTableCommittable) raw;
 
+        // first serialize all metadata
         String database = committable.getDatabase();
         int databaseLen = database.length();
         String table = committable.getTable();
@@ -55,6 +59,7 @@ public class MultiTableCommittableSerializer implements SimpleVersionedSerialize
 
         int multiTableMetaLen = databaseLen + tableLen + commitUserLen + 3 * 4;
 
+        // use committable serializer (of the same version) to serialize committable
         byte[] serializedCommittable = committableSerializer.serialize(committable);
 
         return ByteBuffer.allocate(multiTableMetaLen + serializedCommittable.length)
@@ -74,6 +79,7 @@ public class MultiTableCommittableSerializer implements SimpleVersionedSerialize
             throw new RuntimeException("Can not deserialize version: " + committableVersion);
         }
 
+        // first deserialize all metadata
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
         int databaseLen = buffer.getInt();
         byte[] databaseBytes = new byte[databaseLen];
@@ -89,6 +95,7 @@ public class MultiTableCommittableSerializer implements SimpleVersionedSerialize
         String commitUser = new String(commitUserBytes);
         int multiTableMetaLen = databaseLen + tableLen + commitUserLen + 3 * 4;
 
+        // use committable serializer (of the same version) to deserialize committable
         byte[] serializedCommittable = new byte[bytes.length - multiTableMetaLen];
 
         buffer.get(serializedCommittable, 0, bytes.length - multiTableMetaLen);

@@ -223,6 +223,9 @@ public class MySqlSyncDatabaseAction implements Action {
                 "No tables to be synchronized. Possible cause is the schemas of all tables in specified "
                         + "MySQL database are not compatible with those of existed Paimon tables. Please check the log.");
 
+        // First excluding all tables that failed the excludingPattern and those does not
+        //     have a primary key. Then including other table using regex so that newly
+        //     added table DDLs and DMLs during job runtime will be captured
         String tableList =
                 excludedTables.stream()
                                 .map(t -> String.format("(?!(%s))", t))
@@ -243,16 +246,14 @@ public class MySqlSyncDatabaseAction implements Action {
                                         source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
                         .withParserFactory(parserFactory)
                         .withDatabase(database)
+                        .withCatalog(catalog)
                         .withTables(fileStoreTables);
+
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
         }
 
-        boolean scanNewlyAddedTable = true;
-        if (scanNewlyAddedTable) {
-            sinkBuilder.setCatalog(catalog);
-        }
         sinkBuilder.build();
     }
 

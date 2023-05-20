@@ -20,12 +20,16 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.catalog.Identifier;
 
-/** Committable produced by {@link PrepareCommitOperator}. */
+/**
+ * MultiTableCommittable produced by {@link PrepareCommitOperator}. This type of Committable will
+ * only be produced by multiplexed operators that handles data from multiple tables. Thus, the
+ * database, table, and commit user of each table is included in the committable.
+ */
 public class MultiTableCommittable extends Committable {
 
+    private final String database;
+    private final String table;
     private final String commitUser;
-    private String database;
-    private String table;
 
     public MultiTableCommittable(
             String database,

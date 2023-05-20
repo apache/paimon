@@ -24,7 +24,7 @@ import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
 
-/** Type information of {@link Committable}. */
+/** Type information of {@link MultiTableCommittable}. */
 public class MultiTableCommittableTypeInfo extends CommittableTypeInfo {
 
     @Override
