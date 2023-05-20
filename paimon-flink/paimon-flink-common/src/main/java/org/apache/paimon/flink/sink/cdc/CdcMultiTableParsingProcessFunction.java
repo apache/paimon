@@ -23,7 +23,9 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 
+import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.ListTypeInfo;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
@@ -56,6 +58,12 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     private transient Map<String, OutputTag<CdcRecord>> recordOutputTags;
     public static transient OutputTag<CdcRecord> NEW_TABLE_OUTPUT_TAG =
             new OutputTag<>("paimon-newly-added-table", TypeInformation.of(CdcRecord.class));
+    public static final OutputTag<Tuple2<Identifier, List<DataField>>>
+            NEW_TABLE_SCHEMA_CHANGE_OUTPUT_TAG =
+                    new OutputTag<>(
+                            "paimon-newly-added-table-schema-change",
+                            TypeInformation.of(
+                                    new TypeHint<Tuple2<Identifier, List<DataField>>>() {}));
 
     public CdcMultiTableParsingProcessFunction(
             String database,
@@ -99,7 +107,17 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
                                 }
                             });
             parser.getUpdatedDataFields()
-                    .ifPresent(t -> context.output(getUpdatedDataFieldsOutputTag(tableName), t));
+                    .ifPresent(
+                            t -> {
+                                if (isTableNewlyAdded(tableName)) {
+                                    context.output(
+                                            NEW_TABLE_SCHEMA_CHANGE_OUTPUT_TAG,
+                                            Tuple2.of(Identifier.create(database, tableName), t));
+
+                                } else {
+                                    context.output(getUpdatedDataFieldsOutputTag(tableName), t);
+                                }
+                            });
         } else {
             for (CdcRecord record : parser.getRecords()) {
                 // Get the output tag for a given table. Need to differentiate whether the table

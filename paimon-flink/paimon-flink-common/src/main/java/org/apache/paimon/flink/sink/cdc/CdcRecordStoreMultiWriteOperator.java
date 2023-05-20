@@ -82,7 +82,7 @@ public class CdcRecordStoreMultiWriteOperator extends PrepareCommitOperator<Mult
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
 
-        state = new StoreSinkWriteState(context, (tableName, partition, bucket) -> false);
+        state = new StoreSinkWriteState(context, (tableName, partition, bucket) -> true);
         this.tables = new HashMap<>();
         this.writes = new HashMap<>();
     }

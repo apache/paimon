@@ -141,6 +141,14 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                 SingleOutputStreamOperatorUtils.getSideOutput(
                                 parsed, CdcMultiTableParsingProcessFunction.NEW_TABLE_OUTPUT_TAG)
                         .map(record -> (MultiplexCdcRecord) record);
+        // handles schema change for newly added tables
+        SingleOutputStreamOperator<Void> schemaChangeProcessFunction =
+                SingleOutputStreamOperatorUtils.getSideOutput(
+                                parsed,
+                                CdcMultiTableParsingProcessFunction
+                                        .NEW_TABLE_SCHEMA_CHANGE_OUTPUT_TAG)
+                        .process(new MultiTableUpdatedDataFieldsProcessFunction(catalog));
+
         BucketingStreamPartitioner<MultiplexCdcRecord> partitioner =
                 new BucketingStreamPartitioner<>(new CdcMultiplexRecordChannelComputer());
         PartitionTransformation<MultiplexCdcRecord> partitioned =

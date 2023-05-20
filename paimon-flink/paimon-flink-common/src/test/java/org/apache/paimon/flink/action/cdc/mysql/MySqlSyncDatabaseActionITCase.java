@@ -49,7 +49,6 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
@@ -571,6 +570,12 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         testNewlyAddedTable(3, false, false);
     }
 
+    @Test
+    @Timeout(600)
+    public void testNewlyAddedTableSchemaChange() throws Exception {
+        testNewlyAddedTable(1, false, true);
+    }
+
     public void testNewlyAddedTable(
             int numOfNewlyAddedTables, boolean testSavepointRecovery, boolean testSchemaChange)
             throws Exception {
@@ -608,12 +613,17 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         MYSQL_CONTAINER.getUsername(),
                         MYSQL_CONTAINER.getPassword())) {
             try (Statement statement = conn.createStatement()) {
-                testNewlyAddedTableImpl(statement, 1);
+                testNewlyAddedTableImpl(
+                        statement, numOfNewlyAddedTables, testSavepointRecovery, testSchemaChange);
             }
         }
     }
 
-    private void testNewlyAddedTableImpl(Statement statement, int newlyAddedTableCount)
+    private void testNewlyAddedTableImpl(
+            Statement statement,
+            int newlyAddedTableCount,
+            boolean testSavepointRecovery,
+            boolean testSchemaChange)
             throws Exception {
         FileStoreTable table1 = getFileStoreTable("t1");
         FileStoreTable table2 = getFileStoreTable("t2");
@@ -648,6 +658,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         // Create new tables at runtime. The Flink job is guaranteed to at incremental
         //    sync phase, because the newly added table will not be captured in snapshot
         //    phase.
+        Map<String, List<Tuple2<Integer, String>>> recordsMap = new HashMap<>();
         List<String> newTablePrimaryKeys = Collections.singletonList("k");
         RowType newTableRowType =
                 RowType.of(
@@ -659,6 +670,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         createNewTable(statement, newTableName);
         statement.executeUpdate("INSERT INTO t2 VALUES (8, 'eight', 80, 800)");
         List<Tuple2<Integer, String>> newTableRecords = getNewTableRecords(newTableCount);
+        recordsMap.put(newTableName, newTableRecords);
         List<String> newTableExpected =
                 newTableRecords.stream()
                         .map(tuple -> String.format("+I[%d, %s]", tuple.f0, tuple.f1))
@@ -680,16 +692,47 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             newTableName = getNewTableName(newTableCount);
             createNewTable(statement, newTableName);
 
+            Thread.sleep(5000L);
+
             // insert records
+            newTableRecords = getNewTableRecords(newTableCount);
+            recordsMap.put(newTableName, newTableRecords);
             insertRecordsIntoNewTable(statement, newTableName, newTableRecords);
             newTable = getFileStoreTable(newTableName);
             waitForResult(newTableExpected, newTable, newTableRowType, newTablePrimaryKeys);
+        }
+
+        // test schema change
+        if (testSchemaChange) {
+            ThreadLocalRandom random = ThreadLocalRandom.current();
+            int pick = random.nextInt(newlyAddedTableCount);
+            String tableName = getNewTableName(pick);
+            List<Tuple2<Integer, String>> records = recordsMap.get(tableName);
+            statement.executeUpdate(String.format("ALTER TABLE %s ADD COLUMN v2 INT", tableName));
+            statement.executeUpdate(
+                    String.format("INSERT INTO %s VALUES (100, 'hundred', 10000)", tableName));
+
+            List<String> expectedRecords =
+                    records.stream()
+                            .map(tuple -> String.format("+I[%d, %s, NULL]", tuple.f0, tuple.f1))
+                            .collect(Collectors.toList());
+            expectedRecords.add("+I[100, hundred, 10000]");
+
+            newTable = getFileStoreTable(tableName);
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                            },
+                            new String[] {"k", "v1", "v2"});
+            ;
+            waitForResult(expectedRecords, newTable, rowType, newTablePrimaryKeys);
         }
     }
 
     private List<Tuple2<Integer, String>> getNewTableRecords(int newTableCount) {
         List<Tuple2<Integer, String>> records = new LinkedList<>();
-        int count = new Random().nextInt(10);
+        int count = ThreadLocalRandom.current().nextInt(10) + 1;
         for (int i = 0; i < count; i++) {
             records.add(Tuple2.of(i, "varchar_" + i));
         }
@@ -705,7 +748,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         newTableName,
                         newTableRecords.stream()
                                 .map(tuple -> String.format("(%d, '%s')", tuple.f0, tuple.f1))
-                                .collect(Collectors.joining(",")));
+                                .collect(Collectors.joining(", ")));
         statement.executeUpdate(sql);
     }
 
