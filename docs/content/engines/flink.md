@@ -86,7 +86,7 @@ cp paimon-flink-*.jar <FLINK_HOME>/lib/
 **Step 3: Copy Hadoop Bundled Jar**
 
 {{< hint info >}}
-If the machine is in a hadoop environment, please ensure the value of the environment variable `HADOOP_CLASSPATH`, you do not need to use the following pre-bundled Hadoop jar.
+If the machine is in a hadoop environment, please ensure the value of the environment variable `HADOOP_CLASSPATH` include path to the common Hadoop libraries, you do not need to use the following pre-bundled Hadoop jar.
 {{< /hint >}}
 
 [Download](https://flink.apache.org/downloads.html) Pre-bundled Hadoop jar and copy the jar file to the `lib` directory of your Flink home.
@@ -122,7 +122,7 @@ You can now start Flink SQL client to execute SQL scripts.
 
 ```sql
 -- if you're trying out Paimon in a distributed environment,
--- warehouse path should be set to a shared file system, such as HDFS or OSS
+-- the warehouse path should be set to a shared file system, such as HDFS or OSS
 CREATE CATALOG my_catalog WITH (
     'type'='paimon',
     'warehouse'='file:/tmp/paimon'
