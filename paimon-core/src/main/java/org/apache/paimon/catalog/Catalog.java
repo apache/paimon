@@ -23,8 +23,11 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * This interface is responsible for reading and writing metadata such as database/table from a
@@ -107,6 +110,26 @@ public interface Catalog extends AutoCloseable {
      * @throws DatabaseNotExistException if the database does not exist
      */
     List<String> listTables(String databaseName) throws DatabaseNotExistException;
+
+
+    /**
+     * Get names of all tables under this catalog. An empty list is returned if none exists.
+     *
+     * <p>NOTE: System tables will not be listed.
+     *
+     * @return a list of the names of all tables in this catalog
+     */
+    default List<Identifier> listTables(){
+        return this.listDatabases().stream().map(database -> {
+            try {
+                return this.listTables(database).stream().map(table -> Identifier.create(database, table)).collect(Collectors.toList());
+
+            } catch (DatabaseNotExistException ignored) {
+
+            }
+            return new ArrayList<Identifier>();
+        }).flatMap(Collection::stream).collect(Collectors.toList());
+    }
 
     /**
      * Check if a table exists in this catalog.

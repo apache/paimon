@@ -188,6 +188,23 @@ public abstract class CatalogTestBase {
     }
 
     @Test
+    public void testListAllTables() throws Exception {
+        catalog.createDatabase("test_db1", false);
+        List<String> tables1 = catalog.listTables("test_db1");
+        assertThat(tables1).isEmpty();
+        catalog.createDatabase("test_db2", false);
+        List<String> tables2 = catalog.listTables("test_db2");
+        assertThat(tables2).isEmpty();
+
+        catalog.createTable(Identifier.create("test_db1", "table1"), DEFAULT_TABLE_SCHEMA, false);
+        catalog.createTable(Identifier.create("test_db2", "table2"), DEFAULT_TABLE_SCHEMA, false);
+
+        List<Identifier> identifiers = catalog.listTables();
+
+        assertThat(identifiers).containsExactlyInAnyOrder(Identifier.create("test_db1", "table1"),Identifier.create("test_db2", "table2"));
+    }
+
+    @Test
     public void testTableExists() throws Exception {
         // Table exists returns true when the table exists in the database
         catalog.createDatabase("test_db", false);
