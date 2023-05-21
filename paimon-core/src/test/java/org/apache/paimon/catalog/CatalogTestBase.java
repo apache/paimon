@@ -199,7 +199,7 @@ public abstract class CatalogTestBase {
         catalog.createTable(Identifier.create("test_db1", "table1"), DEFAULT_TABLE_SCHEMA, false);
         catalog.createTable(Identifier.create("test_db2", "table2"), DEFAULT_TABLE_SCHEMA, false);
 
-        List<Identifier> identifiers = catalog.listTables();
+        List<Identifier> identifiers = catalog.listAllTables();
 
         assertThat(identifiers)
                 .containsExactlyInAnyOrder(

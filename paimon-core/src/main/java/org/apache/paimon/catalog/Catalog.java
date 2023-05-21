@@ -118,7 +118,7 @@ public interface Catalog extends AutoCloseable {
      *
      * @return a list of the names of all tables in this catalog
      */
-    default List<Identifier> listTables() {
+    default List<Identifier> listAllTables() {
         return this.listDatabases().stream()
                 .map(
                         database -> {
