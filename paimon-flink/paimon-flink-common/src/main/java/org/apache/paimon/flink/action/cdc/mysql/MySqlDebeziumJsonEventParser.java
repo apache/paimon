@@ -16,6 +16,11 @@
  * limitations under the License.
  */
 
+/* This file is based on source code from JsonDebeziumSchemaSerializer in the Doris Project
+ * (https://doris.apache.org/), licensed by the Apache Software Foundation (ASF) under the
+ * Apache License, Version 2.0. See the NOTICE file distributed with this work for additional
+ *  information regarding copyright ownership. */
+
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
@@ -52,13 +57,7 @@ import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/**
- * {@link EventParser} for MySQL Debezium JSON.
- *
- * <p>Some implementation is referenced from <a
- * href="https://github.com/apache/doris-flink-connector/blob/master/flink-doris-connector/src/main/java/org/apache/doris/flink/sink/writer/JsonDebeziumSchemaSerializer.java">apache
- * / doris-flink-connector</a>.
- */
+/** {@link EventParser} for MySQL Debezium JSON. */
 public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlDebeziumJsonEventParser.class);
