@@ -213,6 +213,8 @@ paimon-common/src/main/java/org/apache/paimon/lookup/hash/HashLookupStoreWriter.
 paimon-common/src/main/java/org/apache/paimon/lookup/hash/HashLookupStoreReader.java
 paimon-common/src/main/java/org/apache/paimon/utils/VarLengthIntUtils.java
 paimon-filesystems/paimon-s3-impl/src/main/java/com/amazonaws/services/s3/model/transform/XmlResponsesSaxParser.java
+paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/action/cdc/mysql/MySqlTypeUtils.java
+paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/action/cdc/mysql/MySqlDebeziumJsonEventParser.java
 
 
 MIT License

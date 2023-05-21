@@ -16,6 +16,11 @@
  * limitations under the License.
  */
 
+/* This file is based on source code from MySqlTypeUtils in the flink-cdc-connectors Project
+ * (https://ververica.github.io/flink-cdc-connectors/), licensed by the Apache Software Foundation (ASF)
+ * under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
+
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.types.DataType;
@@ -25,13 +30,7 @@ import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
-/**
- * Converts from MySQL type to {@link DataType}.
- *
- * <p>Mostly referenced from <a
- * href="https://github.com/ververica/flink-cdc-connectors/blob/master/flink-connector-mysql-cdc/src/main/java/com/ververica/cdc/connectors/mysql/schema/MySqlTypeUtils.java">ververica
- * / flink-cdc-connectors</a>.
- */
+/** Converts from MySQL type to {@link DataType}. */
 public class MySqlTypeUtils {
 
     // ------ MySQL Type ------
