@@ -111,7 +111,6 @@ public interface Catalog extends AutoCloseable {
      */
     List<String> listTables(String databaseName) throws DatabaseNotExistException;
 
-
     /**
      * Get names of all tables under this catalog. An empty list is returned if none exists.
      *
@@ -119,16 +118,22 @@ public interface Catalog extends AutoCloseable {
      *
      * @return a list of the names of all tables in this catalog
      */
-    default List<Identifier> listTables(){
-        return this.listDatabases().stream().map(database -> {
-            try {
-                return this.listTables(database).stream().map(table -> Identifier.create(database, table)).collect(Collectors.toList());
+    default List<Identifier> listTables() {
+        return this.listDatabases().stream()
+                .map(
+                        database -> {
+                            try {
+                                return this.listTables(database).stream()
+                                        .map(table -> Identifier.create(database, table))
+                                        .collect(Collectors.toList());
 
-            } catch (DatabaseNotExistException ignored) {
+                            } catch (DatabaseNotExistException ignored) {
 
-            }
-            return new ArrayList<Identifier>();
-        }).flatMap(Collection::stream).collect(Collectors.toList());
+                            }
+                            return new ArrayList<Identifier>();
+                        })
+                .flatMap(Collection::stream)
+                .collect(Collectors.toList());
     }
 
     /**

@@ -201,7 +201,10 @@ public abstract class CatalogTestBase {
 
         List<Identifier> identifiers = catalog.listTables();
 
-        assertThat(identifiers).containsExactlyInAnyOrder(Identifier.create("test_db1", "table1"),Identifier.create("test_db2", "table2"));
+        assertThat(identifiers)
+                .containsExactlyInAnyOrder(
+                        Identifier.create("test_db1", "table1"),
+                        Identifier.create("test_db2", "table2"));
     }
 
     @Test
