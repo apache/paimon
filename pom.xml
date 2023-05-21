@@ -809,6 +809,10 @@ under the License.
                             </importOrder>
 
                             <removeUnusedImports/>
+
+                            <licenseHeader>
+                                <file>${maven.multiModuleProjectDirectory}/tools/copyright/copyright-header-java.txt</file>
+                            </licenseHeader>
                         </java>
                     </configuration>
                     <executions>
