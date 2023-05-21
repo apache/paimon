@@ -32,10 +32,15 @@ import org.apache.paimon.types.RowType;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.core.execution.JobClient;
+import org.apache.flink.core.execution.SavepointFormatType;
+import org.apache.flink.runtime.jobgraph.JobGraph;
+import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 
 import javax.annotation.Nullable;
 
@@ -49,6 +54,7 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
@@ -59,6 +65,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     private static final String DATABASE_NAME = "paimon_sync_database";
+    @TempDir java.nio.file.Path tempDir;
 
     @Test
     @Timeout(60)
@@ -576,9 +583,41 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         testNewlyAddedTable(1, false, true);
     }
 
+    @Test
+    @Timeout(600)
+    public void testNewlyAddedTableSingleTableWithSavepoint() throws Exception {
+        testNewlyAddedTable(1, true, true);
+    }
+
     public void testNewlyAddedTable(
             int numOfNewlyAddedTables, boolean testSavepointRecovery, boolean testSchemaChange)
             throws Exception {
+        JobClient client = buildSyncDatabaseActionWithNewlyAddedTables();
+        waitJobRunning(client);
+
+        try (Connection conn =
+                DriverManager.getConnection(
+                        MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
+                        MYSQL_CONTAINER.getUsername(),
+                        MYSQL_CONTAINER.getPassword())) {
+            try (Statement statement = conn.createStatement()) {
+                testNewlyAddedTableImpl(
+                        client,
+                        statement,
+                        numOfNewlyAddedTables,
+                        testSavepointRecovery,
+                        testSchemaChange);
+            }
+        }
+    }
+
+    private JobClient buildSyncDatabaseActionWithNewlyAddedTables() throws Exception {
+        return buildSyncDatabaseActionWithNewlyAddedTables(null);
+    }
+
+    private JobClient buildSyncDatabaseActionWithNewlyAddedTables(String savepointPath)
+            throws Exception {
+
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
 
@@ -604,22 +643,19 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         Collections.emptyMap(),
                         tableConfig);
         action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
 
-        try (Connection conn =
-                DriverManager.getConnection(
-                        MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
-                        MYSQL_CONTAINER.getUsername(),
-                        MYSQL_CONTAINER.getPassword())) {
-            try (Statement statement = conn.createStatement()) {
-                testNewlyAddedTableImpl(
-                        statement, numOfNewlyAddedTables, testSavepointRecovery, testSchemaChange);
-            }
+        if (Objects.nonNull(savepointPath)) {
+            StreamGraph streamGraph = env.getStreamGraph();
+            JobGraph jobGraph = streamGraph.getJobGraph();
+            jobGraph.setSavepointRestoreSettings(
+                    SavepointRestoreSettings.forPath(savepointPath, true));
+            return env.executeAsync(streamGraph);
         }
+        return env.executeAsync();
     }
 
     private void testNewlyAddedTableImpl(
+            JobClient client,
             Statement statement,
             int newlyAddedTableCount,
             boolean testSavepointRecovery,
@@ -671,10 +707,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         statement.executeUpdate("INSERT INTO t2 VALUES (8, 'eight', 80, 800)");
         List<Tuple2<Integer, String>> newTableRecords = getNewTableRecords(newTableCount);
         recordsMap.put(newTableName, newTableRecords);
-        List<String> newTableExpected =
-                newTableRecords.stream()
-                        .map(tuple -> String.format("+I[%d, %s]", tuple.f0, tuple.f1))
-                        .collect(Collectors.toList());
+        List<String> newTableExpected = getNewTableExpected(newTableRecords);
         insertRecordsIntoNewTable(statement, newTableName, newTableRecords);
 
         // wait until table t2 contains the updated record, and then check
@@ -699,15 +732,43 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             recordsMap.put(newTableName, newTableRecords);
             insertRecordsIntoNewTable(statement, newTableName, newTableRecords);
             newTable = getFileStoreTable(newTableName);
+            newTableExpected = getNewTableExpected(newTableRecords);
+            waitForResult(newTableExpected, newTable, newTableRowType, newTablePrimaryKeys);
+        }
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        // suspend the job and restart from savepoint
+        if (testSavepointRecovery) {
+            String savepoint =
+                    client.stopWithSavepoint(
+                                    false,
+                                    tempDir.toUri().toString(),
+                                    SavepointFormatType.CANONICAL)
+                            .join();
+            assertThat(savepoint).isNotBlank();
+
+            client = buildSyncDatabaseActionWithNewlyAddedTables(savepoint);
+            waitJobRunning(client);
+
+            // pick a random newly added table and insert records
+            int pick = random.nextInt(newlyAddedTableCount);
+            String tableName = getNewTableName(pick);
+            List<Tuple2<Integer, String>> records = recordsMap.get(tableName);
+            records.add(Tuple2.of(80, "eighty"));
+            newTable = getFileStoreTable(newTableName);
+            newTableExpected = getNewTableExpected(records);
+            statement.executeUpdate(
+                    String.format("INSERT INTO %s VALUES (80, 'eighty')", tableName));
+
             waitForResult(newTableExpected, newTable, newTableRowType, newTablePrimaryKeys);
         }
 
         // test schema change
         if (testSchemaChange) {
-            ThreadLocalRandom random = ThreadLocalRandom.current();
             int pick = random.nextInt(newlyAddedTableCount);
             String tableName = getNewTableName(pick);
             List<Tuple2<Integer, String>> records = recordsMap.get(tableName);
+
             statement.executeUpdate(String.format("ALTER TABLE %s ADD COLUMN v2 INT", tableName));
             statement.executeUpdate(
                     String.format("INSERT INTO %s VALUES (100, 'hundred', 10000)", tableName));
@@ -728,6 +789,13 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             ;
             waitForResult(expectedRecords, newTable, rowType, newTablePrimaryKeys);
         }
+    }
+
+    @NotNull
+    private List<String> getNewTableExpected(List<Tuple2<Integer, String>> newTableRecords) {
+        return newTableRecords.stream()
+                .map(tuple -> String.format("+I[%d, %s]", tuple.f0, tuple.f1))
+                .collect(Collectors.toList());
     }
 
     private List<Tuple2<Integer, String>> getNewTableRecords(int newTableCount) {

@@ -48,7 +48,7 @@ import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
-import org.apache.flink.util.function.SerializableFunction;
+import org.apache.paimon.utils.SerializableFunction;
 
 import java.io.Serializable;
 import java.util.UUID;
