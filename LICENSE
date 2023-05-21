@@ -208,6 +208,7 @@ for text of these licenses.
 Apache Software Foundation License 2.0
 --------------------------------------
 
+paimon-common/src/main/java/org/apache/paimon/fs/Path.java
 paimon-common/src/main/java/org/apache/paimon/lookup/hash/HashLookupStoreWriter.java
 paimon-common/src/main/java/org/apache/paimon/lookup/hash/HashLookupStoreReader.java
 paimon-common/src/main/java/org/apache/paimon/utils/VarLengthIntUtils.java
