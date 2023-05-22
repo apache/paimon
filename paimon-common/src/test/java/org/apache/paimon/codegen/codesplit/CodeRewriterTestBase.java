@@ -50,6 +50,10 @@ abstract class CodeRewriterTestBase<R extends CodeRewriter> {
                                                             + filename
                                                             + ".java")
                                             .toURI()));
+
+            // remove apache header
+            code = removeApacheHeader(code);
+
             String expected =
                     FileIOUtils.readFileUtf8(
                             new File(
@@ -62,6 +66,9 @@ abstract class CodeRewriterTestBase<R extends CodeRewriter> {
                                                             + filename
                                                             + ".java")
                                             .toURI()));
+
+            // remove apache header
+            expected = removeApacheHeader(expected);
 
             R rewriter = rewriterProvider.apply(code);
 
@@ -79,5 +86,13 @@ abstract class CodeRewriterTestBase<R extends CodeRewriter> {
             // we reset the counter to ensure the variable names after rewrite are as expected
             CodeSplitUtil.getCounter().set(0L);
         }
+    }
+
+    private String removeApacheHeader(String code) {
+        int headerLen = 807;
+        if (code.length() == headerLen) {
+            return "";
+        }
+        return code.substring(808);
     }
 }
