@@ -56,7 +56,7 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     private transient EventParser<T> parser;
     private transient Map<String, OutputTag<List<DataField>>> updatedDataFieldsOutputTags;
     private transient Map<String, OutputTag<CdcRecord>> recordOutputTags;
-    public static transient OutputTag<CdcRecord> NEW_TABLE_OUTPUT_TAG =
+    public static final OutputTag<CdcRecord> NEW_TABLE_OUTPUT_TAG =
             new OutputTag<>("paimon-newly-added-table", TypeInformation.of(CdcRecord.class));
     public static final OutputTag<Tuple2<Identifier, List<DataField>>>
             NEW_TABLE_SCHEMA_CHANGE_OUTPUT_TAG =

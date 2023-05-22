@@ -786,7 +786,6 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                                 DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
                             },
                             new String[] {"k", "v1", "v2"});
-            ;
             waitForResult(expectedRecords, newTable, rowType, newTablePrimaryKeys);
         }
     }

@@ -22,6 +22,10 @@ import org.apache.paimon.types.RowKind;
 
 import java.util.Map;
 
+/**
+ * A data change message from the CDC source. Compared to {@link CdcRecord}, MultiplexCdcRecord
+ * contains database and table information.
+ */
 public class MultiplexCdcRecord extends CdcRecord {
     private final String databaseName;
     private final String tableName;
