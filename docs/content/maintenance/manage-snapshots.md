@@ -28,7 +28,7 @@ under the License.
 
 This section will describe the management and behavior related to snapshots.
 
-## Expiring Snapshots
+## Expire Snapshots
 
 Paimon writers generates one or two [snapshots]({{< ref "concepts/basic-concepts#snapshots" >}}) per commit. Each snapshot may add some new data files or mark some old data files as deleted. However, the marked data files are not truly deleted because Paimon also supports time traveling to an earlier snapshot. They are only deleted when the snapshot expires.
 
@@ -98,7 +98,7 @@ Run the following command:
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
-    [--snapshot <snapshot-id>]
+    --snapshot <snapshot-id>
 ```
 
 {{< /tab >}}

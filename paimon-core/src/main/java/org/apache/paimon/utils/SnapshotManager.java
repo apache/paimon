@@ -211,7 +211,7 @@ public class SnapshotManager implements Serializable {
         return Optional.empty();
     }
 
-    public @Nullable Long findLatest() throws IOException {
+    private @Nullable Long findLatest() throws IOException {
         Path snapshotDir = snapshotDirectory();
         if (!fileIO.exists(snapshotDir)) {
             return null;
