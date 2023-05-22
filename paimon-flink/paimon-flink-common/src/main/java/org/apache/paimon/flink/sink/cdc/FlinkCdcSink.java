@@ -29,9 +29,9 @@ import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
-import org.apache.flink.util.function.SerializableFunction;
 
 /**
  * A {@link FlinkSink} which accepts {@link CdcRecord} and waits for a schema change if necessary.
