@@ -23,5 +23,5 @@ flink-cdc-connectors
 Copyright 2022 Ververica Inc.
 Apache Flink, Flink®, Apache®, the squirrel logo, and the Apache feather logo are either registered trademarks or trademarks of The Apache Software Foundation.
 
-Apache Doris
+Flink Connector for Apache Doris
 Copyright 2018-2022 The Apache Software Foundation
