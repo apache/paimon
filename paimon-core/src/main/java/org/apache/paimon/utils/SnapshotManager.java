@@ -161,14 +161,25 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
-        for (long i = latest; i >= earliest; i--) {
-            Snapshot snapshot = snapshot(i);
+        if (snapshot(earliest).timeMillis() > timestampMills) {
+            return null;
+        }
+        Snapshot finnalSnapshot = null;
+        while (earliest <= latest) {
+            long mid = earliest + (latest - earliest) / 2; // Avoid overflow
+            Snapshot snapshot = snapshot(mid);
             long commitTime = snapshot.timeMillis();
-            if (commitTime <= timestampMills) {
-                return snapshot;
+            if (commitTime > timestampMills) {
+                latest = mid - 1; // Search in the left half
+            } else if (commitTime < timestampMills) {
+                earliest = mid + 1; // Search in the right half
+                finnalSnapshot = snapshot;
+            } else {
+                finnalSnapshot = snapshot; // Found the exact match
+                break;
             }
         }
-        return null;
+        return finnalSnapshot;
     }
 
     public long snapshotCount() throws IOException {
