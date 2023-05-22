@@ -25,6 +25,7 @@ import org.apache.paimon.operation.FileStoreRead;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.PartitionExpire;
+import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -56,6 +57,8 @@ public interface FileStore<T> extends Serializable {
     FileStoreCommit newCommit(String commitUser);
 
     FileStoreExpire newExpire();
+
+    SnapshotDeletion newSnapshotDeletion();
 
     @Nullable
     PartitionExpire newPartitionExpire(String commitUser);

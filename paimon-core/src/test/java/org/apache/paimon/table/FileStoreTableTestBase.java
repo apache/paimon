@@ -68,7 +68,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -76,6 +78,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -597,6 +600,48 @@ public abstract class FileStoreTableTestBase {
                 .containsExactlyInAnyOrder("+1|40|400|binary|varbinary|mapKey:mapVal|multiset");
 
         write.close();
+    }
+
+    @Test
+    public void testRollbackTo() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        int commitTimes = ThreadLocalRandom.current().nextInt(100) + 1;
+        for (int i = 0; i < commitTimes; i++) {
+            write.write(rowData(i, 10 * i, 100L * i));
+            commit.commit(i, write.prepareCommit(false, i));
+        }
+        write.close();
+
+        table.rollbackTo(1);
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<String> result =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        BATCH_ROW_TO_STRING);
+        assertThat(result)
+                .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
+
+        List<java.nio.file.Path> files =
+                Files.walk(new File(tablePath.getPath()).toPath()).collect(Collectors.toList());
+        assertThat(files.size()).isEqualTo(14);
+        // table-path
+        // table-path/snapshot
+        // table-path/snapshot/LATEST
+        // table-path/snapshot/EARLIEST
+        // table-path/snapshot/snapshot-1
+        // table-path/pt=0
+        // table-path/pt=0/bucket-0
+        // table-path/pt=0/bucket-0/data-0.orc
+        // table-path/manifest
+        // table-path/manifest/manifest-list-1
+        // table-path/manifest/manifest-0
+        // table-path/manifest/manifest-list-0
+        // table-path/schema
+        // table-path/schema/schema-0
     }
 
     protected List<String> getResult(

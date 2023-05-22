@@ -122,7 +122,7 @@ Write stalls will become less frequent when `num-sorted-run.stop-trigger` become
 By default, Paimon writers will perform compaction as needed when writing records. This is sufficient for most use cases, but there are two downsides:
 
 * This may result in unstable write throughput because throughput might temporarily drop when performing a compaction.
-* Compaction will mark some data files as "deleted" (not really deleted, see [expiring snapshots]({{< ref "maintenance/expiring-snapshots" >}}) for more info). If multiple writers mark the same file a conflict will occur when committing the changes. Paimon will automatically resolve the conflict, but this may result in job restarts.
+* Compaction will mark some data files as "deleted" (not really deleted, see [expiring snapshots]({{< ref "maintenance/manage-snapshots#expiring-snapshots" >}}) for more info). If multiple writers mark the same file a conflict will occur when committing the changes. Paimon will automatically resolve the conflict, but this may result in job restarts.
 
 To avoid these downsides, users can also choose to skip compactions in writers, and run a dedicated job only for compaction. As compactions are performed only by the dedicated job, writers can continuously write records without pausing and no conflicts will ever occur.
 
