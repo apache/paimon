@@ -223,6 +223,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         .sequenceField()
                         .map(field -> new SequenceGenerator(field, schema().logicalRowType()))
                         .orElse(null);
+        final boolean sequenceNanos = store().options().sequenceNanos();
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store().newWrite(commitUser, manifestFilter),
@@ -231,7 +232,9 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                     long sequenceNumber =
                             sequenceGenerator == null
                                     ? KeyValue.UNKNOWN_SEQUENCE
-                                    : sequenceGenerator.generate(record.row());
+                                    : sequenceNanos
+                                            ? sequenceGenerator.generateWithNanos(record.row())
+                                            : sequenceGenerator.generate(record.row());
                     return kv.replace(
                             record.primaryKey(),
                             sequenceNumber,

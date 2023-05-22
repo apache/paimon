@@ -371,6 +371,15 @@ public class CoreOptions implements Serializable {
                             "The field that generates the sequence number for primary key table,"
                                     + " the sequence number determines which data is the most recent.");
 
+    public static final ConfigOption<Boolean> SEQUENCE_NANOS =
+            key("sequence.nanos")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to splice a nano time after sequence number to decide the merge order"
+                                    + " with higher precision if \"sequence.field\" of data type \"Timestamp\" is provided"
+                                    + " but doesn't meet the precise.");
+
     public static final ConfigOption<StartupMode> SCAN_MODE =
             key("scan.mode")
                     .enumType(StartupMode.class)
@@ -881,6 +890,10 @@ public class CoreOptions implements Serializable {
 
     public Optional<String> sequenceField() {
         return options.getOptional(SEQUENCE_FIELD);
+    }
+
+    public boolean sequenceNanos() {
+        return options.get(SEQUENCE_NANOS);
     }
 
     public WriteMode writeMode() {

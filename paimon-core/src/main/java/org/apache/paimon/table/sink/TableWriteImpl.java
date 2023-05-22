@@ -19,6 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.FileStore;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -100,6 +101,20 @@ public class TableWriteImpl<T>
                         row);
         write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
         return record;
+    }
+
+    @VisibleForTesting
+    public T writeAndReturnData(InternalRow row) throws Exception {
+        keyAndBucketExtractor.setRecord(row);
+        SinkRecord record =
+                new SinkRecord(
+                        keyAndBucketExtractor.partition(),
+                        keyAndBucketExtractor.bucket(),
+                        keyAndBucketExtractor.trimmedPrimaryKey(),
+                        row);
+        T data = recordExtractor.extract(record);
+        write.write(record.partition(), record.bucket(), data);
+        return data;
     }
 
     public SinkRecord toLogRecord(SinkRecord record) {

@@ -19,6 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataType;
@@ -38,12 +39,14 @@ import org.apache.paimon.utils.InternalRowUtils;
 
 import javax.annotation.Nullable;
 
+import java.util.concurrent.TimeUnit;
+
 /** Generate sequence number. */
 public class SequenceGenerator {
-
     private final int index;
 
     private final Generator generator;
+    private final NanosGenerator nanosGenerator;
 
     public SequenceGenerator(String field, RowType rowType) {
         index = rowType.getFieldNames().indexOf(field);
@@ -53,6 +56,8 @@ public class SequenceGenerator {
                             "Can not find sequence field %s in table schema: %s", field, rowType));
         }
         generator = rowType.getTypeAt(index).accept(new SequenceGeneratorVisitor());
+        nanosGenerator =
+                rowType.getTypeAt(index).accept(new NanosSequenceGeneratorVisitor(generator));
     }
 
     public int index() {
@@ -66,6 +71,24 @@ public class SequenceGenerator {
 
     public long generate(InternalRow row) {
         return generator.generate(row, index);
+    }
+
+    public long generateWithNanos(InternalRow row) {
+        return nanosGenerator.generateWithNanos(row, index);
+    }
+
+    private static long getCurrentNanoOfMillis() {
+        long currentNanoTime = System.nanoTime();
+        long mills = TimeUnit.MILLISECONDS.convert(currentNanoTime, TimeUnit.NANOSECONDS);
+        long nanosOfMillis = currentNanoTime - mills * 1_000_000;
+        return nanosOfMillis;
+    }
+
+    private static long getCurrentNanoOfSeconds() {
+        long currentNanoTime = System.nanoTime();
+        long seconds = TimeUnit.SECONDS.convert(currentNanoTime, TimeUnit.NANOSECONDS);
+        long nanosOfSecs = currentNanoTime - seconds * 1_000_000_000;
+        return nanosOfSecs;
     }
 
     private interface Generator {
@@ -152,6 +175,56 @@ public class SequenceGenerator {
         @Override
         protected Generator defaultMethod(DataType dataType) {
             throw new UnsupportedOperationException("Unsupported type: " + dataType);
+        }
+    }
+
+    private interface NanosGenerator {
+        long generateWithNanos(InternalRow row, int i);
+    }
+
+    private static class NanosSequenceGeneratorVisitor
+            extends DataTypeDefaultVisitor<NanosGenerator> {
+
+        private Generator generator;
+
+        public NanosSequenceGeneratorVisitor(Generator generator) {
+            this.generator = generator;
+        }
+
+        @Override
+        public NanosGenerator visit(TimestampType timestampType) {
+            return (row, i) -> {
+                int precision = timestampType.getPrecision();
+                Timestamp ts = row.getTimestamp(i, precision);
+                return getNanos(ts, precision);
+            };
+        }
+
+        @Override
+        public NanosGenerator visit(LocalZonedTimestampType localZonedTimestampType) {
+            return (row, i) -> {
+                int precision = localZonedTimestampType.getPrecision();
+                Timestamp ts = row.getTimestamp(i, precision);
+                return getNanos(ts, precision);
+            };
+        }
+
+        private long getNanos(Timestamp ts, int precision) {
+            if (precision == 0) {
+                long nanos = ts.getMillisecond() / 1000 * 1_000_000_000 + getCurrentNanoOfSeconds();
+                return nanos;
+            } else if (precision == 3) {
+                long nanos = ts.getMillisecond() * 1_000_000 + getCurrentNanoOfMillis();
+                return nanos;
+            } else {
+                long millis = ts.getMillisecond();
+                return millis;
+            }
+        }
+
+        @Override
+        protected NanosGenerator defaultMethod(DataType dataType) {
+            return (row, i) -> generator.generate(row, i);
         }
     }
 }

@@ -357,6 +357,12 @@ under the License.
             <td>The field that generates the sequence number for primary key table, the sequence number determines which data is the most recent.</td>
         </tr>
         <tr>
+            <td><h5>sequence.nanos</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Boolean</td>
+            <td>Whether to splice a nano time after sequence number to decide the merge order with higher precision if "sequence.field" of data type "Timestamp" is provided but doesn't meet the precise.</td>
+        </tr>
+        <tr>
             <td><h5>snapshot.num-retained.max</h5></td>
             <td style="word-wrap: break-word;">2147483647</td>
             <td>Integer</td>
