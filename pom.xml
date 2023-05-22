@@ -407,8 +407,6 @@ under the License.
                         <exclude>release/**</exclude>
                         <!-- antlr grammar files -->
                         <exclude>paimon-common/src/main/antlr4/**</exclude>
-                        <!-- Test files -->
-                        <exclude>paimon-common/src/test/resources/codesplit/**</exclude>
                     </excludes>
                 </configuration>
             </plugin>

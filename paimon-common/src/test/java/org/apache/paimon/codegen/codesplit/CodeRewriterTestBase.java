@@ -22,6 +22,7 @@ import org.apache.paimon.utils.FileIOUtils;
 import java.io.File;
 import java.util.function.Function;
 
+import static org.apache.paimon.codegen.codesplit.CodeSplitTestUtil.removeApacheHeader;
 import static org.apache.paimon.codegen.codesplit.CodeSplitTestUtil.trimLines;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -86,13 +87,5 @@ abstract class CodeRewriterTestBase<R extends CodeRewriter> {
             // we reset the counter to ensure the variable names after rewrite are as expected
             CodeSplitUtil.getCounter().set(0L);
         }
-    }
-
-    private String removeApacheHeader(String code) {
-        int headerLen = 807;
-        if (code.length() == headerLen) {
-            return "";
-        }
-        return code.substring(808);
     }
 }

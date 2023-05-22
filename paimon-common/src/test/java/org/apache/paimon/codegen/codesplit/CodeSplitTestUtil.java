@@ -29,7 +29,9 @@ import java.io.File;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.stream.Collectors;
@@ -120,5 +122,21 @@ public final class CodeSplitTestUtil {
         SimpleCompiler compiler = new SimpleCompiler();
         compiler.setParentClassLoader(cl);
         compiler.cook(code);
+    }
+
+    public static String removeApacheHeader(String content) {
+        String[] lines = content.trim().split("\n");
+        List<String> removed = new ArrayList<>();
+        int i;
+        for (i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            if (!line.startsWith("/*") && !line.startsWith(" *") && !"".equals(line)) {
+                break;
+            }
+        }
+        for (; i < lines.length; i++) {
+            removed.add(lines[i]);
+        }
+        return String.join("\n", removed);
     }
 }
