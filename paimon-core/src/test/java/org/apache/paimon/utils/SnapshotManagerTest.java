@@ -18,11 +18,15 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -39,5 +43,42 @@ public class SnapshotManagerTest {
             assertThat(snapshotManager.snapshotPath(i))
                     .isEqualTo(new Path(tempDir.toString() + "/snapshot/snapshot-" + i));
         }
+    }
+
+    @Test
+    public void testEarlierOrEqualTimeMills() throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 10 snapshots
+        for (long i = 0; i < 10; i++) {
+            Snapshot snapshot =
+                    new Snapshot(
+                            i,
+                            0L,
+                            null,
+                            null,
+                            null,
+                            null,
+                            0L,
+                            Snapshot.CommitKind.APPEND,
+                            millis + i * 1000,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null);
+            localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+        // smaller than the second snapshot return the first snapshot
+        assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 999).timeMillis())
+                .isEqualTo(millis);
+        // equal to the second snapshot return the second snapshot
+        assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 1000).timeMillis())
+                .isEqualTo(millis + 1000);
+        // larger than the second snapshot return the second snapshot
+        assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 1001).timeMillis())
+                .isEqualTo(millis + 1000);
     }
 }
