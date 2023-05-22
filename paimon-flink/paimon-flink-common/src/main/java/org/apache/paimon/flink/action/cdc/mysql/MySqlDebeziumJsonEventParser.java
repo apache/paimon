@@ -16,8 +16,8 @@
  * limitations under the License.
  */
 
-/* This file is based on source code from JsonDebeziumSchemaSerializer in the Doris Project
- * (https://doris.apache.org/), licensed by the Apache Software Foundation (ASF) under the
+/* This file is based on source code from JsonDebeziumSchemaSerializer in the doris-flink-connector
+ * (https://github.com/apache/doris-flink-connector/), licensed by the Apache Software Foundation (ASF) under the
  * Apache License, Version 2.0. See the NOTICE file distributed with this work for additional
  *  information regarding copyright ownership. */
 
