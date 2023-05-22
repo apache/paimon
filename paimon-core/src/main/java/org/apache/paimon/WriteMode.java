@@ -32,7 +32,11 @@ public enum WriteMode implements DescribedEnum {
             "append-only",
             "The table can only accept append-only insert operations. Neither data deduplication nor any "
                     + "primary key constraints will be done when inserting rows into paimon."),
-    CHANGE_LOG("change-log", "The table can accept insert/delete/update operations.");
+    CHANGE_LOG("change-log", "The table can accept insert/delete/update operations."),
+    TABLE(
+            "table",
+            "The table without bucket.  Don't guarantee the order in the table. "
+                    + "Use this when we don't need stream read, only regard the table as a batch data storage.");
 
     private final String value;
     private final String description;

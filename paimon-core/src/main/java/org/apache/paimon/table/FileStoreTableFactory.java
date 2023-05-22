@@ -83,6 +83,10 @@ public class FileStoreTableFactory {
         }
         if (writeMode == WriteMode.APPEND_ONLY) {
             table = new AppendOnlyFileStoreTable(fileIO, tablePath, tableSchema);
+        } else if (writeMode == WriteMode.TABLE) {
+            // BatchFileStoreTable need set write_only option to disable compaction
+            dynamicOptions.set(CoreOptions.WRITE_ONLY.key(), "true");
+            table = new BatchFileStoreTable(fileIO, tablePath, tableSchema);
         } else {
             if (tableSchema.primaryKeys().isEmpty()) {
                 table = new ChangelogValueCountFileStoreTable(fileIO, tablePath, tableSchema);
