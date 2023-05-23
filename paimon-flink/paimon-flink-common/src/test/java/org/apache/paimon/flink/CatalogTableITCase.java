@@ -117,13 +117,11 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + ") ]]");
 
         List<Row> result = sql("SELECT * FROM T$schemas order by schema_id");
-        result.stream()
-                .peek(
-                        row -> {
-                            Assertions.assertThat(((long) row.getField(6)))
-                                    .isGreaterThan(1684830452105L);
-                            row.setField(6, 0);
-                        });
+        result.forEach(
+                row -> {
+                    Assertions.assertThat(((long) row.getField(6))).isGreaterThan(1684830452105L);
+                    row.setField(6, 0);
+                });
         assertThat(result.toString())
                 .isEqualTo(
                         "[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
