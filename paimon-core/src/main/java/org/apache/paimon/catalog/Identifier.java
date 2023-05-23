@@ -110,11 +110,7 @@ public class Identifier implements Serializable {
         return "Identifier{" + "database='" + database + '\'' + ", table='" + table + '\'' + '}';
     }
 
-    public String getDatabase() {
-        return database;
-    }
-
-    public String getTable() {
+    public String getTableName() {
         return table;
     }
 }
