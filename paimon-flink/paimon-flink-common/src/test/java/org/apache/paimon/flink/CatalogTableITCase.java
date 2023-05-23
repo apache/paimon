@@ -26,6 +26,7 @@ import org.apache.paimon.types.IntType;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.types.Row;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nonnull;
@@ -111,11 +112,15 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + "  `partition_keys` VARCHAR(2147483647) NOT NULL,\n"
                                 + "  `primary_keys` VARCHAR(2147483647) NOT NULL,\n"
                                 + "  `options` VARCHAR(2147483647) NOT NULL,\n"
-                                + "  `comment` VARCHAR(2147483647)\n"
+                                + "  `comment` VARCHAR(2147483647),\n"
+                                + "  `ddl_last_update_time` BIGINT NOT NULL\n"
                                 + ") ]]");
 
         List<Row> result = sql("SELECT * FROM T$schemas order by schema_id");
-
+        result.stream().peek(row -> {
+            Assertions.assertThat(((long)row.getField(6))).isGreaterThan(1684830452105L);
+            row.setField(6,0);
+        });
         assertThat(result.toString())
                 .isEqualTo(
                         "[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
@@ -125,7 +130,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + "+I[1, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
                                 + "{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},"
                                 + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
-                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\"}, ]]");
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\"}, , 0]]");
     }
 
     @Test
@@ -154,8 +159,12 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("CREATE TABLE T (a INT)");
         sql("CREATE TABLE T1 LIKE T");
         List<Row> result = sql("SELECT * FROM T1$schemas s");
+        result.forEach(row -> {
+            Assertions.assertThat(((long)row.getField(6))).isGreaterThan(1684830452105L);
+            row.setField(6,0);
+        });
         assertThat(result.toString())
-                .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, ]]");
+                .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, , 0]]");
     }
 
     @Test
@@ -164,8 +173,12 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO t VALUES(1),(2)");
         sql("CREATE TABLE t1 AS SELECT * FROM t");
         List<Row> result = sql("SELECT * FROM t1$schemas s");
+        result.forEach(row -> {
+            Assertions.assertThat(((long)row.getField(6))).isGreaterThan(1684830452105L);
+            row.setField(6,0);
+        });
         assertThat(result.toString())
-                .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, ]]");
+                .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, , 0]]");
         List<Row> data = sql("SELECT * FROM t1");
         assertThat(data).containsExactlyInAnyOrder(Row.of(1), Row.of(2));
 
@@ -181,11 +194,15 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO t_p SELECT 1,2,'a','2023-02-19','12'");
         sql("CREATE TABLE t1_p WITH ('partition' = 'dt' ) AS SELECT * FROM t_p");
         List<Row> resultPartition = sql("SELECT * FROM t1_p$schemas s");
+        resultPartition.forEach(row -> {
+            Assertions.assertThat(((long)row.getField(6))).isGreaterThan(1684830452105L);
+            row.setField(6,0);
+        });
         assertThat(resultPartition.toString())
                 .isEqualTo(
                         "[+I[0, [{\"id\":0,\"name\":\"user_id\",\"type\":\"BIGINT\"},{\"id\":1,\"name\":\"item_id\",\"type\":\"BIGINT\"},"
                                 + "{\"id\":2,\"name\":\"behavior\",\"type\":\"STRING\"},{\"id\":3,\"name\":\"dt\",\"type\":\"STRING\"},"
-                                + "{\"id\":4,\"name\":\"hh\",\"type\":\"STRING\"}], [\"dt\"], [], {}, ]]");
+                                + "{\"id\":4,\"name\":\"hh\",\"type\":\"STRING\"}], [\"dt\"], [], {}, , 0]]");
         List<Row> dataPartition = sql("SELECT * FROM t1_p");
         assertThat(dataPartition.toString()).isEqualTo("[+I[1, 2, a, 2023-02-19, 12]]");
 

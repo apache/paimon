@@ -283,8 +283,12 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("INSERT INTO t VALUES(1)").await();
         tEnv.executeSql("CREATE TABLE t1 AS SELECT * FROM t").await();
         List<Row> result = collect("SELECT * FROM t1$schemas s");
+        result.forEach(row -> {
+            Assertions.assertThat(((long)row.getField(6))).isGreaterThan(1684830452105L);
+            row.setField(6,0);
+        });
         Assertions.assertThat(result.toString())
-                .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, ]]");
+                .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, , 0]]");
         List<Row> data = collect("SELECT * FROM t1");
         Assertions.assertThat(data).contains(Row.of(1));
 
@@ -311,10 +315,14 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("INSERT INTO t_p  SELECT 1,2,'a','2023-02-19','12'").await();
         tEnv.executeSql("CREATE TABLE t1_p WITH ('partition' = 'dt') AS SELECT * FROM t_p").await();
         List<Row> resultPartition = collect("SELECT * FROM t1_p$schemas s");
+        resultPartition.forEach(row -> {
+            Assertions.assertThat(((long)row.getField(6))).isGreaterThan(1684830452105L);
+            row.setField(6,0);
+        });
         Assertions.assertThat(resultPartition.toString())
                 .isEqualTo(
                         "[+I[0, [{\"id\":0,\"name\":\"user_id\",\"type\":\"BIGINT\"},{\"id\":1,\"name\":\"item_id\",\"type\":\"BIGINT\"},{\"id\":2,\"name\":\"behavior\",\"type\":\"STRING\"}"
-                                + ",{\"id\":3,\"name\":\"dt\",\"type\":\"STRING\"},{\"id\":4,\"name\":\"hh\",\"type\":\"STRING\"}], [\"dt\"], [], {}, ]]");
+                                + ",{\"id\":3,\"name\":\"dt\",\"type\":\"STRING\"},{\"id\":4,\"name\":\"hh\",\"type\":\"STRING\"}], [\"dt\"], [], {}, , 0]]");
         List<Row> dataPartition = collect("SELECT * FROM t1_p");
         Assertions.assertThat(dataPartition.toString()).isEqualTo("[+I[1, 2, a, 2023-02-19, 12]]");
 
