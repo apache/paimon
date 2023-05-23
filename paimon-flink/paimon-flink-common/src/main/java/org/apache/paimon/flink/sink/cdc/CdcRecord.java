@@ -123,6 +123,10 @@ public class CdcRecord implements Serializable {
         return Optional.of(genericRow);
     }
 
+    public RowKind getKind() {
+        return kind;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof CdcRecord)) {
@@ -136,5 +140,9 @@ public class CdcRecord implements Serializable {
     @Override
     public String toString() {
         return kind.shortString() + " " + fields;
+    }
+
+    public Map<String, String> getFields() {
+        return fields;
     }
 }

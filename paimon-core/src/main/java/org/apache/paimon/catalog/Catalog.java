@@ -23,6 +23,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
+import java.io.Serializable;
 import java.util.List;
 import java.util.Optional;
 
@@ -34,7 +35,7 @@ import java.util.Optional;
  * @since 0.4.0
  */
 @Public
-public interface Catalog extends AutoCloseable {
+public interface Catalog extends AutoCloseable, Serializable {
 
     String DEFAULT_DATABASE = "default";
 

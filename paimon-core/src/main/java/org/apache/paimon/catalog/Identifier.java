@@ -109,4 +109,12 @@ public class Identifier implements Serializable {
     public String toString() {
         return "Identifier{" + "database='" + database + '\'' + ", table='" + table + '\'' + '}';
     }
+
+    public String getDatabase() {
+        return database;
+    }
+
+    public String getTable() {
+        return table;
+    }
 }
