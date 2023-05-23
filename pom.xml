@@ -125,7 +125,6 @@ under the License.
         <json-smart.version>2.4.9</json-smart.version>
         <avro.version>1.11.1</avro.version>
         <kafka.version>3.2.3</kafka.version>
-        <jacoco.version>0.8.8</jacoco.version>
     </properties>
 
     <dependencies>
@@ -188,14 +187,6 @@ under the License.
             <groupId>org.awaitility</groupId>
             <artifactId>awaitility</artifactId>
             <version>${awaitility.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.jacoco</groupId>
-            <artifactId>org.jacoco.agent</artifactId>
-            <version>${jacoco.version}</version>
-            <classifier>runtime</classifier>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -435,7 +426,6 @@ under the License.
                         <test.randomization.seed>${test.randomization.seed}</test.randomization.seed>
                         <test.flink.main.version>${test.flink.main.version}</test.flink.main.version>
                         <test.flink.version>${test.flink.version}</test.flink.version>
-                        <jacoco-agent.destfile>${project.build.directory}/jacoco.exec</jacoco-agent.destfile>
                         <!-- for junit5 -->
                         <junit.jupiter.extensions.autodetection.enabled>true</junit.jupiter.extensions.autodetection.enabled>
                     </systemPropertyVariables>
@@ -694,45 +684,6 @@ under the License.
                                 <artifactId>paimon-parent</artifactId>
                             </project>
                         </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-            <!-- add plugin jacoco report -->
-            <plugin>
-                <groupId>org.jacoco</groupId>
-                <artifactId>jacoco-maven-plugin</artifactId>
-                <version>${jacoco.version}</version>
-                <configuration>
-                    <skip>false</skip>
-                    <dataFile>${project.build.directory}/jacoco.exec</dataFile>
-                </configuration>
-                <executions>
-                    <execution>
-                        <id>default-prepare-agent</id>
-                        <goals>
-                            <goal>prepare-agent</goal>
-                        </goals>
-                        <configuration>
-                            <propertyName>surefireArgLine</propertyName>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>default-instrument</id>
-                        <goals>
-                            <goal>instrument</goal>
-                        </goals>
-                    </execution>
-                    <execution>
-                        <id>default-restore-instrumented-classes</id>
-                        <goals>
-                            <goal>restore-instrumented-classes</goal>
-                        </goals>
-                    </execution>
-                    <execution>
-                        <id>default-report</id>
-                        <goals>
-                            <goal>report</goal>
-                        </goals>
                     </execution>
                 </executions>
             </plugin>
