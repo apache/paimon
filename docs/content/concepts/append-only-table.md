@@ -107,7 +107,7 @@ CREATE TABLE T (
 ) WITH (...);
 
 -- launch a bounded streaming job to read paimon_table
-SELECT window_start, window_end, SUM(f0) FROM
+SELECT window_start, window_end, COUNT(`user`) FROM TABLE(
  TUMBLE(TABLE T, DESCRIPTOR(order_time), INTERVAL '10' MINUTES)) GROUP BY window_start, window_end;
 ```
 
