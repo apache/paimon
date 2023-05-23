@@ -32,7 +32,11 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Map;
 import java.util.function.Consumer;
+
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 
 /** Tests for {@link BatchFileStoreTable}. */
 public class BatchTableFileStoreFileStoreTableTest extends FileStoreTableTestBase {
@@ -43,6 +47,9 @@ public class BatchTableFileStoreFileStoreTableTest extends FileStoreTableTestBas
         conf.set(CoreOptions.PATH, tablePath.toString());
         conf.set(CoreOptions.WRITE_MODE, WriteMode.TABLE);
         configure.accept(conf);
+        Map<String, String> confMap = conf.toMap();
+        confMap.remove(BUCKET.key());
+        confMap.remove(BUCKET_KEY.key());
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
@@ -50,7 +57,7 @@ public class BatchTableFileStoreFileStoreTableTest extends FileStoreTableTestBas
                                 ROW_TYPE.getFields(),
                                 Collections.singletonList("pt"),
                                 Collections.emptyList(),
-                                conf.toMap(),
+                                confMap,
                                 ""));
         return new BatchFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
     }

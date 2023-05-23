@@ -35,8 +35,9 @@ public enum WriteMode implements DescribedEnum {
     CHANGE_LOG("change-log", "The table can accept insert/delete/update operations."),
     TABLE(
             "table",
-            "The table without bucket.  Don't guarantee the order in the table. "
-                    + "Use this when we don't need stream read, only regard the table as a batch data storage.");
+            "This table is used in traditional sense of \"table\". It can act like a Hive or Iceberg table. It can be "
+                    + "written and read in a distributed manner without the concept of bucket. It can be streaming read but no "
+                    + "order guarantee.");
 
     private final String value;
     private final String description;

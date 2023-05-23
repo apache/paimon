@@ -18,9 +18,9 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.BatchTableFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -34,14 +34,16 @@ import org.apache.paimon.utils.Preconditions;
 
 /** {@link FileStoreTable} for {@link WriteMode#TABLE} write mode. */
 public class BatchFileStoreTable extends AppendOnlyFileStoreTable {
+    public static final int BATCH_TABLE_BUCKET = 0;
 
-    @VisibleForTesting private static final int batchTableBucket = 0;
+    private transient BatchTableFileStore lazyStore;
 
     BatchFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
         super(fileIO, path, tableSchema);
         Preconditions.checkState(
-                tableSchema.options().get(CoreOptions.BUCKET_KEY.key()) == null,
-                "\"Table mode could not set properties 'bucket_key' and 'bucket'");
+                tableSchema.options().get(CoreOptions.BUCKET_KEY.key()) == null
+                        && tableSchema.options().get(CoreOptions.BUCKET.key()) == null,
+                "Table mode could not set properties 'bucket_key' and 'bucket'");
     }
 
     @Override
@@ -54,7 +56,7 @@ public class BatchFileStoreTable extends AppendOnlyFileStoreTable {
                 new InternalRowKeyAndBucketExtractor(tableSchema) {
                     @Override
                     public int bucket() {
-                        return batchTableBucket;
+                        return BATCH_TABLE_BUCKET;
                     }
                 },
                 record -> {
@@ -69,5 +71,21 @@ public class BatchFileStoreTable extends AppendOnlyFileStoreTable {
     @Override
     protected FileStoreTable copy(TableSchema newTableSchema) {
         return new BatchFileStoreTable(fileIO, path, newTableSchema);
+    }
+
+    @Override
+    public BatchTableFileStore store() {
+        if (lazyStore == null) {
+            lazyStore =
+                    new BatchTableFileStore(
+                            fileIO,
+                            schemaManager(),
+                            tableSchema.id(),
+                            new CoreOptions(tableSchema.options()),
+                            tableSchema.logicalPartitionType(),
+                            tableSchema.logicalBucketKeyType(),
+                            tableSchema.logicalRowType());
+        }
+        return lazyStore;
     }
 }

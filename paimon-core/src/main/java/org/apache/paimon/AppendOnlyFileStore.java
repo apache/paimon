@@ -104,4 +104,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     public Comparator<InternalRow> newKeyComparator() {
         return null;
     }
+
+    protected RowType getRowType() {
+        return rowType;
+    }
 }

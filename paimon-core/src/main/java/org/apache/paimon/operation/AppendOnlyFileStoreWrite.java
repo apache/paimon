@@ -104,16 +104,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
         long maxSequenceNumber = getMaxSequenceNumber(restoredFiles);
         DataFilePathFactory factory = pathFactory.createDataFilePathFactory(partition, bucket);
         CompactManager compactManager =
-                skipCompaction
-                        ? new NoopCompactManager()
-                        : new AppendOnlyCompactManager(
-                                compactExecutor,
-                                restoredFiles,
-                                compactionMinFileNum,
-                                compactionMaxFileNum,
-                                targetFileSize,
-                                compactRewriter(partition, bucket),
-                                assertDisorder);
+                getCompactManager(partition, bucket, restoredFiles, compactExecutor);
 
         return new AppendOnlyWriter(
                 fileIO,
@@ -127,6 +118,23 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                 factory,
                 restoreIncrement,
                 fileCompression);
+    }
+
+    protected CompactManager getCompactManager(
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> restoredFiles,
+            ExecutorService compactExecutor) {
+        return skipCompaction
+                ? new NoopCompactManager()
+                : new AppendOnlyCompactManager(
+                        compactExecutor,
+                        restoredFiles,
+                        compactionMinFileNum,
+                        compactionMaxFileNum,
+                        targetFileSize,
+                        compactRewriter(partition, bucket),
+                        assertDisorder);
     }
 
     private AppendOnlyCompactManager.CompactRewriter compactRewriter(
