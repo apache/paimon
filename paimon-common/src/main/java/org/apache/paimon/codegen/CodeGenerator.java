@@ -48,4 +48,13 @@ public interface CodeGenerator {
      */
     GeneratedClass<RecordComparator> generateRecordComparator(
             List<DataType> fieldTypes, String name);
+
+    /**
+     * Generate a {@link RecordEqualiser}.
+     *
+     * @param fieldTypes Both the input row field types and the sort key field types. Records are *
+     *     compared by the first field, then the second field, then the third field and so on. All *
+     *     fields are compared in ascending order.
+     */
+    GeneratedClass<RecordEqualiser> generateRecordEqualiser(List<DataType> fieldTypes, String name);
 }
