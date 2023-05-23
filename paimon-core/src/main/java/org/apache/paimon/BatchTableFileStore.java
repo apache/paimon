@@ -50,7 +50,7 @@ public class BatchTableFileStore extends AppendOnlyFileStore {
                 getRowType(),
                 pathFactory(),
                 snapshotManager(),
-                newScan(),
+                newScan(true).withManifestCacheFilter(manifestFilter),
                 options);
     }
 }
