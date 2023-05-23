@@ -74,7 +74,7 @@ public abstract class ObjectsFile<T> {
                     reader = reader.filter(readFilter);
                 }
                 reader.forEachRemaining(row -> result.add(serializer.fromRow(row)));
-            }finally {
+            } finally {
                 if (reader != null) {
                     reader.close();
                 }
