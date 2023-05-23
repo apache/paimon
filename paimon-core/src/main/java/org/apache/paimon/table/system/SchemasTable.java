@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
@@ -71,7 +72,11 @@ public class SchemasTable implements ReadonlyTable {
                             new DataField(
                                     3, "primary_keys", SerializationUtils.newStringType(false)),
                             new DataField(4, "options", SerializationUtils.newStringType(false)),
-                            new DataField(5, "comment", SerializationUtils.newStringType(true))));
+                            new DataField(5, "comment", SerializationUtils.newStringType(true)),
+                            new DataField(
+                                    6,
+                                    "ddl_last_update_time",
+                                new BigIntType(false))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -187,9 +192,10 @@ public class SchemasTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((SchemasSplit) split).location;
+            SchemaManager schemaManager = new SchemaManager(fileIO, location);
             Iterator<TableSchema> schemas =
-                    new SchemaManager(fileIO, location).listAll().iterator();
-            Iterator<InternalRow> rows = Iterators.transform(schemas, this::toRow);
+                schemaManager.listAll().iterator();
+            Iterator<InternalRow> rows = Iterators.transform(schemas, tableSchema -> toRow(tableSchema, schemaManager));
             if (projection != null) {
                 rows =
                         Iterators.transform(
@@ -198,14 +204,21 @@ public class SchemasTable implements ReadonlyTable {
             return new IteratorRecordReader<>(rows);
         }
 
-        private InternalRow toRow(TableSchema schema) {
+        private InternalRow toRow(TableSchema schema, SchemaManager schemaManager) {
+            FileStatus fileStatus;
+            try {
+                fileStatus = fileIO.getFileStatus(schemaManager.toSchemaPath(schema.id()));
+            } catch (IOException e) {
+                throw new RuntimeException("Get file status exception",e);
+            }
             return GenericRow.of(
                     schema.id(),
                     toJson(schema.fields()),
                     toJson(schema.partitionKeys()),
                     toJson(schema.primaryKeys()),
                     toJson(schema.options()),
-                    BinaryString.fromString(schema.comment()));
+                    BinaryString.fromString(schema.comment()),
+                fileStatus.getDdlLastUpdateTime());
         }
 
         private BinaryString toJson(Object obj) {

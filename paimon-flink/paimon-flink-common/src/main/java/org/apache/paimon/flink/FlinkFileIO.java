@@ -222,5 +222,10 @@ public class FlinkFileIO implements FileIO {
         public Path getPath() {
             return new Path(status.getPath().toUri());
         }
+
+        @Override
+        public long getDdlLastUpdateTime() {
+            return status.getModificationTime();
+        }
     }
 }

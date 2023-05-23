@@ -48,4 +48,10 @@ public interface FileStatus {
      * @return the corresponding Path to the FileStatus
      */
     Path getPath();
+
+    /**
+     * Returns the modification time of the file in milliseconds since January 1, 1970 UTC.
+     * @return the modification time of the file in milliseconds since January 1, 1970 UTC
+     */
+    long getDdlLastUpdateTime();
 }
