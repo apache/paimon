@@ -117,10 +117,13 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + ") ]]");
 
         List<Row> result = sql("SELECT * FROM T$schemas order by schema_id");
-        result.stream().peek(row -> {
-            Assertions.assertThat(((long)row.getField(6))).isGreaterThan(1684830452105L);
-            row.setField(6,0);
-        });
+        result.stream()
+                .peek(
+                        row -> {
+                            Assertions.assertThat(((long) row.getField(6)))
+                                    .isGreaterThan(1684830452105L);
+                            row.setField(6, 0);
+                        });
         assertThat(result.toString())
                 .isEqualTo(
                         "[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},"
@@ -159,12 +162,14 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("CREATE TABLE T (a INT)");
         sql("CREATE TABLE T1 LIKE T");
         List<Row> result = sql("SELECT * FROM T1$schemas s");
-        result.forEach(row -> {
-            Assertions.assertThat(((long)row.getField(6))).isGreaterThan(1684830452105L);
-            row.setField(6,0);
-        });
+        result.forEach(
+                row -> {
+                    Assertions.assertThat(((long) row.getField(6))).isGreaterThan(1684830452105L);
+                    row.setField(6, 0);
+                });
         assertThat(result.toString())
-                .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, , 0]]");
+                .isEqualTo(
+                        "[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, , 0]]");
     }
 
     @Test
@@ -173,12 +178,14 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO t VALUES(1),(2)");
         sql("CREATE TABLE t1 AS SELECT * FROM t");
         List<Row> result = sql("SELECT * FROM t1$schemas s");
-        result.forEach(row -> {
-            Assertions.assertThat(((long)row.getField(6))).isGreaterThan(1684830452105L);
-            row.setField(6,0);
-        });
+        result.forEach(
+                row -> {
+                    Assertions.assertThat(((long) row.getField(6))).isGreaterThan(1684830452105L);
+                    row.setField(6, 0);
+                });
         assertThat(result.toString())
-                .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, , 0]]");
+                .isEqualTo(
+                        "[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, , 0]]");
         List<Row> data = sql("SELECT * FROM t1");
         assertThat(data).containsExactlyInAnyOrder(Row.of(1), Row.of(2));
 
@@ -194,10 +201,11 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO t_p SELECT 1,2,'a','2023-02-19','12'");
         sql("CREATE TABLE t1_p WITH ('partition' = 'dt' ) AS SELECT * FROM t_p");
         List<Row> resultPartition = sql("SELECT * FROM t1_p$schemas s");
-        resultPartition.forEach(row -> {
-            Assertions.assertThat(((long)row.getField(6))).isGreaterThan(1684830452105L);
-            row.setField(6,0);
-        });
+        resultPartition.forEach(
+                row -> {
+                    Assertions.assertThat(((long) row.getField(6))).isGreaterThan(1684830452105L);
+                    row.setField(6, 0);
+                });
         assertThat(resultPartition.toString())
                 .isEqualTo(
                         "[+I[0, [{\"id\":0,\"name\":\"user_id\",\"type\":\"BIGINT\"},{\"id\":1,\"name\":\"item_id\",\"type\":\"BIGINT\"},"

@@ -73,10 +73,7 @@ public class SchemasTable implements ReadonlyTable {
                                     3, "primary_keys", SerializationUtils.newStringType(false)),
                             new DataField(4, "options", SerializationUtils.newStringType(false)),
                             new DataField(5, "comment", SerializationUtils.newStringType(true)),
-                            new DataField(
-                                    6,
-                                    "ddl_last_update_time",
-                                new BigIntType(false))));
+                            new DataField(6, "ddl_last_update_time", new BigIntType(false))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -193,9 +190,9 @@ public class SchemasTable implements ReadonlyTable {
             }
             Path location = ((SchemasSplit) split).location;
             SchemaManager schemaManager = new SchemaManager(fileIO, location);
-            Iterator<TableSchema> schemas =
-                schemaManager.listAll().iterator();
-            Iterator<InternalRow> rows = Iterators.transform(schemas, tableSchema -> toRow(tableSchema, schemaManager));
+            Iterator<TableSchema> schemas = schemaManager.listAll().iterator();
+            Iterator<InternalRow> rows =
+                    Iterators.transform(schemas, tableSchema -> toRow(tableSchema, schemaManager));
             if (projection != null) {
                 rows =
                         Iterators.transform(
@@ -209,7 +206,7 @@ public class SchemasTable implements ReadonlyTable {
             try {
                 fileStatus = fileIO.getFileStatus(schemaManager.toSchemaPath(schema.id()));
             } catch (IOException e) {
-                throw new RuntimeException("Get file status exception",e);
+                throw new RuntimeException("Get file status exception", e);
             }
             return GenericRow.of(
                     schema.id(),
@@ -218,7 +215,7 @@ public class SchemasTable implements ReadonlyTable {
                     toJson(schema.primaryKeys()),
                     toJson(schema.options()),
                     BinaryString.fromString(schema.comment()),
-                fileStatus.getDdlLastUpdateTime());
+                    fileStatus.getDdlLastUpdateTime());
         }
 
         private BinaryString toJson(Object obj) {
