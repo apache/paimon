@@ -133,6 +133,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(8))
                     .withDescription("Suggested file size of a manifest file.");
 
+    public static final ConfigOption<MemorySize> MANIFEST_FULL_COMPACTION_FILE_SIZE =
+            key("manifest.full-compaction-threshold-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(16))
+                    .withDescription(
+                            "The size threshold for triggering full compaction of manifest.");
+
     public static final ConfigOption<Integer> MANIFEST_MERGE_MIN_COUNT =
             key("manifest.merge-min-count")
                     .intType()
@@ -686,6 +693,10 @@ public class CoreOptions implements Serializable {
 
     public MemorySize manifestTargetSize() {
         return options.get(MANIFEST_TARGET_FILE_SIZE);
+    }
+
+    public MemorySize manifestFullCompactionThresholdSize() {
+        return options.get(MANIFEST_FULL_COMPACTION_FILE_SIZE);
     }
 
     public MemorySize writeManifestCache() {

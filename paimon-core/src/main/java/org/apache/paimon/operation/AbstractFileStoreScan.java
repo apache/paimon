@@ -117,21 +117,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withPartitionFilter(List<BinaryRow> partitions) {
-        PredicateBuilder builder = new PredicateBuilder(partitionConverter.rowType());
-        Function<BinaryRow, Predicate> partitionToPredicate =
-                p -> {
-                    List<Predicate> fieldPredicates = new ArrayList<>();
-                    Object[] partitionObjects = partitionConverter.convert(p);
-                    for (int i = 0; i < partitionConverter.getArity(); i++) {
-                        Object partition = partitionObjects[i];
-                        fieldPredicates.add(builder.equal(i, partition));
-                    }
-                    return PredicateBuilder.and(fieldPredicates);
-                };
         List<Predicate> predicates =
                 partitions.stream()
                         .filter(p -> p.getFieldCount() > 0)
-                        .map(partitionToPredicate)
+                        .map(partitionConverter::createEqualPredicate)
                         .collect(Collectors.toList());
         if (predicates.isEmpty()) {
             return this;

@@ -28,6 +28,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -38,6 +39,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -76,7 +78,6 @@ public class CompactorSinkITCase extends AbstractTestBase {
         tablePath = new Path(getTempDirPath());
         commitUser = UUID.randomUUID().toString();
     }
-
     @Test
     public void testCompact() throws Exception {
         FileStoreTable table = createFileStoreTable();
