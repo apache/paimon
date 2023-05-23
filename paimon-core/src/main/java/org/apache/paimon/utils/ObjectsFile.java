@@ -66,13 +66,19 @@ public abstract class ObjectsFile<T> {
                 return cache.read(fileName, loadFilter, readFilter);
             }
 
-            RecordReader<InternalRow> reader =
-                    createFormatReader(fileIO, readerFactory, pathFactory.toPath(fileName));
-            if (readFilter != Filter.ALWAYS_TRUE) {
-                reader = reader.filter(readFilter);
-            }
+            RecordReader<InternalRow> reader = null;
             List<T> result = new ArrayList<>();
-            reader.forEachRemaining(row -> result.add(serializer.fromRow(row)));
+            try {
+                reader = createFormatReader(fileIO, readerFactory, pathFactory.toPath(fileName));
+                if (readFilter != Filter.ALWAYS_TRUE) {
+                    reader = reader.filter(readFilter);
+                }
+                reader.forEachRemaining(row -> result.add(serializer.fromRow(row)));
+            }finally {
+                if (reader != null) {
+                    reader.close();
+                }
+            }
             return result;
         } catch (IOException e) {
             throw new RuntimeException("Failed to read manifest list " + fileName, e);
