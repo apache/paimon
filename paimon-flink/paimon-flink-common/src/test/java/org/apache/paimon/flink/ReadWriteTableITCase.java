@@ -1635,8 +1635,18 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         String deleteStatement = String.format("DELETE FROM %s WHERE currency = 'UNKNOWN'", table);
 
         // Step4: execute delete statement and verify result
-        assertThatThrownBy(() -> bEnv.executeSql(deleteStatement).await())
-                .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01"),
+                        changelogRow("+I", 3L, "Euro", 119L, "2022-01-02"));
+        if (writeMode == WriteMode.CHANGE_LOG) {
+            bEnv.executeSql(deleteStatement).await();
+            String querySql = String.format("SELECT * FROM %s", table);
+            testBatchRead(querySql, expectedRecords);
+        } else {
+            assertThatThrownBy(() -> bEnv.executeSql(deleteStatement).await())
+                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+        }
     }
 
     // ----------------------------------------------------------------------------------------------------------------
