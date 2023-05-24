@@ -49,7 +49,6 @@ public class BatchFileStoreTable extends AppendOnlyFileStoreTable {
         AppendOnlyFileStoreWrite writer = store().newWrite(commitUser);
         writer.skipCompaction();
         writer.fromEmptyWriter();
-        writer.withOverwrite(true);
         return new TableWriteImpl<>(
                 writer,
                 new InternalRowKeyAndBucketExtractor(tableSchema) {
