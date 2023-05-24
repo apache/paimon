@@ -309,8 +309,8 @@ For more information of 'delete', see
 {{< tab "Flink 1.17+" >}}
 {{< hint info >}}
 Important table properties setting:
-1. Only [primary key table]({{< ref "concepts/primary-key-table" >}}) supports this feature.
-2. [MergeEngine]({{< ref "concepts/primary-key-table#merge-engines" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table#deduplicate" >}}) to support this feature.
+1. Only tables whose `write-mode` is set to `change-log` supports this feature.
+2. If the table has primary keys, [MergeEngine]({{< ref "concepts/primary-key-table#merge-engines" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table#deduplicate" >}}) to support this feature.
    {{< /hint >}}
 
 {{< hint warning >}}
