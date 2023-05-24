@@ -35,7 +35,7 @@ import java.util.Optional;
  * @since 0.4.0
  */
 @Public
-public interface Catalog extends AutoCloseable, Serializable {
+public interface Catalog extends AutoCloseable {
 
     String DEFAULT_DATABASE = "default";
 
