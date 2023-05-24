@@ -20,10 +20,9 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
+import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.utils.TableEnvironmentUtils;
@@ -53,8 +52,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.catalog.Catalog.DEFAULT_DATABASE;
-
 /** Abstract base of {@link Action}. */
 public abstract class ActionBase implements Action {
 
@@ -81,8 +78,8 @@ public abstract class ActionBase implements Action {
     ActionBase(String warehouse, String databaseName, String tableName, Options catalogOptions) {
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
         identifier = new Identifier(databaseName, tableName);
-        catalog = CatalogFactory.createCatalog(CatalogContext.create(catalogOptions));
-        flinkCatalog = new FlinkCatalog(catalog, catalogName, DEFAULT_DATABASE);
+        catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+        flinkCatalog = FlinkCatalogFactory.createCatalog(catalogName, catalog);
 
         env = StreamExecutionEnvironment.getExecutionEnvironment();
         tEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());

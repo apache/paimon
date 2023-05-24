@@ -19,9 +19,8 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.sink.cdc.EventParser;
@@ -161,10 +160,8 @@ public class MySqlSyncDatabaseAction implements Action {
                         + "If you want to sync several MySQL tables into one Paimon table, "
                         + "use mysql-sync-table instead.");
         Catalog catalog =
-                CatalogFactory.createCatalog(
-                        CatalogContext.create(
-                                new Options(catalogConfig)
-                                        .set(CatalogOptions.WAREHOUSE, warehouse)));
+                FlinkCatalogFactory.createPaimonCatalog(
+                        Options.fromMap(catalogConfig).set(CatalogOptions.WAREHOUSE, warehouse));
         boolean caseSensitive = catalog.caseSensitive();
 
         if (!caseSensitive) {
