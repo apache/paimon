@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.BatchTableFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.InternalRow;
@@ -36,8 +35,6 @@ import org.apache.paimon.utils.Preconditions;
 public class BatchFileStoreTable extends AppendOnlyFileStoreTable {
     public static final int BATCH_TABLE_BUCKET = 0;
 
-    private transient BatchTableFileStore lazyStore;
-
     BatchFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
         super(fileIO, path, tableSchema);
         Preconditions.checkState(
@@ -50,6 +47,8 @@ public class BatchFileStoreTable extends AppendOnlyFileStoreTable {
     public TableWriteImpl<InternalRow> newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
         AppendOnlyFileStoreWrite writer = store().newWrite(commitUser);
+        writer.skipCompaction();
+        writer.fromEmptyWriter();
         writer.withOverwrite(true);
         return new TableWriteImpl<>(
                 writer,
@@ -71,21 +70,5 @@ public class BatchFileStoreTable extends AppendOnlyFileStoreTable {
     @Override
     protected FileStoreTable copy(TableSchema newTableSchema) {
         return new BatchFileStoreTable(fileIO, path, newTableSchema);
-    }
-
-    @Override
-    public BatchTableFileStore store() {
-        if (lazyStore == null) {
-            lazyStore =
-                    new BatchTableFileStore(
-                            fileIO,
-                            schemaManager(),
-                            tableSchema.id(),
-                            new CoreOptions(tableSchema.options()),
-                            tableSchema.logicalPartitionType(),
-                            tableSchema.logicalBucketKeyType(),
-                            tableSchema.logicalRowType());
-        }
-        return lazyStore;
     }
 }

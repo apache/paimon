@@ -62,7 +62,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
     private final int compactionMinFileNum;
     private final int compactionMaxFileNum;
     private final boolean commitForceCompact;
-    private final boolean skipCompaction;
+    private boolean skipCompaction;
     private final boolean assertDisorder;
     private final String fileCompression;
 
@@ -104,7 +104,16 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
         long maxSequenceNumber = getMaxSequenceNumber(restoredFiles);
         DataFilePathFactory factory = pathFactory.createDataFilePathFactory(partition, bucket);
         CompactManager compactManager =
-                getCompactManager(partition, bucket, restoredFiles, compactExecutor);
+                skipCompaction
+                        ? new NoopCompactManager()
+                        : new AppendOnlyCompactManager(
+                                compactExecutor,
+                                restoredFiles,
+                                compactionMinFileNum,
+                                compactionMaxFileNum,
+                                targetFileSize,
+                                compactRewriter(partition, bucket),
+                                assertDisorder);
 
         return new AppendOnlyWriter(
                 fileIO,
@@ -118,23 +127,6 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                 factory,
                 restoreIncrement,
                 fileCompression);
-    }
-
-    protected CompactManager getCompactManager(
-            BinaryRow partition,
-            int bucket,
-            List<DataFileMeta> restoredFiles,
-            ExecutorService compactExecutor) {
-        return skipCompaction
-                ? new NoopCompactManager()
-                : new AppendOnlyCompactManager(
-                        compactExecutor,
-                        restoredFiles,
-                        compactionMinFileNum,
-                        compactionMaxFileNum,
-                        targetFileSize,
-                        compactRewriter(partition, bucket),
-                        assertDisorder);
     }
 
     private AppendOnlyCompactManager.CompactRewriter compactRewriter(
@@ -165,5 +157,14 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
             rewriter.close();
             return rewriter.result();
         };
+    }
+
+    // overwrite flag in AppendOnlyFileStoreWrite only disable search for restored files
+    public void fromEmptyWriter() {
+        withOverwrite(true);
+    }
+
+    public void skipCompaction() {
+        skipCompaction = true;
     }
 }
