@@ -47,12 +47,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.function.Function;
 import java.util.stream.Collectors;
-
-import static org.apache.paimon.hive.HiveTypeUtils.typeInfoToLogicalType;
 
 /** Column names, types and comments of a Hive table. */
 public class HiveSchema {
@@ -91,7 +91,7 @@ public class HiveSchema {
         String location = LocationKeyExtractor.getLocation(properties);
         Optional<TableSchema> tableSchema = getExistsSchema(configuration, location);
         String columnProperty = properties.getProperty(serdeConstants.LIST_COLUMNS);
-        // Create Hive external table with Paimon schema directly when Hive schema is absent
+        // Create hive external table with empty ddl
         if (StringUtils.isEmpty(columnProperty)) {
             if (!tableSchema.isPresent()) {
                 throw new IllegalArgumentException(
@@ -103,6 +103,7 @@ public class HiveSchema {
             return new HiveSchema(new RowType(tableSchema.get().fields()));
         }
 
+        // Create hive external table with ddl
         String columnNameDelimiter =
                 properties.getProperty(
                         // serdeConstants.COLUMN_NAME_DELIMITER is not defined in earlier Hive
@@ -111,28 +112,33 @@ public class HiveSchema {
         List<String> columnNames = Arrays.asList(columnProperty.split(columnNameDelimiter));
         String columnTypes = properties.getProperty(serdeConstants.LIST_COLUMN_TYPES);
         List<TypeInfo> typeInfos = TypeInfoUtils.getTypeInfosFromTypeString(columnTypes);
-
-        // If both Paimon table schema and Hive table schema exist, we check whether the schema
-        // matches and still build from Paimon table schema
-        if (tableSchema.isPresent()) {
-            if (columnNames.size() > 0 && typeInfos.size() > 0) {
-                LOG.debug(
-                        "Extract schema with exists DDL and exists paimon table, table location:[{}].",
-                        location);
-                checkSchemaMatched(columnNames, typeInfos, tableSchema.get());
-            }
-
-            return new HiveSchema(new RowType(tableSchema.get().fields()));
-        }
-
-        // Create from Hive schema only when Paimon schema is absent
+        List<DataType> dataTypes =
+                typeInfos.stream()
+                        .map(HiveTypeUtils::typeInfoToLogicalType)
+                        .collect(Collectors.toList());
         List<String> comments =
                 Lists.newArrayList(
                         Splitter.on('\0').split(properties.getProperty("columns.comments")));
+        // Both Paimon table schema and Hive table schema exist
+        if (tableSchema.isPresent() && columnNames.size() > 0 && typeInfos.size() > 0) {
+            LOG.debug(
+                    "Extract schema with exists DDL and exists paimon table, table location:[{}].",
+                    location);
+            checkSchemaMatched(columnNames, typeInfos, tableSchema.get());
+            // Use paimon table data types and column comments when the paimon table exists.
+            Map<String, DataField> paimonFields =
+                    tableSchema.get().fields().stream()
+                            .collect(Collectors.toMap(DataField::name, Function.identity()));
+
+            for (int i = 0; i < columnNames.size(); i++) {
+                String columnName = columnNames.get(i);
+                dataTypes.set(i, paimonFields.get(columnName).type());
+                comments.set(i, paimonFields.get(columnName).description());
+            }
+        }
         RowType.Builder builder = RowType.builder();
         for (int i = 0; i < columnNames.size(); i++) {
-            builder.field(
-                    columnNames.get(i), typeInfoToLogicalType(typeInfos.get(i)), comments.get(i));
+            builder.field(columnNames.get(i), dataTypes.get(i), comments.get(i));
         }
         return new HiveSchema(builder.build());
     }

@@ -916,8 +916,7 @@ public class PaimonStorageHandlerITCase {
                         conf,
                         RowType.of(
                                 new DataType[] {
-                                    DataTypes.DATE(),
-                                    DataTypes.TIMESTAMP(random.nextBoolean() ? 3 : 6)
+                                    DataTypes.DATE(), DataTypes.TIMESTAMP(random.nextInt(10))
                                 },
                                 new String[] {"dt", "ts"}),
                         Collections.emptyList(),
