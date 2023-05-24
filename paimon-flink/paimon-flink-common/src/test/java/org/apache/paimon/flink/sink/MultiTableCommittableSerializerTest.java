@@ -49,10 +49,9 @@ class MultiTableCommittableSerializerTest {
         Committable committable = new Committable(9, Committable.Kind.FILE, commitMessage);
         String database = "database";
         String table = "table";
-        String user = "user";
         MultiTableCommittable multiTableCommittable =
                 MultiTableCommittable.fromCommittable(
-                        Identifier.create(database, table), user, committable);
+                        Identifier.create(database, table), committable);
         Committable deserializeCommittable =
                 serializer.deserialize(2, serializer.serialize(multiTableCommittable));
 
@@ -61,7 +60,5 @@ class MultiTableCommittableSerializerTest {
         assertThat(((MultiTableCommittable) deserializeCommittable).getDatabase())
                 .isEqualTo(database);
         assertThat(((MultiTableCommittable) deserializeCommittable).getTable()).isEqualTo(table);
-        assertThat(((MultiTableCommittable) deserializeCommittable).getCommitUser())
-                .isEqualTo(user);
     }
 }

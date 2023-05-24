@@ -54,10 +54,8 @@ public class MultiTableCommittableSerializer implements SimpleVersionedSerialize
         int databaseLen = database.length();
         String table = committable.getTable();
         int tableLen = table.length();
-        String commitUser = committable.getCommitUser();
-        int commitUserLen = commitUser.length();
 
-        int multiTableMetaLen = databaseLen + tableLen + commitUserLen + 3 * 4;
+        int multiTableMetaLen = databaseLen + tableLen + 2 * 4;
 
         // use committable serializer (of the same version) to serialize committable
         byte[] serializedCommittable = committableSerializer.serialize(committable);
@@ -67,8 +65,6 @@ public class MultiTableCommittableSerializer implements SimpleVersionedSerialize
                 .put(database.getBytes())
                 .putInt(tableLen)
                 .put(table.getBytes())
-                .putInt(commitUserLen)
-                .put(commitUser.getBytes())
                 .put(serializedCommittable)
                 .array();
     }
@@ -89,11 +85,7 @@ public class MultiTableCommittableSerializer implements SimpleVersionedSerialize
         byte[] tableBytes = new byte[tableLen];
         buffer.get(tableBytes, 0, tableLen);
         String table = new String(tableBytes);
-        int commitUserLen = buffer.getInt();
-        byte[] commitUserBytes = new byte[commitUserLen];
-        buffer.get(commitUserBytes, 0, commitUserLen);
-        String commitUser = new String(commitUserBytes);
-        int multiTableMetaLen = databaseLen + tableLen + commitUserLen + 3 * 4;
+        int multiTableMetaLen = databaseLen + tableLen + 2 * 4;
 
         // use committable serializer (of the same version) to deserialize committable
         byte[] serializedCommittable = new byte[bytes.length - multiTableMetaLen];
@@ -103,6 +95,6 @@ public class MultiTableCommittableSerializer implements SimpleVersionedSerialize
                 committableSerializer.deserialize(committableVersion, serializedCommittable);
 
         return MultiTableCommittable.fromCommittable(
-                Identifier.create(database, table), commitUser, committable);
+                Identifier.create(database, table), committable);
     }
 }

@@ -50,9 +50,10 @@ import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.RETRY
 public class CdcRecordStoreMultiWriteOperator extends PrepareCommitOperator<CdcMultiplexRecord> {
 
     private static final long serialVersionUID = 1L;
-    private final Catalog catalog;
+    private Catalog catalog;
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
     private final String initialCommitUser;
+    private final Catalog.Loader catalogLoader;
     private FileStoreTable table;
     private Map<Identifier, FileStoreTable> tables;
     private StoreSinkWriteState state;
@@ -61,10 +62,10 @@ public class CdcRecordStoreMultiWriteOperator extends PrepareCommitOperator<CdcM
     private String commitUser;
 
     public CdcRecordStoreMultiWriteOperator(
-            Catalog catalog,
+            Catalog.Loader catalogLoader,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
-        this.catalog = catalog;
+        this.catalogLoader = catalogLoader;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;
     }
@@ -72,6 +73,8 @@ public class CdcRecordStoreMultiWriteOperator extends PrepareCommitOperator<CdcM
     @Override
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
+
+        catalog = catalogLoader.load();
 
         // Each job can only have one user name and this name must be consistent across restarts.
         // We cannot use job id as commit user name here because user may change job id by creating
@@ -167,8 +170,7 @@ public class CdcRecordStoreMultiWriteOperator extends PrepareCommitOperator<CdcM
                     write.prepareCommit(doCompaction, checkpointId).stream()
                             .map(
                                     committable ->
-                                            MultiTableCommittable.fromCommittable(
-                                                    key, commitUser, committable))
+                                            MultiTableCommittable.fromCommittable(key, committable))
                             .collect(Collectors.toList()));
         }
         return committables;

@@ -29,27 +29,22 @@ public class MultiTableCommittable extends Committable {
 
     private final String database;
     private final String table;
-    private final String commitUser;
 
     public MultiTableCommittable(
             String database,
             String table,
-            String commitUser,
             long checkpointId,
             Kind kind,
             Object wrappedCommittable) {
         super(checkpointId, kind, wrappedCommittable);
         this.database = database;
         this.table = table;
-        this.commitUser = commitUser;
     }
 
-    public static MultiTableCommittable fromCommittable(
-            Identifier id, String commitUser, Committable committable) {
+    public static MultiTableCommittable fromCommittable(Identifier id, Committable committable) {
         return new MultiTableCommittable(
                 id.getDatabaseName(),
                 id.getObjectName(),
-                commitUser,
                 committable.checkpointId(),
                 committable.kind(),
                 committable.wrappedCommittable());
@@ -61,9 +56,5 @@ public class MultiTableCommittable extends Committable {
 
     public String getTable() {
         return table;
-    }
-
-    public String getCommitUser() {
-        return commitUser;
     }
 }

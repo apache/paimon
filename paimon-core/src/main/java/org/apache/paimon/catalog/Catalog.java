@@ -343,4 +343,10 @@ public interface Catalog extends AutoCloseable, Serializable {
             return column;
         }
     }
+
+    /** Loader of {@link Catalog}. */
+    @FunctionalInterface
+    interface Loader extends Serializable {
+        Catalog load();
+    }
 }

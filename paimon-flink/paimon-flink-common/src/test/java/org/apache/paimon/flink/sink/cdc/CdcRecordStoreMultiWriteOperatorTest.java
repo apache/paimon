@@ -20,7 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.FileSystemCatalogFactory;
+import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.MultiTableCommittableTypeInfo;
@@ -77,6 +77,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
     private Identifier firstTable;
     private Catalog catalog;
     private Identifier secondTable;
+    private Catalog.Loader catalogLoader;
 
     @BeforeEach
     public void before() throws Exception {
@@ -87,7 +88,8 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         firstTable = Identifier.create(databaseName, "test_table1");
         secondTable = Identifier.create(databaseName, "test_table2");
 
-        catalog = createTestCatalog();
+        catalogLoader = createCatalogLoader();
+        catalog = catalogLoader.load();
         catalog.createDatabase(databaseName, true);
         Options conf = new Options();
         conf.set(CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME, Duration.ofMillis(10));
@@ -161,7 +163,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         FileStoreTable table = (FileStoreTable) catalog.getTable(tableId);
 
         OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness =
-                createTestHarness(catalog);
+                createTestHarness(catalogLoader);
 
         harness.open();
 
@@ -223,20 +225,17 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         harness.close();
     }
 
-    private Catalog createTestCatalog() {
-
-        CatalogContext catalogContext = createCatalogContext(warehouse);
-        FileIO fileIO = getFileIO(catalogContext, warehouse);
-        return new FileSystemCatalogFactory().create(fileIO, warehouse, catalogContext);
+    private Catalog.Loader createCatalogLoader() {
+        Options catalogOptions = createCatalogOptions(warehouse);
+        return () -> CatalogFactory.createCatalog(CatalogContext.create(catalogOptions));
     }
 
-    private CatalogContext createCatalogContext(Path warehouse) {
+    private Options createCatalogOptions(Path warehouse) {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, warehouse.getPath());
         conf.set(CatalogOptions.URI, "");
 
-        // create CatalogContext using the options
-        return CatalogContext.create(conf);
+        return conf;
     }
 
     @Test
@@ -246,7 +245,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         FileStoreTable table = (FileStoreTable) catalog.getTable(tableId);
 
         OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness =
-                createTestHarness(catalog);
+                createTestHarness(catalogLoader);
         harness.open();
 
         Runner runner = new Runner(harness);
@@ -361,7 +360,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         FileStoreTable table2 = (FileStoreTable) catalog.getTable(secondTable);
 
         OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness =
-                createTestHarness(catalog);
+                createTestHarness(catalogLoader);
         harness.open();
 
         Runner runner = new Runner(harness);
@@ -512,10 +511,10 @@ public class CdcRecordStoreMultiWriteOperatorTest {
     }
 
     private OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> createTestHarness(
-            Catalog catalog) throws Exception {
+            Catalog.Loader catalogLoader) throws Exception {
         CdcRecordStoreMultiWriteOperator operator =
                 new CdcRecordStoreMultiWriteOperator(
-                        catalog,
+                        catalogLoader,
                         (t, commitUser, state, ioManager) ->
                                 new StoreSinkWriteImpl(
                                         t, commitUser, state, ioManager, false, false),
