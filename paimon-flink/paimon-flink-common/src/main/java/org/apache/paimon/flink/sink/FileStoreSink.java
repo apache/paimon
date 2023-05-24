@@ -33,7 +33,7 @@ import javax.annotation.Nullable;
 import java.util.Map;
 
 /** {@link FlinkSink} for writing records into paimon. */
-public class FileStoreSink extends FlinkSink<RowData, Committable, ManifestCommittable> {
+public class FileStoreSink extends FlinkSink<RowData> {
 
     private static final long serialVersionUID = 1L;
 

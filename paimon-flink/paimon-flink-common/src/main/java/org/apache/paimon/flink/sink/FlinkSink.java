@@ -20,15 +20,13 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.api.common.typeinfo.TypeHint;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.api.java.typeutils.PojoTypeInfo;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.CheckpointingMode;
@@ -49,7 +47,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_F
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_LOOKUP_WAIT;
 
 /** Abstract sink of paimon. */
-public abstract class FlinkSink<T, CommitT, GlobalCommitT> implements Serializable {
+public abstract class FlinkSink<T> implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -133,8 +131,8 @@ public abstract class FlinkSink<T, CommitT, GlobalCommitT> implements Serializab
             assertCheckpointConfiguration(env);
         }
 
-        TypeInformation<CommitT> typeInfo = PojoTypeInfo.of(new TypeHint<CommitT>() {});
-        SingleOutputStreamOperator<CommitT> written =
+        CommittableTypeInfo typeInfo = new CommittableTypeInfo();
+        SingleOutputStreamOperator<Committable> written =
                 input.transform(
                                 WRITER_NAME + " -> " + table.name(),
                                 typeInfo,
@@ -145,7 +143,7 @@ public abstract class FlinkSink<T, CommitT, GlobalCommitT> implements Serializab
                 written.transform(
                                 GLOBAL_COMMITTER_NAME + " -> " + table.name(),
                                 typeInfo,
-                                new CommitterOperator<CommitT, GlobalCommitT>(
+                                new CommitterOperator<Committable, ManifestCommittable>(
                                         streamingCheckpointEnabled,
                                         commitUser,
                                         createCommitterFactory(streamingCheckpointEnabled),
@@ -168,11 +166,11 @@ public abstract class FlinkSink<T, CommitT, GlobalCommitT> implements Serializab
                         + " to exactly-once");
     }
 
-    protected abstract OneInputStreamOperator<T, CommitT> createWriteOperator(
+    protected abstract OneInputStreamOperator<T, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, boolean isStreaming, String commitUser);
 
-    protected abstract SerializableFunction<String, Committer<CommitT, GlobalCommitT>>
+    protected abstract SerializableFunction<String, Committer<Committable, ManifestCommittable>>
             createCommitterFactory(boolean streamingCheckpointEnabled);
 
-    protected abstract CommittableStateManager<GlobalCommitT> createCommittableStateManager();
+    protected abstract CommittableStateManager<ManifestCommittable> createCommittableStateManager();
 }

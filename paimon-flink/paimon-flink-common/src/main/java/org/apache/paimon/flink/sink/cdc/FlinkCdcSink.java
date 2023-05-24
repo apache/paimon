@@ -37,7 +37,7 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 /**
  * A {@link FlinkSink} which accepts {@link CdcRecord} and waits for a schema change if necessary.
  */
-public class FlinkCdcSink extends FlinkSink<CdcRecord, Committable, ManifestCommittable> {
+public class FlinkCdcSink extends FlinkSink<CdcRecord> {
 
     private static final long serialVersionUID = 1L;
 

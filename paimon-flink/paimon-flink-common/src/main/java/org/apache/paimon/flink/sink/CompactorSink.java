@@ -27,7 +27,7 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
 
 /** {@link FlinkSink} for dedicated compact jobs. */
-public class CompactorSink extends FlinkSink<RowData, Committable, ManifestCommittable> {
+public class CompactorSink extends FlinkSink<RowData> {
 
     private static final long serialVersionUID = 1L;
 
