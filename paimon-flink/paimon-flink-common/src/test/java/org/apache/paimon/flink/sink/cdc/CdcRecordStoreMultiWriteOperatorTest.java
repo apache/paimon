@@ -78,6 +78,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
     private Catalog catalog;
     private Identifier secondTable;
     private Catalog.Loader catalogLoader;
+    private Schema firstTableSchema;
 
     @BeforeEach
     public void before() throws Exception {
@@ -109,16 +110,16 @@ public class CdcRecordStoreMultiWriteOperatorTest {
                         },
                         new String[] {"k", "v1", "v2", "v3", "v4"});
 
+        firstTableSchema =
+                new Schema(
+                        rowType1.getFields(),
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "k"),
+                        conf.toMap(),
+                        "");
         createTestTables(
                 catalog,
-                Tuple2.of(
-                        firstTable,
-                        new Schema(
-                                rowType1.getFields(),
-                                Collections.singletonList("pt"),
-                                Arrays.asList("pt", "k"),
-                                conf.toMap(),
-                                "")),
+                Tuple2.of(firstTable, firstTableSchema),
                 Tuple2.of(
                         secondTable,
                         new Schema(
@@ -153,6 +154,60 @@ public class CdcRecordStoreMultiWriteOperatorTest {
             throw new UncheckedIOException(e);
         }
         return fileIO;
+    }
+
+    @Test
+    @Timeout(30)
+    public void testAsyncTableCreate() throws Exception {
+        // the async table will have same row type, partitions, and pks as firstTable
+        Identifier tableId = Identifier.create(databaseName, "async_new_table");
+
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness =
+                createTestHarness(catalogLoader);
+
+        harness.open();
+
+        Runner runner = new Runner(harness);
+        Thread t = new Thread(runner);
+        t.start();
+
+        // check that records should be processed after table is created
+        Map<String, String> fields = new HashMap<>();
+        fields.put("pt", "0");
+        fields.put("k", "1");
+        fields.put("v", "10");
+
+        CdcMultiplexRecord expected =
+                CdcMultiplexRecord.fromCdcRecord(
+                        databaseName,
+                        tableId.getObjectName(),
+                        new CdcRecord(RowKind.INSERT, fields));
+        runner.offer(expected);
+        CdcMultiplexRecord actual = runner.poll(1);
+
+        assertThat(actual).isNull();
+
+        catalog.createTable(tableId, firstTableSchema, true);
+        actual = runner.take();
+        assertThat(actual).isEqualTo(expected);
+
+        // after table is created, record should be processed immediately
+        fields = new HashMap<>();
+        fields.put("pt", "0");
+        fields.put("k", "3");
+        fields.put("v", "30");
+        expected =
+                CdcMultiplexRecord.fromCdcRecord(
+                        databaseName,
+                        tableId.getObjectName(),
+                        new CdcRecord(RowKind.INSERT, fields));
+        runner.offer(expected);
+        actual = runner.take();
+        assertThat(actual).isEqualTo(expected);
+
+        runner.stop();
+        t.join();
+        harness.close();
     }
 
     @Test

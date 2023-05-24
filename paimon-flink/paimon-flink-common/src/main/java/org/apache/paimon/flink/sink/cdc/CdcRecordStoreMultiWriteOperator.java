@@ -50,6 +50,7 @@ import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.RETRY
 public class CdcRecordStoreMultiWriteOperator extends PrepareCommitOperator<CdcMultiplexRecord> {
 
     private static final long serialVersionUID = 1L;
+    private final long retrySleepMillis;
     private Catalog catalog;
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
     private final String initialCommitUser;
@@ -68,6 +69,7 @@ public class CdcRecordStoreMultiWriteOperator extends PrepareCommitOperator<CdcM
         this.catalogLoader = catalogLoader;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;
+        this.retrySleepMillis = RETRY_SLEEP_TIME.defaultValue().toMillis();
     }
 
     @Override
@@ -94,25 +96,26 @@ public class CdcRecordStoreMultiWriteOperator extends PrepareCommitOperator<CdcM
 
         String databaseName = record.getDatabaseName();
         String tableName = record.getTableName();
-        Identifier key = Identifier.create(databaseName, tableName);
-        table =
-                tables.computeIfAbsent(
-                        key,
-                        id -> {
-                            try {
-                                return (FileStoreTable) catalog.getTable(id);
-                            } catch (Catalog.TableNotExistException e) {
-                                return null;
-                            }
-                        });
+        Identifier tableId = Identifier.create(databaseName, tableName);
 
+        table = tables.get(tableId);
         if (table == null) {
-            throw new IOException("Failed to get table " + key);
+            while (true) {
+                try {
+                    table = (FileStoreTable) catalog.getTable(tableId);
+                    tables.put(tableId, table);
+                    break;
+                } catch (Catalog.TableNotExistException e) {
+                    // table not found, waiting until table is created by
+                    //     upstream operators
+                }
+                Thread.sleep(retrySleepMillis);
+            }
         }
 
         write =
                 writes.computeIfAbsent(
-                        key,
+                        tableId,
                         id ->
                                 storeSinkWriteProvider.provide(
                                         table,
