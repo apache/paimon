@@ -226,7 +226,7 @@ public class RowDataStoreWriteOperator extends PrepareCommitOperator<RowData, Co
                                     committables.add(
                                             new Committable(
                                                     checkpointId,
-                                                    CommittableType.Kind.LOG_OFFSET,
+                                                    Committable.Kind.LOG_OFFSET,
                                                     new LogOffsetCommittable(k, v))));
         }
 

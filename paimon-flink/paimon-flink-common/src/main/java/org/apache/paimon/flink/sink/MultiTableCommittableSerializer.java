@@ -134,7 +134,7 @@ public class MultiTableCommittableSerializer
 
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
         long checkpointId = buffer.getLong();
-        Committable.Kind kind = CommittableType.Kind.fromByteValue(buffer.get());
+        Committable.Kind kind = Committable.Kind.fromByteValue(buffer.get());
         byte[] wrapped = new byte[bytes.length - 13];
         buffer.get(wrapped);
         int version = buffer.getInt();

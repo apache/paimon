@@ -46,7 +46,7 @@ class MultiTableCommittableSerializerTest {
         CompactIncrement compactIncrement = randomCompactIncrement();
         CommitMessage commitMessage =
                 new CommitMessageImpl(row(0), 1, newFilesIncrement, compactIncrement);
-        Committable committable = new Committable(9, CommittableType.Kind.FILE, commitMessage);
+        Committable committable = new Committable(9, Committable.Kind.FILE, commitMessage);
         String database = "database";
         String table = "table";
         MultiTableCommittable multiTableCommittable =

@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.flink.VersionedSerializerWrapper;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
@@ -32,7 +33,7 @@ import javax.annotation.Nullable;
 import java.util.Map;
 
 /** {@link FlinkSink} for writing records into paimon. */
-public class FileStoreSink extends FlinkSink<RowData> {
+public class FileStoreSink extends FlinkSink<RowData, Committable, ManifestCommittable> {
 
     private static final long serialVersionUID = 1L;
 
@@ -58,8 +59,8 @@ public class FileStoreSink extends FlinkSink<RowData> {
     }
 
     @Override
-    protected SerializableFunction<String, Committer> createCommitterFactory(
-            boolean streamingCheckpointEnabled) {
+    protected SerializableFunction<String, Committer<Committable, ManifestCommittable>>
+            createCommitterFactory(boolean streamingCheckpointEnabled) {
         // If checkpoint is enabled for streaming job, we have to
         // commit new files list even if they're empty.
         // Otherwise we can't tell if the commit is successful after
@@ -73,7 +74,7 @@ public class FileStoreSink extends FlinkSink<RowData> {
     }
 
     @Override
-    protected CommittableStateManager createCommittableStateManager() {
+    protected CommittableStateManager<ManifestCommittable> createCommittableStateManager() {
         return new RestoreAndFailCommittableStateManager(
                 () -> new VersionedSerializerWrapper<>(new ManifestCommittableSerializer()));
     }

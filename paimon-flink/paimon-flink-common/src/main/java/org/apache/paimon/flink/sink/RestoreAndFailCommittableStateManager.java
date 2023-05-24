@@ -41,7 +41,8 @@ import java.util.List;
  * <p>Useful for committing snapshots containing records. For example snapshots produced by table
  * store writers.
  */
-public class RestoreAndFailCommittableStateManager implements CommittableStateManager {
+public class RestoreAndFailCommittableStateManager
+        implements CommittableStateManager<ManifestCommittable> {
 
     private static final long serialVersionUID = 1L;
 

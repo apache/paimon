@@ -31,7 +31,7 @@ import java.util.List;
  * <p>Useful for committing optional snapshots. For example COMPACT snapshots produced by a separate
  * compact job.
  */
-public class NoopCommittableStateManager implements CommittableStateManager {
+public class NoopCommittableStateManager implements CommittableStateManager<ManifestCommittable> {
 
     @Override
     public void initializeState(StateInitializationContext context, Committer committer)

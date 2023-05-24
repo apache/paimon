@@ -25,13 +25,13 @@ import org.apache.paimon.catalog.Identifier;
  * only be produced by multiplexed operators that handles data from multiple tables. Thus, the
  * database, table, and commit user of each table is included in the committable.
  */
-public class MultiTableCommittable implements CommittableType {
+public class MultiTableCommittable {
 
     private final String database;
     private final String table;
     private final long checkpointId;
 
-    private final Kind kind;
+    private final Committable.Kind kind;
 
     private final Object wrappedCommittable;
 
@@ -39,7 +39,7 @@ public class MultiTableCommittable implements CommittableType {
             String database,
             String table,
             long checkpointId,
-            Kind kind,
+            Committable.Kind kind,
             Object wrappedCommittable) {
         this.checkpointId = checkpointId;
         this.kind = kind;
@@ -69,7 +69,7 @@ public class MultiTableCommittable implements CommittableType {
         return checkpointId;
     }
 
-    public Kind kind() {
+    public Committable.Kind kind() {
         return kind;
     }
 
@@ -87,5 +87,34 @@ public class MultiTableCommittable implements CommittableType {
                 + ", wrappedCommittable="
                 + wrappedCommittable
                 + '}';
+    }
+
+    /** Kind of the produced Committable. */
+    public enum Kind {
+        FILE((byte) 0),
+
+        LOG_OFFSET((byte) 1);
+
+        private final byte value;
+
+        Kind(byte value) {
+            this.value = value;
+        }
+
+        public byte toByteValue() {
+            return value;
+        }
+
+        public static Kind fromByteValue(byte value) {
+            switch (value) {
+                case 0:
+                    return FILE;
+                case 1:
+                    return LOG_OFFSET;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unsupported byte value '" + value + "' for value kind.");
+            }
+        }
     }
 }

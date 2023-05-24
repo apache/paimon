@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 /** Committable produced by {@link PrepareCommitOperator}. */
-public class Committable implements CommittableType {
+public class Committable {
 
     private final long checkpointId;
 
@@ -55,5 +55,34 @@ public class Committable implements CommittableType {
                 + ", wrappedCommittable="
                 + wrappedCommittable
                 + '}';
+    }
+
+    /** Kind of the produced Committable. */
+    public enum Kind {
+        FILE((byte) 0),
+
+        LOG_OFFSET((byte) 1);
+
+        private final byte value;
+
+        Kind(byte value) {
+            this.value = value;
+        }
+
+        public byte toByteValue() {
+            return value;
+        }
+
+        public static Kind fromByteValue(byte value) {
+            switch (value) {
+                case 0:
+                    return FILE;
+                case 1:
+                    return LOG_OFFSET;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unsupported byte value '" + value + "' for value kind.");
+            }
+        }
     }
 }

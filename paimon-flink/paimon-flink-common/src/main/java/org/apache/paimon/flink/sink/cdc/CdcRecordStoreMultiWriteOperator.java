@@ -51,16 +51,16 @@ public class CdcRecordStoreMultiWriteOperator
 
     private static final long serialVersionUID = 1L;
     private final long retrySleepMillis;
-    private Catalog catalog;
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
     private final String initialCommitUser;
     private final Catalog.Loader catalogLoader;
-    private FileStoreTable table;
-    private Map<Identifier, FileStoreTable> tables;
-    private StoreSinkWriteState state;
-    private StoreSinkWrite write;
-    private Map<Identifier, StoreSinkWrite> writes;
-    private String commitUser;
+    protected Catalog catalog;
+    protected FileStoreTable table;
+    protected Map<Identifier, FileStoreTable> tables;
+    protected StoreSinkWriteState state;
+    protected StoreSinkWrite write;
+    protected Map<Identifier, StoreSinkWrite> writes;
+    protected String commitUser;
 
     public CdcRecordStoreMultiWriteOperator(
             Catalog.Loader catalogLoader,
@@ -86,8 +86,8 @@ public class CdcRecordStoreMultiWriteOperator
                         context, "commit_user_state", String.class, initialCommitUser);
 
         state = new StoreSinkWriteState(context, (tableName, partition, bucket) -> true);
-        this.tables = new HashMap<>();
-        this.writes = new HashMap<>();
+        tables = new HashMap<>();
+        writes = new HashMap<>();
     }
 
     @Override

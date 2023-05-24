@@ -212,6 +212,67 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
     @Test
     @Timeout(30)
+    public void testInitializeState() throws Exception {
+        // the async table will have same row type, partitions, and pks as firstTable
+        Identifier tableId = Identifier.create(databaseName, "async_new_table");
+
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
+                createTestHarness(catalogLoader);
+
+        harness.open();
+
+        Runner runner = new Runner(harness);
+        Thread t = new Thread(runner);
+        t.start();
+
+        // check that records should be processed after table is created
+        Map<String, String> fields = new HashMap<>();
+        fields.put("pt", "0");
+        fields.put("k", "1");
+        fields.put("v", "10");
+
+        CdcMultiplexRecord expected =
+                CdcMultiplexRecord.fromCdcRecord(
+                        databaseName,
+                        tableId.getObjectName(),
+                        new CdcRecord(RowKind.INSERT, fields));
+        runner.offer(expected);
+        CdcMultiplexRecord actual = runner.poll(1);
+
+        assertThat(actual).isNull();
+
+        CdcRecordStoreMultiWriteOperator operator =
+                (CdcRecordStoreMultiWriteOperator) harness.getOperator();
+        assertThat(operator.tables.size()).isEqualTo(0);
+        assertThat(operator.writes.size()).isEqualTo(0);
+
+        catalog.createTable(tableId, firstTableSchema, true);
+        actual = runner.take();
+        assertThat(actual).isEqualTo(expected);
+        assertThat(operator.tables.size()).isEqualTo(1);
+        assertThat(operator.writes.size()).isEqualTo(1);
+
+        // after table is created, record should be processed immediately
+        fields = new HashMap<>();
+        fields.put("pt", "0");
+        fields.put("k", "3");
+        fields.put("v", "30");
+        expected =
+                CdcMultiplexRecord.fromCdcRecord(
+                        databaseName,
+                        tableId.getObjectName(),
+                        new CdcRecord(RowKind.INSERT, fields));
+        runner.offer(expected);
+        actual = runner.take();
+        assertThat(actual).isEqualTo(expected);
+
+        runner.stop();
+        t.join();
+        harness.close();
+    }
+
+    @Test
+    @Timeout(30)
     public void testSingleTableAddColumn() throws Exception {
 
         Identifier tableId = firstTable;
