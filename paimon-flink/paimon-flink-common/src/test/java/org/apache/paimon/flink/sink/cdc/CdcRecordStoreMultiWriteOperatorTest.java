@@ -22,7 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.MultiTableCommittable;
 import org.apache.paimon.flink.sink.MultiTableCommittableTypeInfo;
 import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
 import org.apache.paimon.fs.FileIO;
@@ -162,7 +162,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         // the async table will have same row type, partitions, and pks as firstTable
         Identifier tableId = Identifier.create(databaseName, "async_new_table");
 
-        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness =
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
                 createTestHarness(catalogLoader);
 
         harness.open();
@@ -217,7 +217,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         Identifier tableId = firstTable;
         FileStoreTable table = (FileStoreTable) catalog.getTable(tableId);
 
-        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness =
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
                 createTestHarness(catalogLoader);
 
         harness.open();
@@ -299,7 +299,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         Identifier tableId = secondTable;
         FileStoreTable table = (FileStoreTable) catalog.getTable(tableId);
 
-        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness =
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
                 createTestHarness(catalogLoader);
         harness.open();
 
@@ -414,7 +414,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         FileStoreTable table1 = (FileStoreTable) catalog.getTable(firstTable);
         FileStoreTable table2 = (FileStoreTable) catalog.getTable(secondTable);
 
-        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness =
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
                 createTestHarness(catalogLoader);
         harness.open();
 
@@ -565,8 +565,8 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         harness.close();
     }
 
-    private OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> createTestHarness(
-            Catalog.Loader catalogLoader) throws Exception {
+    private OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable>
+            createTestHarness(Catalog.Loader catalogLoader) throws Exception {
         CdcRecordStoreMultiWriteOperator operator =
                 new CdcRecordStoreMultiWriteOperator(
                         catalogLoader,
@@ -575,9 +575,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
                                         t, commitUser, state, ioManager, false, false),
                         commitUser);
         TypeSerializer<CdcMultiplexRecord> inputSerializer = new JavaSerializer<>();
-        TypeSerializer<Committable> outputSerializer =
+        TypeSerializer<MultiTableCommittable> outputSerializer =
                 new MultiTableCommittableTypeInfo().createSerializer(new ExecutionConfig());
-        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness =
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
                 new OneInputStreamOperatorTestHarness<>(operator, inputSerializer);
         harness.setup(outputSerializer);
         return harness;
@@ -585,12 +585,15 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
     private static class Runner implements Runnable {
 
-        private final OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness;
+        private final OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable>
+                harness;
         private final BlockingQueue<CdcMultiplexRecord> toProcess = new LinkedBlockingQueue<>();
         private final BlockingQueue<CdcMultiplexRecord> processed = new LinkedBlockingQueue<>();
         private final AtomicBoolean running = new AtomicBoolean(true);
 
-        private Runner(OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness) {
+        private Runner(
+                OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable>
+                        harness) {
             this.harness = harness;
         }
 

@@ -42,7 +42,7 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
  * org.apache.paimon.flink.source.CompactorSourceBuilder}. The records will contain partition keys
  * in the first few columns, and bucket number in the last column.
  */
-public class StoreCompactOperator extends PrepareCommitOperator<RowData> {
+public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committable> {
 
     private final FileStoreTable table;
     private final StoreSinkWrite.Provider storeSinkWriteProvider;

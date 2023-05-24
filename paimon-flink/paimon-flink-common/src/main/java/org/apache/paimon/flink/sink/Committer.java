@@ -30,14 +30,14 @@ import java.util.List;
  *
  * <p>The {@code Committer} runs with parallelism equal to 1.
  */
-public interface Committer extends AutoCloseable {
+public interface Committer<CommitT extends CommittableType> extends AutoCloseable {
 
     /** Find out which global committables need to be retried when recovering from the failure. */
     List<ManifestCommittable> filterRecoveredCommittables(
             List<ManifestCommittable> globalCommittables) throws IOException;
 
     /** Compute an aggregated committable from a list of committables. */
-    ManifestCommittable combine(long checkpointId, long watermark, List<Committable> committables)
+    ManifestCommittable combine(long checkpointId, long watermark, List<CommitT> committables)
             throws IOException;
 
     /** Commits the given {@link ManifestCommittable}. */

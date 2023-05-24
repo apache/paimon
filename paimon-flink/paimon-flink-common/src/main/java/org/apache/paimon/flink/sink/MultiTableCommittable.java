@@ -25,10 +25,15 @@ import org.apache.paimon.catalog.Identifier;
  * only be produced by multiplexed operators that handles data from multiple tables. Thus, the
  * database, table, and commit user of each table is included in the committable.
  */
-public class MultiTableCommittable extends Committable {
+public class MultiTableCommittable implements CommittableType {
 
     private final String database;
     private final String table;
+    private final long checkpointId;
+
+    private final Kind kind;
+
+    private final Object wrappedCommittable;
 
     public MultiTableCommittable(
             String database,
@@ -36,7 +41,9 @@ public class MultiTableCommittable extends Committable {
             long checkpointId,
             Kind kind,
             Object wrappedCommittable) {
-        super(checkpointId, kind, wrappedCommittable);
+        this.checkpointId = checkpointId;
+        this.kind = kind;
+        this.wrappedCommittable = wrappedCommittable;
         this.database = database;
         this.table = table;
     }
@@ -56,5 +63,29 @@ public class MultiTableCommittable extends Committable {
 
     public String getTable() {
         return table;
+    }
+
+    public long checkpointId() {
+        return checkpointId;
+    }
+
+    public Kind kind() {
+        return kind;
+    }
+
+    public Object wrappedCommittable() {
+        return wrappedCommittable;
+    }
+
+    @Override
+    public String toString() {
+        return "MultiTableCommittable{"
+                + "checkpointId="
+                + checkpointId
+                + ", kind="
+                + kind
+                + ", wrappedCommittable="
+                + wrappedCommittable
+                + '}';
     }
 }

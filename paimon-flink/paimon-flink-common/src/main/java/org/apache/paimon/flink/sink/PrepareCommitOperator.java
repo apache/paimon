@@ -28,8 +28,8 @@ import java.io.IOException;
 import java.util.List;
 
 /** Prepare commit operator to emit {@link Committable}s. */
-public abstract class PrepareCommitOperator<T> extends AbstractStreamOperator<Committable>
-        implements OneInputStreamOperator<T, Committable>, BoundedOneInput {
+public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOperator<OUT>
+        implements OneInputStreamOperator<IN, OUT>, BoundedOneInput {
 
     private boolean endOfInput = false;
 
@@ -56,6 +56,6 @@ public abstract class PrepareCommitOperator<T> extends AbstractStreamOperator<Co
                 .forEach(committable -> output.collect(new StreamRecord<>(committable)));
     }
 
-    protected abstract List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
+    protected abstract List<OUT> prepareCommit(boolean doCompaction, long checkpointId)
             throws IOException;
 }

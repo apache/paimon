@@ -29,7 +29,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /** {@link Committer} for dynamic store. */
-public class StoreCommitter implements Committer {
+public class StoreCommitter implements Committer<Committable> {
 
     private final TableCommitImpl commit;
 

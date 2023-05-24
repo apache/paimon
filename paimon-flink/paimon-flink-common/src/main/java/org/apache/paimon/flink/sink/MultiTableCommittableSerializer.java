@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 
 import org.apache.flink.core.io.SimpleVersionedSerializer;
@@ -32,12 +33,15 @@ import java.nio.ByteBuffer;
  * produces it will include the database, table, and commit user information. This can be done by
  * calling MultiTableCommittable::fromCommittable.
  */
-public class MultiTableCommittableSerializer implements SimpleVersionedSerializer<Committable> {
+public class MultiTableCommittableSerializer
+        implements SimpleVersionedSerializer<MultiTableCommittable> {
 
     private final CommittableSerializer committableSerializer;
+    private final CommitMessageSerializer commitMessageSerializer;
 
     public MultiTableCommittableSerializer(CommitMessageSerializer commitMessageSerializer) {
         this.committableSerializer = new CommittableSerializer(commitMessageSerializer);
+        this.commitMessageSerializer = commitMessageSerializer;
     }
 
     @Override
@@ -46,9 +50,7 @@ public class MultiTableCommittableSerializer implements SimpleVersionedSerialize
     }
 
     @Override
-    public byte[] serialize(Committable raw) throws IOException {
-        MultiTableCommittable committable = (MultiTableCommittable) raw;
-
+    public byte[] serialize(MultiTableCommittable committable) throws IOException {
         // first serialize all metadata
         String database = committable.getDatabase();
         int databaseLen = database.length();
@@ -58,7 +60,7 @@ public class MultiTableCommittableSerializer implements SimpleVersionedSerialize
         int multiTableMetaLen = databaseLen + tableLen + 2 * 4;
 
         // use committable serializer (of the same version) to serialize committable
-        byte[] serializedCommittable = committableSerializer.serialize(committable);
+        byte[] serializedCommittable = serializeCommittable(committable);
 
         return ByteBuffer.allocate(multiTableMetaLen + serializedCommittable.length)
                 .putInt(databaseLen)
@@ -70,7 +72,8 @@ public class MultiTableCommittableSerializer implements SimpleVersionedSerialize
     }
 
     @Override
-    public Committable deserialize(int committableVersion, byte[] bytes) throws IOException {
+    public MultiTableCommittable deserialize(int committableVersion, byte[] bytes)
+            throws IOException {
         if (committableVersion != getVersion()) {
             throw new RuntimeException("Can not deserialize version: " + committableVersion);
         }
@@ -91,10 +94,62 @@ public class MultiTableCommittableSerializer implements SimpleVersionedSerialize
         byte[] serializedCommittable = new byte[bytes.length - multiTableMetaLen];
 
         buffer.get(serializedCommittable, 0, bytes.length - multiTableMetaLen);
-        Committable committable =
-                committableSerializer.deserialize(committableVersion, serializedCommittable);
+        Committable committable = deserializeCommittable(committableVersion, serializedCommittable);
 
         return MultiTableCommittable.fromCommittable(
                 Identifier.create(database, table), committable);
+    }
+
+    public byte[] serializeCommittable(MultiTableCommittable committable) throws IOException {
+        byte[] wrapped;
+        int version;
+        switch (committable.kind()) {
+            case FILE:
+                version = commitMessageSerializer.getVersion();
+                wrapped =
+                        commitMessageSerializer.serialize(
+                                (CommitMessage) committable.wrappedCommittable());
+                break;
+            case LOG_OFFSET:
+                version = 1;
+                wrapped = ((LogOffsetCommittable) committable.wrappedCommittable()).toBytes();
+                break;
+            default:
+                throw new UnsupportedOperationException("Unsupported kind: " + committable.kind());
+        }
+
+        return ByteBuffer.allocate(8 + 1 + wrapped.length + 4)
+                .putLong(committable.checkpointId())
+                .put(committable.kind().toByteValue())
+                .put(wrapped)
+                .putInt(version)
+                .array();
+    }
+
+    public Committable deserializeCommittable(int committableVersion, byte[] bytes)
+            throws IOException {
+        if (committableVersion != getVersion()) {
+            throw new RuntimeException("Can not deserialize version: " + committableVersion);
+        }
+
+        ByteBuffer buffer = ByteBuffer.wrap(bytes);
+        long checkpointId = buffer.getLong();
+        Committable.Kind kind = CommittableType.Kind.fromByteValue(buffer.get());
+        byte[] wrapped = new byte[bytes.length - 13];
+        buffer.get(wrapped);
+        int version = buffer.getInt();
+
+        Object wrappedCommittable;
+        switch (kind) {
+            case FILE:
+                wrappedCommittable = commitMessageSerializer.deserialize(version, wrapped);
+                break;
+            case LOG_OFFSET:
+                wrappedCommittable = LogOffsetCommittable.fromBytes(wrapped);
+                break;
+            default:
+                throw new UnsupportedOperationException("Unsupported kind: " + kind);
+        }
+        return new Committable(checkpointId, kind, wrappedCommittable);
     }
 }

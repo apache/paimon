@@ -21,11 +21,12 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 
 import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
 
 /** Type information of {@link MultiTableCommittable}. */
-public class MultiTableCommittableTypeInfo extends CommittableTypeInfo {
+public class MultiTableCommittableTypeInfo extends TypeInformation<MultiTableCommittable> {
 
     @Override
     public boolean isBasicType() {
@@ -48,8 +49,8 @@ public class MultiTableCommittableTypeInfo extends CommittableTypeInfo {
     }
 
     @Override
-    public Class<Committable> getTypeClass() {
-        return Committable.class;
+    public Class<MultiTableCommittable> getTypeClass() {
+        return MultiTableCommittable.class;
     }
 
     @Override
@@ -58,17 +59,18 @@ public class MultiTableCommittableTypeInfo extends CommittableTypeInfo {
     }
 
     @Override
-    public TypeSerializer<Committable> createSerializer(ExecutionConfig config) {
+    public TypeSerializer<MultiTableCommittable> createSerializer(ExecutionConfig config) {
         // no copy, so that data from writer is directly going into committer while chaining
-        return new SimpleVersionedSerializerTypeSerializerProxy<Committable>(
+        return new SimpleVersionedSerializerTypeSerializerProxy<MultiTableCommittable>(
                 () -> new MultiTableCommittableSerializer(new CommitMessageSerializer())) {
             @Override
-            public Committable copy(Committable from) {
+            public MultiTableCommittable copy(MultiTableCommittable from) {
                 return from;
             }
 
             @Override
-            public Committable copy(Committable from, Committable reuse) {
+            public MultiTableCommittable copy(
+                    MultiTableCommittable from, MultiTableCommittable reuse) {
                 return from;
             }
         };

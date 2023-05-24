@@ -21,7 +21,6 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.MultiTableCommittable;
 import org.apache.paimon.flink.sink.PrepareCommitOperator;
 import org.apache.paimon.flink.sink.StateUtils;
@@ -47,7 +46,8 @@ import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.RETRY
  * A {@link PrepareCommitOperator} to write {@link CdcRecord}. Record schema may change. If current
  * known schema does not fit record schema, this operator will wait for schema changes.
  */
-public class CdcRecordStoreMultiWriteOperator extends PrepareCommitOperator<CdcMultiplexRecord> {
+public class CdcRecordStoreMultiWriteOperator
+        extends PrepareCommitOperator<CdcMultiplexRecord, MultiTableCommittable> {
 
     private static final long serialVersionUID = 1L;
     private final long retrySleepMillis;
@@ -163,9 +163,9 @@ public class CdcRecordStoreMultiWriteOperator extends PrepareCommitOperator<CdcM
     }
 
     @Override
-    protected List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
+    protected List<MultiTableCommittable> prepareCommit(boolean doCompaction, long checkpointId)
             throws IOException {
-        List<Committable> committables = new LinkedList<>();
+        List<MultiTableCommittable> committables = new LinkedList<>();
         for (Map.Entry<Identifier, StoreSinkWrite> entry : writes.entrySet()) {
             Identifier key = entry.getKey();
             StoreSinkWrite write = entry.getValue();
