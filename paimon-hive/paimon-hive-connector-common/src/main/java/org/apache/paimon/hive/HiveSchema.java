@@ -126,6 +126,8 @@ public class HiveSchema {
                     location);
             checkSchemaMatched(columnNames, typeInfos, tableSchema.get());
             // Use paimon table data types and column comments when the paimon table exists.
+            // Using paimon data types first because hive's TypeInfoFactory.timestampTypeInfo
+            // doesn't contain precision and thus may cause casting problems
             Map<String, DataField> paimonFields =
                     tableSchema.get().fields().stream()
                             .collect(Collectors.toMap(DataField::name, Function.identity()));
