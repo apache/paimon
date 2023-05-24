@@ -69,4 +69,13 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
                 catalogName,
                 context.options().get(DEFAULT_DATABASE));
     }
+
+    public static FlinkCatalog createCatalog(String catalogName, Catalog catalog) {
+        return new FlinkCatalog(catalog, catalogName, Catalog.DEFAULT_DATABASE);
+    }
+
+    public static Catalog createPaimonCatalog(Options catalogOptions) {
+        return CatalogFactory.createCatalog(
+                CatalogContext.create(catalogOptions, new FlinkFileIOLoader()));
+    }
 }
