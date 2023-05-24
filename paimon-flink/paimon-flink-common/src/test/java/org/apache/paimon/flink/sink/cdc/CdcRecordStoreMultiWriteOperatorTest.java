@@ -160,7 +160,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         Identifier tableId = firstTable;
         FileStoreTable table = (FileStoreTable) catalog.getTable(tableId);
 
-        OneInputStreamOperatorTestHarness<MultiplexCdcRecord, Committable> harness =
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness =
                 createTestHarness(catalog);
 
         harness.open();
@@ -176,22 +176,22 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         fields.put("k", "1");
         fields.put("v", "10");
 
-        MultiplexCdcRecord expected =
-                MultiplexCdcRecord.fromCdcRecord(
+        CdcMultiplexRecord expected =
+                CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
-                        tableId.getTableName(),
+                        tableId.getObjectName(),
                         new CdcRecord(RowKind.INSERT, fields));
         runner.offer(expected);
-        MultiplexCdcRecord actual = runner.take();
+        CdcMultiplexRecord actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
         fields = new HashMap<>();
         fields.put("pt", "0");
         fields.put("k", "2");
         expected =
-                MultiplexCdcRecord.fromCdcRecord(
+                CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
-                        tableId.getTableName(),
+                        tableId.getObjectName(),
                         new CdcRecord(RowKind.INSERT, fields));
         runner.offer(expected);
         actual = runner.take();
@@ -205,9 +205,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         fields.put("v", "30");
         fields.put("v2", "300");
         expected =
-                MultiplexCdcRecord.fromCdcRecord(
+                CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
-                        tableId.getTableName(),
+                        tableId.getObjectName(),
                         new CdcRecord(RowKind.INSERT, fields));
         runner.offer(expected);
         actual = runner.poll(1);
@@ -245,7 +245,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         Identifier tableId = secondTable;
         FileStoreTable table = (FileStoreTable) catalog.getTable(tableId);
 
-        OneInputStreamOperatorTestHarness<MultiplexCdcRecord, Committable> harness =
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness =
                 createTestHarness(catalog);
         harness.open();
 
@@ -261,13 +261,13 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         fields.put("v2", "0.625");
         fields.put("v3", "one");
         fields.put("v4", "b_one");
-        MultiplexCdcRecord expected =
-                MultiplexCdcRecord.fromCdcRecord(
+        CdcMultiplexRecord expected =
+                CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
-                        tableId.getTableName(),
+                        tableId.getObjectName(),
                         new CdcRecord(RowKind.INSERT, fields));
         runner.offer(expected);
-        CdcRecord actual = runner.take();
+        CdcMultiplexRecord actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
         // check that records with new fields should be processed after schema is updated
@@ -279,9 +279,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         fields.put("v1", "12345678987654321");
         fields.put("v2", "0.25");
         expected =
-                MultiplexCdcRecord.fromCdcRecord(
+                CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
-                        tableId.getTableName(),
+                        tableId.getObjectName(),
                         new CdcRecord(RowKind.INSERT, fields));
         runner.offer(expected);
         actual = runner.poll(1);
@@ -299,9 +299,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         fields.put("v1", "100");
         fields.put("v2", "1.0000000000009095");
         expected =
-                MultiplexCdcRecord.fromCdcRecord(
+                CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
-                        tableId.getTableName(),
+                        tableId.getObjectName(),
                         new CdcRecord(RowKind.INSERT, fields));
         runner.offer(expected);
         actual = runner.poll(1);
@@ -318,9 +318,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         fields.put("v1", "40");
         fields.put("v3", "long four");
         expected =
-                MultiplexCdcRecord.fromCdcRecord(
+                CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
-                        tableId.getTableName(),
+                        tableId.getObjectName(),
                         new CdcRecord(RowKind.INSERT, fields));
         runner.offer(expected);
         actual = runner.poll(1);
@@ -337,9 +337,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         fields.put("v1", "50");
         fields.put("v4", "long five~");
         expected =
-                MultiplexCdcRecord.fromCdcRecord(
+                CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
-                        tableId.getTableName(),
+                        tableId.getObjectName(),
                         new CdcRecord(RowKind.INSERT, fields));
         runner.offer(expected);
         actual = runner.poll(1);
@@ -360,7 +360,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         FileStoreTable table1 = (FileStoreTable) catalog.getTable(firstTable);
         FileStoreTable table2 = (FileStoreTable) catalog.getTable(secondTable);
 
-        OneInputStreamOperatorTestHarness<MultiplexCdcRecord, Committable> harness =
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness =
                 createTestHarness(catalog);
         harness.open();
 
@@ -379,13 +379,13 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         fields.put("k", "1");
         fields.put("v", "10");
 
-        MultiplexCdcRecord expected =
-                MultiplexCdcRecord.fromCdcRecord(
+        CdcMultiplexRecord expected =
+                CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
-                        firstTable.getTableName(),
+                        firstTable.getObjectName(),
                         new CdcRecord(RowKind.INSERT, fields));
         runner.offer(expected);
-        MultiplexCdcRecord actual = runner.take();
+        CdcMultiplexRecord actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
         // second table record
@@ -396,9 +396,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         fields.put("v3", "one");
         fields.put("v4", "b_one");
         expected =
-                MultiplexCdcRecord.fromCdcRecord(
+                CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
-                        secondTable.getTableName(),
+                        secondTable.getObjectName(),
                         new CdcRecord(RowKind.INSERT, fields));
         runner.offer(expected);
         actual = runner.take();
@@ -414,9 +414,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         fields.put("k", "123456789876543211");
         fields.put("v", "varchar");
         expected =
-                MultiplexCdcRecord.fromCdcRecord(
+                CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
-                        firstTable.getTableName(),
+                        firstTable.getObjectName(),
                         new CdcRecord(RowKind.INSERT, fields));
         runner.offer(expected);
         actual = runner.poll(1);
@@ -433,9 +433,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         fields.put("v1", "12345678987654321");
         fields.put("v2", "0.25");
         expected =
-                MultiplexCdcRecord.fromCdcRecord(
+                CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
-                        secondTable.getTableName(),
+                        secondTable.getObjectName(),
                         new CdcRecord(RowKind.INSERT, fields));
         runner.offer(expected);
         actual = runner.poll(1);
@@ -454,9 +454,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         fields.put("v1", "100");
         fields.put("v2", "1.0000000000009095");
         expected =
-                MultiplexCdcRecord.fromCdcRecord(
+                CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
-                        secondTable.getTableName(),
+                        secondTable.getObjectName(),
                         new CdcRecord(RowKind.INSERT, fields));
         runner.offer(expected);
         actual = runner.poll(1);
@@ -474,9 +474,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         fields.put("v1", "40");
         fields.put("v3", "long four");
         expected =
-                MultiplexCdcRecord.fromCdcRecord(
+                CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
-                        secondTable.getTableName(),
+                        secondTable.getObjectName(),
                         new CdcRecord(RowKind.INSERT, fields));
         runner.offer(expected);
         actual = runner.poll(1);
@@ -494,9 +494,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         fields.put("v1", "50");
         fields.put("v4", "long five~");
         expected =
-                MultiplexCdcRecord.fromCdcRecord(
+                CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
-                        secondTable.getTableName(),
+                        secondTable.getObjectName(),
                         new CdcRecord(RowKind.INSERT, fields));
         runner.offer(expected);
         actual = runner.poll(1);
@@ -511,7 +511,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         harness.close();
     }
 
-    private OneInputStreamOperatorTestHarness<MultiplexCdcRecord, Committable> createTestHarness(
+    private OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> createTestHarness(
             Catalog catalog) throws Exception {
         CdcRecordStoreMultiWriteOperator operator =
                 new CdcRecordStoreMultiWriteOperator(
@@ -520,10 +520,10 @@ public class CdcRecordStoreMultiWriteOperatorTest {
                                 new StoreSinkWriteImpl(
                                         t, commitUser, state, ioManager, false, false),
                         commitUser);
-        TypeSerializer<MultiplexCdcRecord> inputSerializer = new JavaSerializer<>();
+        TypeSerializer<CdcMultiplexRecord> inputSerializer = new JavaSerializer<>();
         TypeSerializer<Committable> outputSerializer =
                 new MultiTableCommittableTypeInfo().createSerializer(new ExecutionConfig());
-        OneInputStreamOperatorTestHarness<MultiplexCdcRecord, Committable> harness =
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness =
                 new OneInputStreamOperatorTestHarness<>(operator, inputSerializer);
         harness.setup(outputSerializer);
         return harness;
@@ -531,24 +531,24 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
     private static class Runner implements Runnable {
 
-        private final OneInputStreamOperatorTestHarness<MultiplexCdcRecord, Committable> harness;
-        private final BlockingQueue<MultiplexCdcRecord> toProcess = new LinkedBlockingQueue<>();
-        private final BlockingQueue<MultiplexCdcRecord> processed = new LinkedBlockingQueue<>();
+        private final OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness;
+        private final BlockingQueue<CdcMultiplexRecord> toProcess = new LinkedBlockingQueue<>();
+        private final BlockingQueue<CdcMultiplexRecord> processed = new LinkedBlockingQueue<>();
         private final AtomicBoolean running = new AtomicBoolean(true);
 
-        private Runner(OneInputStreamOperatorTestHarness<MultiplexCdcRecord, Committable> harness) {
+        private Runner(OneInputStreamOperatorTestHarness<CdcMultiplexRecord, Committable> harness) {
             this.harness = harness;
         }
 
-        private void offer(MultiplexCdcRecord record) {
+        private void offer(CdcMultiplexRecord record) {
             toProcess.offer(record);
         }
 
-        private MultiplexCdcRecord take() throws Exception {
+        private CdcMultiplexRecord take() throws Exception {
             return processed.take();
         }
 
-        private MultiplexCdcRecord poll(long seconds) throws Exception {
+        private CdcMultiplexRecord poll(long seconds) throws Exception {
             return processed.poll(seconds, TimeUnit.SECONDS);
         }
 
@@ -566,7 +566,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
                         continue;
                     }
 
-                    MultiplexCdcRecord record = toProcess.poll();
+                    CdcMultiplexRecord record = toProcess.poll();
                     harness.processElement(record, ++timestamp);
                     processed.offer(record);
                 }

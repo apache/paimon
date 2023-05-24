@@ -47,7 +47,7 @@ import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.RETRY
  * A {@link PrepareCommitOperator} to write {@link CdcRecord}. Record schema may change. If current
  * known schema does not fit record schema, this operator will wait for schema changes.
  */
-public class CdcRecordStoreMultiWriteOperator extends PrepareCommitOperator<MultiplexCdcRecord> {
+public class CdcRecordStoreMultiWriteOperator extends PrepareCommitOperator<CdcMultiplexRecord> {
 
     private static final long serialVersionUID = 1L;
     private final Catalog catalog;
@@ -86,8 +86,8 @@ public class CdcRecordStoreMultiWriteOperator extends PrepareCommitOperator<Mult
     }
 
     @Override
-    public void processElement(StreamRecord<MultiplexCdcRecord> element) throws Exception {
-        MultiplexCdcRecord record = element.getValue();
+    public void processElement(StreamRecord<CdcMultiplexRecord> element) throws Exception {
+        CdcMultiplexRecord record = element.getValue();
 
         String databaseName = record.getDatabaseName();
         String tableName = record.getTableName();

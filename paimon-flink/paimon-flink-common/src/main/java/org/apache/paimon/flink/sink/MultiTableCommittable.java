@@ -48,7 +48,7 @@ public class MultiTableCommittable extends Committable {
             Identifier id, String commitUser, Committable committable) {
         return new MultiTableCommittable(
                 id.getDatabaseName(),
-                id.getTableName(),
+                id.getObjectName(),
                 commitUser,
                 committable.checkpointId(),
                 committable.kind(),
