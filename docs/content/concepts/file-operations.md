@@ -84,11 +84,10 @@ Run the following insert statement in Flink SQL:
 INSERT INTO T VALUES (1, 10001, 'varchar00001', '20230501');
 ```
 
-After the Flink job finishes, the records are written into Paimon table, which 
-is done by a successful `commit`. The records are visible to user
-as can be verified by `SELECT * FROM T` which return a single row. 
-The commit creates a snapshot under path `/tmp/paimon/default.db/T/snapshot/snapshot-1`. 
-The resulting file layout as of snapshot-1 is as follows:
+Once the Flink job is completed, the records are written to the Paimon table through a successful `commit`.
+Users can verify the visibility of these records by executing the query `SELECT * FROM T` which will return a single row. 
+The commit process creates a snapshot located at the path `/tmp/paimon/default.db/T/snapshot/snapshot-1`. 
+The resulting file layout at snapshot-1 is as described below:
 
 {{< img src="/img/file-operations-0.png">}}
 
@@ -133,7 +132,7 @@ baseManifestList (manifest-list-1-base in the above graph), which is effectively
 `manifest-list-4ccc-c07f-4090-958c-cfe3ce3889e5-1` is the 
 deltaManifestList (manifest-list-1-delta in the above graph), which 
 contains a list of manifest entries that perform operations on data 
-files, which, in this case, is `manifest-B-0`.
+files, which, in this case, is `manifest-1-0`.
 
 
 Now let's insert a batch of records across different partitions and 
@@ -310,9 +309,9 @@ has actually used this schema yet until the next commit.
 Remind that the marked data files are not truly deleted until the snapshot expires and 
 no consumer depends on the snapshot. For more information, see [Expiring Snapshots]({{< ref "maintenance/expiring-snapshots" >}}).
 
-During snapshot expire, the range of snapshots are determined first and then marked data files in these snapshots will be 
-deleted. A data file is `marked` only when there's a manifest entry of kind `DELETE` pointing to that data file, so that it 
-will not be used by next snapshots and can be safely deleted.
+During the process of snapshot expiration, the range of snapshots is initially determined, and then data files within these snapshots are marked for deletion. 
+A data file is `marked` for deletion only when there is a manifest entry of kind `DELETE` that references that specific data file. 
+This marking ensures that the file will not be utilized by subsequent snapshots and can be safely removed.
 
 
 Let's say all 4 snapshots in the above diagram are about to expire. The expire process is as follows:
