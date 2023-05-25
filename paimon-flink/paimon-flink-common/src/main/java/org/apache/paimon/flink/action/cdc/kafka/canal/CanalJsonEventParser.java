@@ -20,7 +20,6 @@ package org.apache.paimon.flink.action.cdc.kafka.canal;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
-import org.apache.paimon.flink.action.cdc.kafka.TypeUtil;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.EventParser;
@@ -313,14 +312,14 @@ public class CanalJsonEventParser implements EventParser<String> {
 
             String oldValue = objectValue.toString();
             String newValue = oldValue;
-            if (MySqlTypeUtils.isSetType(TypeUtil.getType(mySqlType))) {
-                newValue = CanalValueConvert.convertSet(newValue, mySqlType);
-            } else if (MySqlTypeUtils.isEnumType(TypeUtil.getType(mySqlType))) {
-                newValue = CanalValueConvert.convertEnum(newValue, mySqlType);
-            } else if (MySqlTypeUtils.isGeoType(TypeUtil.getType(mySqlType))) {
+            if (MySqlTypeUtils.isSetType(MySqlTypeUtils.getShortType(mySqlType))) {
+                newValue = CanalFieldParser.convertSet(newValue, mySqlType);
+            } else if (MySqlTypeUtils.isEnumType(MySqlTypeUtils.getShortType(mySqlType))) {
+                newValue = CanalFieldParser.convertEnum(newValue, mySqlType);
+            } else if (MySqlTypeUtils.isGeoType(MySqlTypeUtils.getShortType(mySqlType))) {
                 try {
                     byte[] wkb =
-                            CanalValueConvert.convertGeoType2WkbArray(
+                            CanalFieldParser.convertGeoType2WkbArray(
                                     oldValue.getBytes(StandardCharsets.ISO_8859_1));
                     newValue = MySqlTypeUtils.convertWkbArray(wkb);
                 } catch (Exception e) {

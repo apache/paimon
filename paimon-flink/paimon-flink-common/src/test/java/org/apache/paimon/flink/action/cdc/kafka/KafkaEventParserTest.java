@@ -44,6 +44,27 @@ public class KafkaEventParserTest {
                     + "\"mysqlType\":{\"pt\":\"INT\",\"_id\":\"INT\",\"v1\":\"VARCHAR(10)\"},\"old\":null,\"pkNames\":[\"_id\"],"
                     + "\"sql\":\"\",\"sqlType\":{\"pt\":4,\"_id\":4,\"v1\":12},\"table\":\"schema_evolution_1\","
                     + "\"ts\":1683006706728,\"type\":\"INSERT\"}\n";
+    private static final String CANAL_JSON_DDL_ADD_EVENT =
+            "{\"data\":null,\"database\":\"paimon_sync_table\","
+                    + "\"es\":1683008289000,\"id\":13,\"isDdl\":true,\"mysqlType\":null,\"old\":null,\"pkNames\":null,"
+                    + "\"sql\":\"/* Query from DMS-WEBSQL-0-Qid_1694572663426906u by user 1486767996652600 */ ALTER TABLE "
+                    + "schema_evolution_1 ADD COLUMN v2 INT\",\"sqlType\":null,\"table\":\"schema_evolution_1\","
+                    + "\"ts\":1683008289401,\"type\":\"ALTER\"}";
+    private static final String CANAL_JSON_DDL_MODIFY_EVENT =
+            "{\"data\":null,\"database\":\"paimon_sync_table\",\"es\":1683168155000,\"id\":54,\"isDdl\":true,"
+                    + "\"mysqlType\":null,\"old\":null,\"pkNames\":null,\"sql\":\"/* Query from "
+                    + "DMS-WEBSQL-0-Qid_29438367264981907i by user 1486767996652600 */ ALTER TABLE schema_evolution_1 MODIFY "
+                    + "COLUMN v1 VARCHAR(20)\",\"sqlType\":null,\"table\":\"schema_evolution_1\",\"ts\":1683168154943,"
+                    + "\"type\":\"ALTER\"}";
+
+    private static final String CANAL_JSON_DDL_MultiAdd_EVENT =
+            "{\"data\":null,\"database\":\"paimon_sync_table\","
+                    + "\"es\":1683614798000,\"id\":2431,\"isDdl\":true,\"mysqlType\":null,\"old\":null,\"pkNames\":null,"
+                    + "\"sql\":\"/* Query from DMS-WEBSQL-0-Qid_29885012146961120X by user 1486767996652600 */ ALTER TABLE "
+                    + "schema_evolution_multiple \\nADD v4 INT,\\nMODIFY COLUMN v1 VARCHAR(30),\\nADD COLUMN (v5 DOUBLE, v6 "
+                    + "DECIMAL(5, 3), `$% ^,& *(` VARCHAR(10) COMMENT 'test'),\\n            MODIFY v2 BIGINT\",\"sqlType\":null,"
+                    + "\"table\":\"schema_evolution_multiple\",\"ts\":1683614799031,\"type\":\"ALTER\"}\n";
+
     private static final String DEBEZIUM_JSON_EVENT =
             "{\"before\":null,\"after\":{\"id\":101,\"name\":\"scooter\","
                     + "\"description\":\"Small 2-wheel scooter\",\"weight\":3.140000104904175},\"source\":{\"version\":\"1.1.1"
@@ -71,6 +92,41 @@ public class KafkaEventParserTest {
         List<GenericRow> expect =
                 Collections.singletonList(GenericRow.of(1, 1, BinaryString.fromString("one")));
         assertThat(result).isEqualTo(expect);
+    }
+
+    @Test
+    public void testCanalJsonEventParserDdl() {
+        boolean caseSensitive = true;
+        EventParser<String> parser =
+                new CanalJsonEventParser(caseSensitive, new TableNameConverter(caseSensitive));
+        parser.setRawEvent(CANAL_JSON_EVENT);
+        List<DataField> expectDataFields = new ArrayList<>();
+        expectDataFields.add(new DataField(0, "pt", DataTypes.INT()));
+        expectDataFields.add(new DataField(1, "_id", DataTypes.INT()));
+        expectDataFields.add(new DataField(2, "v1", DataTypes.VARCHAR(10)));
+        expectDataFields.add(new DataField(3, "v2", DataTypes.INT()));
+        List<DataField> updatedDataFields = parser.getUpdatedDataFields().orElse(null);
+        assert updatedDataFields == null;
+        parser.setRawEvent(CANAL_JSON_DDL_ADD_EVENT);
+        List<DataField> updatedDataFieldsAdd = parser.getUpdatedDataFields().orElse(null);
+        assertThat(updatedDataFieldsAdd).isEqualTo(expectDataFields);
+
+        expectDataFields.remove(2);
+        expectDataFields.add(new DataField(4, "v1", DataTypes.VARCHAR(20)));
+        parser.setRawEvent(CANAL_JSON_DDL_MODIFY_EVENT);
+        List<DataField> updatedDataFieldsModify = parser.getUpdatedDataFields().orElse(null);
+        assertThat(updatedDataFieldsModify).isEqualTo(expectDataFields);
+        expectDataFields.remove(2);
+        expectDataFields.remove(2);
+        expectDataFields.add(new DataField(4, "v4", DataTypes.INT()));
+        expectDataFields.add(new DataField(4, "v1", DataTypes.VARCHAR(30)));
+        expectDataFields.add(new DataField(4, "v5", DataTypes.DOUBLE()));
+        expectDataFields.add(new DataField(4, "v6", DataTypes.DECIMAL(5, 3)));
+        expectDataFields.add(new DataField(4, "$% ^,& *(", DataTypes.VARCHAR(10)));
+        expectDataFields.add(new DataField(4, "v2", DataTypes.BIGINT()));
+        parser.setRawEvent(CANAL_JSON_DDL_MultiAdd_EVENT);
+        List<DataField> updatedDataFieldsMulti = parser.getUpdatedDataFields().orElse(null);
+        assertThat(updatedDataFieldsMulti).isEqualTo(expectDataFields);
     }
 
     @Test

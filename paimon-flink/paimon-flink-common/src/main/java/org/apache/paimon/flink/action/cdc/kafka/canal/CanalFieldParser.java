@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.action.cdc.kafka.canal;
 
 /** Converts some special types such as enum、set、geometry. */
-public class CanalValueConvert {
+public class CanalFieldParser {
 
     protected static byte[] convertGeoType2WkbArray(byte[] mysqlGeomBytes) {
         if (mysqlGeomBytes == null) {
