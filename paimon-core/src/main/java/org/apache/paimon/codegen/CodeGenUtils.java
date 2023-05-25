@@ -51,6 +51,11 @@ public class CodeGenUtils {
         return CodeGenLoader.getCodeGenerator().generateRecordComparator(fieldTypes, name);
     }
 
+    public static GeneratedClass<RecordEqualiser> generateRecordEqualiser(
+            List<DataType> fieldTypes, String name) {
+        return CodeGenLoader.getCodeGenerator().generateRecordEqualiser(fieldTypes, name);
+    }
+
     public static RecordComparator newRecordComparator(List<DataType> fieldTypes, String name) {
         return generateRecordComparator(fieldTypes, name)
                 .newInstance(CodeGenUtils.class.getClassLoader());

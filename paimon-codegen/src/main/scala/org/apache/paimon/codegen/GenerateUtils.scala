@@ -22,6 +22,7 @@ import org.apache.paimon.memory.MemorySegment
 import org.apache.paimon.types._
 import org.apache.paimon.types.DataTypeChecks.{getFieldCount, getFieldTypes, getPrecision, getScale}
 import org.apache.paimon.types.DataTypeRoot._
+import org.apache.paimon.utils.TypeCheckUtils._
 
 import java.lang.{Boolean => JBoolean, Byte => JByte, Double => JDouble, Float => JFloat, Integer => JInt, Long => JLong, Short => JShort}
 import java.util.concurrent.atomic.AtomicLong
@@ -42,6 +43,10 @@ object GenerateUtils {
   val MAP_DATA: String = className[InternalMap]
 
   val ROW_DATA: String = className[InternalRow]
+
+  val BINARY_ARRAY: String = className[BinaryArray]
+
+  val BINARY_ROW: String = className[BinaryRow]
 
   val BINARY_STRING: String = className[BinaryString]
 
@@ -754,5 +759,80 @@ object GenerateUtils {
       val typeTerm = boxedTypeTermForType(t)
       ctx.addReusableMember(s"$typeTerm $recordTerm = new $typeTerm();")
       s"$recordTerm = new $typeTerm();"
+  }
+
+  /** Generates a call with a single result statement. */
+  def generateCallIfArgsNotNull(
+      ctx: CodeGeneratorContext,
+      returnType: DataType,
+      operands: Seq[GeneratedExpression],
+      resultNullable: Boolean = false,
+      wrapTryCatch: Boolean = false)(call: Seq[String] => String): GeneratedExpression = {
+    generateCallWithStmtIfArgsNotNull(ctx, returnType, operands, resultNullable, wrapTryCatch) {
+      args => ("", call(args))
+    }
+  }
+
+  /** Generates a call with auxiliary statements and result expression. */
+  def generateCallWithStmtIfArgsNotNull(
+      ctx: CodeGeneratorContext,
+      returnType: DataType,
+      operands: Seq[GeneratedExpression],
+      resultNullable: Boolean = false,
+      wrapTryCatch: Boolean = false)(call: Seq[String] => (String, String)): GeneratedExpression = {
+    val resultTypeTerm = if (resultNullable) {
+      boxedTypeTermForType(returnType)
+    } else {
+      primitiveTypeTermForType(returnType)
+    }
+    val nullTerm = ctx.addReusableLocalVariable("boolean", "isNull")
+    val resultTerm = ctx.addReusableLocalVariable(resultTypeTerm, "result")
+    val defaultValue = primitiveDefaultValue(returnType)
+    val isResultNullable = resultNullable || (isReference(returnType) && !isTemporal(returnType))
+    val nullTermCode = if (isResultNullable) {
+      s"$nullTerm = ($resultTerm == null);"
+    } else {
+      ""
+    }
+
+    val (stmt, result) = call(operands.map(_.resultTerm))
+
+    val wrappedResultAssignment = if (wrapTryCatch) {
+      s"""
+         |try {
+         |  $stmt
+         |  $resultTerm = $result;
+         |} catch (Throwable ${newName("ignored")}) {
+         |  $nullTerm = true;
+         |  $resultTerm = $defaultValue;
+         |}
+         |""".stripMargin
+    } else {
+      s"""
+         |$stmt
+         |$resultTerm = $result;
+         |""".stripMargin
+    }
+
+    val resultCode = if (operands.nonEmpty) {
+      s"""
+         |${operands.map(_.code).mkString("\n")}
+         |$nullTerm = ${operands.map(_.nullTerm).mkString(" || ")};
+         |$resultTerm = $defaultValue;
+         |if (!$nullTerm) {
+         |  $wrappedResultAssignment
+         |  $nullTermCode
+         |}
+         |""".stripMargin
+    } else {
+      s"""
+         |${operands.map(_.code).mkString("\n")}
+         |$nullTerm = false;
+         |$wrappedResultAssignment
+         |$nullTermCode
+         |""".stripMargin
+    }
+
+    GeneratedExpression(resultTerm, nullTerm, resultCode, returnType)
   }
 }

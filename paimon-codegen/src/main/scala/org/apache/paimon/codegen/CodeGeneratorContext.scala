@@ -50,8 +50,46 @@ class CodeGeneratorContext {
   private val reusableTypeSerializers: mutable.Map[DataType, String] =
     mutable.Map[DataType, String]()
 
-  // local variable statements.
-  private val reusableLocalVariableStatements = mutable.LinkedHashSet[String]()
+  /**
+   * The current method name for [[reusableLocalVariableStatements]]. You can start a new local
+   * variable statements for another method using [[startNewLocalVariableStatement()]]
+   */
+  private var currentMethodNameForLocalVariables = "DEFAULT"
+
+  // method_name -> local_variable_statements
+  private val reusableLocalVariableStatements = mutable.Map[String, mutable.LinkedHashSet[String]](
+    (currentMethodNameForLocalVariables, mutable.LinkedHashSet[String]()))
+
+  /**
+   * Starts a new local variable statements for a generated class with the given method name.
+   *
+   * @param methodName
+   *   the method name which the fields will be placed into if code is not split.
+   */
+  def startNewLocalVariableStatement(methodName: String): Unit = {
+    currentMethodNameForLocalVariables = methodName
+    reusableLocalVariableStatements(methodName) = mutable.LinkedHashSet[String]()
+  }
+
+  /**
+   * Adds a reusable local variable statement with the given type term and field name. The local
+   * variable statements will be placed in methods or class member area depends on whether the
+   * method length excess max code length.
+   *
+   * @param fieldName
+   *   the field name prefix
+   * @param fieldTypeTerm
+   *   the field type term
+   * @return
+   *   a new generated unique field name
+   */
+  def addReusableLocalVariable(fieldTypeTerm: String, fieldName: String): String = {
+    val fieldTerm = newName(fieldName)
+    reusableLocalVariableStatements
+      .getOrElse(currentMethodNameForLocalVariables, mutable.LinkedHashSet[String]())
+      .add(s"$fieldTypeTerm $fieldTerm;")
+    fieldTerm
+  }
 
   /**
    * Adds multiple pairs of local variables. The local variable statements will be placed in methods
@@ -66,7 +104,9 @@ class CodeGeneratorContext {
     val fieldTerms = newNames(fieldTypeAndNames.map(_._2): _*)
     fieldTypeAndNames.map(_._1).zip(fieldTerms).foreach {
       case (fieldTypeTerm, fieldTerm) =>
-        reusableLocalVariableStatements.add(s"$fieldTypeTerm $fieldTerm;")
+        reusableLocalVariableStatements
+          .getOrElse(currentMethodNameForLocalVariables, mutable.LinkedHashSet[String]())
+          .add(s"$fieldTypeTerm $fieldTerm;")
     }
     fieldTerms
   }
@@ -142,9 +182,16 @@ class CodeGeneratorContext {
    *   code block of statements that will be placed in the member area of the class if generated
    *   code is split or in local variables of method
    */
-  def reuseLocalVariableCode(): String = {
-    reusableLocalVariableStatements.mkString("\n")
+  def reuseLocalVariableCode(methodName: String = currentMethodNameForLocalVariables): String = {
+    if (methodName == null) {
+      reusableLocalVariableStatements(currentMethodNameForLocalVariables).mkString("\n")
+    } else {
+      reusableLocalVariableStatements(methodName).mkString("\n")
+    }
   }
+
+  /** Adds a reusable init statement which will be placed in constructor. */
+  def addReusableInitStatement(s: String): Unit = reusableInitStatements.add(s)
 
   /**
    * Adds a reusable TypeSerializer to the member area of the generated class.
