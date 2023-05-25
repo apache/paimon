@@ -85,6 +85,7 @@ public class CdcRecordStoreMultiWriteOperator
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
 
+        // TODO: should use CdcRecordMultiChannelComputer to filter
         state = new StoreSinkWriteState(context, (tableName, partition, bucket) -> true);
         tables = new HashMap<>();
         writes = new HashMap<>();

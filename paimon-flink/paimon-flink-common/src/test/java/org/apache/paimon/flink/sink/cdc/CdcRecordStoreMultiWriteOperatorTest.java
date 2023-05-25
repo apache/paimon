@@ -42,6 +42,7 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.state.JavaSerializer;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.junit.jupiter.api.AfterEach;
@@ -215,6 +216,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
     public void testInitializeState() throws Exception {
         // the async table will have same row type, partitions, and pks as firstTable
         Identifier tableId = Identifier.create(databaseName, "async_new_table");
+        long timestamp = 1;
 
         OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
                 createTestHarness(catalogLoader);
@@ -265,6 +267,18 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         runner.offer(expected);
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
+
+        // trigger a snapshot and re-create test harness using a different commit user
+        OperatorSubtaskState snapshot = harness.snapshot(0, timestamp++);
+        String prevCommitUser = commitUser;
+        commitUser = UUID.randomUUID().toString();
+        harness.close();
+
+        harness = createTestHarness(catalogLoader);
+        harness.initializeState(snapshot);
+        operator = (CdcRecordStoreMultiWriteOperator) harness.getOperator();
+
+        assertThat(operator.commitUser).isEqualTo(prevCommitUser);
 
         runner.stop();
         t.join();
