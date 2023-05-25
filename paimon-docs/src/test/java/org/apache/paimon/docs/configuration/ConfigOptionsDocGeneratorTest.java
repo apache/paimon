@@ -43,6 +43,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.docs.util.Utils.apacheHeaderToHtml;
 import static org.apache.paimon.options.description.TextElement.text;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -527,10 +528,10 @@ class ConfigOptionsDocGeneratorTest {
                 ConfigOptionsDocGenerator.getSectionFileName(TestCommonOptions.SECTION_2);
         assertThat(new File(outputDirectory, fileName1))
                 .content(StandardCharsets.UTF_8)
-                .isEqualTo(expected1);
+                .isEqualTo(apacheHeaderToHtml() + expected1);
         assertThat(new File(outputDirectory, fileName2))
                 .content(StandardCharsets.UTF_8)
-                .isEqualTo(expected2);
+                .isEqualTo(apacheHeaderToHtml() + expected2);
     }
 
     static class TestConfigGroupWithExclusion {
