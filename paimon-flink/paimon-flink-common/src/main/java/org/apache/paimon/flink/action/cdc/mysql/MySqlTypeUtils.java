@@ -313,21 +313,19 @@ public class MySqlTypeUtils {
     }
 
     public static boolean isEnumType(String typeName) {
-        return typeName.toLowerCase().startsWith(ENUM);
+        return typeName.toUpperCase().startsWith(ENUM);
     }
 
     public static boolean isSetType(String typeName) {
-        return typeName.toLowerCase().startsWith(SET);
+        return typeName.toUpperCase().startsWith(SET);
     }
 
     /* Get type after the brackets are removed.*/
     public static String getShortType(String typeName) {
 
         if (typeName.contains(LEFT_BRACKETS) && typeName.contains(RIGHT_BRACKETS)) {
-            String type =
-                    typeName.substring(0, typeName.indexOf(LEFT_BRACKETS)).trim()
-                            + typeName.substring(typeName.indexOf(RIGHT_BRACKETS) + 1);
-            return type;
+            return typeName.substring(0, typeName.indexOf(LEFT_BRACKETS)).trim()
+                    + typeName.substring(typeName.indexOf(RIGHT_BRACKETS) + 1);
         } else {
             return typeName;
         }
@@ -337,25 +335,19 @@ public class MySqlTypeUtils {
         if (typeName.contains(LEFT_BRACKETS)
                 && typeName.contains(RIGHT_BRACKETS)
                 && isScaleType(typeName)) {
-            int precision =
-                    Integer.parseInt(
-                            typeName.substring(
-                                            typeName.indexOf(LEFT_BRACKETS) + 1,
-                                            typeName.indexOf(COMMA))
-                                    .trim());
-            return precision;
+            return Integer.parseInt(
+                    typeName.substring(typeName.indexOf(LEFT_BRACKETS) + 1, typeName.indexOf(COMMA))
+                            .trim());
         } else if ((typeName.contains(LEFT_BRACKETS)
                 && typeName.contains(RIGHT_BRACKETS)
                 && !isScaleType(typeName)
                 && !isEnumType(typeName)
                 && !isSetType(typeName))) {
-            int precision =
-                    Integer.parseInt(
-                            typeName.substring(
-                                            typeName.indexOf(LEFT_BRACKETS) + 1,
-                                            typeName.indexOf(RIGHT_BRACKETS))
-                                    .trim());
-            return precision;
+            return Integer.parseInt(
+                    typeName.substring(
+                                    typeName.indexOf(LEFT_BRACKETS) + 1,
+                                    typeName.indexOf(RIGHT_BRACKETS))
+                            .trim());
         } else {
             return 0;
         }
@@ -365,13 +357,10 @@ public class MySqlTypeUtils {
         if (typeName.contains(LEFT_BRACKETS)
                 && typeName.contains(RIGHT_BRACKETS)
                 && isScaleType(typeName)) {
-            int scale =
-                    Integer.parseInt(
-                            typeName.substring(
-                                            typeName.indexOf(COMMA) + 1,
-                                            typeName.indexOf(RIGHT_BRACKETS))
-                                    .trim());
-            return scale;
+            return Integer.parseInt(
+                    typeName.substring(
+                                    typeName.indexOf(COMMA) + 1, typeName.indexOf(RIGHT_BRACKETS))
+                            .trim());
         } else {
             return 0;
         }
