@@ -269,8 +269,11 @@ public class KafkaEventParserTest {
     public void testCanalJsonEventParserAndComputeColumn() {
         boolean caseSensitive = false;
         EventParser<String> parser =
-            new CanalJsonEventParser(caseSensitive, new TableNameConverter(caseSensitive),Collections.singletonList(new ComputedColumn("v1",
-                Expression.substring("v1","1"))));
+                new CanalJsonEventParser(
+                        caseSensitive,
+                        new TableNameConverter(caseSensitive),
+                        Collections.singletonList(
+                                new ComputedColumn("v1", Expression.substring("v1", "1"))));
         parser.setRawEvent(CANAL_JSON_EVENT);
         List<DataField> dataFields = new ArrayList<>();
         dataFields.add(new DataField(0, "pt", DataTypes.INT()));
@@ -282,23 +285,23 @@ public class KafkaEventParserTest {
         List<DataField> updatedDataFields = parser.getUpdatedDataFields().orElse(null);
         assert updatedDataFields == null;
         List<GenericRow> result =
-            parser.getRecords().stream()
-                .map(record -> record.toGenericRow(dataFields).get())
-                .collect(Collectors.toList());
+                parser.getRecords().stream()
+                        .map(record -> record.toGenericRow(dataFields).get())
+                        .collect(Collectors.toList());
         BinaryString[] binaryStrings =
-            new BinaryString[] {BinaryString.fromString("a"), BinaryString.fromString("b")};
+                new BinaryString[] {BinaryString.fromString("a"), BinaryString.fromString("b")};
         GenericArray genericArray = new GenericArray(binaryStrings);
 
         List<GenericRow> expect =
-            Collections.singletonList(
-                GenericRow.of(
-                    1,
-                    1,
-                    BinaryString.fromString("ne"),
-                    BinaryString.fromString(
-                        "{\"geometries\":[{\"type\":\"Point\",\"coordinates\":[10,10]},{\"type\":\"Point\",\"coordinates\":[30,30]},{\"type\":\"LineString\",\"coordinates\":[[15,15],[20,20]]}],\"type\":\"GeometryCollection\",\"srid\":0}"),
-                    genericArray,
-                    BinaryString.fromString("value1")));
+                Collections.singletonList(
+                        GenericRow.of(
+                                1,
+                                1,
+                                BinaryString.fromString("ne"),
+                                BinaryString.fromString(
+                                        "{\"geometries\":[{\"type\":\"Point\",\"coordinates\":[10,10]},{\"type\":\"Point\",\"coordinates\":[30,30]},{\"type\":\"LineString\",\"coordinates\":[[15,15],[20,20]]}],\"type\":\"GeometryCollection\",\"srid\":0}"),
+                                genericArray,
+                                BinaryString.fromString("value1")));
         assertThat(result).isEqualTo(expect);
     }
 }
