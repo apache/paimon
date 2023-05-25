@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql;
+package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.kafka.canal.CanalJsonEventParser;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
 import org.apache.paimon.options.CatalogOptions;
@@ -34,43 +35,39 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
-import com.ververica.cdc.connectors.mysql.source.MySqlSource;
-import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.sql.Connection;
-import java.sql.DatabaseMetaData;
-import java.sql.ResultSet;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.Action.getConfigMap;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * An {@link Action} which synchronize the whole MySQL database into one Paimon database.
+ * An {@link Action} which synchronize the Multiple topics into one Paimon database.
  *
- * <p>You should specify MySQL source database in {@code mySqlConfig}. See <a
- * href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options">document
- * of flink-cdc-connectors</a> for detailed keys and values.
+ * <p>You should specify Kafka source topic in {@code kafkaConfig}. See <a
+ * href="https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/kafka/">document
+ * of flink-connectors</a> for detailed keys and values.
  *
- * <p>For each MySQL table to be synchronized, if the corresponding Paimon table does not exist,
+ * <p>For each topic's table to be synchronized, if the corresponding Paimon table does not exist,
  * this action will automatically create the table. Its schema will be derived from all specified
- * MySQL tables. If the Paimon table already exists, its schema will be compared against the schema
- * of all specified MySQL tables.
+ * tables. If the Paimon table already exists, its schema will be compared against the schema of all
+ * specified tables.
  *
  * <p>This action supports a limited number of schema changes. Currently, the framework can not drop
  * columns, so the behaviors of `DROP` will be ignored, `RENAME` will add a new column. Currently
@@ -96,71 +93,63 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * not very efficient in resource saving. We may optimize this action by merging all sinks into one
  * instance in the future.
  */
-public class MySqlSyncDatabaseAction implements Action {
+public class KafkaSyncDatabaseAction implements Action {
 
-    private static final Logger LOG = LoggerFactory.getLogger(MySqlSyncDatabaseAction.class);
+    private static final Logger LOG = LoggerFactory.getLogger(KafkaSyncDatabaseAction.class);
 
-    private final Configuration mySqlConfig;
+    private final Configuration kafkaConfig;
     private final String warehouse;
     private final String database;
     private final boolean ignoreIncompatible;
     private final String tablePrefix;
     private final String tableSuffix;
-    @Nullable private final Pattern includingPattern;
-    @Nullable private final Pattern excludingPattern;
     private final Map<String, String> catalogConfig;
     private final Map<String, String> tableConfig;
 
-    MySqlSyncDatabaseAction(
-            Map<String, String> mySqlConfig,
+    KafkaSyncDatabaseAction(
+            Map<String, String> kafkaConfig,
             String warehouse,
             String database,
             boolean ignoreIncompatible,
             Map<String, String> catalogConfig,
             Map<String, String> tableConfig) {
         this(
-                mySqlConfig,
+                kafkaConfig,
                 warehouse,
                 database,
                 ignoreIncompatible,
-                null,
-                null,
                 null,
                 null,
                 catalogConfig,
                 tableConfig);
     }
 
-    MySqlSyncDatabaseAction(
-            Map<String, String> mySqlConfig,
+    KafkaSyncDatabaseAction(
+            Map<String, String> kafkaConfig,
             String warehouse,
             String database,
             boolean ignoreIncompatible,
             @Nullable String tablePrefix,
             @Nullable String tableSuffix,
-            @Nullable String includingTables,
-            @Nullable String excludingTables,
             Map<String, String> catalogConfig,
             Map<String, String> tableConfig) {
-        this.mySqlConfig = Configuration.fromMap(mySqlConfig);
+        this.kafkaConfig = Configuration.fromMap(kafkaConfig);
         this.warehouse = warehouse;
         this.database = database;
         this.ignoreIncompatible = ignoreIncompatible;
         this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
         this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
-        this.includingPattern = includingTables == null ? null : Pattern.compile(includingTables);
-        this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
         this.catalogConfig = catalogConfig;
         this.tableConfig = tableConfig;
     }
 
     public void build(StreamExecutionEnvironment env) throws Exception {
         checkArgument(
-                !mySqlConfig.contains(MySqlSourceOptions.TABLE_NAME),
-                MySqlSourceOptions.TABLE_NAME.key()
-                        + " cannot be set for mysql-sync-database. "
-                        + "If you want to sync several MySQL tables into one Paimon table, "
-                        + "use mysql-sync-table instead.");
+                kafkaConfig.contains(KafkaConnectorOptions.VALUE_FORMAT),
+                KafkaConnectorOptions.VALUE_FORMAT.key() + " cannot be null.");
+        checkArgument(
+                kafkaConfig.get(KafkaConnectorOptions.TOPIC).size() > 1,
+                "kafka-sync-database requires that the size of topics be greater than one.");
         Catalog catalog =
                 CatalogFactory.createCatalog(
                         CatalogContext.create(
@@ -172,26 +161,24 @@ public class MySqlSyncDatabaseAction implements Action {
             validateCaseInsensitive();
         }
 
-        List<MySqlSchema> mySqlSchemas = getMySqlSchemaList();
-        checkArgument(
-                mySqlSchemas.size() > 0,
-                "No tables found in MySQL database "
-                        + mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME)
-                        + ", or MySQL database does not exist.");
+        Map<String, KafkaSchema> kafkaCanalSchemaMap = getKafkaCanalSchemaMap();
 
         catalog.createDatabase(database, true);
         TableNameConverter tableNameConverter =
                 new TableNameConverter(caseSensitive, tablePrefix, tableSuffix);
 
         List<FileStoreTable> fileStoreTables = new ArrayList<>();
-        List<String> monitoredTables = new ArrayList<>();
-        for (MySqlSchema mySqlSchema : mySqlSchemas) {
-            String paimonTableName = tableNameConverter.convert(mySqlSchema.tableName());
+        List<String> monitoredTopics = new ArrayList<>();
+        for (Map.Entry<String, KafkaSchema> kafkaCanalSchemaEntry :
+                kafkaCanalSchemaMap.entrySet()) {
+            KafkaSchema kafkaSchema = kafkaCanalSchemaEntry.getValue();
+            String topic = kafkaCanalSchemaEntry.getKey();
+            String paimonTableName = tableNameConverter.convert(kafkaSchema.tableName());
             Identifier identifier = new Identifier(database, paimonTableName);
             FileStoreTable table;
-            Schema fromMySql =
-                    MySqlActionUtils.buildPaimonSchema(
-                            mySqlSchema,
+            Schema fromCanal =
+                    KafkaActionUtils.buildPaimonSchema(
+                            kafkaSchema,
                             Collections.emptyList(),
                             Collections.emptyList(),
                             Collections.emptyList(),
@@ -200,37 +187,38 @@ public class MySqlSyncDatabaseAction implements Action {
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
                 Supplier<String> errMsg =
-                        incompatibleMessage(table.schema(), mySqlSchema, identifier);
-                if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {
-                    monitoredTables.add(mySqlSchema.tableName());
+                        incompatibleMessage(table.schema(), kafkaSchema, identifier);
+                if (shouldMonitorTable(table.schema(), fromCanal, errMsg)) {
+                    monitoredTopics.add(topic);
                 }
             } catch (Catalog.TableNotExistException e) {
-                catalog.createTable(identifier, fromMySql, false);
+                catalog.createTable(identifier, fromCanal, false);
                 table = (FileStoreTable) catalog.getTable(identifier);
-                monitoredTables.add(mySqlSchema.tableName());
+                monitoredTopics.add(topic);
             }
             fileStoreTables.add(table);
         }
 
         Preconditions.checkState(
-                !monitoredTables.isEmpty(),
+                !monitoredTopics.isEmpty(),
                 "No tables to be synchronized. Possible cause is the schemas of all tables in specified "
-                        + "MySQL database are not compatible with those of existed Paimon tables. Please check the log.");
+                        + "Kafka topic's table are not compatible with those of existed Paimon tables. Please check the log.");
 
-        mySqlConfig.set(
-                MySqlSourceOptions.TABLE_NAME, "(" + String.join("|", monitoredTables) + ")");
-        MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig);
+        kafkaConfig.set(KafkaConnectorOptions.TOPIC, monitoredTopics);
+        KafkaSource<String> source = KafkaActionUtils.buildKafkaSource(kafkaConfig);
 
-        String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
-        ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
-        EventParser.Factory<String> parserFactory =
-                () -> new MySqlDebeziumJsonEventParser(zoneId, caseSensitive, tableNameConverter);
-
+        EventParser.Factory<String> parserFactory;
+        String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
+        if ("canal-json".equals(format)) {
+            parserFactory = () -> new CanalJsonEventParser(caseSensitive, tableNameConverter);
+        } else {
+            throw new UnsupportedOperationException("This format: " + format + " is not support.");
+        }
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<String>()
                         .withInput(
                                 env.fromSource(
-                                        source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
+                                        source, WatermarkStrategy.noWatermarks(), "Kafka Source"))
                         .withParserFactory(parserFactory)
                         .withTables(fileStoreTables);
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
@@ -258,44 +246,23 @@ public class MySqlSyncDatabaseAction implements Action {
                         tablePrefix));
     }
 
-    private List<MySqlSchema> getMySqlSchemaList() throws Exception {
-        String databaseName = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME);
-        List<MySqlSchema> mySqlSchemaList = new ArrayList<>();
-        try (Connection conn = MySqlActionUtils.getConnection(mySqlConfig)) {
-            DatabaseMetaData metaData = conn.getMetaData();
-            try (ResultSet tables =
-                    metaData.getTables(databaseName, null, "%", new String[] {"TABLE"})) {
-                while (tables.next()) {
-                    String tableName = tables.getString("TABLE_NAME");
-                    if (!shouldMonitorTable(tableName)) {
-                        continue;
+    private Map<String, KafkaSchema> getKafkaCanalSchemaMap() throws Exception {
+        Map<String, KafkaSchema> kafkaCanalSchemaMap = new HashMap<>();
+        List<String> topicList = kafkaConfig.get(KafkaConnectorOptions.TOPIC);
+        topicList.forEach(
+                topic -> {
+                    try {
+                        kafkaCanalSchemaMap.put(topic, new KafkaSchema(kafkaConfig, topic));
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
                     }
-                    MySqlSchema mySqlSchema = new MySqlSchema(metaData, databaseName, tableName);
-                    if (mySqlSchema.primaryKeys().size() > 0) {
-                        // only tables with primary keys will be considered
-                        mySqlSchemaList.add(mySqlSchema);
-                    }
-                }
-            }
-        }
-        return mySqlSchemaList;
-    }
-
-    private boolean shouldMonitorTable(String mySqlTableName) {
-        boolean shouldMonitor = true;
-        if (includingPattern != null) {
-            shouldMonitor = includingPattern.matcher(mySqlTableName).matches();
-        }
-        if (excludingPattern != null) {
-            shouldMonitor = shouldMonitor && !excludingPattern.matcher(mySqlTableName).matches();
-        }
-        LOG.debug("Source table {} is monitored? {}", mySqlTableName, shouldMonitor);
-        return shouldMonitor;
+                });
+        return kafkaCanalSchemaMap;
     }
 
     private boolean shouldMonitorTable(
-            TableSchema tableSchema, Schema mySqlSchema, Supplier<String> errMsg) {
-        if (MySqlActionUtils.schemaCompatible(tableSchema, mySqlSchema)) {
+            TableSchema tableSchema, Schema schema, Supplier<String> errMsg) {
+        if (KafkaActionUtils.schemaCompatible(tableSchema, schema)) {
             return true;
         } else if (ignoreIncompatible) {
             LOG.warn(errMsg.get() + "This table will be ignored.");
@@ -308,17 +275,17 @@ public class MySqlSyncDatabaseAction implements Action {
     }
 
     private Supplier<String> incompatibleMessage(
-            TableSchema paimonSchema, MySqlSchema mySqlSchema, Identifier identifier) {
+            TableSchema paimonSchema, KafkaSchema kafkaSchema, Identifier identifier) {
         return () ->
                 String.format(
                         "Incompatible schema found.\n"
                                 + "Paimon table is: %s, fields are: %s.\n"
-                                + "MySQL table is: %s.%s, fields are: %s.\n",
+                                + "Kafka's table is: %s.%s, fields are: %s.\n",
                         identifier.getFullName(),
                         paimonSchema.fields(),
-                        mySqlSchema.databaseName(),
-                        mySqlSchema.tableName(),
-                        mySqlSchema.fields());
+                        kafkaSchema.databaseName(),
+                        kafkaSchema.tableName(),
+                        kafkaSchema.fields());
     }
 
     // ------------------------------------------------------------------------
@@ -338,51 +305,46 @@ public class MySqlSyncDatabaseAction implements Action {
         boolean ignoreIncompatible = Boolean.parseBoolean(params.get("ignore-incompatible"));
         String tablePrefix = params.get("table-prefix");
         String tableSuffix = params.get("table-suffix");
-        String includingTables = params.get("including-tables");
-        String excludingTables = params.get("excluding-tables");
 
-        Optional<Map<String, String>> mySqlConfigOption = getConfigMap(params, "mysql-conf");
+        Optional<Map<String, String>> kafkaConfigOption = getConfigMap(params, "kafka-conf");
         Optional<Map<String, String>> catalogConfigOption = getConfigMap(params, "catalog-conf");
         Optional<Map<String, String>> tableConfigOption = getConfigMap(params, "table-conf");
-        return mySqlConfigOption.map(
-                mySqlConfig ->
-                        new MySqlSyncDatabaseAction(
-                                mySqlConfig,
+        return kafkaConfigOption.map(
+                kafkaConfig ->
+                        new KafkaSyncDatabaseAction(
+                                kafkaConfig,
                                 warehouse,
                                 database,
                                 ignoreIncompatible,
                                 tablePrefix,
                                 tableSuffix,
-                                includingTables,
-                                excludingTables,
                                 catalogConfigOption.orElse(Collections.emptyMap()),
                                 tableConfigOption.orElse(Collections.emptyMap())));
     }
 
     private static void printHelp() {
         System.out.println(
-                "Action \"mysql-sync-database\" creates a streaming job "
-                        + "with a Flink MySQL CDC source and multiple Paimon table sinks "
-                        + "to synchronize a whole MySQL database into one Paimon database.\n"
-                        + "Only MySQL tables with primary keys will be considered. "
-                        + "Newly created MySQL tables after the job starts will not be included.");
+                "Action \"kafka-sync-database\" creates a streaming job "
+                        + "with a Flink Kafka source and multiple Paimon table sinks "
+                        + "to synchronize multiple tables into one Paimon database.\n"
+                        + "Only tables with primary keys will be considered. ");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  mysql-sync-database --warehouse <warehouse-path> --database <database-name> "
+                "  kafka-sync-database --warehouse <warehouse-path> --database <database-name> "
                         + "[--ignore-incompatible <true/false>] "
                         + "[--table-prefix <paimon-table-prefix>] "
                         + "[--table-suffix <paimon-table-suffix>] "
-                        + "[--including-tables <mysql-table-name|name-regular-expr>] "
-                        + "[--excluding-tables <mysql-table-name|name-regular-expr>] "
-                        + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
+                        + "[--including-tables <table-name|name-regular-expr>] "
+                        + "[--excluding-tables <table-name|name-regular-expr>] "
+                        + "[--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
         System.out.println();
 
         System.out.println(
-                "--ignore-incompatible is default false, in this case, if MySQL table name exists in Paimon "
+                "--ignore-incompatible is default false, in this case, if Topic's table name exists in Paimon "
                         + "and their schema is incompatible, an exception will be thrown. "
                         + "You can specify it to true explicitly to ignore the incompatible tables and exception.");
         System.out.println();
@@ -403,17 +365,15 @@ public class MySqlSyncDatabaseAction implements Action {
                 "--excluding-tables has higher priority than --including-tables if you specified both.");
         System.out.println();
 
-        System.out.println("MySQL CDC source conf syntax:");
+        System.out.println("kafka source conf syntax:");
         System.out.println("  key=value");
         System.out.println(
-                "'hostname', 'username', 'password' and 'database-name' "
-                        + "are required configurations, others are optional. "
-                        + "Note that 'database-name' should be the exact name "
-                        + "of the MySQL databse you want to synchronize. "
-                        + "It can't be a regular expression.");
+                "'topic', 'properties.bootstrap.servers', 'properties.group.id'"
+                        + "are required configurations, others are optional.");
         System.out.println(
                 "For a complete list of supported configurations, "
-                        + "see https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options");
+                        + "see https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/kafka/");
+        System.out.println();
         System.out.println();
 
         System.out.println("Paimon catalog and table sink conf syntax:");
@@ -426,13 +386,13 @@ public class MySqlSyncDatabaseAction implements Action {
 
         System.out.println("Examples:");
         System.out.println(
-                "  mysql-sync-database \\\n"
+                "  kafka-sync-database \\\n"
                         + "    --warehouse hdfs:///path/to/warehouse \\\n"
                         + "    --database test_db \\\n"
-                        + "    --mysql-conf hostname=127.0.0.1 \\\n"
-                        + "    --mysql-conf username=root \\\n"
-                        + "    --mysql-conf password=123456 \\\n"
-                        + "    --mysql-conf database-name=source_db \\\n"
+                        + "    --kafka-conf properties.bootstrap.servers=127.0.0.1:9020 \\\n"
+                        + "    --kafka-conf topic=order,logistic,user \\\n"
+                        + "    --kafka-conf properties.group.id=123456 \\\n"
+                        + "    --kafka-conf value.format=canal-json \\\n"
                         + "    --catalog-conf metastore=hive \\\n"
                         + "    --catalog-conf uri=thrift://hive-metastore:9083 \\\n"
                         + "    --table-conf bucket=4 \\\n"
@@ -444,6 +404,6 @@ public class MySqlSyncDatabaseAction implements Action {
     public void run() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         build(env);
-        env.execute(String.format("MySQL-Paimon Database Sync: %s", database));
+        env.execute(String.format("KAFKA-Paimon Database Sync: %s", database));
     }
 }

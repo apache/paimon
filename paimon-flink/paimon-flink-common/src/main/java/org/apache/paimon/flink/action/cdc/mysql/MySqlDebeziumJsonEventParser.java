@@ -23,6 +23,8 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.types.DataField;
@@ -34,15 +36,12 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectWriter;
 
-import com.esri.core.geometry.ogc.OGCGeometry;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
-import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -314,25 +313,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 JsonNode jsonNode = recordRow.get(fieldName);
                 try {
                     byte[] wkb = jsonNode.get("wkb").binaryValue();
-                    String geoJson = OGCGeometry.fromBinary(ByteBuffer.wrap(wkb)).asGeoJson();
-                    JsonNode originGeoNode = objectMapper.readTree(geoJson);
-
-                    Optional<Integer> srid =
-                            Optional.ofNullable(
-                                    originGeoNode.has("srid")
-                                            ? originGeoNode.get("srid").intValue()
-                                            : null);
-                    Map<String, Object> geometryInfo = new HashMap<>();
-                    String geometryType = originGeoNode.get("type").asText();
-                    geometryInfo.put("type", geometryType);
-                    if (geometryType.equalsIgnoreCase("GeometryCollection")) {
-                        geometryInfo.put("geometries", originGeoNode.get("geometries"));
-                    } else {
-                        geometryInfo.put("coordinates", originGeoNode.get("coordinates"));
-                    }
-                    geometryInfo.put("srid", srid.orElse(0));
-                    ObjectWriter objectWriter = objectMapper.writer();
-                    newValue = objectWriter.writeValueAsString(geometryInfo);
+                    newValue = MySqlTypeUtils.convertWkbArray(wkb);
                 } catch (Exception e) {
                     throw new IllegalArgumentException(
                             String.format("Failed to convert %s to geometry JSON.", jsonNode), e);

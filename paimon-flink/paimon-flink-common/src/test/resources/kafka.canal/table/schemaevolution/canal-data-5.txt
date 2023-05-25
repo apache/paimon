@@ -1,0 +1,24 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+{"data":null,"database":"paimon_sync_table","es":1683357620000,"id":4709,"isDdl":true,"mysqlType":null,"old":null,"pkNames":null,"sql":"/* Query from DMS-WEBSQL-0-Qid_18482856626453185y by user 1486767996652600 */ ALTER TABLE schema_evolution_1 MODIFY COLUMN v4 VARBINARY(20)","sqlType":null,"table":"schema_evolution_1","ts":1683357620606,"type":"ALTER"}
+{"data":null,"database":"paimon_sync_table","es":1683357620000,"id":4709,"isDdl":true,"mysqlType":null,"old":null,"pkNames":null,"sql":"/* Query from DMS-WEBSQL-0-Qid_18482856626456873I by user 1486767996652600 */ ALTER TABLE schema_evolution_1 MODIFY COLUMN v5 DOUBLE","sqlType":null,"table":"schema_evolution_1","ts":1683357620655,"type":"ALTER"}
+{"data":[{"pt":"1","_id":"9","v1":"nine","v2":"90000000000","v3":"99999.999","v4":"nine.bin.long","v5":"9.00000000009"}],"database":"paimon_sync_table","es":1683357620000,"id":4710,"isDdl":false,"mysqlType":{"pt":"INT","_id":"INT","v1":"VARCHAR(20)","v2":"BIGINT","v3":"NUMERIC(8,3)","v4":"VARBINARY(20)","v5":"DOUBLE"},"old":[{"v4":"nine.bin","v5":"9.899999618530273"}],"pkNames":["_id"],"sql":"","sqlType":{"pt":4,"_id":4,"v1":12,"v2":-5,"v3":3,"v4":2004,"v5":8},"table":"schema_evolution_1","ts":1683357621014,"type":"UPDATE"}
+{"data":null,"database":"paimon_sync_table","es":1683357621000,"id":4711,"isDdl":true,"mysqlType":null,"old":null,"pkNames":null,"sql":"/* Query from DMS-WEBSQL-0-Qid_18482856626457713M by user 1486767996652600 */ ALTER TABLE schema_evolution_2 MODIFY COLUMN v4 VARBINARY(20)","sqlType":null,"table":"schema_evolution_2","ts":1683357621135,"type":"ALTER"}
+{"data":null,"database":"paimon_sync_table","es":1683357621000,"id":4712,"isDdl":true,"mysqlType":null,"old":null,"pkNames":null,"sql":"/* Query from DMS-WEBSQL-0-Qid_18482856626458168p by user 1486767996652600 */ ALTER TABLE schema_evolution_2 MODIFY COLUMN v5 DOUBLE","sqlType":null,"table":"schema_evolution_2","ts":1683357621450,"type":"ALTER"}
+{"data":[{"pt":"2","_id":"4","v1":"four","v2":null,"v3":null,"v4":"four.bin.long","v5":"4.00000000004"}],"database":"paimon_sync_table","es":1683357620000,"id":4710,"isDdl":false,"mysqlType":{"pt":"INT","_id":"INT","v1":"VARCHAR(20)","v2":"BIGINT","v3":"NUMERIC(8,3)","v4":"VARBINARY(20)","v5":"DOUBLE"},"old":[{"v4":null,"v5":null}],"pkNames":["_id"],"sql":"","sqlType":{"pt":4,"_id":4,"v1":12,"v2":-5,"v3":3,"v4":2004,"v5":8},"table":"schema_evolution_2","ts":1683357621014,"type":"UPDATE"}
