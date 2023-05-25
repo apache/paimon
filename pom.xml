@@ -388,7 +388,6 @@ under the License.
                         <exclude>docs/themes/book/**</exclude>
                         <exclude>docs/assets/github.css</exclude>
                         <exclude>docs/static/js/anchor.min.js</exclude>
-                        <exclude>docs/layouts/shortcodes/generated/**</exclude>
                         <exclude>**/*.svg</exclude>
                         <exclude>**/dependency-reduced-pom.xml</exclude>
                         <!-- Bundled license files -->
@@ -397,8 +396,6 @@ under the License.
                         <exclude>release/**</exclude>
                         <!-- antlr grammar files -->
                         <exclude>paimon-common/src/main/antlr4/**</exclude>
-                        <!-- Test files -->
-                        <exclude>paimon-common/src/test/resources/codesplit/**</exclude>
                     </excludes>
                 </configuration>
             </plugin>

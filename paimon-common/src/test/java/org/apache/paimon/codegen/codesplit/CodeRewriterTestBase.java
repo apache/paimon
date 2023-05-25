@@ -22,6 +22,7 @@ import org.apache.paimon.utils.FileIOUtils;
 import java.io.File;
 import java.util.function.Function;
 
+import static org.apache.paimon.codegen.codesplit.CodeSplitTestUtil.removeApacheHeader;
 import static org.apache.paimon.codegen.codesplit.CodeSplitTestUtil.trimLines;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -50,6 +51,10 @@ abstract class CodeRewriterTestBase<R extends CodeRewriter> {
                                                             + filename
                                                             + ".java")
                                             .toURI()));
+
+            // remove apache header
+            code = removeApacheHeader(code);
+
             String expected =
                     FileIOUtils.readFileUtf8(
                             new File(
@@ -62,6 +67,9 @@ abstract class CodeRewriterTestBase<R extends CodeRewriter> {
                                                             + filename
                                                             + ".java")
                                             .toURI()));
+
+            // remove apache header
+            expected = removeApacheHeader(expected);
 
             R rewriter = rewriterProvider.apply(code);
 
