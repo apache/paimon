@@ -1203,7 +1203,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                                 INFER_SCAN_PARALLELISM.key(), "true"))))
                 .isEqualTo(1);
 
-        // error scan.parallelism, infer parallelism should be at least 1
+        // with scan.parallelism, respect scan.parallelism
         assertThat(
                         sourceParallelism(
                                 buildQueryWithTableOptions(
@@ -1213,10 +1213,10 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                         new HashMap<String, String>() {
                                             {
                                                 put(INFER_SCAN_PARALLELISM.key(), "true");
-                                                put(SCAN_PARALLELISM.key(), "-1");
+                                                put(SCAN_PARALLELISM.key(), "3");
                                             }
                                         })))
-                .isEqualTo(1);
+                .isEqualTo(3);
 
         // 2 splits, the parallelism is splits num: 2
         insertInto(table, "('Euro', 119)");
