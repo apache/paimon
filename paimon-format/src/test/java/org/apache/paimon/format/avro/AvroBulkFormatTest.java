@@ -80,7 +80,7 @@ class AvroBulkFormatTest {
                             Timestamp.fromMicros(TIMESTAMP * 1000 + 123),
                             Timestamp.fromEpochMillis(TIMESTAMP),
                             Timestamp.fromMicros(TIMESTAMP * 1000 + 123)),
-                    // -------- batch 1, block start 593 --------
+                    // -------- batch 1, block start 689 --------
                     GenericRow.of(
                             BinaryString.fromString("File"),
                             BinaryString.fromString("Format"),
@@ -96,7 +96,7 @@ class AvroBulkFormatTest {
                             Timestamp.fromMicros(TIMESTAMP * 1000 + 123),
                             Timestamp.fromEpochMillis(TIMESTAMP),
                             Timestamp.fromMicros(TIMESTAMP * 1000 + 123)),
-                    // -------- batch 2, block start 705 --------
+                    // -------- batch 2, block start 1147 --------
                     GenericRow.of(
                             BinaryString.fromString("block with"),
                             BinaryString.fromString("only one record"),
@@ -104,7 +104,7 @@ class AvroBulkFormatTest {
                             Timestamp.fromMicros(TIMESTAMP * 1000 + 123),
                             Timestamp.fromEpochMillis(TIMESTAMP),
                             Timestamp.fromMicros(TIMESTAMP * 1000 + 123))
-                    // -------- file length 752 --------
+                    // -------- file length 1323 --------
                     );
     private static final List<Long> BLOCK_STARTS = Arrays.asList(689L, 1147L, 1323L);
 

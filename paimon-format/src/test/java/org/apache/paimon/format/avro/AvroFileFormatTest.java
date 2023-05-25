@@ -23,7 +23,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -85,15 +84,5 @@ public class AvroFileFormatTest {
 
         RowType rowType = new RowType(dataFields);
         fileFormat.validateDataFields(rowType);
-    }
-
-    @Test
-    public void testUnsupportedDataTypes() {
-        ArrayList<DataField> dataFields = new ArrayList<>();
-        int index = 0;
-        dataFields.add(new DataField(index++, "timestamp_type", DataTypes.TIMESTAMP(6)));
-
-        RowType rowType = new RowType(dataFields);
-        Assertions.assertDoesNotThrow(() -> fileFormat.validateDataFields(rowType));
     }
 }

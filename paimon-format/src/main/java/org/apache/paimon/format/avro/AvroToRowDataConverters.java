@@ -45,10 +45,7 @@ import java.nio.ByteBuffer;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.time.temporal.ChronoField;
-import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -103,7 +100,8 @@ public class AvroToRowDataConverters {
     }
 
     /** Creates a runtime converter which assuming input object is not null. */
-    public static AvroToRowDataConverter createConverter(DataType type) {
+    @VisibleForTesting
+    static AvroToRowDataConverter createConverter(DataType type) {
         switch (type.getTypeRoot()) {
             case TINYINT:
                 return avroObject -> ((Integer) avroObject).byteValue();
@@ -121,19 +119,19 @@ public class AvroToRowDataConverters {
                 return AvroToRowDataConverters::convertToTime;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 int precision = ((TimestampType) type).getPrecision();
-                if (precision == 3) {
+                if (precision <= 3) {
                     return AvroToRowDataConverters::convertToTimestampFromMillis;
-                } else if (precision == 6) {
+                } else if (precision <= 6) {
                     return AvroToRowDataConverters::convertToTimestampFromMicros;
                 } else {
                     throw new UnsupportedOperationException("Unsupported precision: " + precision);
                 }
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 precision = ((LocalZonedTimestampType) type).getPrecision();
-                if (precision == 3) {
-                    return AvroToRowDataConverters::convertToOffsetTimestampFromMillis;
-                } else if (precision == 6) {
-                    return AvroToRowDataConverters::convertToOffsetTimestampFromMicros;
+                if (precision <= 3) {
+                    return AvroToRowDataConverters::convertToTimestampFromMillis;
+                } else if (precision <= 6) {
+                    return AvroToRowDataConverters::convertToTimestampFromMicros;
                 } else {
                     throw new UnsupportedOperationException("Unsupported precision: " + precision);
                 }
@@ -219,10 +217,10 @@ public class AvroToRowDataConverters {
     @VisibleForTesting
     static Timestamp convertToTimestamp(Object object, int precision) {
         if (object instanceof Long) {
-            if (precision == 3) {
+            if (precision <= 3) {
                 return Timestamp.fromEpochMillis((Long) object);
-            } else if (precision == 6) {
-                return Timestamp.fromInstant(Instant.EPOCH.plus((Long) object, ChronoUnit.MICROS));
+            } else if (precision <= 6) {
+                return Timestamp.fromMicros((Long) object);
             } else {
                 throw new UnsupportedOperationException("Unsupported precision: " + precision);
             }
@@ -236,41 +234,6 @@ public class AvroToRowDataConverters {
                 throw new IllegalArgumentException(
                         "Unexpected object type for TIMESTAMP logical type. Received: " + object);
             }
-        }
-    }
-
-    @VisibleForTesting
-    static Object convertToOffsetTimestampFromMillis(Object object) {
-        if (object instanceof Long) {
-            return Timestamp.fromInstant(
-                    OffsetDateTime.ofInstant(
-                                    Instant.ofEpochMilli((Long) object), ZoneOffset.systemDefault())
-                            .toInstant());
-        } else if (object instanceof Instant) {
-            return Timestamp.fromInstant(
-                    OffsetDateTime.ofInstant((Instant) object, ZoneOffset.systemDefault())
-                            .toInstant());
-        } else {
-            throw new IllegalArgumentException(
-                    "Unexpected object type for TIMESTAMP_WITH_LOCAL_TIME_ZONE logical type. Received: "
-                            + object);
-        }
-    }
-
-    @VisibleForTesting
-    static Object convertToOffsetTimestampFromMicros(Object object) {
-        if (object instanceof Long) {
-            Instant instant = Instant.EPOCH.plus((Long) object, ChronoUnit.MICROS);
-            return Timestamp.fromInstant(
-                    OffsetDateTime.ofInstant(instant, ZoneOffset.systemDefault()).toInstant());
-        } else if (object instanceof Instant) {
-            return Timestamp.fromInstant(
-                    OffsetDateTime.ofInstant((Instant) object, ZoneOffset.systemDefault())
-                            .toInstant());
-        } else {
-            throw new IllegalArgumentException(
-                    "Unexpected object type for TIMESTAMP_WITH_LOCAL_TIME_ZONE logical type. Received: "
-                            + object);
         }
     }
 

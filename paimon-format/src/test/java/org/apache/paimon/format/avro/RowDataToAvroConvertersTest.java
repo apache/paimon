@@ -52,6 +52,6 @@ public class RowDataToAvroConvertersTest {
                 AvroToRowDataConverters.createConverter(zonedTimestampType);
 
         Object original = avroToRowDataConverter.convert(converted);
-        Assertions.assertEquals(millis, (Timestamp) original);
+        Assertions.assertEquals(millis, original);
     }
 }

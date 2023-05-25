@@ -44,30 +44,4 @@ public class AvroToRowDataConvertersTest {
 
         Assertions.assertEquals(NOW, AvroToRowDataConverters.convertToTimestamp(INSTANT, 6));
     }
-
-    @Test
-    public void testConvertToOffsetTimestampFromMillis() {
-        Assertions.assertEquals(
-                NOW, AvroToRowDataConverters.convertToOffsetTimestampFromMillis(TS_MILLIS));
-
-        Assertions.assertEquals(
-                NOW, AvroToRowDataConverters.convertToOffsetTimestampFromMillis(INSTANT));
-
-        Assertions.assertThrowsExactly(
-                IllegalArgumentException.class,
-                () -> AvroToRowDataConverters.convertToOffsetTimestampFromMillis(null));
-    }
-
-    @Test
-    public void testConvertToOffsetTimestampFromMicros() {
-        Assertions.assertEquals(
-                NOW_MICROS, AvroToRowDataConverters.convertToOffsetTimestampFromMicros(TS_MICROS));
-
-        Assertions.assertEquals(
-                NOW, AvroToRowDataConverters.convertToOffsetTimestampFromMicros(INSTANT));
-
-        Assertions.assertThrowsExactly(
-                IllegalArgumentException.class,
-                () -> AvroToRowDataConverters.convertToOffsetTimestampFromMicros(null));
-    }
 }

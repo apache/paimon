@@ -149,8 +149,7 @@ public class RowDataToAvroConverters {
                                 if (logicalType instanceof LogicalTypes.TimestampMillis) {
                                     return ((Timestamp) object).toInstant().toEpochMilli();
                                 } else if (logicalType instanceof LogicalTypes.TimestampMicros) {
-                                    return ((Timestamp) object).toInstant().toEpochMilli() * 1000
-                                            + ((Timestamp) object).getNanoOfMillisecond() / 1000;
+                                    return ((Timestamp) object).toMicros();
                                 } else {
                                     throw new UnsupportedOperationException(
                                             "Unsupported timestamp type: " + logicalType);
@@ -171,8 +170,7 @@ public class RowDataToAvroConverters {
                                     return ((Timestamp) object).toInstant().toEpochMilli();
                                 } else if (logicalType
                                         instanceof LogicalTypes.LocalTimestampMicros) {
-                                    return ((Timestamp) object).toInstant().toEpochMilli() * 1000
-                                            + ((Timestamp) object).getNanoOfMillisecond() / 1000;
+                                    return ((Timestamp) object).toMicros();
                                 } else {
                                     throw new UnsupportedOperationException(
                                             "Unsupported timestamp type: " + logicalType);
