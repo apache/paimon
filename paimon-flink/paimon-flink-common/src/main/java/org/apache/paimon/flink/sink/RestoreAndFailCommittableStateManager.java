@@ -41,7 +41,8 @@ import java.util.List;
  * <p>Useful for committing snapshots containing records. For example snapshots produced by table
  * store writers.
  */
-public class RestoreAndFailCommittableStateManager implements CommittableStateManager {
+public class RestoreAndFailCommittableStateManager
+        implements CommittableStateManager<ManifestCommittable> {
 
     private static final long serialVersionUID = 1L;
 
@@ -59,7 +60,8 @@ public class RestoreAndFailCommittableStateManager implements CommittableStateMa
     }
 
     @Override
-    public void initializeState(StateInitializationContext context, Committer committer)
+    public void initializeState(
+            StateInitializationContext context, Committer<?, ManifestCommittable> committer)
             throws Exception {
         streamingCommitterState =
                 new SimpleVersionedListState<>(
@@ -75,7 +77,8 @@ public class RestoreAndFailCommittableStateManager implements CommittableStateMa
         recover(restored, committer);
     }
 
-    private void recover(List<ManifestCommittable> committables, Committer committer)
+    private void recover(
+            List<ManifestCommittable> committables, Committer<?, ManifestCommittable> committer)
             throws Exception {
         committables = committer.filterRecoveredCommittables(committables);
         if (!committables.isEmpty()) {

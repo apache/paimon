@@ -18,26 +18,58 @@
 
 package org.apache.paimon.flink.sink;
 
-/** Committable produced by {@link PrepareCommitOperator}. */
-public class Committable {
+import org.apache.paimon.catalog.Identifier;
 
+/**
+ * MultiTableCommittable produced by {@link PrepareCommitOperator}. This type of Committable will
+ * only be produced by multiplexed operators that handles data from multiple tables. Thus, the
+ * database, table, and commit user of each table is included in the committable.
+ */
+public class MultiTableCommittable {
+
+    private final String database;
+    private final String table;
     private final long checkpointId;
 
-    private final Kind kind;
+    private final Committable.Kind kind;
 
     private final Object wrappedCommittable;
 
-    public Committable(long checkpointId, Kind kind, Object wrappedCommittable) {
+    public MultiTableCommittable(
+            String database,
+            String table,
+            long checkpointId,
+            Committable.Kind kind,
+            Object wrappedCommittable) {
         this.checkpointId = checkpointId;
         this.kind = kind;
         this.wrappedCommittable = wrappedCommittable;
+        this.database = database;
+        this.table = table;
+    }
+
+    public static MultiTableCommittable fromCommittable(Identifier id, Committable committable) {
+        return new MultiTableCommittable(
+                id.getDatabaseName(),
+                id.getObjectName(),
+                committable.checkpointId(),
+                committable.kind(),
+                committable.wrappedCommittable());
+    }
+
+    public String getDatabase() {
+        return database;
+    }
+
+    public String getTable() {
+        return table;
     }
 
     public long checkpointId() {
         return checkpointId;
     }
 
-    public Kind kind() {
+    public Committable.Kind kind() {
         return kind;
     }
 
@@ -47,7 +79,7 @@ public class Committable {
 
     @Override
     public String toString() {
-        return "Committable{"
+        return "MultiTableCommittable{"
                 + "checkpointId="
                 + checkpointId
                 + ", kind="

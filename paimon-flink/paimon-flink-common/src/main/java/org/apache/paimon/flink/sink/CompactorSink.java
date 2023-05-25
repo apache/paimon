@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.SerializableFunction;
@@ -44,13 +45,13 @@ public class CompactorSink extends FlinkSink<RowData> {
     }
 
     @Override
-    protected SerializableFunction<String, Committer> createCommitterFactory(
-            boolean streamingCheckpointEnabled) {
+    protected SerializableFunction<String, Committer<Committable, ManifestCommittable>>
+            createCommitterFactory(boolean streamingCheckpointEnabled) {
         return user -> new StoreCommitter(table.newCommit(user).withLock(lockFactory.create()));
     }
 
     @Override
-    protected CommittableStateManager createCommittableStateManager() {
+    protected CommittableStateManager<ManifestCommittable> createCommittableStateManager() {
         return new NoopCommittableStateManager();
     }
 }

@@ -45,7 +45,7 @@ import java.io.IOException;
 import java.util.List;
 
 /** A {@link PrepareCommitOperator} to write {@link RowData}. Record schema is fixed. */
-public class RowDataStoreWriteOperator extends PrepareCommitOperator<RowData> {
+public class RowDataStoreWriteOperator extends PrepareCommitOperator<RowData, Committable> {
 
     private static final long serialVersionUID = 3L;
 

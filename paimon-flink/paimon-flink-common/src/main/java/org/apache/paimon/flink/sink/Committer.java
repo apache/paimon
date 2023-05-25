@@ -19,10 +19,10 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.manifest.ManifestCommittable;
-
 import java.io.IOException;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The {@code Committer} is responsible for creating and committing an aggregated committable, which
@@ -30,17 +30,18 @@ import java.util.List;
  *
  * <p>The {@code Committer} runs with parallelism equal to 1.
  */
-public interface Committer extends AutoCloseable {
+public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
 
     /** Find out which global committables need to be retried when recovering from the failure. */
-    List<ManifestCommittable> filterRecoveredCommittables(
-            List<ManifestCommittable> globalCommittables) throws IOException;
-
-    /** Compute an aggregated committable from a list of committables. */
-    ManifestCommittable combine(long checkpointId, long watermark, List<Committable> committables)
+    List<GlobalCommitT> filterRecoveredCommittables(List<GlobalCommitT> globalCommittables)
             throws IOException;
 
-    /** Commits the given {@link ManifestCommittable}. */
-    void commit(List<ManifestCommittable> globalCommittables)
-            throws IOException, InterruptedException;
+    /** Compute an aggregated committable from a list of committables. */
+    GlobalCommitT combine(long checkpointId, long watermark, List<CommitT> committables)
+            throws IOException;
+
+    /** Commits the given {@link GlobalCommitT}. */
+    void commit(List<GlobalCommitT> globalCommittables) throws IOException, InterruptedException;
+
+    Map<Long, List<CommitT>> groupByCheckpoint(Collection<CommitT> committables);
 }

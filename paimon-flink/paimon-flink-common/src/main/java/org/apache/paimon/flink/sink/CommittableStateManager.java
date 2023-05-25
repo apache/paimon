@@ -17,8 +17,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.manifest.ManifestCommittable;
-
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 
@@ -29,10 +27,11 @@ import java.util.List;
  * Helper interface for {@link CommitterOperator}. This interface manages operator states about
  * {@link org.apache.paimon.manifest.ManifestCommittable}.
  */
-public interface CommittableStateManager extends Serializable {
+public interface CommittableStateManager<GlobalCommitT> extends Serializable {
 
-    void initializeState(StateInitializationContext context, Committer committer) throws Exception;
+    void initializeState(StateInitializationContext context, Committer<?, GlobalCommitT> committer)
+            throws Exception;
 
-    void snapshotState(StateSnapshotContext context, List<ManifestCommittable> committables)
+    void snapshotState(StateSnapshotContext context, List<GlobalCommitT> committables)
             throws Exception;
 }

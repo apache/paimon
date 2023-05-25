@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
@@ -142,7 +143,7 @@ public abstract class FlinkSink<T> implements Serializable {
                 written.transform(
                                 GLOBAL_COMMITTER_NAME + " -> " + table.name(),
                                 typeInfo,
-                                new CommitterOperator(
+                                new CommitterOperator<>(
                                         streamingCheckpointEnabled,
                                         commitUser,
                                         createCommitterFactory(streamingCheckpointEnabled),
@@ -168,8 +169,8 @@ public abstract class FlinkSink<T> implements Serializable {
     protected abstract OneInputStreamOperator<T, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, boolean isStreaming, String commitUser);
 
-    protected abstract SerializableFunction<String, Committer> createCommitterFactory(
-            boolean streamingCheckpointEnabled);
+    protected abstract SerializableFunction<String, Committer<Committable, ManifestCommittable>>
+            createCommitterFactory(boolean streamingCheckpointEnabled);
 
-    protected abstract CommittableStateManager createCommittableStateManager();
+    protected abstract CommittableStateManager<ManifestCommittable> createCommittableStateManager();
 }

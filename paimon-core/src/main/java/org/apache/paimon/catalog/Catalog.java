@@ -23,6 +23,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
+import java.io.Serializable;
 import java.util.List;
 import java.util.Optional;
 
@@ -341,5 +342,11 @@ public interface Catalog extends AutoCloseable {
         public String column() {
             return column;
         }
+    }
+
+    /** Loader of {@link Catalog}. */
+    @FunctionalInterface
+    interface Loader extends Serializable {
+        Catalog load();
     }
 }

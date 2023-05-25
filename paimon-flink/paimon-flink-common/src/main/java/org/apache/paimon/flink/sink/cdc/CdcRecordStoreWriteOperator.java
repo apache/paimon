@@ -41,7 +41,7 @@ import java.util.Optional;
  * A {@link PrepareCommitOperator} to write {@link CdcRecord}. Record schema may change. If current
  * known schema does not fit record schema, this operator will wait for schema changes.
  */
-public class CdcRecordStoreWriteOperator extends PrepareCommitOperator<CdcRecord> {
+public class CdcRecordStoreWriteOperator extends PrepareCommitOperator<CdcRecord, Committable> {
 
     private static final long serialVersionUID = 1L;
 
