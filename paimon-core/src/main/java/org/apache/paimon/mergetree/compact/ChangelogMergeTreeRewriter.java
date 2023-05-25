@@ -20,6 +20,7 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
@@ -39,7 +40,7 @@ import java.util.List;
 /** A {@link MergeTreeCompactRewriter} which produces changelog files for the compaction. */
 public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewriter {
 
-    protected final Comparator<InternalRow> valueComparator;
+    protected final RecordEqualiser valueEqualiser;
     protected final boolean changelogRowDeduplicate;
 
     public ChangelogMergeTreeRewriter(
@@ -48,10 +49,10 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             SortEngine sortEngine,
-            Comparator<InternalRow> valueComparator,
+            RecordEqualiser valueEqualiser,
             boolean changelogRowDeduplicate) {
         super(readerFactory, writerFactory, keyComparator, mfFactory, sortEngine);
-        this.valueComparator = valueComparator;
+        this.valueEqualiser = valueEqualiser;
         this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
 

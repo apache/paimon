@@ -19,10 +19,10 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowKind;
 
-import java.util.Comparator;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -51,13 +51,13 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
     private final ChangelogResult reusedResult = new ChangelogResult();
     private final KeyValue reusedBefore = new KeyValue();
     private final KeyValue reusedAfter = new KeyValue();
-    private final Comparator<InternalRow> valueComparator;
+    private final RecordEqualiser valueEqualiser;
     private final boolean changelogRowDeduplicate;
 
     public LookupChangelogMergeFunctionWrapper(
             MergeFunctionFactory<KeyValue> mergeFunctionFactory,
             Function<InternalRow, KeyValue> lookup,
-            Comparator<InternalRow> valueComparator,
+            RecordEqualiser valueEqualiser,
             boolean changelogRowDeduplicate) {
         MergeFunction<KeyValue> mergeFunction = mergeFunctionFactory.create();
         checkArgument(
@@ -67,7 +67,7 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
         this.mergeFunction = (LookupMergeFunction) mergeFunction;
         this.mergeFunction2 = mergeFunctionFactory.create();
         this.lookup = lookup;
-        this.valueComparator = valueComparator;
+        this.valueEqualiser = valueEqualiser;
         this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
 
@@ -124,7 +124,7 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
             if (!isAdd(after)) {
                 reusedResult.addChangelog(replaceBefore(RowKind.DELETE, before));
             } else if (!changelogRowDeduplicate
-                    || valueComparator.compare(before.value(), after.value()) != 0) {
+                    || !valueEqualiser.equals(before.value(), after.value())) {
                 reusedResult
                         .addChangelog(replaceBefore(RowKind.UPDATE_BEFORE, before))
                         .addChangelog(replaceAfter(RowKind.UPDATE_AFTER, after));
