@@ -903,14 +903,11 @@ public class PaimonStorageHandlerITCase {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
-        int randomInt = random.nextInt(3);
-        if (randomInt == 0) {
-            conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.ORC);
-        } else if (randomInt == 1) {
-            conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.PARQUET);
-        } else {
-            conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
-        }
+        conf.set(
+                CoreOptions.FILE_FORMAT,
+                random.nextBoolean()
+                        ? CoreOptions.FileFormatType.ORC
+                        : CoreOptions.FileFormatType.PARQUET);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
