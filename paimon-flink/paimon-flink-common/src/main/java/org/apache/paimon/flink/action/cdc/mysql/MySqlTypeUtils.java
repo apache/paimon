@@ -23,12 +23,26 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.flink.action.cdc.kafka.TypeUtil;
+import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.types.VarBinaryType;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectWriter;
+
+import com.esri.core.geometry.ogc.OGCGeometry;
 
 import javax.annotation.Nullable;
+
+import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
 
 /** Converts from MySQL type to {@link DataType}. */
 public class MySqlTypeUtils {
@@ -110,6 +124,15 @@ public class MySqlTypeUtils {
     // It returns the number of characters when converting this timestamp to string.
     // The base length of a timestamp is 19, for example "2023-03-23 17:20:00".
     private static final int JDBC_TIMESTAMP_BASE_LENGTH = 19;
+
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+
+    public static DataType toDataType(String mysqlType) {
+        return toDataType(
+                TypeUtil.getType(mysqlType),
+                TypeUtil.getPrecision(mysqlType),
+                TypeUtil.getScale(mysqlType));
+    }
 
     public static DataType toDataType(
             String type, @Nullable Integer length, @Nullable Integer scale) {
@@ -197,10 +220,13 @@ public class MySqlTypeUtils {
                                     + length
                                     + " for MySQL DATETIME and TIMESTAMP types");
                 }
+                // because tidb ddl event does not contain field precision
             case CHAR:
-                return DataTypes.CHAR(Preconditions.checkNotNull(length));
+                return length == null || length == 0 ? DataTypes.STRING() : DataTypes.CHAR(length);
             case VARCHAR:
-                return DataTypes.VARCHAR(Preconditions.checkNotNull(length));
+                return length == null || length == 0
+                        ? DataTypes.STRING()
+                        : DataTypes.VARCHAR(length);
             case TINYTEXT:
             case TEXT:
             case MEDIUMTEXT:
@@ -217,9 +243,13 @@ public class MySqlTypeUtils {
             case GEOMETRYCOLLECTION:
                 return DataTypes.STRING();
             case BINARY:
-                return DataTypes.BINARY(Preconditions.checkNotNull(length));
+                return length == null || length == 0
+                        ? DataTypes.BINARY(BinaryType.DEFAULT_LENGTH)
+                        : DataTypes.BINARY(length);
             case VARBINARY:
-                return DataTypes.VARBINARY(Preconditions.checkNotNull(length));
+                return length == null || length == 0
+                        ? DataTypes.VARBINARY(VarBinaryType.DEFAULT_LENGTH)
+                        : DataTypes.VARBINARY(length);
             case TINYBLOB:
             case BLOB:
             case MEDIUMBLOB:
@@ -231,5 +261,59 @@ public class MySqlTypeUtils {
                 throw new UnsupportedOperationException(
                         String.format("Don't support MySQL type '%s' yet.", type));
         }
+    }
+
+    public static boolean isGeoType(String type) {
+        switch (type.toUpperCase()) {
+            case GEOMETRY:
+            case POINT:
+            case LINESTRING:
+            case POLYGON:
+            case MULTIPOINT:
+            case MULTILINESTRING:
+            case MULTIPOLYGON:
+            case GEOMETRYCOLLECTION:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    public static boolean isEnumType(String type) {
+        switch (type.toUpperCase()) {
+            case ENUM:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    public static boolean isSetType(String type) {
+        switch (type.toUpperCase()) {
+            case SET:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    public static String convertWkbArray(byte[] wkb) throws JsonProcessingException {
+        String geoJson = OGCGeometry.fromBinary(ByteBuffer.wrap(wkb)).asGeoJson();
+        JsonNode originGeoNode = objectMapper.readTree(geoJson);
+
+        Optional<Integer> srid =
+                Optional.ofNullable(
+                        originGeoNode.has("srid") ? originGeoNode.get("srid").intValue() : null);
+        Map<String, Object> geometryInfo = new HashMap<>();
+        String geometryType = originGeoNode.get("type").asText();
+        geometryInfo.put("type", geometryType);
+        if (geometryType.equalsIgnoreCase("GeometryCollection")) {
+            geometryInfo.put("geometries", originGeoNode.get("geometries"));
+        } else {
+            geometryInfo.put("coordinates", originGeoNode.get("coordinates"));
+        }
+        geometryInfo.put("srid", srid.orElse(0));
+        ObjectWriter objectWriter = objectMapper.writer();
+        return objectWriter.writeValueAsString(geometryInfo);
     }
 }
