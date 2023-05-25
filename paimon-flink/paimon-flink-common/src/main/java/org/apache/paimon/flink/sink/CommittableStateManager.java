@@ -29,7 +29,8 @@ import java.util.List;
  */
 public interface CommittableStateManager<GlobalCommitT> extends Serializable {
 
-    void initializeState(StateInitializationContext context, Committer committer) throws Exception;
+    void initializeState(StateInitializationContext context, Committer<?, GlobalCommitT> committer)
+            throws Exception;
 
     void snapshotState(StateSnapshotContext context, List<GlobalCommitT> committables)
             throws Exception;

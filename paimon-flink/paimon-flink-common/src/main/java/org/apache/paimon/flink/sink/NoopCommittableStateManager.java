@@ -34,7 +34,8 @@ import java.util.List;
 public class NoopCommittableStateManager implements CommittableStateManager<ManifestCommittable> {
 
     @Override
-    public void initializeState(StateInitializationContext context, Committer committer)
+    public void initializeState(
+            StateInitializationContext context, Committer<?, ManifestCommittable> committer)
             throws Exception {
         // nothing to do
     }

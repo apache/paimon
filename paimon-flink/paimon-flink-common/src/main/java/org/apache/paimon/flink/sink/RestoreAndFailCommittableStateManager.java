@@ -60,7 +60,8 @@ public class RestoreAndFailCommittableStateManager
     }
 
     @Override
-    public void initializeState(StateInitializationContext context, Committer committer)
+    public void initializeState(
+            StateInitializationContext context, Committer<?, ManifestCommittable> committer)
             throws Exception {
         streamingCommitterState =
                 new SimpleVersionedListState<>(
@@ -76,7 +77,8 @@ public class RestoreAndFailCommittableStateManager
         recover(restored, committer);
     }
 
-    private void recover(List<ManifestCommittable> committables, Committer committer)
+    private void recover(
+            List<ManifestCommittable> committables, Committer<?, ManifestCommittable> committer)
             throws Exception {
         committables = committer.filterRecoveredCommittables(committables);
         if (!committables.isEmpty()) {

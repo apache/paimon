@@ -35,8 +35,6 @@ public class ManifestCommittable {
     @Nullable private final Long watermark;
     private final Map<Integer, Long> logOffsets;
     private final List<CommitMessage> commitMessages;
-    @Nullable private String database;
-    @Nullable private String table;
 
     public ManifestCommittable(long identifier) {
         this(identifier, null);
@@ -119,23 +117,5 @@ public class ManifestCommittable {
                         + "logOffsets = %s, "
                         + "commitMessages = %s",
                 identifier, watermark, logOffsets, commitMessages);
-    }
-
-    @Nullable
-    public String getDatabase() {
-        return database;
-    }
-
-    public void setDatabase(@Nullable String database) {
-        this.database = database;
-    }
-
-    @Nullable
-    public String getTable() {
-        return table;
-    }
-
-    public void setTable(@Nullable String table) {
-        this.table = table;
     }
 }
