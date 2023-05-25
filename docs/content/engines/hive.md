@@ -35,6 +35,7 @@ Paimon currently supports Hive 3.1, 2.3, 2.2, 2.1 and 2.1-cdh-6.3.
 ## Execution Engine
 
 Paimon currently supports MR and Tez execution engine for Hive Read, and MR execution engine for Hive Write. 
+Note beeline also does not support hive write.
 
 ## Installation
 
@@ -159,6 +160,7 @@ OK
 */
 
 -- Insert records into test table
+-- Note beeline and tez engine do not support hive write, only the hive engine is supported.
 
 INSERT INTO test_table VALUES (3, 'Paimon');
 
