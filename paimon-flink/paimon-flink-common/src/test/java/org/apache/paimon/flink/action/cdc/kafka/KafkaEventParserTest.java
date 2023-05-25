@@ -21,8 +21,10 @@ package org.apache.paimon.flink.action.cdc.kafka;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.kafka.canal.CanalJsonEventParser;
+import org.apache.paimon.flink.action.cdc.mysql.Expression;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -261,5 +263,42 @@ public class KafkaEventParserTest {
                         .map(record -> record.toGenericRow(dataFields).get())
                         .collect(Collectors.toList());
         assertThat(resultCaseSensitive).isEqualTo(expect);
+    }
+
+    @Test
+    public void testCanalJsonEventParserAndComputeColumn() {
+        boolean caseSensitive = false;
+        EventParser<String> parser =
+            new CanalJsonEventParser(caseSensitive, new TableNameConverter(caseSensitive),Collections.singletonList(new ComputedColumn("v1",
+                Expression.substring("v1","1"))));
+        parser.setRawEvent(CANAL_JSON_EVENT);
+        List<DataField> dataFields = new ArrayList<>();
+        dataFields.add(new DataField(0, "pt", DataTypes.INT()));
+        dataFields.add(new DataField(1, "_id", DataTypes.INT()));
+        dataFields.add(new DataField(2, "v1", DataTypes.VARCHAR(10)));
+        dataFields.add(new DataField(3, "_geometrycollection", DataTypes.STRING()));
+        dataFields.add(new DataField(4, "_set", DataTypes.ARRAY(DataTypes.STRING())));
+        dataFields.add(new DataField(5, "_enum", DataTypes.STRING()));
+        List<DataField> updatedDataFields = parser.getUpdatedDataFields().orElse(null);
+        assert updatedDataFields == null;
+        List<GenericRow> result =
+            parser.getRecords().stream()
+                .map(record -> record.toGenericRow(dataFields).get())
+                .collect(Collectors.toList());
+        BinaryString[] binaryStrings =
+            new BinaryString[] {BinaryString.fromString("a"), BinaryString.fromString("b")};
+        GenericArray genericArray = new GenericArray(binaryStrings);
+
+        List<GenericRow> expect =
+            Collections.singletonList(
+                GenericRow.of(
+                    1,
+                    1,
+                    BinaryString.fromString("ne"),
+                    BinaryString.fromString(
+                        "{\"geometries\":[{\"type\":\"Point\",\"coordinates\":[10,10]},{\"type\":\"Point\",\"coordinates\":[30,30]},{\"type\":\"LineString\",\"coordinates\":[[15,15],[20,20]]}],\"type\":\"GeometryCollection\",\"srid\":0}"),
+                    genericArray,
+                    BinaryString.fromString("value1")));
+        assertThat(result).isEqualTo(expect);
     }
 }
