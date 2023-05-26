@@ -53,10 +53,10 @@ import java.util.Map;
  * <p>Unversioned change list:
  *
  * <ul>
- *   <li>Since paimon 0.22 and paimon 0.3, commitIdentifier is changed from a String to a long
- *       value. For paimon < 0.22, only Flink connectors have paimon sink and they use checkpointId
- *       as commitIdentifier (which is a long value). Json can automatically perform type conversion
- *       so there is no compatibility issue.
+ *   <li>Since paimon 0.2 and paimon 0.3, commitIdentifier is changed from a String to a long value.
+ *       For paimon < 0.2, only Flink connectors have paimon sink and they use checkpointId as
+ *       commitIdentifier (which is a long value). Json can automatically perform type conversion so
+ *       there is no compatibility issue.
  * </ul>
  */
 public class Snapshot {

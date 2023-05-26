@@ -20,6 +20,7 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
@@ -43,7 +44,7 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             SortEngine sortEngine,
-            Comparator<InternalRow> valueComparator,
+            RecordEqualiser valueComparator,
             boolean changelogRowDeduplicate) {
         super(
                 readerFactory,
@@ -76,7 +77,7 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
     @Override
     protected MergeFunctionWrapper<ChangelogResult> createMergeWrapper(int outputLevel) {
         return new FullChangelogMergeFunctionWrapper(
-                mfFactory.create(), maxLevel, valueComparator, changelogRowDeduplicate);
+                mfFactory.create(), maxLevel, valueEqualiser, changelogRowDeduplicate);
     }
 
     @Override

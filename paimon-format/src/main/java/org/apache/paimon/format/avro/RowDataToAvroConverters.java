@@ -28,6 +28,8 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.avro.LogicalType;
+import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
@@ -142,7 +144,37 @@ public class RowDataToAvroConverters {
 
                             @Override
                             public Object convert(Schema schema, Object object) {
-                                return ((Timestamp) object).toInstant().toEpochMilli();
+                                LogicalType logicalType = schema.getLogicalType();
+
+                                if (logicalType instanceof LogicalTypes.TimestampMillis) {
+                                    return ((Timestamp) object).toInstant().toEpochMilli();
+                                } else if (logicalType instanceof LogicalTypes.TimestampMicros) {
+                                    return ((Timestamp) object).toMicros();
+                                } else {
+                                    throw new UnsupportedOperationException(
+                                            "Unsupported timestamp type: " + logicalType);
+                                }
+                            }
+                        };
+                break;
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                converter =
+                        new RowDataToAvroConverter() {
+                            private static final long serialVersionUID = 1L;
+
+                            @Override
+                            public Object convert(Schema schema, Object object) {
+                                LogicalType logicalType = schema.getLogicalType();
+
+                                if (logicalType instanceof LogicalTypes.LocalTimestampMillis) {
+                                    return ((Timestamp) object).toInstant().toEpochMilli();
+                                } else if (logicalType
+                                        instanceof LogicalTypes.LocalTimestampMicros) {
+                                    return ((Timestamp) object).toMicros();
+                                } else {
+                                    throw new UnsupportedOperationException(
+                                            "Unsupported timestamp type: " + logicalType);
+                                }
                             }
                         };
                 break;

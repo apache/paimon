@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
+import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
@@ -71,7 +72,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
     private final KeyValueFileWriterFactory.Builder writerFactoryBuilder;
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
-    private final Supplier<Comparator<InternalRow>> valueComparatorSupplier;
+    private final Supplier<RecordEqualiser> valueEqualiserSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final CoreOptions options;
     private final FileIO fileIO;
@@ -86,7 +87,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             RowType keyType,
             RowType valueType,
             Supplier<Comparator<InternalRow>> keyComparatorSupplier,
-            Supplier<Comparator<InternalRow>> valueComparatorSupplier,
+            Supplier<RecordEqualiser> valueEqualiserSupplier,
             MergeFunctionFactory<KeyValue> mfFactory,
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
@@ -117,7 +118,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         pathFactory,
                         options.targetFileSize());
         this.keyComparatorSupplier = keyComparatorSupplier;
-        this.valueComparatorSupplier = valueComparatorSupplier;
+        this.valueEqualiserSupplier = valueEqualiserSupplier;
         this.mfFactory = mfFactory;
         this.options = options;
     }
@@ -215,7 +216,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         keyComparator,
                         mfFactory,
                         options.sortEngine(),
-                        valueComparatorSupplier.get(),
+                        valueEqualiserSupplier.get(),
                         options.changelogRowDeduplicate());
             case LOOKUP:
                 LookupLevels lookupLevels = createLookupLevels(levels, readerFactory);
@@ -226,7 +227,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         keyComparator,
                         mfFactory,
                         options.sortEngine(),
-                        valueComparatorSupplier.get(),
+                        valueEqualiserSupplier.get(),
                         options.changelogRowDeduplicate());
             default:
                 return new MergeTreeCompactRewriter(

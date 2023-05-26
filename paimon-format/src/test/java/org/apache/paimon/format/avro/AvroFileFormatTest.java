@@ -23,7 +23,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -57,6 +56,11 @@ public class AvroFileFormatTest {
         dataFields.add(new DataField(index++, "timestamp_type", DataTypes.TIMESTAMP(3)));
         dataFields.add(new DataField(index++, "date_type", DataTypes.DATE()));
         dataFields.add(new DataField(index++, "decimal_type", DataTypes.DECIMAL(10, 3)));
+        dataFields.add(
+                new DataField(
+                        index++,
+                        "local_timestamp_type",
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3)));
 
         RowType rowType = new RowType(dataFields);
         fileFormat.validateDataFields(rowType);
@@ -80,16 +84,5 @@ public class AvroFileFormatTest {
 
         RowType rowType = new RowType(dataFields);
         fileFormat.validateDataFields(rowType);
-    }
-
-    @Test
-    public void testUnsupportedDataTypes() {
-        ArrayList<DataField> dataFields = new ArrayList<>();
-        int index = 0;
-        dataFields.add(new DataField(index++, "timestamp_type", DataTypes.TIMESTAMP(6)));
-
-        RowType rowType = new RowType(dataFields);
-        Assertions.assertThrows(
-                IllegalArgumentException.class, () -> fileFormat.validateDataFields(rowType));
     }
 }
