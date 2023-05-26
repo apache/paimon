@@ -33,7 +33,7 @@ import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.io.DataFileTestUtils.fromMinMax;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link AppendOnlySplitGenerator} and {@link MergeTreeSplitGenerator}. */
+/** Test for {@link RowDataSplitGenerator} and {@link MergeTreeSplitGenerator}. */
 public class SplitGeneratorTest {
 
     public static DataFileMeta newFileFromSequence(

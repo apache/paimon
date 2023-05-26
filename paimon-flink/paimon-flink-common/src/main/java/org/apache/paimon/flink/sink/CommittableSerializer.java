@@ -46,6 +46,7 @@ public class CommittableSerializer implements SimpleVersionedSerializer<Committa
         int version;
         switch (committable.kind()) {
             case FILE:
+            case COMPACTION_TASK:
                 version = commitMessageSerializer.getVersion();
                 wrapped =
                         commitMessageSerializer.serialize(
@@ -87,6 +88,9 @@ public class CommittableSerializer implements SimpleVersionedSerializer<Committa
                 break;
             case LOG_OFFSET:
                 wrappedCommittable = LogOffsetCommittable.fromBytes(wrapped);
+                break;
+            case COMPACTION_TASK:
+                wrappedCommittable = commitMessageSerializer.deserialize(version, wrapped);
                 break;
             default:
                 throw new UnsupportedOperationException("Unsupported kind: " + kind);

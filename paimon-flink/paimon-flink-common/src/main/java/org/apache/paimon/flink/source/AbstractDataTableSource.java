@@ -216,7 +216,10 @@ public abstract class AbstractDataTableSource extends FlinkTableSource
         Integer parallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);
         if (options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
             if (streaming) {
-                parallelism = options.get(CoreOptions.BUCKET);
+                int bucket = options.get(CoreOptions.BUCKET);
+                if (bucket != -1) {
+                    parallelism = bucket;
+                }
             } else {
                 scanSplitsForInference();
                 parallelism = splitStatistics.splitNumber();

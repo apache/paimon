@@ -15,6 +15,12 @@
             <td>When changelog-producer is set to LOOKUP, commit will wait for changelog generation by lookup.</td>
         </tr>
         <tr>
+            <td><h5>compaction.parallelism</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Defines a custom parallelism for batch table compaction. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration. This configuration only works for append only table with 'bucket' = '-1'.</td>
+        </tr>
+        <tr>
             <td><h5>log.system</h5></td>
             <td style="word-wrap: break-word;">"none"</td>
             <td>String</td>

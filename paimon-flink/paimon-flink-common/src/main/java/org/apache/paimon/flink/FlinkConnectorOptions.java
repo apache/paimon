@@ -86,6 +86,16 @@ public class FlinkConnectorOptions {
                                     + "for each statement individually by also considering the global configuration. "
                                     + "If user enable the scan.infer-parallelism, the planner will derive the parallelism by inferred parallelism.");
 
+    public static final ConfigOption<Integer> COMPACTION_PARALLELISM =
+            ConfigOptions.key("compaction.parallelism")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Defines a custom parallelism for batch table compaction. "
+                                    + "By default, if this option is not defined, the planner will derive the parallelism "
+                                    + "for each statement individually by also considering the global configuration. "
+                                    + "This configuration only works for append only table with 'bucket' = '-1'.");
+
     public static final ConfigOption<Boolean> INFER_SCAN_PARALLELISM =
             ConfigOptions.key("scan.infer-parallelism")
                     .booleanType()

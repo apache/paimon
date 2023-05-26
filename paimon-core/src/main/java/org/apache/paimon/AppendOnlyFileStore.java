@@ -85,7 +85,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 options);
     }
 
-    private AppendOnlyFileStoreScan newScan(boolean forWrite) {
+    protected AppendOnlyFileStoreScan newScan(boolean forWrite) {
         return new AppendOnlyFileStoreScan(
                 partitionType,
                 bucketKeyType.getFieldCount() == 0 ? rowType : bucketKeyType,

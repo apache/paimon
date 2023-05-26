@@ -152,6 +152,81 @@ public abstract class FlinkSink<T> implements Serializable {
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
+    public DataStreamSink<?> sinkFromForBatch(
+            DataStream<T> input, Integer parallelism, Integer compactionParallelism) {
+        // This commitUser is valid only for new jobs.
+        // After the job starts, this commitUser will be recorded into the states of write and
+        // commit operators.
+        // When the job restarts, commitUser will be recovered from states and this value is
+        // ignored.
+        String initialCommitUser = UUID.randomUUID().toString();
+        return sinkFromForBatch(
+                input,
+                initialCommitUser,
+                createWriteProvider(input.getExecutionEnvironment().getCheckpointConfig()),
+                parallelism,
+                compactionParallelism);
+    }
+
+    public DataStreamSink<?> sinkFromForBatch(
+            DataStream<T> input,
+            String commitUser,
+            StoreSinkWrite.Provider sinkProvider,
+            Integer parallelism,
+            Integer compactionParallelism) {
+        StreamExecutionEnvironment env = input.getExecutionEnvironment();
+        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        CheckpointConfig checkpointConfig = env.getCheckpointConfig();
+
+        boolean isStreaming =
+                conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
+        boolean streamingCheckpointEnabled =
+                isStreaming && checkpointConfig.isCheckpointingEnabled();
+        if (streamingCheckpointEnabled) {
+            assertCheckpointConfiguration(env);
+        }
+
+        CommittableTypeInfo typeInfo = new CommittableTypeInfo();
+        SingleOutputStreamOperator<Committable> written =
+                input.transform(
+                        WRITER_NAME + " -> " + table.name(),
+                        typeInfo,
+                        createWriteOperator(sinkProvider, isStreaming, commitUser));
+        if (parallelism != null) {
+            written.setParallelism(parallelism);
+        }
+
+        SingleOutputStreamOperator<Committable> compactionTaskAssigned =
+                written.transform(
+                                "Compaction Coordinator For: " + table.name(),
+                                typeInfo,
+                                new AppendOnlyTableCompactionCoordinatorOperator(table))
+                        .setParallelism(1);
+
+        SingleOutputStreamOperator<Committable> compacted =
+                compactionTaskAssigned.transform(
+                        "Compaction Workers For: " + table.name(),
+                        typeInfo,
+                        new AppendOnlyTableCompactionWorkerOperator(table));
+        if (compactionParallelism != null) {
+            compacted.setParallelism(compactionParallelism);
+        }
+
+        SingleOutputStreamOperator<?> committed =
+                compacted
+                        .transform(
+                                GLOBAL_COMMITTER_NAME + " -> " + table.name(),
+                                typeInfo,
+                                new CommitterOperator(
+                                        streamingCheckpointEnabled,
+                                        commitUser,
+                                        createCommitterFactory(streamingCheckpointEnabled),
+                                        createCommittableStateManager()))
+                        .setParallelism(1)
+                        .setMaxParallelism(1);
+        return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
+    }
+
     private void assertCheckpointConfiguration(StreamExecutionEnvironment env) {
         Preconditions.checkArgument(
                 !env.getCheckpointConfig().isUnalignedCheckpointsEnabled(),

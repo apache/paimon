@@ -110,4 +110,17 @@ public class SparkWriteITCase {
         List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
         assertThat(rows.toString()).isEqualTo("[[2,22,222]]");
     }
+
+    @Test
+    public void testNonnull() {
+        spark.sql(
+                "CREATE TABLE T (a INT NOT NULL, b INT, c STRING) TBLPROPERTIES"
+                        + " ('primary-key'='a', 'file.format'='avro')");
+        spark.sql(
+                "CREATE TABLE T2 (a INT, b INT, c STRING) TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+        spark.table("T").printSchema();
+        spark.sql("INSERT INTO T2 VALUES (1, 11, '111'), (null, 22, '222')").collectAsList();
+        spark.sql("INSERT INTO T SELECT nvl(a, 1), b, c FROM T2");
+    }
 }

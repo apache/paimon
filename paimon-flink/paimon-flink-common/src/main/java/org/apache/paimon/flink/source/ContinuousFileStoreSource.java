@@ -67,6 +67,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
             splits = checkpoint.splits();
         }
         CoreOptions coreOptions = CoreOptions.fromMap(options);
+        boolean unorderSplit = coreOptions.bucket() == -1;
         StreamTableScan scan = readBuilder.newStreamScan();
         scan.restore(nextSnapshotId);
         return new ContinuousFileSplitEnumerator(
@@ -77,7 +78,8 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 coreOptions
                         .toConfiguration()
                         .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
-                scan);
+                scan,
+                unorderSplit);
     }
 
     @Override

@@ -71,13 +71,16 @@ public class ContinuousFileSplitEnumerator
 
     private boolean finished = false;
 
+    private boolean unorderSplit;
+
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> remainSplits,
             @Nullable Long nextSnapshotId,
             long discoveryInterval,
             int splitBatchSize,
-            StreamTableScan scan) {
+            StreamTableScan scan,
+            boolean unorderSplit) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.bucketSplits = new HashMap<>();
@@ -88,6 +91,7 @@ public class ContinuousFileSplitEnumerator
         this.readersAwaitingSplit = new HashSet<>();
         this.splitGenerator = new FileStoreSourceSplitGenerator();
         this.scan = scan;
+        this.unorderSplit = unorderSplit;
     }
 
     private void addSplits(Collection<FileStoreSourceSplit> splits) {
@@ -179,7 +183,12 @@ public class ContinuousFileSplitEnumerator
     }
 
     private void assignSplits() {
-        Map<Integer, List<FileStoreSourceSplit>> assignment = createAssignment();
+        Map<Integer, List<FileStoreSourceSplit>> assignment;
+        if (unorderSplit) {
+            assignment = assignUnordered();
+        } else {
+            assignment = createAssignment();
+        }
         if (finished) {
             Iterator<Integer> iterator = readersAwaitingSplit.iterator();
             while (iterator.hasNext()) {
@@ -218,6 +227,39 @@ public class ContinuousFileSplitEnumerator
                         }
                     }
                 });
+        return assignment;
+    }
+
+    private Map<Integer, List<FileStoreSourceSplit>> assignUnordered() {
+        Map<Integer, List<FileStoreSourceSplit>> assignment = new HashMap<>();
+        ArrayList<Integer> readersId = new ArrayList<>(readersAwaitingSplit);
+        int splitCount = 0;
+
+        for (LinkedList<FileStoreSourceSplit> splits : bucketSplits.values()) {
+            //  we assign all the split until no spare split or no available reader
+            while (splits.size() > 0 && readersId.size() > 0) {
+                int index = splitCount % readersId.size();
+                int subTask = readersId.get(index);
+                // if the reader that requested another split has failed in the
+                // meantime, remove
+                // it from the list of waiting readers
+                if (!context.registeredReaders().containsKey(subTask)) {
+                    readersAwaitingSplit.remove(subTask);
+                    readersId.remove(index);
+                    continue;
+                }
+                List<FileStoreSourceSplit> taskAssignment =
+                        assignment.computeIfAbsent(subTask, i -> new ArrayList<>());
+                if (taskAssignment.size() < splitBatchSize) {
+                    taskAssignment.add(splits.poll());
+                } else {
+                    // this task reader is full of batch, we remove it from readers list
+                    readersId.remove(index);
+                    continue;
+                }
+                splitCount++;
+            }
+        }
         return assignment;
     }
 }

@@ -60,7 +60,9 @@ public class Committable {
     enum Kind {
         FILE((byte) 0),
 
-        LOG_OFFSET((byte) 1);
+        LOG_OFFSET((byte) 1),
+
+        COMPACTION_TASK((byte) 2);
 
         private final byte value;
 
@@ -78,6 +80,8 @@ public class Committable {
                     return FILE;
                 case 1:
                     return LOG_OFFSET;
+                case 2:
+                    return COMPACTION_TASK;
                 default:
                     throw new UnsupportedOperationException(
                             "Unsupported byte value '" + value + "' for value kind.");

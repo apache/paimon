@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -42,6 +43,7 @@ public class FlinkSinkBuilder {
     @Nullable private Map<String, String> overwritePartition;
     @Nullable private LogSinkFunction logSinkFunction;
     @Nullable private Integer parallelism;
+    @Nullable private Integer compactionParallelism;
     @Nullable private String commitUser;
     @Nullable private StoreSinkWrite.Provider sinkProvider;
 
@@ -74,6 +76,11 @@ public class FlinkSinkBuilder {
         return this;
     }
 
+    public FlinkSinkBuilder withCompactionParallelism(@Nullable Integer compactionParallelism) {
+        this.compactionParallelism = compactionParallelism;
+        return this;
+    }
+
     @VisibleForTesting
     public FlinkSinkBuilder withSinkProvider(
             String commitUser, StoreSinkWrite.Provider sinkProvider) {
@@ -83,6 +90,9 @@ public class FlinkSinkBuilder {
     }
 
     public DataStreamSink<?> build() {
+        if (table instanceof AppendOnlyFileStoreTable && table.coreOptions().bucket() == -1) {
+            return buildBatch();
+        }
         BucketingStreamPartitioner<RowData> partitioner =
                 new BucketingStreamPartitioner<>(
                         new RowDataChannelComputer(table.schema(), logSinkFunction != null));
@@ -98,5 +108,14 @@ public class FlinkSinkBuilder {
         return commitUser != null && sinkProvider != null
                 ? sink.sinkFrom(new DataStream<>(env, partitioned), commitUser, sinkProvider)
                 : sink.sinkFrom(new DataStream<>(env, partitioned));
+    }
+
+    public DataStreamSink<?> buildBatch() {
+        FileStoreSink sink =
+                new FileStoreSink(table, lockFactory, overwritePartition, logSinkFunction);
+        return commitUser != null && sinkProvider != null
+                ? sink.sinkFromForBatch(
+                        input, commitUser, sinkProvider, parallelism, compactionParallelism)
+                : sink.sinkFromForBatch(input, parallelism, compactionParallelism);
     }
 }
