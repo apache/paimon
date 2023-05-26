@@ -20,27 +20,25 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.GeneratedClass;
-import org.apache.paimon.codegen.RecordComparator;
-import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.types.RowType;
 
-import java.util.Comparator;
 import java.util.function.Supplier;
 
-/** A {@link Supplier} that returns the comparator for the file store value. */
-public class ValueComparatorSupplier implements SerializableSupplier<Comparator<InternalRow>> {
+/** A {@link Supplier} that returns the equaliser for the file store value. */
+public class ValueEqualiserSupplier implements SerializableSupplier<RecordEqualiser> {
 
     private static final long serialVersionUID = 1L;
 
-    private final GeneratedClass<RecordComparator> genRecordComparator;
+    private final GeneratedClass<RecordEqualiser> genRecordEqualiser;
 
-    public ValueComparatorSupplier(RowType keyType) {
-        genRecordComparator =
-                CodeGenUtils.generateRecordComparator(keyType.getFieldTypes(), "valueComparator");
+    public ValueEqualiserSupplier(RowType keyType) {
+        genRecordEqualiser =
+                CodeGenUtils.generateRecordEqualiser(keyType.getFieldTypes(), "valueEqualiser");
     }
 
     @Override
-    public RecordComparator get() {
-        return genRecordComparator.newInstance(ValueComparatorSupplier.class.getClassLoader());
+    public RecordEqualiser get() {
+        return genRecordEqualiser.newInstance(ValueEqualiserSupplier.class.getClassLoader());
     }
 }

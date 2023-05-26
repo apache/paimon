@@ -18,6 +18,7 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
@@ -30,7 +31,7 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
-import org.apache.paimon.utils.ValueComparatorSupplier;
+import org.apache.paimon.utils.ValueEqualiserSupplier;
 
 import java.util.Comparator;
 import java.util.function.Supplier;
@@ -45,7 +46,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final RowType valueType;
     private final KeyValueFieldsExtractor keyValueFieldsExtractor;
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
-    private final Supplier<Comparator<InternalRow>> valueComparatorSupplier;
+    private final Supplier<RecordEqualiser> valueEqualiserSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
 
     public KeyValueFileStore(
@@ -66,7 +67,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         this.keyValueFieldsExtractor = keyValueFieldsExtractor;
         this.mfFactory = mfFactory;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
-        this.valueComparatorSupplier = new ValueComparatorSupplier(valueType);
+        this.valueEqualiserSupplier = new ValueEqualiserSupplier(valueType);
     }
 
     @Override
@@ -104,7 +105,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 keyType,
                 valueType,
                 keyComparatorSupplier,
-                valueComparatorSupplier,
+                valueEqualiserSupplier,
                 mfFactory,
                 pathFactory(),
                 snapshotManager(),

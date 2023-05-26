@@ -19,11 +19,9 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
-import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Preconditions;
-
-import java.util.Comparator;
 
 /**
  * Wrapper for {@link MergeFunction}s to produce changelog during a full compaction.
@@ -41,7 +39,7 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
 
     private final MergeFunction<KeyValue> mergeFunction;
     private final int maxLevel;
-    private final Comparator<InternalRow> valueComparator;
+    private final RecordEqualiser valueEqualiser;
     private final boolean changelogRowDeduplicate;
 
     // only full compaction will write files into maxLevel, see UniversalCompaction class
@@ -56,7 +54,7 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
     public FullChangelogMergeFunctionWrapper(
             MergeFunction<KeyValue> mergeFunction,
             int maxLevel,
-            Comparator<InternalRow> valueComparator,
+            RecordEqualiser valueEqualiser,
             boolean changelogRowDeduplicate) {
         Preconditions.checkArgument(
                 !(mergeFunction instanceof ValueCountMergeFunction),
@@ -64,7 +62,7 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
                         + "Please set changelog producer to 'input'.");
         this.mergeFunction = mergeFunction;
         this.maxLevel = maxLevel;
-        this.valueComparator = valueComparator;
+        this.valueEqualiser = valueEqualiser;
         this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
 
@@ -113,7 +111,7 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
                 if (merged == null || !isAdd(merged)) {
                     reusedResult.addChangelog(replace(reusedBefore, RowKind.DELETE, topLevelKv));
                 } else if (!changelogRowDeduplicate
-                        || valueComparator.compare(topLevelKv.value(), merged.value()) != 0) {
+                        || !valueEqualiser.equals(topLevelKv.value(), merged.value())) {
                     reusedResult
                             .addChangelog(replace(reusedBefore, RowKind.UPDATE_BEFORE, topLevelKv))
                             .addChangelog(replace(reusedAfter, RowKind.UPDATE_AFTER, merged));
