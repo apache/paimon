@@ -38,6 +38,8 @@ import com.ververica.cdc.debezium.table.DebeziumOptions;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -53,6 +55,8 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 class MySqlActionUtils {
+
+    private static final Logger LOG = LoggerFactory.getLogger(MySqlActionUtils.class);
 
     static Connection getConnection(Configuration mySqlConfig) throws Exception {
         return DriverManager.getConnection(
@@ -79,11 +83,17 @@ class MySqlActionUtils {
         for (DataField field : mySqlSchema.fields()) {
             int idx = paimonSchema.fieldNames().indexOf(field.name());
             if (idx < 0) {
+                LOG.info("Cannot find field '{}' in Paimon table.", field.name());
                 return false;
             }
             DataType type = paimonSchema.fields().get(idx).type();
             if (UpdatedDataFieldsProcessFunction.canConvert(field.type(), type)
                     != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
+                LOG.info(
+                        "Cannot convert field '{}' from MySQL type '{}' to Paimon type '{}'.",
+                        field.name(),
+                        field.type(),
+                        type);
                 return false;
             }
         }
