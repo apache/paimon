@@ -170,6 +170,6 @@ public class CompactAction extends TableActionBase {
     public void run() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         build(env);
-        env.execute("Compact job");
+        execute(env, "Compact job");
     }
 }

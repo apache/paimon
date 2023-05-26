@@ -433,6 +433,6 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     public void run() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         build(env);
-        env.execute(String.format("MySQL-Paimon Database Sync: %s", database));
+        execute(env, String.format("MySQL-Paimon Database Sync: %s", database));
     }
 }
