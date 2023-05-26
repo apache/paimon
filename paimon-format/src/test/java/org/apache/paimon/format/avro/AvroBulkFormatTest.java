@@ -21,6 +21,7 @@ package org.apache.paimon.format.avro;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.reader.RecordReader;
@@ -49,35 +50,63 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for {@link AbstractAvroBulkFormat}. */
 class AvroBulkFormatTest {
 
+    private static final long TIMESTAMP = System.currentTimeMillis();
+
     private static final List<InternalRow> TEST_DATA =
             Arrays.asList(
                     // -------- batch 0, block start 232 --------
                     GenericRow.of(
                             BinaryString.fromString("AvroBulk"),
-                            BinaryString.fromString("FormatTest")),
+                            BinaryString.fromString("FormatTest"),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123)),
                     GenericRow.of(
-                            BinaryString.fromString("Apache"), BinaryString.fromString("Paimon")),
+                            BinaryString.fromString("Apache"),
+                            BinaryString.fromString("Paimon"),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123)),
                     GenericRow.of(
                             BinaryString.fromString(
                                     "永和九年，岁在癸丑，暮春之初，会于会稽山阴之兰亭，修禊事也。群贤毕至，少"
                                             + "长咸集。此地有崇山峻岭，茂林修竹，又有清流激湍，映带左右。引"
                                             + "以为流觞曲水，列坐其次。虽无丝竹管弦之盛，一觞一咏，亦足以畅"
                                             + "叙幽情。"),
-                            BinaryString.fromString("")),
-                    // -------- batch 1, block start 593 --------
+                            BinaryString.fromString(""),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123)),
+                    // -------- batch 1, block start 689 --------
                     GenericRow.of(
-                            BinaryString.fromString("File"), BinaryString.fromString("Format")),
+                            BinaryString.fromString("File"),
+                            BinaryString.fromString("Format"),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123)),
                     GenericRow.of(
                             null,
                             BinaryString.fromString(
-                                    "This is a string with English, 中文 and even 🍎🍌🍑🥝🍍🥭🍐")),
-                    // -------- batch 2, block start 705 --------
+                                    "This is a string with English, 中文 and even 🍎🍌🍑🥝🍍🥭🍐"),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123)),
+                    // -------- batch 2, block start 1147 --------
                     GenericRow.of(
                             BinaryString.fromString("block with"),
-                            BinaryString.fromString("only one record"))
-                    // -------- file length 752 --------
+                            BinaryString.fromString("only one record"),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123),
+                            Timestamp.fromEpochMillis(TIMESTAMP),
+                            Timestamp.fromMicros(TIMESTAMP * 1000 + 123))
+                    // -------- file length 1323 --------
                     );
-    private static final List<Long> BLOCK_STARTS = Arrays.asList(233L, 595L, 707L);
+    private static final List<Long> BLOCK_STARTS = Arrays.asList(689L, 1147L, 1323L);
 
     private File tmpFile;
 
