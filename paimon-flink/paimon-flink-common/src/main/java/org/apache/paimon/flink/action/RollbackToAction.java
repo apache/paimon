@@ -30,7 +30,7 @@ import java.util.Optional;
 import static org.apache.paimon.flink.action.Action.getTablePath;
 
 /** Rollback to specific snapshot action for Flink. */
-public class RollbackToAction extends ActionBase {
+public class RollbackToAction extends TableActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(RollbackToAction.class);
 
