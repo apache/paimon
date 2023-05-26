@@ -109,7 +109,7 @@ public class MySqlSyncDatabaseAction implements Action {
     private final Map<String, String> catalogConfig;
     private final Map<String, String> tableConfig;
 
-    MySqlSyncDatabaseAction(
+    public MySqlSyncDatabaseAction(
             Map<String, String> mySqlConfig,
             String warehouse,
             String database,
@@ -129,7 +129,7 @@ public class MySqlSyncDatabaseAction implements Action {
                 tableConfig);
     }
 
-    MySqlSyncDatabaseAction(
+    public MySqlSyncDatabaseAction(
             Map<String, String> mySqlConfig,
             String warehouse,
             String database,
