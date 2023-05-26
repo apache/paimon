@@ -73,11 +73,11 @@ public class AppendOnlyTableCompactionCoordinator {
         }
 
         if (snapshotId == null) {
-            snapshotId = latestSnapshotId;
             updateFull();
         } else {
             updateDelta(latestSnapshotId);
         }
+        snapshotId = latestSnapshotId;
     }
 
     private void updateFull() {
