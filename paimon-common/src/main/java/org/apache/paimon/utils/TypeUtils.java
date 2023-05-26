@@ -106,8 +106,14 @@ public class TypeUtils {
                 if (d == ((float) d)) {
                     return (float) d;
                 } else {
-                    throw new NumberFormatException(
-                            s + " cannot be cast to float due to precision loss");
+                    // Compatible canal-cdc
+                    Float f = Float.valueOf(s);
+                    if (f.toString().length() != s.length()) {
+                        throw new NumberFormatException(
+                                s + " cannot be cast to float due to precision loss");
+                    } else {
+                        return f;
+                    }
                 }
             case DOUBLE:
                 return Double.valueOf(s);
