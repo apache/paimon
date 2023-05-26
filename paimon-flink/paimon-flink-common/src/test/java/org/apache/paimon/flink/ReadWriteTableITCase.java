@@ -1218,6 +1218,22 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                         })))
                 .isEqualTo(3);
 
+        // with illegal scan.parallelism, respect illegal scan.parallelism
+        assertThatThrownBy(
+                        () ->
+                                sourceParallelism(
+                                        buildQueryWithTableOptions(
+                                                table,
+                                                "*",
+                                                "",
+                                                new HashMap<String, String>() {
+                                                    {
+                                                        put(INFER_SCAN_PARALLELISM.key(), "true");
+                                                        put(SCAN_PARALLELISM.key(), "-2");
+                                                    }
+                                                })))
+                .hasMessageContaining("The parallelism of an operator must be at least 1");
+
         // 2 splits, the parallelism is splits num: 2
         insertInto(table, "('Euro', 119)");
         insertInto(table, "('US Dollar', 102)");
