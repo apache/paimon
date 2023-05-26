@@ -147,7 +147,7 @@ public class KafkaEventParserTest {
         parser.setRawEvent(CANAL_JSON_EVENT);
         List<DataField> expectDataFields = new ArrayList<>();
         expectDataFields.add(new DataField(0, "pt", DataTypes.INT()));
-        expectDataFields.add(new DataField(1, "_ID", DataTypes.INT()));
+        expectDataFields.add(new DataField(1, "_id", DataTypes.INT()));
         expectDataFields.add(new DataField(2, "v1", DataTypes.VARCHAR(10)));
         expectDataFields.add(new DataField(3, "_geometrycollection", DataTypes.STRING()));
         expectDataFields.add(new DataField(4, "_set", DataTypes.ARRAY(DataTypes.STRING())));

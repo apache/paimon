@@ -158,7 +158,11 @@ public class CanalJsonEventParser implements EventParser<String> {
         List<DataField> result = new ArrayList<>();
         int id = 0;
         for (Map.Entry<String, DataType> fieldType : paimonFieldTypes.entrySet()) {
-            result.add(new DataField(id++, fieldType.getKey(), fieldType.getValue()));
+            result.add(
+                    new DataField(
+                            id++,
+                            caseSensitive ? fieldType.getKey() : fieldType.getKey().toLowerCase(),
+                            fieldType.getValue()));
         }
         SQLStatement sqlStatement = SQLUtils.parseSingleStatement(sql, DbType.mysql);
         if (sqlStatement instanceof SQLAlterTableStatement) {
