@@ -16,17 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.memory;
+package org.apache.paimon.flink.memory;
 
-/** MemorySegment pool from heap. */
-public class HeapMemorySegmentPool extends AbstractMemorySegmentPool {
+import org.apache.paimon.memory.AbstractMemorySegmentPool;
+import org.apache.paimon.memory.MemorySegment;
 
-    public HeapMemorySegmentPool(long maxMemory, int pageSize) {
+/**
+ * Flink memory segment pool allocates segment from flink managed memory for paimon writer buffer.
+ */
+public class FlinkMemorySegmentPool extends AbstractMemorySegmentPool {
+    private final MemorySegmentAllocator allocator;
+
+    public FlinkMemorySegmentPool(long maxMemory, int pageSize, MemorySegmentAllocator allocator) {
         super(maxMemory, pageSize);
+        this.allocator = allocator;
     }
 
     @Override
     protected MemorySegment allocateMemory() {
-        return MemorySegment.allocateHeapMemory(pageSize);
+        return allocator.allocate();
     }
 }

@@ -95,7 +95,8 @@ public class CdcRecordStoreWriteOperator extends PrepareCommitOperator<CdcRecord
                         table,
                         commitUser,
                         state,
-                        getContainingTask().getEnvironment().getIOManager());
+                        getContainingTask().getEnvironment().getIOManager(),
+                        memoryPool);
     }
 
     @Override

@@ -93,7 +93,8 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
                         table,
                         commitUser,
                         state,
-                        getContainingTask().getEnvironment().getIOManager());
+                        getContainingTask().getEnvironment().getIOManager(),
+                        memoryPool);
     }
 
     @Override

@@ -122,7 +122,8 @@ public class CdcRecordStoreMultiWriteOperator
                                         table,
                                         commitUser,
                                         state,
-                                        getContainingTask().getEnvironment().getIOManager()));
+                                        getContainingTask().getEnvironment().getIOManager(),
+                                        memoryPool));
 
         Optional<GenericRow> optionalConverted = record.toGenericRow(table.schema().fields());
         if (!optionalConverted.isPresent()) {

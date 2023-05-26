@@ -18,11 +18,15 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.memory.MemorySegmentPool;
+
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
@@ -31,6 +35,7 @@ import java.util.List;
 public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOperator<OUT>
         implements OneInputStreamOperator<IN, OUT>, BoundedOneInput {
 
+    @Nullable protected transient MemorySegmentPool memoryPool;
     private boolean endOfInput = false;
 
     public PrepareCommitOperator() {
