@@ -670,6 +670,46 @@ public class KafkaCanalSyncTableActionITCase extends KafkaCanalActionITCaseBase 
         assertThat(e).hasMessage("This format: ogg-json is not support.");
     }
 
+    @Test
+    @Timeout(60)
+    public void testKafkaNoNonDdlData() throws Exception {
+        final String topic = "no_non_ddl_data";
+        createTestTopic(topic, 1, 1);
+        // ---------- Write the Canal json into Kafka -------------------
+        List<String> lines = readLines("kafka.canal/table/nononddldata/canal-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", topic);
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        KafkaSyncTableAction action =
+                new KafkaSyncTableAction(
+                        kafkaConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "_id"),
+                        Collections.EMPTY_LIST,
+                        Collections.emptyMap(),
+                        tableConfig);
+        Exception e = assertThrows(Exception.class, () -> action.build(env), "Expecting Exception");
+        assertThat(e).hasMessage("Could not get metadata from server,topic :no_non_ddl_data");
+    }
+
     private FileStoreTable getFileStoreTable() throws Exception {
         Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
         Identifier identifier = Identifier.create(database, tableName);

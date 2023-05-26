@@ -19,17 +19,14 @@
 package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
+import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.kafka.canal.CanalJsonEventParser;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncTableSinkBuilder;
-import org.apache.paimon.options.CatalogOptions;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -84,10 +81,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *       are supported. Other type changes will cause exceptions.
  * </ul>
  */
-public class KafkaSyncTableAction implements Action {
+public class KafkaSyncTableAction extends ActionBase {
 
     private final Configuration kafkaConfig;
-    private final String warehouse;
     private final String database;
     private final String table;
     private final List<String> partitionKeys;
@@ -95,7 +91,6 @@ public class KafkaSyncTableAction implements Action {
 
     private final List<String> computedColumnArgs;
 
-    Map<String, String> catalogConfig;
     private final Map<String, String> paimonConfig;
 
     KafkaSyncTableAction(
@@ -129,14 +124,13 @@ public class KafkaSyncTableAction implements Action {
             List<String> computedColumnArgs,
             Map<String, String> catalogConfig,
             Map<String, String> paimonConfig) {
+        super(warehouse, catalogConfig);
         this.kafkaConfig = Configuration.fromMap(kafkaConfig);
-        this.warehouse = warehouse;
         this.database = database;
         this.table = table;
         this.partitionKeys = partitionKeys;
         this.primaryKeys = primaryKeys;
         this.computedColumnArgs = computedColumnArgs;
-        this.catalogConfig = catalogConfig;
         this.paimonConfig = paimonConfig;
     }
 
@@ -148,10 +142,6 @@ public class KafkaSyncTableAction implements Action {
         String topic = kafkaConfig.get(KafkaConnectorOptions.TOPIC).get(0);
         KafkaSchema kafkaSchema = new KafkaSchema(kafkaConfig, topic);
 
-        Catalog catalog =
-                CatalogFactory.createCatalog(
-                        CatalogContext.create(
-                                new Options().set(CatalogOptions.WAREHOUSE, warehouse)));
         catalog.createDatabase(database, true);
         boolean caseSensitive = catalog.caseSensitive();
 

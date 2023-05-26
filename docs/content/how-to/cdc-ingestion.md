@@ -51,7 +51,6 @@ To use this feature through `flink run`, run the following shell command.
     --table <table-name> \
     [--partition-keys <partition-keys>] \
     [--primary-keys <primary-keys>] \
-    [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
     [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
@@ -203,8 +202,7 @@ To use this feature through `flink run`, run the following shell command.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     kafka-sync-table
     --warehouse <warehouse-path> \
     --database <database-name> \
@@ -217,14 +215,7 @@ To use this feature through `flink run`, run the following shell command.
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
 ```
 
-* `--warehouse` is the path to Paimon warehouse.
-* `--database` is the database name in Paimon catalog.
-* `--table` is the Paimon table name.
-* `--partition-keys` are the partition keys for Paimon table. If there are multiple partition keys, connect them with comma, for example `dt,hh,mm`.
-* `--primary-keys` are the primary keys for Paimon table. If there are multiple primary keys, connect them with comma, for example `buyer_id,seller_id`.
-* `--kafka-conf` is the configuration for Flink Kafka sources. Each configuration should be specified in the format `key=value`. `properties.bootstrap.servers`, `topic`, `properties.group.id`,  and `value.format` are required configurations, others are optional. See its [document](https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/kafka/#%e8%bf%9e%e6%8e%a5%e5%99%a8%e5%8f%82%e6%95%b0) for a complete list of configurations.
-* `--catalog-conf` is the configuration for Paimon catalog. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of catalog configurations.
-* `--table-conf` is the configuration for Paimon table sink. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of table configurations.
+{{< generated/kafka_sync_table >}}
 
 If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from all specified Kafka topic's tables,it gets the earliest non-DDL data parsing schema from topic. If the Paimon table already exists, its schema will be compared against the schema of all specified Kafka topic's tables.
 
@@ -245,8 +236,7 @@ Example
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    -c org.apache.paimon.flink.action.FlinkActions \
-    /path/to/paimon-flink-**-{{< version >}}.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     kafka-sync-table \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
@@ -266,11 +256,6 @@ Example
 ```
 
 ## Computed Functions
-* `--computed-column` are the definitions of computed columns. The argument field is from Kafka topic's table field name. Supported expressions are:
-  * year(date-column): Extract year from a DATE, DATETIME or TIMESTAMP. Output is an INT value represent the year.
-  * substring(column,beginInclusive): Get column.substring(beginInclusive). Output is a STRING.
-  * substring(column,beginInclusive,endExclusive): Get column.substring(beginInclusive,endExclusive). Output is a STRING.
-  * truncate(column,width): truncate column by width. Output type is same with column.
-    * If the column is a STRING, truncate(column,width) will truncate the string to width characters, namely `value.substring(0, width)`.
-    * If the column is an INT or LONG, truncate(column,width) will truncate the number with the algorithm `v - (((v % W) + W) % W)`. The `redundant` compute part is to keep the result always positive.
-    * If the column is a DECIMAL, truncate(column,width) will truncate the decimal with the algorithm: let `scaled_W = decimal(W, scale(v))`, then return `v - (v % scaled_W)`.
+`--computed-column` are the definitions of computed columns. The argument field is from Kafka topic's table field name. Supported expressions are:
+
+{{< generated/compute_column >}}

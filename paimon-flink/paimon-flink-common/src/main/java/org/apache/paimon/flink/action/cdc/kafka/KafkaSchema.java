@@ -47,19 +47,20 @@ import java.util.UUID;
 /** Utility class to load canal kafka schema. */
 public class KafkaSchema {
 
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final int MAX_RETRY = 10;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private String databaseName;
     private String tableName;
     private final Map<String, DataType> fields;
     private final List<String> primaryKeys;
-    private static final int RETRY = Integer.MAX_VALUE;
 
     public KafkaSchema(Configuration kafkaConfig, String topic) throws Exception {
 
         fields = new LinkedHashMap<>();
         primaryKeys = new ArrayList<>();
-        KafkaConsumer<String, String> consumer = getKafkaConsumer(kafkaConfig);
+        KafkaConsumer<String, String> consumer = getKafkaEarliestConsumer(kafkaConfig);
 
         consumer.subscribe(Collections.singletonList(topic));
 
@@ -71,18 +72,19 @@ public class KafkaSchema {
                 try {
                     String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
                     if ("canal-json".equals(format)) {
-                        parseCanalJson(record.value());
+                        success = parseCanalJson(record.value());
+                        if (success) {
+                            break;
+                        }
                     } else {
                         throw new UnsupportedOperationException(
                                 "This format: " + format + " is not support.");
                     }
-                    success = true;
-                    break;
                 } catch (JsonProcessingException e) {
                     throw new RuntimeException(e);
                 }
             }
-            if (!success && retry == RETRY) {
+            if (!success && retry == MAX_RETRY) {
                 throw new Exception("Could not get metadata from server,topic :" + topic);
             }
             Thread.sleep(1000);
@@ -106,7 +108,8 @@ public class KafkaSchema {
         return primaryKeys;
     }
 
-    static KafkaConsumer<String, String> getKafkaConsumer(Configuration kafkaConfig) {
+    private static KafkaConsumer<String, String> getKafkaEarliestConsumer(
+            Configuration kafkaConfig) {
         Properties props = new Properties();
         props.put(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
@@ -121,7 +124,7 @@ public class KafkaSchema {
         return consumer;
     }
 
-    static Boolean extractIsDDL(JsonNode record) {
+    private static Boolean extractIsDDL(JsonNode record) {
         return Boolean.valueOf(extractJsonNode(record, "isDdl"));
     }
 
@@ -129,7 +132,7 @@ public class KafkaSchema {
         return record != null && record.get(key) != null ? record.get(key).asText() : null;
     }
 
-    private void parseCanalJson(String record) throws JsonProcessingException {
+    private boolean parseCanalJson(String record) throws JsonProcessingException {
         JsonNode root = objectMapper.readValue(record, JsonNode.class);
         if (!extractIsDDL(root)) {
             JsonNode mysqlType = root.get("mysqlType");
@@ -148,6 +151,8 @@ public class KafkaSchema {
             }
             databaseName = extractJsonNode(root, "database");
             tableName = extractJsonNode(root, "table");
+            return true;
         }
+        return false;
     }
 }
