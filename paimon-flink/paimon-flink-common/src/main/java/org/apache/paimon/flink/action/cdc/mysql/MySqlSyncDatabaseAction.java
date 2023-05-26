@@ -20,14 +20,12 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
+import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
-import org.apache.paimon.options.CatalogOptions;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -95,19 +93,17 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * not very efficient in resource saving. We may optimize this action by merging all sinks into one
  * instance in the future.
  */
-public class MySqlSyncDatabaseAction implements Action {
+public class MySqlSyncDatabaseAction extends ActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlSyncDatabaseAction.class);
 
     private final Configuration mySqlConfig;
-    private final String warehouse;
     private final String database;
     private final boolean ignoreIncompatible;
     private final String tablePrefix;
     private final String tableSuffix;
     @Nullable private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
-    private final Map<String, String> catalogConfig;
     private final Map<String, String> tableConfig;
 
     public MySqlSyncDatabaseAction(
@@ -141,15 +137,14 @@ public class MySqlSyncDatabaseAction implements Action {
             @Nullable String excludingTables,
             Map<String, String> catalogConfig,
             Map<String, String> tableConfig) {
+        super(warehouse, catalogConfig);
         this.mySqlConfig = Configuration.fromMap(mySqlConfig);
-        this.warehouse = warehouse;
         this.database = database;
         this.ignoreIncompatible = ignoreIncompatible;
         this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
         this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
         this.includingPattern = includingTables == null ? null : Pattern.compile(includingTables);
         this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
-        this.catalogConfig = catalogConfig;
         this.tableConfig = tableConfig;
     }
 
@@ -160,9 +155,6 @@ public class MySqlSyncDatabaseAction implements Action {
                         + " cannot be set for mysql-sync-database. "
                         + "If you want to sync several MySQL tables into one Paimon table, "
                         + "use mysql-sync-table instead.");
-        Catalog catalog =
-                FlinkCatalogFactory.createPaimonCatalog(
-                        Options.fromMap(catalogConfig).set(CatalogOptions.WAREHOUSE, warehouse));
         boolean caseSensitive = catalog.caseSensitive();
 
         if (!caseSensitive) {

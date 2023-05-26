@@ -37,7 +37,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.flink.action.Action.getTablePath;
 
 /** Delete from table action for Flink. */
-public class DeleteAction extends ActionBase {
+public class DeleteAction extends TableActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(DeleteAction.class);
 
@@ -102,7 +102,7 @@ public class DeleteAction extends ActionBase {
         LOG.debug("Run delete action with filter '{}'.", filter);
 
         Table queriedTable =
-                tEnv.sqlQuery(
+                batchTEnv.sqlQuery(
                         String.format(
                                 "SELECT * FROM %s WHERE %s",
                                 identifier.getEscapedFullName(), filter));
@@ -113,7 +113,8 @@ public class DeleteAction extends ActionBase {
                         .collect(Collectors.toList());
 
         DataStream<RowData> dataStream =
-                tEnv.toChangelogStream(queriedTable)
+                batchTEnv
+                        .toChangelogStream(queriedTable)
                         .map(
                                 row -> {
                                     int arity = row.getArity();

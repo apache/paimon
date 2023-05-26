@@ -37,7 +37,7 @@ import static org.apache.paimon.flink.action.Action.getPartitions;
 import static org.apache.paimon.flink.action.Action.getTablePath;
 
 /** Table drop partition action for Flink. */
-public class DropPartitionAction extends ActionBase {
+public class DropPartitionAction extends TableActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(DropPartitionAction.class);
 
