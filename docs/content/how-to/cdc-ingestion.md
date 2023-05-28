@@ -101,7 +101,7 @@ the regular expressions.
 
 ### Synchronizing Databases
 
-By using [MySqlSyncDatabaseAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncDatabaseAction) in a Flink DataStream job or directly through `flink run`, users can synchronize the whole MySQL database into one Paimon database.
+By using [MySqlSyncDatabaseAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncDatabaseAction) in a Flink DataStream job or directly through `flink run`, users can synchronize one or multiple MySQL database into one or multiple Paimon database, if `sync-to-multiple-db` is false, all the MySQL database will be synchronize to one paimon database, and the table with same name in different database will be merged. if `sync-to-multiple-db` is true, all the MySQL database will be synchronize to multiple paimon database with the same schema as MySQL.  
 
 To use this feature through `flink run`, run the following shell command.
 
@@ -111,6 +111,7 @@ To use this feature through `flink run`, run the following shell command.
     mysql-sync-database
     --warehouse <warehouse-path> \
     --database <database-name> \
+    [--sync-to-multiple-db <true/false>] \
     [--ignore-incompatible <true/false>] \
     [--table-prefix <paimon-table-prefix>] \
     [--table-suffix <paimon-table-suffix>] \
@@ -130,6 +131,10 @@ For each MySQL table to be synchronized, if the corresponding Paimon table does 
 
 Example 1: synchronize entire database
 
+You can synchronize one or multiple mysql database to paimon, if you want to synchronize one mysql database,
+you can set the `database-name` parameter to a specific database name, if you want to synchronize multiple mysql database,
+you can set the `database-name` parameter to a regular expression.
+ 
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \

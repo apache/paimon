@@ -62,16 +62,20 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
     private final EventParser.Factory<T> parserFactory;
     private final String database;
     private final Catalog.Loader catalogLoader;
+    private final boolean syncToMultipleDB;
 
     private transient EventParser<T> parser;
     private transient Catalog catalog;
 
     public CdcDynamicTableParsingProcessFunction(
-            String database, Catalog.Loader catalogLoader, EventParser.Factory<T> parserFactory) {
-        // for now, only support single database
+            String database,
+            Catalog.Loader catalogLoader,
+            EventParser.Factory<T> parserFactory,
+            boolean syncToMultipleDB) {
         this.database = database;
         this.catalogLoader = catalogLoader;
         this.parserFactory = parserFactory;
+        this.syncToMultipleDB = syncToMultipleDB;
     }
 
     @Override
@@ -84,20 +88,26 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
     public void processElement(T raw, Context context, Collector<Void> collector) throws Exception {
         parser.setRawEvent(raw);
 
-        // CDC Ingestion only supports single database at this time being.
-        //    In the future, there will be a mapping between source databases
-        //    and target paimon databases
-        // TODO: support multiple databases
-        // String databaseName = parser.parseDatabaseName();
-        String tableName = parser.parseTableName();
+        String finalDatabaseName;
+        String finalTableName;
+        if (syncToMultipleDB) {
+            finalDatabaseName = parser.parseDatabaseName();
+            finalTableName = parser.parseTableName().split("\\.")[1];
+        } else {
+            finalDatabaseName = database;
+            finalTableName = parser.parseTableName();
+        }
 
         // check for newly added table
         parser.parseNewTable()
                 .ifPresent(
                         schema -> {
                             Identifier identifier =
-                                    new Identifier(database, parser.parseTableName());
+                                    new Identifier(finalDatabaseName, finalTableName);
                             try {
+                                if (!catalog.databaseExists(finalDatabaseName)) {
+                                    catalog.createDatabase(finalDatabaseName, true);
+                                }
                                 catalog.createTable(identifier, schema, true);
                             } catch (Exception e) {
                                 LOG.error("create newly added paimon table error.", e);
@@ -108,7 +118,7 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
         if (schemaChange.size() > 0) {
             context.output(
                     DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG,
-                    Tuple2.of(Identifier.create(database, tableName), schemaChange));
+                    Tuple2.of(Identifier.create(finalDatabaseName, finalTableName), schemaChange));
         }
 
         parser.parseRecords()
@@ -116,7 +126,7 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
                         record ->
                                 context.output(
                                         DYNAMIC_OUTPUT_TAG,
-                                        wrapRecord(database, tableName, record)));
+                                        wrapRecord(finalDatabaseName, finalTableName, record)));
     }
 
     private CdcMultiplexRecord wrapRecord(String databaseName, String tableName, CdcRecord record) {

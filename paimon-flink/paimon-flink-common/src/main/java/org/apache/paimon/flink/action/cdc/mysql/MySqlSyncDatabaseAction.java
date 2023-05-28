@@ -51,7 +51,9 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -102,6 +104,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
 
     private final Configuration mySqlConfig;
     private final String database;
+    private final boolean syncToMultipleDB;
     private final boolean ignoreIncompatible;
     private final String tablePrefix;
     private final String tableSuffix;
@@ -115,6 +118,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
             Map<String, String> mySqlConfig,
             String warehouse,
             String database,
+            boolean syncToMultipleDB,
             boolean ignoreIncompatible,
             Map<String, String> catalogConfig,
             Map<String, String> tableConfig) {
@@ -122,6 +126,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                 mySqlConfig,
                 warehouse,
                 database,
+                syncToMultipleDB,
                 ignoreIncompatible,
                 null,
                 null,
@@ -136,6 +141,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
             Map<String, String> mySqlConfig,
             String warehouse,
             String database,
+            boolean syncToMultipleDB,
             boolean ignoreIncompatible,
             @Nullable String tablePrefix,
             @Nullable String tableSuffix,
@@ -147,6 +153,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         super(warehouse, catalogConfig);
         this.mySqlConfig = Configuration.fromMap(mySqlConfig);
         this.database = database;
+        this.syncToMultipleDB = syncToMultipleDB;
         this.ignoreIncompatible = ignoreIncompatible;
         this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
         this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
@@ -165,13 +172,15 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         + "If you want to sync several MySQL tables into one Paimon table, "
                         + "use mysql-sync-table instead.");
         boolean caseSensitive = catalog.caseSensitive();
-
-        if (!caseSensitive) {
-            validateCaseInsensitive();
-        }
-
         List<String> excludedTables = new LinkedList<>();
         List<MySqlSchema> mySqlSchemas = getMySqlSchemaList(excludedTables);
+        Set<String> databases =
+                mySqlSchemas.stream().map(MySqlSchema::databaseName).collect(Collectors.toSet());
+
+        if (!caseSensitive) {
+            validateCaseInsensitive(databases);
+        }
+
         String mySqlDatabase = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME);
         checkArgument(
                 mySqlSchemas.size() > 0,
@@ -179,7 +188,14 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         + mySqlDatabase
                         + ", or MySQL database does not exist.");
 
-        catalog.createDatabase(database, true);
+        if (syncToMultipleDB) {
+            for (String database : databases) {
+                catalog.createDatabase(database, true);
+            }
+        } else {
+            catalog.createDatabase(database, true);
+        }
+
         TableNameConverter tableNameConverter =
                 new TableNameConverter(caseSensitive, tablePrefix, tableSuffix);
 
@@ -187,7 +203,13 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         List<String> monitoredTables = new ArrayList<>();
         for (MySqlSchema mySqlSchema : mySqlSchemas) {
             String paimonTableName = tableNameConverter.convert(mySqlSchema.tableName());
-            Identifier identifier = new Identifier(database, paimonTableName);
+            Identifier identifier;
+            if (syncToMultipleDB) {
+                identifier = new Identifier(mySqlSchema.databaseName(), paimonTableName);
+            } else {
+                identifier = new Identifier(database, paimonTableName);
+            }
+
             FileStoreTable table;
             Schema fromMySql =
                     MySqlActionUtils.buildPaimonSchema(
@@ -202,13 +224,13 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                 Supplier<String> errMsg =
                         incompatibleMessage(table.schema(), mySqlSchema, identifier);
                 if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {
-                    monitoredTables.add(mySqlSchema.tableName());
+                    monitoredTables.add(mySqlSchema.databaseName() + "." + mySqlSchema.tableName());
                     fileStoreTables.add(table);
                 }
             } catch (Catalog.TableNotExistException e) {
                 catalog.createTable(identifier, fromMySql, false);
                 table = (FileStoreTable) catalog.getTable(identifier);
-                monitoredTables.add(mySqlSchema.tableName());
+                monitoredTables.add(mySqlSchema.databaseName() + "." + mySqlSchema.tableName());
                 fileStoreTables.add(table);
             }
         }
@@ -241,6 +263,9 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         Pattern includingPattern = this.includingPattern;
         Pattern excludingPattern = this.excludingPattern;
         Boolean convertTinyint1ToBool = mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL);
+
+        // if we use syncToMultipleDB variable directly, it will throw an NotSerializableException.
+        boolean enableMultipleDB = syncToMultipleDB;
         EventParser.Factory<String> parserFactory =
                 () ->
                         new MySqlDebeziumJsonEventParser(
@@ -250,10 +275,12 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                                 schemaBuilder,
                                 includingPattern,
                                 excludingPattern,
-                                convertTinyint1ToBool);
+                                convertTinyint1ToBool,
+                                enableMultipleDB);
 
         String database = this.database;
         DatabaseSyncMode mode = this.mode;
+
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<String>()
                         .withInput(
@@ -263,8 +290,9 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         .withDatabase(database)
                         .withCatalogLoader(catalogLoader())
                         .withTables(fileStoreTables)
-                        .withMode(mode);
-
+                        .withMode(mode)
+                        .withSyncMultipleDB(syncToMultipleDB)
+                        .withTables(fileStoreTables);
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
@@ -273,12 +301,23 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         sinkBuilder.build();
     }
 
-    private void validateCaseInsensitive() {
-        checkArgument(
-                database.equals(database.toLowerCase()),
-                String.format(
-                        "Database name [%s] cannot contain upper case in case-insensitive catalog.",
-                        database));
+    private void validateCaseInsensitive(Set<String> databases) {
+        if (syncToMultipleDB) {
+            for (String database : databases) {
+                checkArgument(
+                        database.equals(database.toLowerCase()),
+                        String.format(
+                                "Database name [%s] cannot contain upper case in case-insensitive catalog.",
+                                database));
+            }
+        } else {
+            checkArgument(
+                    database.equals(database.toLowerCase()),
+                    String.format(
+                            "Database name [%s] cannot contain upper case in case-insensitive catalog.",
+                            database));
+        }
+
         checkArgument(
                 tablePrefix.equals(tablePrefix.toLowerCase()),
                 String.format(
@@ -292,29 +331,40 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     }
 
     private List<MySqlSchema> getMySqlSchemaList(List<String> excludedTables) throws Exception {
-        String databaseName = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME);
+        Pattern databasePattern =
+                Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME));
         List<MySqlSchema> mySqlSchemaList = new ArrayList<>();
         try (Connection conn = MySqlActionUtils.getConnection(mySqlConfig)) {
             DatabaseMetaData metaData = conn.getMetaData();
-            try (ResultSet tables =
-                    metaData.getTables(databaseName, null, "%", new String[] {"TABLE"})) {
-                while (tables.next()) {
-                    String tableName = tables.getString("TABLE_NAME");
-                    if (!shouldMonitorTable(tableName)) {
-                        excludedTables.add(tableName);
-                        continue;
-                    }
-                    MySqlSchema mySqlSchema =
-                            new MySqlSchema(
-                                    metaData,
-                                    databaseName,
-                                    tableName,
-                                    mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL));
-                    if (mySqlSchema.primaryKeys().size() > 0) {
-                        // only tables with primary keys will be considered
-                        mySqlSchemaList.add(mySqlSchema);
-                    } else {
-                        excludedTables.add(tableName);
+            try (ResultSet schemas = metaData.getCatalogs()) {
+                while (schemas.next()) {
+                    String databaseName = schemas.getString("TABLE_CAT");
+                    Matcher databaseMatcher = databasePattern.matcher(databaseName);
+                    if (databaseMatcher.matches()) {
+                        try (ResultSet tables = metaData.getTables(databaseName, null, "%", null)) {
+                            while (tables.next()) {
+                                String tableName = tables.getString("TABLE_NAME");
+                                String fullMysqlTableName = databaseName + "." + tableName;
+                                if (!shouldMonitorTable(fullMysqlTableName)) {
+                                    excludedTables.add(fullMysqlTableName);
+                                    continue;
+                                }
+
+                                MySqlSchema mySqlSchema =
+                                        new MySqlSchema(
+                                                metaData,
+                                                databaseName,
+                                                tableName,
+                                                mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL));
+                                if (mySqlSchema.primaryKeys().size() > 0) {
+                                    // only tables with primary keys will be considered
+                                    mySqlSchemaList.add(mySqlSchema);
+                                } else {
+
+                                    excludedTables.add(fullMysqlTableName);
+                                }
+                            }
+                        }
                     }
                 }
             }

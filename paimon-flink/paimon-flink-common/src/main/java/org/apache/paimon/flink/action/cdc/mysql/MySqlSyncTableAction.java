@@ -133,7 +133,6 @@ public class MySqlSyncTableAction extends ActionBase {
     }
 
     public void build(StreamExecutionEnvironment env) throws Exception {
-        MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig);
 
         boolean caseSensitive = catalog.caseSensitive();
 
@@ -141,13 +140,23 @@ public class MySqlSyncTableAction extends ActionBase {
             validateCaseInsensitive();
         }
 
+        List<MySqlSchema> mySqlSchemaList = getMySqlSchemaList();
+
+        String tableNames =
+                mySqlSchemaList.stream()
+                        .map(m -> m.databaseName() + "." + m.tableName())
+                        .collect(Collectors.joining("|"));
+
         MySqlSchema mySqlSchema =
-                getMySqlSchemaList().stream()
+                mySqlSchemaList.stream()
                         .reduce(MySqlSchema::merge)
                         .orElseThrow(
                                 () ->
                                         new RuntimeException(
                                                 "No table satisfies the given database name and table name"));
+
+        mySqlConfig.set(MySqlSourceOptions.TABLE_NAME, "(" + tableNames + ")");
+        MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig);
 
         catalog.createDatabase(database, true);
 

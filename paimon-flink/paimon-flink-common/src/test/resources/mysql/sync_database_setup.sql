@@ -346,3 +346,45 @@ CREATE TABLE a (
     v VARCHAR(10),
     PRIMARY KEY (k)
 );
+
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testEnableSyncToMultipleDB
+--  MySqlSyncDatabaseActionITCase#testDisableSyncToMultipleDB
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database_multiple1;
+USE paimon_sync_database_multiple1;
+
+CREATE TABLE t1 (
+    k1 INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k1)
+);
+
+CREATE TABLE t2 (
+    k2 INT,
+    v2 VARCHAR(10),
+    PRIMARY KEY (k2)
+);
+
+INSERT INTO t1 VALUES(1, 'flink');
+INSERT INTO t2 VALUES(2, 'paimon');
+
+CREATE DATABASE paimon_sync_database_multiple2;
+USE paimon_sync_database_multiple2;
+
+CREATE TABLE t1 (
+    k1 INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k1)
+);
+
+CREATE TABLE t3 (
+    k3 INT,
+    v3 VARCHAR(10),
+    PRIMARY KEY (k3)
+);
+
+INSERT INTO t1 VALUES(3, 'three');
+INSERT INTO t3 VALUES(4, 'four');

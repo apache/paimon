@@ -211,7 +211,7 @@ public class MySqlActionUtils {
                 .username(mySqlConfig.get(MySqlSourceOptions.USERNAME))
                 .password(mySqlConfig.get(MySqlSourceOptions.PASSWORD))
                 .databaseList(databaseName)
-                .tableList(databaseName + "." + tableName);
+                .tableList(tableName);
 
         mySqlConfig.getOptional(MySqlSourceOptions.SERVER_ID).ifPresent(sourceBuilder::serverId);
         mySqlConfig

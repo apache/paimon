@@ -49,6 +49,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
         String warehouse = params.get("warehouse");
         String database = params.get("database");
         boolean ignoreIncompatible = Boolean.parseBoolean(params.get("ignore-incompatible"));
+        boolean syncToMultipleDB = Boolean.parseBoolean(params.get("sync-to-multiple-db"));
         String tablePrefix = params.get("table-prefix");
         String tableSuffix = params.get("table-suffix");
         String includingTables = params.get("including-tables");
@@ -79,6 +80,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         mySqlConfig,
                         warehouse,
                         database,
+                        syncToMultipleDB,
                         ignoreIncompatible,
                         tablePrefix,
                         tableSuffix,
@@ -94,7 +96,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
         System.out.println(
                 "Action \"mysql-sync-database\" creates a streaming job "
                         + "with a Flink MySQL CDC source and multiple Paimon table sinks "
-                        + "to synchronize a whole MySQL database into one Paimon database.\n"
+                        + "to synchronize one or multiple MySQL database into one or multiple Paimon database.\n"
                         + "Only MySQL tables with primary keys will be considered. "
                         + "Newly created MySQL tables after the job starts will not be included.");
         System.out.println();
@@ -102,6 +104,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
         System.out.println("Syntax:");
         System.out.println(
                 "  mysql-sync-database --warehouse <warehouse-path> --database <database-name> "
+                        + "[--sync-to-multiple-db <true/false>] "
                         + "[--ignore-incompatible <true/false>] "
                         + "[--table-prefix <paimon-table-prefix>] "
                         + "[--table-suffix <paimon-table-suffix>] "
@@ -111,6 +114,13 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
+        System.out.println();
+
+        System.out.println(
+                "--sync-to-multiple-db is default false, in this case, all the MySQL database will be synchronized to one paimon database, "
+                        + "and the table with same name in different database will be merged, it is suitable for database sharding scenarios. "
+                        + "if it is true, the parameter \"--database\" will be ignored, all the MySQL database will be synchronize to multiple "
+                        + "paimon database with the same schema as MySQL, it is suitable for scenarios with a large number of databases under a database instance, which can save resources.");
         System.out.println();
 
         System.out.println(

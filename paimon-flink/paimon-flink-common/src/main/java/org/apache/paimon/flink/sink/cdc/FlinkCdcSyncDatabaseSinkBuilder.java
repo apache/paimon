@@ -66,9 +66,9 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     //     Paimon tables. 2) in multiplex sink where it is used to
     //     initialize different writers to multiple tables.
     private Catalog.Loader catalogLoader;
-    // database to sync, currently only support single database
     private String database;
     private DatabaseSyncMode mode;
+    private boolean syncToMultipleDB = false;
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
@@ -78,6 +78,11 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     public FlinkCdcSyncDatabaseSinkBuilder<T> withParserFactory(
             EventParser.Factory<T> parserFactory) {
         this.parserFactory = parserFactory;
+        return this;
+    }
+
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withSyncMultipleDB(Boolean syncToMultipleDB) {
+        this.syncToMultipleDB = syncToMultipleDB;
         return this;
     }
 
@@ -124,7 +129,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                 input.forward()
                         .process(
                                 new CdcDynamicTableParsingProcessFunction<>(
-                                        database, catalogLoader, parserFactory))
+                                        database, catalogLoader, parserFactory, syncToMultipleDB))
                         .setParallelism(input.getParallelism());
 
         // for newly-added tables, create a multiplexing operator that handles all their records
@@ -171,15 +176,26 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                         .setParallelism(input.getParallelism());
 
         for (FileStoreTable table : tables) {
+            String tableName;
+            Identifier identifier;
+            if (syncToMultipleDB) {
+                String db = table.location().getParent().getName().replace(".db", "");
+                tableName = db + "." + table.name();
+                identifier = Identifier.create(db, table.name());
+            } else {
+                tableName = table.name();
+                identifier = Identifier.create(database, tableName);
+            }
+
             DataStream<Void> schemaChangeProcessFunction =
                     SingleOutputStreamOperatorUtils.getSideOutput(
                                     parsed,
                                     CdcMultiTableParsingProcessFunction
-                                            .createUpdatedDataFieldsOutputTag(table.name()))
+                                            .createUpdatedDataFieldsOutputTag(tableName))
                             .process(
                                     new UpdatedDataFieldsProcessFunction(
                                             new SchemaManager(table.fileIO(), table.location()),
-                                            Identifier.create(database, table.name()),
+                                            identifier,
                                             catalogLoader));
             schemaChangeProcessFunction.getTransformation().setParallelism(1);
             schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
@@ -187,8 +203,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
             DataStream<CdcRecord> parsedForTable =
                     SingleOutputStreamOperatorUtils.getSideOutput(
                             parsed,
-                            CdcMultiTableParsingProcessFunction.createRecordOutputTag(
-                                    table.name()));
+                            CdcMultiTableParsingProcessFunction.createRecordOutputTag(tableName));
 
             BucketMode bucketMode = table.bucketMode();
             switch (bucketMode) {

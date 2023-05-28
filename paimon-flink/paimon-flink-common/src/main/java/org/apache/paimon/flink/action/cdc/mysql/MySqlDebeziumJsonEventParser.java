@@ -72,6 +72,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ZoneId serverTimeZone;
     private final boolean caseSensitive;
+    private final boolean syncToMultipleDB;
     private final TableNameConverter tableNameConverter;
     private final List<ComputedColumn> computedColumns;
     private final NewTableSchemaBuilder<JsonNode> schemaBuilder;
@@ -100,7 +101,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 ddl -> Optional.empty(),
                 null,
                 null,
-                convertTinyint1ToBool);
+                convertTinyint1ToBool,
+                false);
     }
 
     public MySqlDebeziumJsonEventParser(
@@ -110,7 +112,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             NewTableSchemaBuilder<JsonNode> schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
-            boolean convertTinyint1ToBool) {
+            boolean convertTinyint1ToBool,
+            boolean syncToMultipleDB) {
         this(
                 serverTimeZone,
                 caseSensitive,
@@ -119,7 +122,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 schemaBuilder,
                 includingPattern,
                 excludingPattern,
-                convertTinyint1ToBool);
+                convertTinyint1ToBool,
+                syncToMultipleDB);
     }
 
     public MySqlDebeziumJsonEventParser(
@@ -130,7 +134,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             NewTableSchemaBuilder<JsonNode> schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
-            boolean convertTinyint1ToBool) {
+            boolean convertTinyint1ToBool,
+            Boolean syncToMultipleDB) {
         this.serverTimeZone = serverTimeZone;
         this.caseSensitive = caseSensitive;
         this.computedColumns = computedColumns;
@@ -139,6 +144,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         this.includingPattern = includingPattern;
         this.excludingPattern = excludingPattern;
         this.convertTinyint1ToBool = convertTinyint1ToBool;
+        this.syncToMultipleDB = syncToMultipleDB;
     }
 
     @Override
@@ -146,7 +152,10 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         try {
             root = objectMapper.readValue(rawEvent, JsonNode.class);
             payload = root.get("payload");
-            currentTable = payload.get("source").get("table").asText();
+            currentTable =
+                    payload.get("source").get("db").asText()
+                            + "."
+                            + payload.get("source").get("table").asText();
             shouldSynchronizeCurrentTable = shouldSynchronizeCurrentTable();
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -154,8 +163,19 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     @Override
+    public String parseDatabaseName() {
+        return payload.get("source").get("db").asText();
+    }
+
+    @Override
     public String parseTableName() {
-        return tableNameConverter.convert(currentTable);
+        String tableName = payload.get("source").get("table").asText();
+        if (syncToMultipleDB) {
+            String dbName = payload.get("source").get("db").asText();
+            return dbName + "." + tableNameConverter.convert(tableName);
+        } else {
+            return tableNameConverter.convert(tableName);
+        }
     }
 
     private boolean isSchemaChange() {
@@ -244,11 +264,13 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
             JsonNode primaryKeyColumnNames = tableChange.get("table").get("primaryKeyColumnNames");
             if (primaryKeyColumnNames.size() == 0) {
+                String id = tableChange.get("id").asText();
+                String tableName = id.replaceAll("\"", "");
                 LOG.debug(
                         "Didn't find primary keys from MySQL DDL for table '{}'. "
                                 + "This table won't be synchronized.",
                         currentTable);
-                excludedTables.add(currentTable);
+                excludedTables.add(tableName);
                 shouldSynchronizeCurrentTable = false;
                 return Optional.empty();
             }

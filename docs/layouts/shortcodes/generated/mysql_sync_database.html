@@ -34,6 +34,10 @@ under the License.
         <td>The database name in Paimon catalog.</td>
     </tr>
     <tr>
+        <td><h5>--sync-to-multiple-db</h5></td>
+supp        <td>It is default false, in this case, all the MySQL database will be synchronized to one paimon database, and the table with same name in different database will be merged, it is suitable for database sharding scenarios. if it is true, the parameter "--database" will be ignored, all the MySQL database will be synchronize to multiple paimon database with the same schema as MySQL, it is suitable for scenarios with a large number of databases under a database instance, which can save resources.</td>
+    </tr>
+    <tr>
         <td><h5>--ignore-incompatible</h5></td>
         <td>It is default false, in this case, if MySQL table name exists in Paimon and their schema is incompatible,an exception will be thrown. You can specify it to true explicitly to ignore the incompatible tables and exception.</td>
     </tr>
@@ -47,7 +51,7 @@ under the License.
     </tr>
     <tr>
         <td><h5>--including-tables</h5></td>
-        <td>It is used to specify which source tables are to be synchronized. You must use '|' to separate multiple tables.Because '|' is a special character, a comma is required, for example: 'a|b|c'.Regular expression is supported, for example, specifying "--including-tables test|paimon.*" means to synchronize table 'test' and all tables start with 'paimon'.</td>
+        <td>It is used to specify which source tables are to be synchronized. You must use '|' to separate multiple tables.Because '|' is a special character, a comma is required, for example: 'db1.a|db2.b|db2.c'.Regular expression is supported, for example, specifying "--including-tables db1.test|db2.paimon.*" means to synchronize table 'db1.test' and all tables start with 'db2.paimon'.</td>
     </tr>
     <tr>
         <td><h5>--excluding-tables</h5></td>

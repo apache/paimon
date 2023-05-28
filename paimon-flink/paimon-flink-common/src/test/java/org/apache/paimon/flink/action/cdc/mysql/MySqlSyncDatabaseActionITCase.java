@@ -100,6 +100,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         warehouse,
                         database,
                         false,
+                        false,
                         Collections.emptyMap(),
                         tableConfig);
         action.build(env);
@@ -230,6 +231,109 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         waitForResult(expected, table2, rowType2, primaryKeys2);
     }
 
+    private void testSyncToMultipleDatabaseImpl(
+            boolean enableMultipleDB, String includingTables, String excludingTables)
+            throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put(
+                "database-name", "paimon_sync_database_multiple1|paimon_sync_database_multiple2");
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+        MySqlSyncDatabaseAction action =
+                new MySqlSyncDatabaseAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        enableMultipleDB,
+                        false,
+                        null,
+                        null,
+                        includingTables,
+                        excludingTables,
+                        Collections.emptyMap(),
+                        Collections.emptyMap(),
+                        DIVIDED);
+
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testEnableSyncToMultipleDB() throws Exception {
+        testSyncToMultipleDatabaseImpl(true, null, null);
+        FileStoreTable table1 = getFileStoreTable("t1", "paimon_sync_database_multiple1");
+        List<String> primaryKeys1 = Collections.singletonList("k1");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new String[] {"k1", "v1"});
+        List<String> expected = Collections.singletonList("+I[1, flink]");
+        waitForResult(expected, table1, rowType, primaryKeys1);
+
+        FileStoreTable table2 = getFileStoreTable("t2", "paimon_sync_database_multiple1");
+        List<String> primaryKeys2 = Collections.singletonList("k2");
+        rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new String[] {"k2", "v2"});
+        expected = Collections.singletonList("+I[2, paimon]");
+        waitForResult(expected, table2, rowType, primaryKeys2);
+
+        FileStoreTable table3 = getFileStoreTable("t1", "paimon_sync_database_multiple2");
+        List<String> primaryKeys3 = Collections.singletonList("k1");
+        rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new String[] {"k1", "v1"});
+        expected = Collections.singletonList("+I[3, three]");
+        waitForResult(expected, table3, rowType, primaryKeys3);
+
+        FileStoreTable table4 = getFileStoreTable("t3", "paimon_sync_database_multiple2");
+        List<String> primaryKeys4 = Collections.singletonList("k3");
+        rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new String[] {"k3", "v3"});
+        expected = Collections.singletonList("+I[4, four]");
+        waitForResult(expected, table4, rowType, primaryKeys4);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testDisableSyncToMultipleDB() throws Exception {
+        testSyncToMultipleDatabaseImpl(false, null, null);
+        FileStoreTable table1 = getFileStoreTable("t1");
+        List<String> primaryKeys1 = Collections.singletonList("k1");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new String[] {"k1", "v1"});
+        List<String> expected = Arrays.asList("+I[1, flink]", "+I[3, three]");
+        waitForResult(expected, table1, rowType, primaryKeys1);
+
+        FileStoreTable table2 = getFileStoreTable("t2");
+        List<String> primaryKeys2 = Collections.singletonList("k2");
+        rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new String[] {"k2", "v2"});
+        expected = Collections.singletonList("+I[2, paimon]");
+        waitForResult(expected, table2, rowType, primaryKeys2);
+
+        FileStoreTable table3 = getFileStoreTable("t3");
+        List<String> primaryKeys3 = Collections.singletonList("k3");
+        rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new String[] {"k3", "v3"});
+        expected = Collections.singletonList("+I[4, four]");
+        waitForResult(expected, table3, rowType, primaryKeys3);
+    }
+
     @Test
     @Timeout(60)
     public void testSchemaEvolutionWithTinyInt1Convert() throws Exception {
@@ -248,6 +352,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         mySqlConfig,
                         warehouse,
                         database,
+                        false,
                         false,
                         Collections.emptyMap(),
                         tableConfig);
@@ -340,6 +445,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         warehouse,
                         database,
                         false,
+                        false,
                         Collections.emptyMap(),
                         Collections.emptyMap());
 
@@ -366,6 +472,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         mySqlConfig,
                         warehouse,
                         database,
+                        false,
                         false,
                         Collections.emptyMap(),
                         Collections.emptyMap());
@@ -410,6 +517,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         mySqlConfig,
                         warehouse,
                         database,
+                        false,
                         true,
                         Collections.emptyMap(),
                         tableConfig);
@@ -475,6 +583,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         mySqlConfig,
                         warehouse,
                         database,
+                        false,
                         false,
                         "test_prefix_",
                         "_test_suffix",
@@ -600,7 +709,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     public void testIncludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 "paimon_sync_database_including",
-                "flink|paimon.+",
+                "paimon_sync_database_including.flink|paimon_sync_database_including.paimon.+",
                 null,
                 Arrays.asList("flink", "paimon_1", "paimon_2"),
                 Collections.singletonList("ignored"));
@@ -612,7 +721,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         includingAndExcludingTablesImpl(
                 "paimon_sync_database_excluding",
                 null,
-                "flink|paimon.+",
+                "paimon_sync_database_excluding.flink|paimon_sync_database_excluding.paimon.+",
                 Collections.singletonList("sync"),
                 Arrays.asList("flink", "paimon_1", "paimon_2"));
     }
@@ -622,8 +731,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     public void testIncludingAndExcludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 "paimon_sync_database_in_excluding",
-                "flink|paimon.+",
-                "paimon_1",
+                "paimon_sync_database_in_excluding.flink|paimon_sync_database_in_excluding.paimon.+",
+                "paimon_sync_database_in_excluding.paimon_1",
                 Arrays.asList("flink", "paimon_2"),
                 Arrays.asList("paimon_1", "test"));
     }
@@ -650,6 +759,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         mySqlConfig,
                         warehouse,
                         database,
+                        false,
                         false,
                         null,
                         null,
@@ -685,7 +795,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(
-                        mySqlConfig, warehouse, database, false, catalogConfig, tableConfig);
+                        mySqlConfig, warehouse, database, false, false, catalogConfig, tableConfig);
         action.build(env);
         JobClient client = env.executeAsync();
         waitJobRunning(client);
@@ -793,10 +903,11 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         warehouse,
                         database,
                         false,
+                        false,
                         null,
                         null,
-                        "t.+",
-                        ".*a$",
+                        "paimon_sync_database_add_ignored_table.t.+",
+                        "paimon_sync_database_add_ignored_table.*a$",
                         Collections.emptyMap(),
                         tableConfig,
                         COMBINED);
@@ -1105,9 +1216,10 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         warehouse,
                         database,
                         false,
+                        false,
                         null,
                         null,
-                        "t.+",
+                        databaseName + ".t.+",
                         null,
                         catalogConfig,
                         tableConfig,
@@ -1142,6 +1254,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         mySqlConfig,
                         warehouse,
                         database,
+                        false,
                         false,
                         Collections.emptyMap(),
                         tableConfig);
@@ -1211,6 +1324,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         warehouse,
                         database,
                         false,
+                        false,
                         null,
                         null,
                         null,
@@ -1257,9 +1371,12 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         }
     }
 
-    private FileStoreTable getFileStoreTable(String tableName) throws Exception {
-        Identifier identifier = Identifier.create(database, tableName);
-        return (FileStoreTable) catalog().getTable(identifier);
+    private FileStoreTable getFileStoreTable(String tableName, String... databaseName)
+            throws Exception {
+        Catalog catalog = catalog();
+        Identifier identifier =
+                Identifier.create(databaseName.length > 0 ? databaseName[0] : database, tableName);
+        return (FileStoreTable) catalog.getTable(identifier);
     }
 
     private void assertTableExists(List<String> tableNames) {
