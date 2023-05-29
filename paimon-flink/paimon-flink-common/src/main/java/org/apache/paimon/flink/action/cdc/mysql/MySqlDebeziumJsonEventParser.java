@@ -104,7 +104,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                                     + "in the JsonDebeziumDeserializationSchema you created");
             payload = root.get("payload");
 
-            if (!isUpdatedDataFields()) {
+            if (!isSchemaChange()) {
                 updateFieldTypes(schema);
             }
         } catch (Exception e) {
@@ -113,7 +113,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     @Override
-    public String tableName() {
+    public String parseTableName() {
         String tableName = payload.get("source").get("table").asText();
         return tableNameConverter.convert(tableName);
     }
@@ -142,12 +142,12 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     @Override
-    public boolean isUpdatedDataFields() {
+    public boolean isSchemaChange() {
         return payload.get("op") == null;
     }
 
     @Override
-    public Optional<List<DataField>> getUpdatedDataFields() {
+    public Optional<List<DataField>> parseNewSchema() {
         JsonNode historyRecord = payload.get("historyRecord");
         if (historyRecord == null) {
             return Optional.empty();
@@ -194,7 +194,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     @Override
-    public List<CdcRecord> getRecords() {
+    public List<CdcRecord> parseRecords() {
         List<CdcRecord> records = new ArrayList<>();
 
         Map<String, String> before = extractRow(payload.get("before"));

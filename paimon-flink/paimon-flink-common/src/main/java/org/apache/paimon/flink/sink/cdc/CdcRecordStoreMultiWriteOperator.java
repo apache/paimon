@@ -41,6 +41,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME;
+import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.toGenericRow;
 
 /**
  * A {@link PrepareCommitOperator} to write {@link CdcRecord}. Record schema may change. If current
@@ -95,8 +96,8 @@ public class CdcRecordStoreMultiWriteOperator
     public void processElement(StreamRecord<CdcMultiplexRecord> element) throws Exception {
         CdcMultiplexRecord record = element.getValue();
 
-        String databaseName = record.getDatabaseName();
-        String tableName = record.getTableName();
+        String databaseName = record.databaseName();
+        String tableName = record.tableName();
         Identifier tableId = Identifier.create(databaseName, tableName);
 
         table = tables.get(tableId);
@@ -124,11 +125,12 @@ public class CdcRecordStoreMultiWriteOperator
                                         state,
                                         getContainingTask().getEnvironment().getIOManager()));
 
-        Optional<GenericRow> optionalConverted = record.toGenericRow(table.schema().fields());
+        Optional<GenericRow> optionalConverted =
+                toGenericRow(record.record(), table.schema().fields());
         if (!optionalConverted.isPresent()) {
             while (true) {
                 table = table.copyWithLatestSchema();
-                optionalConverted = record.toGenericRow(table.schema().fields());
+                optionalConverted = toGenericRow(record.record(), table.schema().fields());
                 if (optionalConverted.isPresent()) {
                     break;
                 }

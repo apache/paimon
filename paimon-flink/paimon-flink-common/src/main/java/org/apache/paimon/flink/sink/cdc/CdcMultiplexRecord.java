@@ -18,16 +18,8 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.types.DataField;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.Serializable;
-import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 
 /**
  * A data change message from the CDC source. Compared to {@link CdcRecord}, MultiplexCdcRecord
@@ -35,8 +27,6 @@ import java.util.Optional;
  */
 public class CdcMultiplexRecord implements Serializable {
     private static final long serialVersionUID = 1L;
-
-    private static final Logger LOG = LoggerFactory.getLogger(CdcMultiplexRecord.class);
 
     private final String databaseName;
     private final String tableName;
@@ -53,20 +43,16 @@ public class CdcMultiplexRecord implements Serializable {
         return new CdcMultiplexRecord(databaseName, tableName, record);
     }
 
-    public GenericRow projectAsInsert(List<DataField> dataFields) {
-        return record.projectAsInsert(dataFields);
-    }
-
-    public Optional<GenericRow> toGenericRow(List<DataField> dataFields) {
-        return record.toGenericRow(dataFields);
-    }
-
-    public String getDatabaseName() {
+    public String databaseName() {
         return databaseName;
     }
 
-    public String getTableName() {
+    public String tableName() {
         return tableName;
+    }
+
+    public CdcRecord record() {
+        return record;
     }
 
     @Override

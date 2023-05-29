@@ -112,7 +112,7 @@ public class CanalJsonEventParser implements EventParser<String> {
                             + "please make sure that your topic's format is accurate.");
             JsonNode mysqlType = root.get("mysqlType");
 
-            if (!isUpdatedDataFields()) {
+            if (!isSchemaChange()) {
                 updateFieldTypes(mysqlType);
             }
         } catch (Exception e) {
@@ -121,7 +121,7 @@ public class CanalJsonEventParser implements EventParser<String> {
     }
 
     @Override
-    public String tableName() {
+    public String parseTableName() {
         String tableName = root.get("table").asText();
         return tableNameConverter.convert(tableName);
     }
@@ -139,7 +139,7 @@ public class CanalJsonEventParser implements EventParser<String> {
     }
 
     @Override
-    public boolean isUpdatedDataFields() {
+    public boolean isSchemaChange() {
         if (root.get("isDdl") == null) {
             return false;
         } else {
@@ -148,7 +148,7 @@ public class CanalJsonEventParser implements EventParser<String> {
     }
 
     @Override
-    public Optional<List<DataField>> getUpdatedDataFields() {
+    public Optional<List<DataField>> parseNewSchema() {
         String sql = root.get("sql").asText();
 
         if (StringUtils.isEmpty(sql)) {
@@ -276,7 +276,7 @@ public class CanalJsonEventParser implements EventParser<String> {
     }
 
     @Override
-    public List<CdcRecord> getRecords() {
+    public List<CdcRecord> parseRecords() {
         List<CdcRecord> records = new ArrayList<>();
         String type = root.get(TYPE).asText();
         if (OP_UPDATE.equals(type)) {

@@ -37,6 +37,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
+import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.toGenericRow;
+
 /**
  * A {@link PrepareCommitOperator} to write {@link CdcRecord}. Record schema may change. If current
  * known schema does not fit record schema, this operator will wait for schema changes.
@@ -101,11 +103,11 @@ public class CdcRecordStoreWriteOperator extends PrepareCommitOperator<CdcRecord
     @Override
     public void processElement(StreamRecord<CdcRecord> element) throws Exception {
         CdcRecord record = element.getValue();
-        Optional<GenericRow> optionalConverted = record.toGenericRow(table.schema().fields());
+        Optional<GenericRow> optionalConverted = toGenericRow(record, table.schema().fields());
         if (!optionalConverted.isPresent()) {
             while (true) {
                 table = table.copyWithLatestSchema();
-                optionalConverted = record.toGenericRow(table.schema().fields());
+                optionalConverted = toGenericRow(record, table.schema().fields());
                 if (optionalConverted.isPresent()) {
                     break;
                 }

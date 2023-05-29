@@ -30,6 +30,8 @@ import org.apache.paimon.types.RowType;
 import java.util.List;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.projectAsInsert;
+
 /** {@link KeyAndBucketExtractor} for {@link CdcRecord}. */
 public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<CdcRecord> {
 
@@ -74,7 +76,7 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
     @Override
     public BinaryRow partition() {
         if (partition == null) {
-            partition = partitionProjection.apply(record.projectAsInsert(partitionFields));
+            partition = partitionProjection.apply(projectAsInsert(record, partitionFields));
         }
         return partition;
     }
@@ -82,7 +84,7 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
     @Override
     public int bucket() {
         if (bucketKey == null) {
-            bucketKey = bucketKeyProjection.apply(record.projectAsInsert(bucketKeyFields));
+            bucketKey = bucketKeyProjection.apply(projectAsInsert(record, bucketKeyFields));
         }
         if (bucket == null) {
             bucket =

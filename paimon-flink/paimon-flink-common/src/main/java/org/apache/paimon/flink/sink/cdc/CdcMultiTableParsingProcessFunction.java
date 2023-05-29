@@ -61,13 +61,13 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     @Override
     public void processElement(T raw, Context context, Collector<Void> collector) throws Exception {
         parser.setRawEvent(raw);
-        String tableName = parser.tableName();
+        String tableName = parser.parseTableName();
 
-        if (parser.isUpdatedDataFields()) {
-            parser.getUpdatedDataFields()
+        if (parser.isSchemaChange()) {
+            parser.parseNewSchema()
                     .ifPresent(t -> context.output(getUpdatedDataFieldsOutputTag(tableName), t));
         } else {
-            for (CdcRecord record : parser.getRecords()) {
+            for (CdcRecord record : parser.parseRecords()) {
                 context.output(getRecordOutputTag(tableName), record);
             }
         }

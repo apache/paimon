@@ -26,9 +26,18 @@ under the License.
 
 # CDC Ingestion
 
-Paimon supports synchronizing changes from different databases using change data capture (CDC). This feature requires Flink and its [CDC connectors](https://ververica.github.io/flink-cdc-connectors/).
+Paimon supports a variety of ways to ingest data into Paimon tables with schema evolution. This means that the added
+columns are synchronized to the Paimon table in real time and the synchronization job is not restarted for this purpose.
+
+We currently support the following sync ways:
+
+1. MySQL Synchronizing Table: synchronize one or multiple tables from MySQL into one Paimon table.
+2. MySQL Synchronizing Database: synchronize the whole MySQL database into one Paimon database.
+3. [API Synchronizing Table]({{< ref "/api/flink-api#cdc-ingestion-table" >}}): synchronize your custom DataStream input into one Paimon table.
 
 ## MySQL
+
+Paimon supports synchronizing changes from different databases using change data capture (CDC). This feature requires Flink and its [CDC connectors](https://ververica.github.io/flink-cdc-connectors/).
 
 ### Prepare CDC Bundled Jar
 

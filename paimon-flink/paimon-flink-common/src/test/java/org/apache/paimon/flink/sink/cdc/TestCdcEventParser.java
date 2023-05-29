@@ -34,22 +34,22 @@ public class TestCdcEventParser implements EventParser<TestCdcEvent> {
     }
 
     @Override
-    public String tableName() {
+    public String parseTableName() {
         return raw.tableName();
     }
 
     @Override
-    public boolean isUpdatedDataFields() {
+    public boolean isSchemaChange() {
         return raw.updatedDataFields() != null;
     }
 
     @Override
-    public Optional<List<DataField>> getUpdatedDataFields() {
+    public Optional<List<DataField>> parseNewSchema() {
         return Optional.ofNullable(raw.updatedDataFields());
     }
 
     @Override
-    public List<CdcRecord> getRecords() {
+    public List<CdcRecord> parseRecords() {
         return raw.records();
     }
 }
