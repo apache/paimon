@@ -28,6 +28,7 @@ import org.apache.paimon.manifest.WrappedManifestCommittable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -35,7 +36,7 @@ import java.util.Map;
 public class WrappedManifestCommittableSerializer
         implements VersionedSerializer<WrappedManifestCommittable> {
 
-    protected static final int CURRENT_VERSION = 2;
+    protected static final int CURRENT_VERSION = 1;
 
     private final ManifestCommittableSerializer manifestCommittableSerializer;
 
@@ -57,7 +58,7 @@ public class WrappedManifestCommittableSerializer
         Map<Identifier, ManifestCommittable> map = wrapped.getManifestCommittables();
         view.writeInt(map.size());
         for (Map.Entry<Identifier, ManifestCommittable> entry : map.entrySet()) {
-            byte[] serializedKey = entry.getKey().getFullName().getBytes();
+            byte[] serializedKey = entry.getKey().getFullName().getBytes(StandardCharsets.UTF_8);
             byte[] serializedValue = manifestCommittableSerializer.serialize(entry.getValue());
             view.writeInt(serializedKey.length);
             view.write(serializedKey);

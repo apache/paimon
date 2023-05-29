@@ -86,7 +86,7 @@ public class WrappedManifestCommittable {
         return sb.toString();
     }
 
-    public ManifestCommittable getManifestCommittable(
+    public ManifestCommittable computeCommittableIfAbsent(
             Identifier identifier, long checkpointId, long watermark) {
         return manifestCommittables.computeIfAbsent(
                 identifier, id -> new ManifestCommittable(checkpointId, watermark));

@@ -65,14 +65,14 @@ public class StoreMultiCommitter
             List<WrappedManifestCommittable> globalCommittables) {
         // key by table id
         Map<Identifier, List<ManifestCommittable>> committableMap =
-                getCommittableMap(globalCommittables);
+                groupByTable(globalCommittables);
 
         Map<Long, WrappedManifestCommittable> result = new TreeMap<>();
 
         for (Map.Entry<Identifier, List<ManifestCommittable>> entry : committableMap.entrySet()) {
             Identifier tableId = entry.getKey();
             List<ManifestCommittable> committableList = entry.getValue();
-            StoreCommitter committer = getStoreCommitter(tableId, committableList.get(0));
+            StoreCommitter committer = getStoreCommitter(tableId);
             List<ManifestCommittable> filteredCommittables =
                     committer.filterRecoveredCommittables(committableList);
 
@@ -95,7 +95,7 @@ public class StoreMultiCommitter
         for (MultiTableCommittable committable : committables) {
 
             ManifestCommittable manifestCommittable =
-                    wrappedManifestCommittable.getManifestCommittable(
+                    wrappedManifestCommittable.computeCommittableIfAbsent(
                             Identifier.create(committable.getDatabase(), committable.getTable()),
                             checkpointId,
                             watermark);
@@ -120,19 +120,17 @@ public class StoreMultiCommitter
             throws IOException, InterruptedException {
 
         // key by table id
-        Map<Identifier, List<ManifestCommittable>> committableMap = getCommittableMap(committables);
+        Map<Identifier, List<ManifestCommittable>> committableMap = groupByTable(committables);
 
         for (Map.Entry<Identifier, List<ManifestCommittable>> entry : committableMap.entrySet()) {
             Identifier tableId = entry.getKey();
             List<ManifestCommittable> committableList = entry.getValue();
-            for (ManifestCommittable committable : committableList) {
-                StoreCommitter committer = getStoreCommitter(tableId, committable);
-                committer.commit(committableList);
-            }
+            StoreCommitter committer = getStoreCommitter(tableId);
+            committer.commit(committableList);
         }
     }
 
-    private Map<Identifier, List<ManifestCommittable>> getCommittableMap(
+    private Map<Identifier, List<ManifestCommittable>> groupByTable(
             List<WrappedManifestCommittable> committables) {
         return committables.stream()
                 .flatMap(
@@ -157,26 +155,27 @@ public class StoreMultiCommitter
         return grouped;
     }
 
-    private StoreCommitter getStoreCommitter(Identifier tableId, ManifestCommittable committable) {
-        StoreCommitter committer =
-                tableCommitters.computeIfAbsent(
-                        tableId,
-                        id -> {
-                            try {
-                                FileStoreTable table = (FileStoreTable) catalog.getTable(id);
-                                return new StoreCommitter(
-                                        table.newCommit(commitUser)
-                                                .withLock(lockFactory.create())
-                                                .ignoreEmptyCommit(false));
-                            } catch (Catalog.TableNotExistException e) {
-                                return null;
-                            }
-                        });
+    private StoreCommitter getStoreCommitter(Identifier tableId) {
+        StoreCommitter committer = tableCommitters.get(tableId);
 
         if (committer == null) {
-            throw new RuntimeException(
-                    String.format("Failed to get committer for table %s", tableId.getFullName()));
+            FileStoreTable table;
+            try {
+                table = (FileStoreTable) catalog.getTable(tableId);
+            } catch (Catalog.TableNotExistException e) {
+                throw new RuntimeException(
+                        String.format(
+                                "Failed to get committer for table %s", tableId.getFullName()),
+                        e);
+            }
+            committer =
+                    new StoreCommitter(
+                            table.newCommit(commitUser)
+                                    .withLock(lockFactory.create())
+                                    .ignoreEmptyCommit(false));
+            tableCommitters.put(tableId, committer);
         }
+
         return committer;
     }
 
