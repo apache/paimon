@@ -47,7 +47,7 @@ import java.util.UUID;
 /** Utility class to load canal kafka schema. */
 public class KafkaSchema {
 
-    private static final int MAX_RETRY = 10;
+    private static final int MAX_RETRY = 100;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
