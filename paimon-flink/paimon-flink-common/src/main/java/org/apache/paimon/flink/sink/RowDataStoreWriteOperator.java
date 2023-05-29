@@ -20,8 +20,6 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.log.LogWriteCallback;
-import org.apache.paimon.flink.memory.FlinkMemorySegmentPool;
-import org.apache.paimon.flink.memory.MemorySegmentAllocator;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
@@ -29,9 +27,6 @@ import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.flink.api.common.functions.util.FunctionUtils;
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.memory.ManagedMemoryUseCase;
-import org.apache.flink.runtime.execution.Environment;
-import org.apache.flink.runtime.memory.MemoryManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
@@ -66,7 +61,6 @@ public class RowDataStoreWriteOperator extends PrepareCommitOperator<RowData, Co
     private transient StoreSinkWrite write;
     private transient SimpleContext sinkContext;
     @Nullable private transient LogWriteCallback logCallback;
-    @Nullable private transient MemorySegmentAllocator memoryAllocator;
 
     /** We listen to this ourselves because we don't have an {@link InternalTimerService}. */
     private long currentWatermark = Long.MIN_VALUE;
@@ -76,6 +70,7 @@ public class RowDataStoreWriteOperator extends PrepareCommitOperator<RowData, Co
             @Nullable LogSinkFunction logSinkFunction,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
+        super(Options.fromMap(table.options()));
         this.table = table;
         this.logSinkFunction = logSinkFunction;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
@@ -91,27 +86,6 @@ public class RowDataStoreWriteOperator extends PrepareCommitOperator<RowData, Co
         if (logSinkFunction != null) {
             FunctionUtils.setFunctionRuntimeContext(logSinkFunction, getRuntimeContext());
         }
-        Options options = Options.fromMap(table.options());
-        if (options.get(SINK_USE_MANAGED_MEMORY)) {
-            MemoryManager memoryManager = containingTask.getEnvironment().getMemoryManager();
-            memoryAllocator = new MemorySegmentAllocator(containingTask, memoryManager);
-            memoryPool =
-                    new FlinkMemorySegmentPool(
-                            computeMemorySize(), memoryManager.getPageSize(), memoryAllocator);
-        }
-    }
-
-    /** Compute memory size from memory faction. */
-    private long computeMemorySize() {
-        final Environment environment = getContainingTask().getEnvironment();
-        return environment
-                .getMemoryManager()
-                .computeMemorySize(
-                        getOperatorConfig()
-                                .getManagedMemoryFractionOperatorUseCaseOfSlot(
-                                        ManagedMemoryUseCase.OPERATOR,
-                                        environment.getTaskManagerInfo().getConfiguration(),
-                                        environment.getUserCodeClassLoader().asClassLoader()));
     }
 
     @Override
@@ -223,9 +197,6 @@ public class RowDataStoreWriteOperator extends PrepareCommitOperator<RowData, Co
         write.close();
         if (logSinkFunction != null) {
             FunctionUtils.closeFunction(logSinkFunction);
-        }
-        if (memoryAllocator != null) {
-            memoryAllocator.release();
         }
     }
 
