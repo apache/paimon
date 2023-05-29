@@ -391,6 +391,96 @@ CREATE TABLE ignored (
 );
 
 -- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testSyncMultipleDatabaseIncludingTables
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database_including_01;
+USE paimon_sync_database_including_01;
+
+CREATE TABLE paimon_1 (
+                          k INT,
+                          PRIMARY KEY (k)
+);
+
+CREATE TABLE paimon_2 (
+                          k INT,
+                          PRIMARY KEY (k)
+);
+
+CREATE DATABASE paimon_sync_database_including_02;
+USE paimon_sync_database_including_02;
+
+CREATE TABLE paimon_3 (
+                          k INT,
+                          PRIMARY KEY (k)
+);
+
+CREATE TABLE paimon_4 (
+                          k INT,
+                          PRIMARY KEY (k)
+);
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testSyncMultipleDatabaseIncludingSameTables
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database_including_03;
+USE paimon_sync_database_including_03;
+
+CREATE TABLE paimon_1 (
+                          k INT,
+                          PRIMARY KEY (k)
+);
+
+CREATE TABLE paimon_2 (
+                          k INT,
+                          PRIMARY KEY (k)
+);
+
+CREATE DATABASE paimon_sync_database_including_04;
+USE paimon_sync_database_including_04;
+
+CREATE TABLE paimon_1 (
+                          k INT,
+                          PRIMARY KEY (k)
+);
+
+CREATE TABLE paimon_2 (
+                          k INT,
+                          PRIMARY KEY (k)
+);
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testSyncMultipleDatabase
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_multiple_database_01;
+USE paimon_sync_multiple_database_01;
+
+CREATE TABLE paimon_multiple_1 (
+                          k INT,
+                          PRIMARY KEY (k)
+);
+
+CREATE TABLE paimon_multiple_2 (
+                          k INT,
+                          PRIMARY KEY (k)
+);
+
+CREATE DATABASE paimon_sync_multiple_database_02;
+USE paimon_sync_multiple_database_02;
+
+CREATE TABLE paimon_multiple_3 (
+                                   k INT,
+                                   PRIMARY KEY (k)
+);
+
+CREATE TABLE paimon_multiple_4 (
+                                   k INT,
+                                   PRIMARY KEY (k)
+);
+
+-- ################################################################################
 --  MySqlSyncDatabaseActionITCase#testExcludingTables
 -- ################################################################################
 

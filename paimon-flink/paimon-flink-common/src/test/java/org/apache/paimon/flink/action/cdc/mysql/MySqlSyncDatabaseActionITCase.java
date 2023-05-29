@@ -481,6 +481,63 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
+    public void testSyncMultipleDatabase() throws Exception {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "paimon_sync_multiple_database_01,paimon_sync_multiple_database_02");
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+
+        MySqlSyncDatabaseAction action =
+                new MySqlSyncDatabaseAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        false,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Collections.emptyMap(),
+                        tableConfig);
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+
+        assertTableExists(Arrays.asList("paimon_multiple_1", "paimon_multiple_2", "paimon_multiple_3", "paimon_multiple_4"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testSyncMultipleDatabaseIncludingTables() throws Exception {
+        includingAndExcludingTablesImpl(
+                "paimon_sync_database_including_01,paimon_sync_database_including_02",
+                "paimon.+",
+                null,
+                Arrays.asList("paimon_1", "paimon_2", "paimon_3", "paimon_4"),
+                Collections.singletonList("ignored"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testSyncMultipleDatabaseIncludingSameTables() throws Exception {
+        includingAndExcludingTablesImpl(
+                "paimon_sync_database_including_03,paimon_sync_database_including_04",
+                "paimon_1",
+                null,
+                Arrays.asList("paimon_1"),
+                Collections.singletonList("ignored"));
+    }
+
+    @Test
+    @Timeout(60)
     public void testIncludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 "paimon_sync_database_including",
