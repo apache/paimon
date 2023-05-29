@@ -1,6 +1,6 @@
 ---
 title: "Manage Partition"
-weight: 5
+weight: 4
 type: docs
 aliases:
 - /maintenance/manage-partition.html
