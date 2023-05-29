@@ -206,6 +206,9 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                 "No tables to be synchronized. Possible cause is the schemas of all tables in specified "
                         + "MySQL database are not compatible with those of existed Paimon tables. Please check the log.");
 
+        String databaseNameStr = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME);
+        mySqlConfig.set(
+                MySqlSourceOptions.DATABASE_NAME, "(" + String.join("|", databaseNameStr.split(",")) + ")");
         mySqlConfig.set(
                 MySqlSourceOptions.TABLE_NAME, "(" + String.join("|", monitoredTables) + ")");
         MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig);
@@ -248,21 +251,24 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     }
 
     private List<MySqlSchema> getMySqlSchemaList() throws Exception {
-        String databaseName = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME);
+        String databaseListStr = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME);
+        String[] databaseList = databaseListStr.split(",");
         List<MySqlSchema> mySqlSchemaList = new ArrayList<>();
         try (Connection conn = MySqlActionUtils.getConnection(mySqlConfig)) {
             DatabaseMetaData metaData = conn.getMetaData();
-            try (ResultSet tables =
-                    metaData.getTables(databaseName, null, "%", new String[] {"TABLE"})) {
-                while (tables.next()) {
-                    String tableName = tables.getString("TABLE_NAME");
-                    if (!shouldMonitorTable(tableName)) {
-                        continue;
-                    }
-                    MySqlSchema mySqlSchema = new MySqlSchema(metaData, databaseName, tableName);
-                    if (mySqlSchema.primaryKeys().size() > 0) {
-                        // only tables with primary keys will be considered
-                        mySqlSchemaList.add(mySqlSchema);
+            for (String databaseName : databaseList) {
+                try (ResultSet tables =
+                             metaData.getTables(databaseName, null, "%", new String[]{"TABLE"})) {
+                    while (tables.next()) {
+                        String tableName = tables.getString("TABLE_NAME");
+                        if (!shouldMonitorTable(tableName)) {
+                            continue;
+                        }
+                        MySqlSchema mySqlSchema = new MySqlSchema(metaData, databaseName, tableName);
+                        if (mySqlSchema.primaryKeys().size() > 0) {
+                            // only tables with primary keys will be considered
+                            mySqlSchemaList.add(mySqlSchema);
+                        }
                     }
                 }
             }
