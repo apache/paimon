@@ -248,7 +248,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                 tableSuffix.equals(tableSuffix.toLowerCase()),
                 String.format(
                         "Table suffix [%s] cannot contain upper case in case-insensitive catalog.",
-                        tablePrefix));
+                        tableSuffix));
     }
 
     private List<MySqlSchema> getMySqlSchemaList() throws Exception {
@@ -441,6 +441,6 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     public void run() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         build(env);
-        env.execute(String.format("MySQL-Paimon Database Sync: %s", database));
+        execute(env, String.format("MySQL-Paimon Database Sync: %s", database));
     }
 }

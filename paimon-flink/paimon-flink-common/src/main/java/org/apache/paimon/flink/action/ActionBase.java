@@ -21,8 +21,13 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
+import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+
+import org.apache.flink.configuration.PipelineOptions;
+import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
 import java.util.Map;
 import java.util.UUID;
@@ -44,5 +49,11 @@ public abstract class ActionBase implements Action {
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
         catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
         flinkCatalog = FlinkCatalogFactory.createCatalog(catalogName, catalog);
+    }
+
+    protected void execute(StreamExecutionEnvironment env, String defaultName) throws Exception {
+        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        String name = conf.getOptional(PipelineOptions.NAME).orElse(defaultName);
+        env.execute(name);
     }
 }
