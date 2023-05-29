@@ -384,6 +384,6 @@ public class MySqlSyncTableAction extends ActionBase {
     public void run() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         build(env);
-        env.execute(String.format("MySQL-Paimon Table Sync: %s.%s", database, table));
+        execute(env, String.format("MySQL-Paimon Table Sync: %s.%s", database, table));
     }
 }
