@@ -100,6 +100,7 @@ public class PaimonOutputCommitter extends OutputCommitter {
                                 attemptID.getJobID(),
                                 attemptID.getTaskID().getId()),
                         table.fileIO());
+                writer.close(true);
             } catch (Exception e) {
                 LOG.error(
                         "CommitTask prepareCommit error for specific table: {}, attemptID: {}",
