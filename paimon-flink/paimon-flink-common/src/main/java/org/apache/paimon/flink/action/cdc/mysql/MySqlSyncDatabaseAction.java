@@ -244,7 +244,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                 tableSuffix.equals(tableSuffix.toLowerCase()),
                 String.format(
                         "Table suffix [%s] cannot contain upper case in case-insensitive catalog.",
-                        tablePrefix));
+                        tableSuffix));
     }
 
     private List<MySqlSchema> getMySqlSchemaList() throws Exception {
