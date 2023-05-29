@@ -86,6 +86,24 @@ commits of `OVERWRITE`, you can configure `streaming-read-overwrite`.
 deletes the partitions appear in the overwrite data). You can configure `dynamic-partition-overwrite` to change it.
 {{< /hint >}}
 
+{{< hint warning >}}
+Warning: We cannot insert into a non-null column of one table with a nullable column of another table. Assume that, 
+we have a column key1 in table A which is primary key, primary key cannot be null. We have a column key2 in table B,
+which is nullable. If we run a sql like this:
+``` sql
+INSERT INTO A key1 SELECT key2 FROM B
+```
+We will catch a exception,
+- In spark: "Cannot write nullable values to non-null column 'key1'."
+- In flink: "Column 'key1' is NOT NULL, however, a null value is being written into it. "
+
+Other engines will throw respective exception to announce this. We can use function "NVL" or "COALESCE" to work around, 
+turn a nullable column into a non-null column to escape exception:
+```sql
+INSERT INTO A key1 SELECT COALESCE(key2, <non-null expression>) FROM B
+```
+{{< /hint >}}
+
 ## Applying Records/Changes to Tables
 
 {{< tabs "insert-into-example" >}}
