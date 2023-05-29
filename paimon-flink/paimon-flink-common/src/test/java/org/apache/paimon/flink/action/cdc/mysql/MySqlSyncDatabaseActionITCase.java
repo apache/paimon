@@ -488,7 +488,9 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         env.setRestartStrategy(RestartStrategies.noRestart());
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "paimon_sync_multiple_database_01,paimon_sync_multiple_database_02");
+        mySqlConfig.put(
+                "database-name",
+                "paimon_sync_multiple_database_01,paimon_sync_multiple_database_02");
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
         Map<String, String> tableConfig = new HashMap<>();
@@ -511,7 +513,12 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         JobClient client = env.executeAsync();
         waitJobRunning(client);
 
-        assertTableExists(Arrays.asList("paimon_multiple_1", "paimon_multiple_2", "paimon_multiple_3", "paimon_multiple_4"));
+        assertTableExists(
+                Arrays.asList(
+                        "paimon_multiple_1",
+                        "paimon_multiple_2",
+                        "paimon_multiple_3",
+                        "paimon_multiple_4"));
     }
 
     @Test
