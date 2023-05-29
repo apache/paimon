@@ -21,12 +21,15 @@ package org.apache.paimon.table;
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
+import org.apache.paimon.append.AppendOnlyTableCompactionCoordinator;
+import org.apache.paimon.append.AppendOnlyTableCompactionWorker;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendOnlyFileStoreRead;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
+import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ReverseReader;
 import org.apache.paimon.predicate.Predicate;
@@ -49,6 +52,8 @@ import java.util.function.BiConsumer;
 public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
+
+    public static final int NO_BUCKET_BUCKET = 0;
 
     private transient AppendOnlyFileStore lazyStore;
 
@@ -130,9 +135,23 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableWriteImpl<InternalRow> newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
+        AppendOnlyFileStoreWrite writer = store().newWrite(commitUser);
+        boolean negativeBucket = coreOptions().bucket() == -1;
+        if (negativeBucket) {
+            writer.skipCompaction();
+            writer.fromEmptyWriter();
+        }
         return new TableWriteImpl<>(
-                store().newWrite(commitUser, manifestFilter),
-                new InternalRowKeyAndBucketExtractor(tableSchema),
+                writer,
+                new InternalRowKeyAndBucketExtractor(tableSchema) {
+                    @Override
+                    public int bucket() {
+                        if (negativeBucket) {
+                            return AppendOnlyFileStoreTable.NO_BUCKET_BUCKET;
+                        }
+                        return super.bucket();
+                    }
+                },
                 record -> {
                     Preconditions.checkState(
                             record.row().getRowKind() == RowKind.INSERT,
@@ -140,5 +159,17 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                             record.row().getRowKind());
                     return record.row();
                 });
+    }
+
+    public AppendOnlyTableCompactionCoordinator getCompactionCoordinator() {
+        return new AppendOnlyTableCompactionCoordinator(
+                this,
+                coreOptions().targetFileSize(),
+                coreOptions().compactionMinFileNum(),
+                coreOptions().compactionMaxFileNum());
+    }
+
+    public AppendOnlyTableCompactionWorker getCompactionWorker() {
+        return new AppendOnlyTableCompactionWorker(this);
     }
 }

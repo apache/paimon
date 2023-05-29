@@ -62,7 +62,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
     private final int compactionMinFileNum;
     private final int compactionMaxFileNum;
     private final boolean commitForceCompact;
-    private final boolean skipCompaction;
+    private boolean skipCompaction;
     private final boolean assertDisorder;
     private final String fileCompression;
 
@@ -129,7 +129,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                 fileCompression);
     }
 
-    private AppendOnlyCompactManager.CompactRewriter compactRewriter(
+    // AppendOnlyCompactWorker need rewriter to execute compaction task
+    public AppendOnlyCompactManager.CompactRewriter compactRewriter(
             BinaryRow partition, int bucket) {
         return toCompact -> {
             if (toCompact.isEmpty()) {
@@ -157,5 +158,14 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
             rewriter.close();
             return rewriter.result();
         };
+    }
+
+    // overwrite flag in AppendOnlyFileStoreWrite only disable search for restored files
+    public void fromEmptyWriter() {
+        withOverwrite(true);
+    }
+
+    public void skipCompaction() {
+        skipCompaction = true;
     }
 }

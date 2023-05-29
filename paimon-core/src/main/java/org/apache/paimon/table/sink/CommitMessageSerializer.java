@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.append.CompactionTask;
 import org.apache.paimon.data.serializer.VersionedSerializer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMetaSerializer;
@@ -67,14 +68,24 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
     }
 
     private void serialize(CommitMessage obj, DataOutputView view) throws IOException {
-        CommitMessageImpl message = (CommitMessageImpl) obj;
-        serializeBinaryRow(obj.partition(), view);
-        view.writeInt(obj.bucket());
-        dataFileSerializer.serializeList(message.newFilesIncrement().newFiles(), view);
-        dataFileSerializer.serializeList(message.newFilesIncrement().changelogFiles(), view);
-        dataFileSerializer.serializeList(message.compactIncrement().compactBefore(), view);
-        dataFileSerializer.serializeList(message.compactIncrement().compactAfter(), view);
-        dataFileSerializer.serializeList(message.compactIncrement().changelogFiles(), view);
+        if (obj instanceof CommitMessageImpl) {
+            view.writeInt(0);
+            CommitMessageImpl message = (CommitMessageImpl) obj;
+            serializeBinaryRow(obj.partition(), view);
+            view.writeInt(obj.bucket());
+            dataFileSerializer.serializeList(message.newFilesIncrement().newFiles(), view);
+            dataFileSerializer.serializeList(message.newFilesIncrement().changelogFiles(), view);
+            dataFileSerializer.serializeList(message.compactIncrement().compactBefore(), view);
+            dataFileSerializer.serializeList(message.compactIncrement().compactAfter(), view);
+            dataFileSerializer.serializeList(message.compactIncrement().changelogFiles(), view);
+        } else {
+            view.writeInt(1);
+            CompactionTask task = (CompactionTask) obj;
+            serializeBinaryRow(task.partition(), view);
+            dataFileSerializer.serializeList(task.newFiles(), view);
+            dataFileSerializer.serializeList(task.restoredFiles(), view);
+            view.writeBoolean(task.isNeedCompact());
+        }
     }
 
     @Override
@@ -107,15 +118,30 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
     }
 
     private CommitMessage deserialize(DataInputView view) throws IOException {
-        return new CommitMessageImpl(
-                deserializeBinaryRow(view),
-                view.readInt(),
-                new NewFilesIncrement(
-                        dataFileSerializer.deserializeList(view),
-                        dataFileSerializer.deserializeList(view)),
-                new CompactIncrement(
-                        dataFileSerializer.deserializeList(view),
-                        dataFileSerializer.deserializeList(view),
-                        dataFileSerializer.deserializeList(view)));
+        int kind = view.readInt();
+        if (kind == 0) {
+            return new CommitMessageImpl(
+                    deserializeBinaryRow(view),
+                    view.readInt(),
+                    new NewFilesIncrement(
+                            dataFileSerializer.deserializeList(view),
+                            dataFileSerializer.deserializeList(view)),
+                    new CompactIncrement(
+                            dataFileSerializer.deserializeList(view),
+                            dataFileSerializer.deserializeList(view),
+                            dataFileSerializer.deserializeList(view)));
+        } else if (kind == 1) {
+            return new CompactionTask(
+                    deserializeBinaryRow(view),
+                    dataFileSerializer.deserializeList(view),
+                    dataFileSerializer.deserializeList(view),
+                    view.readBoolean());
+        } else {
+            throw new RuntimeException(
+                    "unkonw commit message kind: "
+                            + kind
+                            + ". "
+                            + "0 for CommitMessageImpl, 1 for CompactionTask.");
+        }
     }
 }

@@ -157,6 +157,7 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
                 snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
                 scanKind != ScanKind.ALL,
                 false,
+                splitStreaming(),
                 splitGenerator,
                 files);
     }
@@ -201,6 +202,7 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
                         snapshotId,
                         true,
                         true,
+                        splitStreaming(),
                         splitGenerator,
                         FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.DELETE))));
 
@@ -209,6 +211,7 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
                         snapshotId,
                         true,
                         false,
+                        splitStreaming(),
                         splitGenerator,
                         FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.ADD))));
         return splits;
@@ -229,6 +232,7 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
             long snapshotId,
             boolean isIncremental,
             boolean reverseRowKind,
+            boolean splitStreaming,
             SplitGenerator splitGenerator,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
         List<DataSplit> splits = new ArrayList<>();
@@ -238,8 +242,10 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
             Map<Integer, List<DataFileMeta>> buckets = entry.getValue();
             for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : buckets.entrySet()) {
                 int bucket = bucketEntry.getKey();
-                if (isIncremental) {
+                if (isIncremental && !splitStreaming) {
                     // Don't split when incremental
+                    // If we specify splitStreaming, we need to split the files. When bucket num is
+                    // negative, we do this.
                     splits.add(
                             new DataSplit(
                                     snapshotId,
@@ -264,5 +270,9 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
             }
         }
         return splits;
+    }
+
+    private boolean splitStreaming() {
+        return options.bucket() == -1;
     }
 }

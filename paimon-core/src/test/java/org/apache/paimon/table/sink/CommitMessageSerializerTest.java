@@ -18,9 +18,11 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.append.CompactionTask;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.NewFilesIncrement;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -42,5 +44,21 @@ public class CommitMessageSerializerTest {
                 new CommitMessageImpl(row(0), 1, newFilesIncrement, compactIncrement);
         CommitMessage newCommittable = serializer.deserialize(2, serializer.serialize(committable));
         assertThat(newCommittable).isEqualTo(committable);
+    }
+
+    @Test
+    public void testCompactionTaskSerializer() throws IOException {
+        CommitMessageSerializer serializer = new CommitMessageSerializer();
+        CompactionTask task =
+                new CompactionTask(
+                        row(0),
+                        randomNewFilesIncrement().newFiles(),
+                        randomNewFilesIncrement().newFiles(),
+                        true);
+
+        byte[] bytes = serializer.serialize(task);
+        CompactionTask task1 =
+                (CompactionTask) serializer.deserialize(serializer.getVersion(), bytes);
+        Assertions.assertTrue(task1.equals(task));
     }
 }

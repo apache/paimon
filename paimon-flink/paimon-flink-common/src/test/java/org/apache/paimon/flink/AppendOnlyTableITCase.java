@@ -51,6 +51,17 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testCreateNegativeBucketTableWithBucketKey() {
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        "CREATE TABLE pk_table (id INT, data STRING) "
+                                                + "WITH ('write-mode'='append-only', 'bucket' = '-1', 'bucket-key' = 'id')"))
+                .hasRootCauseInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage("Cannot define 'bucket-key' with negative bucket number.");
+    }
+
+    @Test
     public void testReadEmpty() {
         assertThat(batchSql("SELECT * FROM append_table")).isEmpty();
     }
