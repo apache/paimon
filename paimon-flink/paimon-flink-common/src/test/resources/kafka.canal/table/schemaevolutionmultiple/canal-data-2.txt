@@ -1,0 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+{"data":null,"database":"paimon_sync_table","es":1683614798000,"id":2431,"isDdl":true,"mysqlType":null,"old":null,"pkNames":null,"sql":"/* Query from DMS-WEBSQL-0-Qid_29885012146961120X by user 1486767996652600 */ ALTER TABLE schema_evolution_multiple \nADD v4 INT,\nMODIFY COLUMN v1 VARCHAR(20),\nADD COLUMN (v5 DOUBLE, v6 DECIMAL(5, 3), `$% ^,& *(` VARCHAR(10) COMMENT 'test'),\n            MODIFY v2 BIGINT","sqlType":null,"table":"schema_evolution_multiple","ts":1683614799031,"type":"ALTER"}
+{"data":[{"_id":"2","v1":"long_string_two","v2":"2000000000000","v3":"string_2","v4":"20","v5":"20.5","v6":"20.002","$% ^,& *(":"test_2"}],"database":"paimon_sync_table","es":1683614814000,"id":2433,"isDdl":false,"mysqlType":{"_id":"INT","v1":"VARCHAR(20)","v2":"BIGINT","v3":"VARCHAR(10)","v4":"INT","v5":"DOUBLE","v6":"DECIMAL(5,3)","$% ^,& *(":"VARCHAR(10)"},"old":null,"pkNames":["_id"],"sql":"","sqlType":{"_id":4,"v1":12,"v2":-5,"v3":12,"v4":4,"v5":8,"v6":3,"$% ^,& *(":12},"table":"schema_evolution_multiple","ts":1683614814534,"type":"INSERT"}

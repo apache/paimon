@@ -1,0 +1,65 @@
+{{/*
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+*/}}
+{{ $ref := ref . "maintenance/configurations.md" }}
+<table class="configuration table table-bordered">
+    <thead>
+    <tr>
+        <th class="text-left" style="width: 15%">Configuration</th>
+        <th class="text-left" style="width: 85%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+        <td><h5>--warehouse</h5></td>
+        <td>The path to Paimon warehouse.</td>
+    </tr>
+    <tr>
+        <td><h5>--database</h5></td>
+        <td>The database name in Paimon catalog.</td>
+    </tr>
+    <tr>
+        <td><h5>--table</h5></td>
+        <td>The Paimon table name.</td>
+    </tr>
+    <tr>
+        <td><h5>--partition-keys</h5></td>
+        <td>The partition keys for Paimon table. If there are multiple partition keys, connect them with comma, for example "dt,hh,mm".</td>
+    </tr>
+    <tr>
+        <td><h5>--primary-keys</h5></td>
+        <td>The primary keys for Paimon table. If there are multiple primary keys, connect them with comma, for example "buyer_id,seller_id".</td>
+    </tr>
+    <tr>
+        <td><h5>--computed-column</h5></td>
+        <td>The definitions of computed columns. The argument field is from Kafka topic's table field name. <br /><br />Supported expressions are: <ul><li>year(date-column): Extract year from a DATE, DATETIME or TIMESTAMP. Output is an INT value represent the year.</li><li>substring(column,beginInclusive): Get column.substring(beginInclusive). Output is a STRING.</li><li>substring(column,beginInclusive,endExclusive): Get column.substring(beginInclusive,endExclusive). Output is a STRING.</li><li>truncate(column,width): truncate column by width. Output type is same with column.<ul><li>If the column is a STRING, truncate(column,width) will truncate the string to width characters, namely "value.substring(0, width)".</li><li>If the column is an INT or LONG, truncate(column,width) will truncate the number with the algorithm "v - (((v % W) + W) % W)". The "redundant" compute part is to keep the result always positive.</li><li>If the column is a DECIMAL, truncate(column,width) will truncate the decimal with the algorithm: let "scaled_W = decimal(W, scale(v))", then return "v - (v % scaled_W)".</li></ul></li></ul></td>
+    </tr>
+    <tr>
+        <td><h5>--kafka-conf</h5></td>
+        <td>The configuration for Flink Kafka sources. Each configuration should be specified in the format `key=value`. `properties.bootstrap.servers`, `topic`, `properties.group.id`,  and `value.format` are required configurations, others are optional.See its <a href="https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/kafka/#%e8%bf%9e%e6%8e%a5%e5%99%a8%e5%8f%82%e6%95%b0">document</a> for a complete list of configurations.</td>
+    </tr>
+    <tr>
+        <td><h5>--catalog-conf</h5></td>
+        <td>The configuration for Paimon catalog. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}">here</a> for a complete list of catalog configurations.</td>
+    </tr>
+    <tr>
+        <td><h5>--table-conf</h5></td>
+        <td>The configuration for Paimon table sink. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}">here</a> for a complete list of table configurations.</td>
+    </tr>
+    </tbody>
+</table>
