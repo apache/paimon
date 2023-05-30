@@ -773,8 +773,8 @@ public class KafkaCanalSyncTableActionITCase extends KafkaCanalActionITCaseBase 
 
     @Test
     @Timeout(60)
-    public void testStarUpOption() throws Exception {
-        final String topic = "start_up";
+    public void testStarUpOptionSpecific() throws Exception {
+        final String topic = "start_up_specific";
         createTestTopic(topic, 1, 1);
         // ---------- Write the Canal json into Kafka -------------------
         List<String> lines = readLines("kafka.canal/table/startupmode/canal-data-1.txt");
@@ -825,8 +825,266 @@ public class KafkaCanalSyncTableActionITCase extends KafkaCanalActionITCaseBase 
                         },
                         new String[] {"pt", "_id", "v1"});
         List<String> primaryKeys = Arrays.asList("pt", "_id");
-        // topic has 2 record we read one
+        // topic has two records we read two
         List<String> expected = Collections.singletonList("+I[1, 2, two]");
+        waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testStarUpOptionLatest() throws Exception {
+        final String topic = "start_up_latest";
+        createTestTopic(topic, 1, 1);
+        // ---------- Write the Canal json into Kafka -------------------
+        List<String> lines = readLines("kafka.canal/table/startupmode/canal-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", topic);
+        kafkaConfig.put("scan.startup.mode", "latest-offset");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        KafkaSyncTableAction action =
+                new KafkaSyncTableAction(
+                        kafkaConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "_id"),
+                        Collections.EMPTY_LIST,
+                        Collections.emptyMap(),
+                        tableConfig);
+        action.build(env);
+        JobClient client = env.executeAsync();
+
+        waitJobRunning(client);
+
+        try {
+            writeRecordsToKafka(topic, readLines("kafka.canal/table/startupmode/canal-data-2.txt"));
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+        FileStoreTable table = getFileStoreTable();
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10)
+                        },
+                        new String[] {"pt", "_id", "v1"});
+        List<String> primaryKeys = Arrays.asList("pt", "_id");
+        // topic has four records we read two
+        List<String> expected = Arrays.asList("+I[1, 3, three]", "+I[1, 4, four]");
+        waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testStarUpOptionTimestamp() throws Exception {
+        final String topic = "start_up_timestamp";
+        createTestTopic(topic, 1, 1);
+        // ---------- Write the Canal json into Kafka -------------------
+        List<String> lines = readLines("kafka.canal/table/startupmode/canal-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", topic);
+        kafkaConfig.put("scan.startup.mode", "timestamp");
+        kafkaConfig.put(
+                "scan.startup.timestamp-millis", String.valueOf(System.currentTimeMillis()));
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        KafkaSyncTableAction action =
+                new KafkaSyncTableAction(
+                        kafkaConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "_id"),
+                        Collections.EMPTY_LIST,
+                        Collections.emptyMap(),
+                        tableConfig);
+        action.build(env);
+        JobClient client = env.executeAsync();
+
+        waitJobRunning(client);
+
+        try {
+            writeRecordsToKafka(topic, readLines("kafka.canal/table/startupmode/canal-data-2.txt"));
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+        FileStoreTable table = getFileStoreTable();
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10)
+                        },
+                        new String[] {"pt", "_id", "v1"});
+        List<String> primaryKeys = Arrays.asList("pt", "_id");
+        // topic has four records we read two
+        List<String> expected = Arrays.asList("+I[1, 3, three]", "+I[1, 4, four]");
+        waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testStarUpOptionEarliest() throws Exception {
+        final String topic = "start_up_earliest";
+        createTestTopic(topic, 1, 1);
+        // ---------- Write the Canal json into Kafka -------------------
+        List<String> lines = readLines("kafka.canal/table/startupmode/canal-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", topic);
+        kafkaConfig.put("scan.startup.mode", "earliest-offset");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        KafkaSyncTableAction action =
+                new KafkaSyncTableAction(
+                        kafkaConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "_id"),
+                        Collections.EMPTY_LIST,
+                        Collections.emptyMap(),
+                        tableConfig);
+        action.build(env);
+        JobClient client = env.executeAsync();
+
+        waitJobRunning(client);
+
+        try {
+            writeRecordsToKafka(topic, readLines("kafka.canal/table/startupmode/canal-data-2.txt"));
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+        FileStoreTable table = getFileStoreTable();
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10)
+                        },
+                        new String[] {"pt", "_id", "v1"});
+        List<String> primaryKeys = Arrays.asList("pt", "_id");
+        // topic has four records we read all
+        List<String> expected =
+                Arrays.asList(
+                        "+I[1, 1, one]", "+I[1, 2, two]", "+I[1, 3, three]", "+I[1, 4, four]");
+        waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testStarUpOptionGroup() throws Exception {
+        final String topic = "start_up_group";
+        createTestTopic(topic, 1, 1);
+        // ---------- Write the Canal json into Kafka -------------------
+        List<String> lines = readLines("kafka.canal/table/startupmode/canal-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", topic);
+        kafkaConfig.put("scan.startup.mode", "group-offsets");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        KafkaSyncTableAction action =
+                new KafkaSyncTableAction(
+                        kafkaConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "_id"),
+                        Collections.EMPTY_LIST,
+                        Collections.emptyMap(),
+                        tableConfig);
+        action.build(env);
+        JobClient client = env.executeAsync();
+
+        waitJobRunning(client);
+
+        try {
+            writeRecordsToKafka(topic, readLines("kafka.canal/table/startupmode/canal-data-2.txt"));
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+        FileStoreTable table = getFileStoreTable();
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10)
+                        },
+                        new String[] {"pt", "_id", "v1"});
+        List<String> primaryKeys = Arrays.asList("pt", "_id");
+        // topic has four records we read all
+        List<String> expected =
+                Arrays.asList(
+                        "+I[1, 1, one]", "+I[1, 2, two]", "+I[1, 3, three]", "+I[1, 4, four]");
         waitForResult(expected, table, rowType, primaryKeys);
     }
 
