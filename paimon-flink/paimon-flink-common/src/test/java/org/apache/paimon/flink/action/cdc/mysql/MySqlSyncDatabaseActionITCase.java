@@ -18,6 +18,14 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.core.execution.JobClient;
+import org.apache.flink.core.execution.SavepointFormatType;
+import org.apache.flink.runtime.jobgraph.JobGraph;
+import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -30,15 +38,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
-
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
-import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.core.execution.SavepointFormatType;
-import org.apache.flink.runtime.jobgraph.JobGraph;
-import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -555,7 +554,6 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         assertTableNotExists(notExistedTables);
     }
 
-    @Test
     @Timeout(60)
     public void testIgnoreCase() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
@@ -635,16 +633,51 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     @Test
     @Timeout(600)
     public void testNewlyAddedTables() throws Exception {
-        JobClient client = buildSyncDatabaseActionWithNewlyAddedTables();
+        testNewlyAddedTable(1, true, false, "paimon_sync_database_newly_added_tables");
+    }
+
+    @Test
+    @Timeout(600)
+    public void testNewlyAddedTableSingleTable() throws Exception {
+        testNewlyAddedTable(1, false, false, "paimon_sync_database_newly_added_tables_1");
+    }
+
+    @Test
+    @Timeout(600)
+    public void testNewlyAddedTableMultipleTables() throws Exception {
+        testNewlyAddedTable(3, false, false, "paimon_sync_database_newly_added_tables_2");
+    }
+
+    @Test
+    @Timeout(600)
+    public void testNewlyAddedTableSchemaChange() throws Exception {
+        testNewlyAddedTable(1, false, true, "paimon_sync_database_newly_added_tables_3");
+    }
+
+    @Test
+    @Timeout(600)
+    public void testNewlyAddedTableSingleTableWithSavepoint() throws Exception {
+        testNewlyAddedTable(1, true, true, "paimon_sync_database_newly_added_tables_4");
+    }
+
+    public void testNewlyAddedTable(
+        int numOfNewlyAddedTables, boolean testSavepointRecovery, boolean testSchemaChange, String databaseName)
+            throws Exception {
+        JobClient client = buildSyncDatabaseActionWithNewlyAddedTables(databaseName);
         waitJobRunning(client);
 
         try (Connection conn =
                 DriverManager.getConnection(
-                        MYSQL_CONTAINER.getJdbcUrl("paimon_sync_database_newly_added_tables"),
+                        MYSQL_CONTAINER.getJdbcUrl(databaseName),
                         MYSQL_CONTAINER.getUsername(),
                         MYSQL_CONTAINER.getPassword())) {
             try (Statement statement = conn.createStatement()) {
-                testNewlyAddedTableImpl(client, statement, 1, true, false);
+                testNewlyAddedTableImpl(
+                        client,
+                        statement,
+                        numOfNewlyAddedTables,
+                        testSavepointRecovery,
+                        testSchemaChange);
             }
         }
     }
@@ -715,7 +748,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                             .join();
             assertThat(savepoint).isNotBlank();
 
-            client = buildSyncDatabaseActionWithNewlyAddedTables(savepoint);
+            client = buildSyncDatabaseActionWithNewlyAddedTables(savepoint, "paimon_sync_database_newly_added_tables");
             waitJobRunning(client);
         }
 
@@ -823,15 +856,15 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         "CREATE TABLE %s (k INT, v1 VARCHAR(10), PRIMARY KEY (k))", newTableName));
     }
 
-    private JobClient buildSyncDatabaseActionWithNewlyAddedTables() throws Exception {
-        return buildSyncDatabaseActionWithNewlyAddedTables(null);
+    private JobClient buildSyncDatabaseActionWithNewlyAddedTables(String databaseName) throws Exception {
+        return buildSyncDatabaseActionWithNewlyAddedTables(null, databaseName);
     }
 
-    private JobClient buildSyncDatabaseActionWithNewlyAddedTables(String savepointPath)
+    private JobClient buildSyncDatabaseActionWithNewlyAddedTables(String savepointPath, String databaseName)
             throws Exception {
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "paimon_sync_database_newly_added_tables");
+        mySqlConfig.put("database-name", databaseName);
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(2);
         env.enableCheckpointing(1000);

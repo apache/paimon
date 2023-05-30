@@ -210,6 +210,9 @@ class MySqlActionUtils {
         mySqlConfig
                 .getOptional(MySqlSourceOptions.HEARTBEAT_INTERVAL)
                 .ifPresent(sourceBuilder::heartbeatInterval);
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.SCAN_NEWLY_ADDED_TABLE_ENABLED)
+                .ifPresent(sourceBuilder::scanNewlyAddedTableEnabled);
 
         String startupMode = mySqlConfig.get(MySqlSourceOptions.SCAN_STARTUP_MODE);
         // see
