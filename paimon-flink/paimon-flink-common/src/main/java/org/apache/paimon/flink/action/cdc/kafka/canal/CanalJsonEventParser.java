@@ -46,8 +46,6 @@ import com.alibaba.druid.sql.ast.statement.SQLAlterTableStatement;
 import com.alibaba.druid.sql.ast.statement.SQLColumnDefinition;
 import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableChangeColumn;
 import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableModifyColumn;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -57,7 +55,6 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -65,15 +62,12 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** {@link EventParser} for Canal-json. */
 public class CanalJsonEventParser implements EventParser<String> {
 
-    private static final Logger LOG = LoggerFactory.getLogger(CanalJsonEventParser.class);
-
     private static final String FIELD_DATA = "data";
     private static final String FIELD_OLD = "old";
     private static final String TYPE = "type";
     private static final String OP_INSERT = "INSERT";
     private static final String OP_UPDATE = "UPDATE";
     private static final String OP_DELETE = "DELETE";
-    private static final String OP_CREATE = "CREATE";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -112,7 +106,7 @@ public class CanalJsonEventParser implements EventParser<String> {
                             + "please make sure that your topic's format is accurate.");
             JsonNode mysqlType = root.get("mysqlType");
 
-            if (!isUpdatedDataFields()) {
+            if (!isSchemaChange()) {
                 updateFieldTypes(mysqlType);
             }
         } catch (Exception e) {
@@ -121,7 +115,7 @@ public class CanalJsonEventParser implements EventParser<String> {
     }
 
     @Override
-    public String tableName() {
+    public String parseTableName() {
         String tableName = root.get("table").asText();
         return tableNameConverter.convert(tableName);
     }
@@ -138,8 +132,7 @@ public class CanalJsonEventParser implements EventParser<String> {
         }
     }
 
-    @Override
-    public boolean isUpdatedDataFields() {
+    private boolean isSchemaChange() {
         if (root.get("isDdl") == null) {
             return false;
         } else {
@@ -148,11 +141,15 @@ public class CanalJsonEventParser implements EventParser<String> {
     }
 
     @Override
-    public Optional<List<DataField>> getUpdatedDataFields() {
+    public List<DataField> parseSchemaChange() {
+        if (!isSchemaChange()) {
+            return Collections.emptyList();
+        }
+
         String sql = root.get("sql").asText();
 
         if (StringUtils.isEmpty(sql)) {
-            return Optional.empty();
+            return Collections.emptyList();
         }
 
         List<DataField> result = new ArrayList<>();
@@ -272,11 +269,15 @@ public class CanalJsonEventParser implements EventParser<String> {
             }
         }
 
-        return Optional.of(result);
+        return result;
     }
 
     @Override
-    public List<CdcRecord> getRecords() {
+    public List<CdcRecord> parseRecords() {
+        if (isSchemaChange()) {
+            return Collections.emptyList();
+        }
+
         List<CdcRecord> records = new ArrayList<>();
         String type = root.get(TYPE).asText();
         if (OP_UPDATE.equals(type)) {

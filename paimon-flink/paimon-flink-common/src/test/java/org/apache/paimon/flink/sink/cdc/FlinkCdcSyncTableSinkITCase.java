@@ -52,7 +52,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
-/** IT cases for {@link FlinkCdcSyncTableSinkBuilder}. */
+/** IT cases for {@link CdcSinkBuilder}. */
 public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
 
     @TempDir java.nio.file.Path tempDir;
@@ -104,7 +104,7 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
         TestCdcSourceFunction sourceFunction = new TestCdcSourceFunction(testTable.events());
         DataStreamSource<TestCdcEvent> source = env.addSource(sourceFunction);
         source.setParallelism(2);
-        new FlinkCdcSyncTableSinkBuilder<TestCdcEvent>()
+        new CdcSinkBuilder<TestCdcEvent>()
                 .withInput(source)
                 .withParserFactory(TestCdcEventParser::new)
                 .withTable(table)
