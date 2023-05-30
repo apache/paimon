@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
@@ -42,7 +43,7 @@ import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
  * org.apache.paimon.flink.source.CompactorSourceBuilder}. The records will contain partition keys
  * in the first few columns, and bucket number in the last column.
  */
-public class StoreCompactOperator extends PrepareCommitOperator<RowData> {
+public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committable> {
 
     private final FileStoreTable table;
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
@@ -58,6 +59,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData> {
             StoreSinkWrite.Provider storeSinkWriteProvider,
             boolean isStreaming,
             String initialCommitUser) {
+        super(Options.fromMap(table.options()));
         Preconditions.checkArgument(
                 !table.coreOptions().writeOnly(),
                 CoreOptions.WRITE_ONLY.key() + " should not be true for StoreCompactOperator.");
@@ -93,7 +95,8 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData> {
                         table,
                         commitUser,
                         state,
-                        getContainingTask().getEnvironment().getIOManager());
+                        getContainingTask().getEnvironment().getIOManager(),
+                        memoryPool);
     }
 
     @Override

@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.catalog.CatalogUtils;
-import org.apache.paimon.flink.action.cdc.kafka.KafkaSyncDatabaseAction;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaSyncTableAction;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncDatabaseAction;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableAction;
@@ -127,8 +126,6 @@ public interface Action {
 
         private static final String KAFKA_SYNC_TABLE = "kafka-sync-table";
 
-        private static final String KAFKA_SYNC_DATABASE = "kafka-sync-database";
-
         public static Optional<Action> create(String[] args) {
             String action = args[0].toLowerCase();
             String[] actionArgs = Arrays.copyOfRange(args, 1, args.length);
@@ -150,8 +147,6 @@ public interface Action {
                     return MySqlSyncDatabaseAction.create(actionArgs);
                 case KAFKA_SYNC_TABLE:
                     return KafkaSyncTableAction.create(actionArgs);
-                case KAFKA_SYNC_DATABASE:
-                    return KafkaSyncDatabaseAction.create(actionArgs);
                 default:
                     System.err.println("Unknown action \"" + action + "\"");
                     printHelp();

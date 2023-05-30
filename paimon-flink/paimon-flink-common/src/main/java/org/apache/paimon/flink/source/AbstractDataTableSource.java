@@ -214,7 +214,7 @@ public abstract class AbstractDataTableSource extends FlinkTableSource
             FlinkSourceBuilder sourceBuilder, StreamExecutionEnvironment env) {
         Options options = Options.fromMap(this.table.options());
         Integer parallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);
-        if (options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
+        if (parallelism == null && options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
             if (streaming) {
                 parallelism = options.get(CoreOptions.BUCKET);
             } else {

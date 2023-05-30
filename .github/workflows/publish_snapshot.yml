@@ -52,8 +52,6 @@ jobs:
           key: snapshot-maven-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
             snapshot-maven-
-      - name: Clone Paimon-shade repo
-        run: git clone https://github.com/apache/incubator-paimon-shade.git /tmp/paimon-shade
       - name: Publish snapshot
         env:
           ASF_USERNAME: ${{ secrets.NEXUS_USER }}
@@ -67,8 +65,8 @@ jobs:
           
           mvn --settings $tmp_settings clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release
 
-          mv $tmp_settings /tmp/paimon-shade
-          cd /tmp/paimon-shade
+          git checkout -b release-0.4 origin/release-0.4
+
           mvn --settings $tmp_settings clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release
-          
+
           rm $tmp_settings

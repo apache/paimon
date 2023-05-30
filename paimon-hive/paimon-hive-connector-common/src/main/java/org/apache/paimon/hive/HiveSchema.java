@@ -47,12 +47,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.function.Function;
 import java.util.stream.Collectors;
-
-import static org.apache.paimon.hive.HiveTypeUtils.typeInfoToLogicalType;
 
 /** Column names, types and comments of a Hive table. */
 public class HiveSchema {
@@ -112,6 +112,10 @@ public class HiveSchema {
         List<String> columnNames = Arrays.asList(columnProperty.split(columnNameDelimiter));
         String columnTypes = properties.getProperty(serdeConstants.LIST_COLUMN_TYPES);
         List<TypeInfo> typeInfos = TypeInfoUtils.getTypeInfosFromTypeString(columnTypes);
+        List<DataType> dataTypes =
+                typeInfos.stream()
+                        .map(HiveTypeUtils::typeInfoToLogicalType)
+                        .collect(Collectors.toList());
         List<String> comments =
                 Lists.newArrayList(
                         Splitter.on('\0').split(properties.getProperty("columns.comments")));
@@ -121,16 +125,22 @@ public class HiveSchema {
                     "Extract schema with exists DDL and exists paimon table, table location:[{}].",
                     location);
             checkSchemaMatched(columnNames, typeInfos, tableSchema.get());
-            // Use paimon table column comment when the paimon table exists.
-            comments =
+            // Use paimon table data types and column comments when the paimon table exists.
+            // Using paimon data types first because hive's TypeInfoFactory.timestampTypeInfo
+            // doesn't contain precision and thus may cause casting problems
+            Map<String, DataField> paimonFields =
                     tableSchema.get().fields().stream()
-                            .map(DataField::description)
-                            .collect(Collectors.toList());
+                            .collect(Collectors.toMap(DataField::name, Function.identity()));
+
+            for (int i = 0; i < columnNames.size(); i++) {
+                String columnName = columnNames.get(i);
+                dataTypes.set(i, paimonFields.get(columnName).type());
+                comments.set(i, paimonFields.get(columnName).description());
+            }
         }
         RowType.Builder builder = RowType.builder();
         for (int i = 0; i < columnNames.size(); i++) {
-            builder.field(
-                    columnNames.get(i), typeInfoToLogicalType(typeInfos.get(i)), comments.get(i));
+            builder.field(columnNames.get(i), dataTypes.get(i), comments.get(i));
         }
         return new HiveSchema(builder.build());
     }

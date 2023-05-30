@@ -121,8 +121,9 @@ public class FlinkTableSink extends FlinkTableSinkBase
                     String.format(
                             "merge engine '%s' can not support delete, currently only %s can support delete.",
                             options.get(MERGE_ENGINE), MergeEngine.DEDUPLICATE));
-        } else if (table instanceof AppendOnlyFileStoreTable
-                || table instanceof ChangelogValueCountFileStoreTable) {
+        } else if (table instanceof ChangelogValueCountFileStoreTable) {
+            return new RowLevelDeleteInfo() {};
+        } else if (table instanceof AppendOnlyFileStoreTable) {
             throw new UnsupportedOperationException(
                     String.format(
                             "table '%s' can not support delete, because there is no primary key.",

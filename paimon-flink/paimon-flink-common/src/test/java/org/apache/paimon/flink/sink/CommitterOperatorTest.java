@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -233,8 +234,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
     private OneInputStreamOperatorTestHarness<Committable, Committable>
             createRecoverableTestHarness(FileStoreTable table) throws Exception {
-        CommitterOperator operator =
-                new CommitterOperator(
+        CommitterOperator<Committable, ManifestCommittable> operator =
+                new CommitterOperator<>(
                         true,
                         initialCommitUser,
                         user ->
@@ -242,7 +243,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                         table.newStreamWriteBuilder()
                                                 .withCommitUser(user)
                                                 .newCommit()),
-                        new RestoreAndFailCommittableStateManager(
+                        new RestoreAndFailCommittableStateManager<>(
                                 () ->
                                         new VersionedSerializerWrapper<>(
                                                 new ManifestCommittableSerializer())));
@@ -251,8 +252,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
     private OneInputStreamOperatorTestHarness<Committable, Committable> createLossyTestHarness(
             FileStoreTable table) throws Exception {
-        CommitterOperator operator =
-                new CommitterOperator(
+        CommitterOperator<Committable, ManifestCommittable> operator =
+                new CommitterOperator<>(
                         true,
                         initialCommitUser,
                         user ->
@@ -265,7 +266,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     private OneInputStreamOperatorTestHarness<Committable, Committable> createTestHarness(
-            CommitterOperator operator) throws Exception {
+            CommitterOperator<Committable, ManifestCommittable> operator) throws Exception {
         TypeSerializer<Committable> serializer =
                 new CommittableTypeInfo().createSerializer(new ExecutionConfig());
         OneInputStreamOperatorTestHarness<Committable, Committable> harness =

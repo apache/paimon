@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.avro;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -30,7 +31,9 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimestampType;
 
 import org.apache.avro.generic.GenericFixed;
 import org.apache.avro.generic.GenericRecord;
@@ -97,7 +100,8 @@ public class AvroToRowDataConverters {
     }
 
     /** Creates a runtime converter which assuming input object is not null. */
-    private static AvroToRowDataConverter createConverter(DataType type) {
+    @VisibleForTesting
+    static AvroToRowDataConverter createConverter(DataType type) {
         switch (type.getTypeRoot()) {
             case TINYINT:
                 return avroObject -> ((Integer) avroObject).byteValue();
@@ -114,7 +118,23 @@ public class AvroToRowDataConverters {
             case TIME_WITHOUT_TIME_ZONE:
                 return AvroToRowDataConverters::convertToTime;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-                return AvroToRowDataConverters::convertToTimestamp;
+                int precision = ((TimestampType) type).getPrecision();
+                if (precision <= 3) {
+                    return AvroToRowDataConverters::convertToTimestampFromMillis;
+                } else if (precision <= 6) {
+                    return AvroToRowDataConverters::convertToTimestampFromMicros;
+                } else {
+                    throw new UnsupportedOperationException("Unsupported precision: " + precision);
+                }
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                precision = ((LocalZonedTimestampType) type).getPrecision();
+                if (precision <= 3) {
+                    return AvroToRowDataConverters::convertToTimestampFromMillis;
+                } else if (precision <= 6) {
+                    return AvroToRowDataConverters::convertToTimestampFromMicros;
+                } else {
+                    throw new UnsupportedOperationException("Unsupported precision: " + precision);
+                }
             case CHAR:
             case VARCHAR:
                 return avroObject -> BinaryString.fromString(avroObject.toString());
@@ -186,22 +206,35 @@ public class AvroToRowDataConverters {
         };
     }
 
-    private static Timestamp convertToTimestamp(Object object) {
-        final long millis;
+    private static Timestamp convertToTimestampFromMillis(Object object) {
+        return convertToTimestamp(object, 3);
+    }
+
+    private static Timestamp convertToTimestampFromMicros(Object object) {
+        return convertToTimestamp(object, 6);
+    }
+
+    @VisibleForTesting
+    static Timestamp convertToTimestamp(Object object, int precision) {
         if (object instanceof Long) {
-            millis = (Long) object;
+            if (precision <= 3) {
+                return Timestamp.fromEpochMillis((Long) object);
+            } else if (precision <= 6) {
+                return Timestamp.fromMicros((Long) object);
+            } else {
+                throw new UnsupportedOperationException("Unsupported precision: " + precision);
+            }
         } else if (object instanceof Instant) {
-            millis = ((Instant) object).toEpochMilli();
+            return Timestamp.fromInstant((Instant) object);
         } else {
             JodaConverter jodaConverter = JodaConverter.getConverter();
             if (jodaConverter != null) {
-                millis = jodaConverter.convertTimestamp(object);
+                return Timestamp.fromEpochMillis(jodaConverter.convertTimestamp(object));
             } else {
                 throw new IllegalArgumentException(
                         "Unexpected object type for TIMESTAMP logical type. Received: " + object);
             }
         }
-        return Timestamp.fromEpochMillis(millis);
     }
 
     private static int convertToDate(Object object) {

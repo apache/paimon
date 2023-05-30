@@ -238,9 +238,6 @@ public class KafkaCanalActionITCaseBase extends ActionITCaseBase {
                 if (cnt == rowType.getFieldCount()) {
                     break;
                 }
-            } else {
-                System.out.println(table.schema().fields().size());
-                System.out.println(table.schema().fields());
             }
             table = table.copyWithLatestSchema();
             Thread.sleep(1000);

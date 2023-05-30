@@ -20,6 +20,8 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
+import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
@@ -28,6 +30,7 @@ import org.apache.paimon.utils.SerializableFunction;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.core.memory.ManagedMemoryUseCase;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -44,6 +47,8 @@ import java.util.UUID;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_LOOKUP_WAIT;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
 
 /** Abstract sink of paimon. */
 public abstract class FlinkSink<T> implements Serializable {
@@ -86,7 +91,7 @@ public abstract class FlinkSink<T> implements Serializable {
 
             if (changelogProducer == ChangelogProducer.FULL_COMPACTION || deltaCommits >= 0) {
                 int finalDeltaCommits = Math.max(deltaCommits, 1);
-                return (table, commitUser, state, ioManager) ->
+                return (table, commitUser, state, ioManager, memoryPool) ->
                         new GlobalFullCompactionSinkWrite(
                                 table,
                                 commitUser,
@@ -94,13 +99,20 @@ public abstract class FlinkSink<T> implements Serializable {
                                 ioManager,
                                 isOverwrite,
                                 waitCompaction,
-                                finalDeltaCommits);
+                                finalDeltaCommits,
+                                memoryPool);
             }
         }
 
-        return (table, commitUser, state, ioManager) ->
+        return (table, commitUser, state, ioManager, memoryPool) ->
                 new StoreSinkWriteImpl(
-                        table, commitUser, state, ioManager, isOverwrite, waitCompaction);
+                        table,
+                        commitUser,
+                        state,
+                        ioManager,
+                        isOverwrite,
+                        waitCompaction,
+                        memoryPool);
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<T> input) {
@@ -137,12 +149,19 @@ public abstract class FlinkSink<T> implements Serializable {
                                 typeInfo,
                                 createWriteOperator(sinkProvider, isStreaming, commitUser))
                         .setParallelism(input.getParallelism());
+        Options options = Options.fromMap(table.options());
+        if (options.get(SINK_USE_MANAGED_MEMORY)) {
+            MemorySize memorySize = options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY);
+            written.getTransformation()
+                    .declareManagedMemoryUseCaseAtOperatorScope(
+                            ManagedMemoryUseCase.OPERATOR, memorySize.getMebiBytes());
+        }
 
         SingleOutputStreamOperator<?> committed =
                 written.transform(
                                 GLOBAL_COMMITTER_NAME + " -> " + table.name(),
                                 typeInfo,
-                                new CommitterOperator(
+                                new CommitterOperator<>(
                                         streamingCheckpointEnabled,
                                         commitUser,
                                         createCommitterFactory(streamingCheckpointEnabled),
@@ -168,8 +187,8 @@ public abstract class FlinkSink<T> implements Serializable {
     protected abstract OneInputStreamOperator<T, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, boolean isStreaming, String commitUser);
 
-    protected abstract SerializableFunction<String, Committer> createCommitterFactory(
-            boolean streamingCheckpointEnabled);
+    protected abstract SerializableFunction<String, Committer<Committable, ManifestCommittable>>
+            createCommitterFactory(boolean streamingCheckpointEnabled);
 
-    protected abstract CommittableStateManager createCommittableStateManager();
+    protected abstract CommittableStateManager<ManifestCommittable> createCommittableStateManager();
 }

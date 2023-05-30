@@ -26,6 +26,7 @@ import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.sink.RestoreAndFailCommittableStateManager;
 import org.apache.paimon.flink.sink.StoreCommitter;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
@@ -54,8 +55,8 @@ public class FlinkCdcSink extends FlinkSink<CdcRecord> {
     }
 
     @Override
-    protected SerializableFunction<String, Committer> createCommitterFactory(
-            boolean streamingCheckpointEnabled) {
+    protected SerializableFunction<String, Committer<Committable, ManifestCommittable>>
+            createCommitterFactory(boolean streamingCheckpointEnabled) {
         // If checkpoint is enabled for streaming job, we have to
         // commit new files list even if they're empty.
         // Otherwise we can't tell if the commit is successful after
@@ -68,7 +69,7 @@ public class FlinkCdcSink extends FlinkSink<CdcRecord> {
     }
 
     @Override
-    protected CommittableStateManager createCommittableStateManager() {
+    protected CommittableStateManager<ManifestCommittable> createCommittableStateManager() {
         return new RestoreAndFailCommittableStateManager(
                 () -> new VersionedSerializerWrapper<>(new ManifestCommittableSerializer()));
     }

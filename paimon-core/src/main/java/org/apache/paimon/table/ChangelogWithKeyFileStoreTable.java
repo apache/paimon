@@ -88,10 +88,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                     mfFactory = DeduplicateMergeFunction.factory();
                     break;
                 case PARTIAL_UPDATE:
-                    mfFactory =
-                            PartialUpdateMergeFunction.factory(
-                                    conf.get(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE),
-                                    rowType.getFieldTypes());
+                    mfFactory = PartialUpdateMergeFunction.factory(conf, rowType);
                     break;
                 case AGGREGATE:
                     mfFactory =

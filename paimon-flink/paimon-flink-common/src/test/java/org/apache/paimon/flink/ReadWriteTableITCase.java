@@ -1203,7 +1203,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                                 INFER_SCAN_PARALLELISM.key(), "true"))))
                 .isEqualTo(1);
 
-        // error scan.parallelism, infer parallelism should be at least 1
+        // with scan.parallelism, respect scan.parallelism
         assertThat(
                         sourceParallelism(
                                 buildQueryWithTableOptions(
@@ -1213,10 +1213,26 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                         new HashMap<String, String>() {
                                             {
                                                 put(INFER_SCAN_PARALLELISM.key(), "true");
-                                                put(SCAN_PARALLELISM.key(), "-1");
+                                                put(SCAN_PARALLELISM.key(), "3");
                                             }
                                         })))
-                .isEqualTo(1);
+                .isEqualTo(3);
+
+        // with illegal scan.parallelism, respect illegal scan.parallelism
+        assertThatThrownBy(
+                        () ->
+                                sourceParallelism(
+                                        buildQueryWithTableOptions(
+                                                table,
+                                                "*",
+                                                "",
+                                                new HashMap<String, String>() {
+                                                    {
+                                                        put(INFER_SCAN_PARALLELISM.key(), "true");
+                                                        put(SCAN_PARALLELISM.key(), "-2");
+                                                    }
+                                                })))
+                .hasMessageContaining("The parallelism of an operator must be at least 1");
 
         // 2 splits, the parallelism is splits num: 2
         insertInto(table, "('Euro', 119)");
@@ -1635,8 +1651,18 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         String deleteStatement = String.format("DELETE FROM %s WHERE currency = 'UNKNOWN'", table);
 
         // Step4: execute delete statement and verify result
-        assertThatThrownBy(() -> bEnv.executeSql(deleteStatement).await())
-                .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01"),
+                        changelogRow("+I", 3L, "Euro", 119L, "2022-01-02"));
+        if (writeMode == WriteMode.CHANGE_LOG) {
+            bEnv.executeSql(deleteStatement).await();
+            String querySql = String.format("SELECT * FROM %s", table);
+            testBatchRead(querySql, expectedRecords);
+        } else {
+            assertThatThrownBy(() -> bEnv.executeSql(deleteStatement).await())
+                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+        }
     }
 
     // ----------------------------------------------------------------------------------------------------------------

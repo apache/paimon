@@ -57,7 +57,8 @@ public class Committable {
                 + '}';
     }
 
-    enum Kind {
+    /** Kind of the produced Committable. */
+    public enum Kind {
         FILE((byte) 0),
 
         LOG_OFFSET((byte) 1);

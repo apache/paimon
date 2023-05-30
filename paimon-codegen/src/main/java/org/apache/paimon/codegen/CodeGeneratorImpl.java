@@ -53,6 +53,14 @@ public class CodeGeneratorImpl implements CodeGenerator {
                 getAscendingSortSpec(fieldTypes.size()));
     }
 
+    /** Generate a {@link RecordEqualiser}. */
+    @Override
+    public GeneratedClass<RecordEqualiser> generateRecordEqualiser(
+            List<DataType> fieldTypes, String name) {
+        return new EqualiserCodeGenerator(RowType.builder().fields(fieldTypes).build())
+                .generateRecordEqualiser(name);
+    }
+
     private SortSpec getAscendingSortSpec(int numFields) {
         SortSpec.SortSpecBuilder builder = SortSpec.builder();
         for (int i = 0; i < numFields; i++) {

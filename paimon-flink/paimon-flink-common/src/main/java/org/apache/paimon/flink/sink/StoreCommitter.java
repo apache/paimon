@@ -24,12 +24,16 @@ import org.apache.paimon.table.sink.TableCommit;
 import org.apache.paimon.table.sink.TableCommitImpl;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 /** {@link Committer} for dynamic store. */
-public class StoreCommitter implements Committer {
+public class StoreCommitter implements Committer<Committable, ManifestCommittable> {
 
     private final TableCommitImpl commit;
 
@@ -74,6 +78,15 @@ public class StoreCommitter implements Committer {
     public void commit(List<ManifestCommittable> committables)
             throws IOException, InterruptedException {
         commit.commitMultiple(committables);
+    }
+
+    @Override
+    public Map<Long, List<Committable>> groupByCheckpoint(Collection<Committable> committables) {
+        Map<Long, List<Committable>> grouped = new HashMap<>();
+        for (Committable c : committables) {
+            grouped.computeIfAbsent(c.checkpointId(), k -> new ArrayList<>()).add(c);
+        }
+        return grouped;
     }
 
     @Override

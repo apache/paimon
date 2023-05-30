@@ -23,7 +23,6 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.flink.action.cdc.kafka.TypeUtil;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -40,7 +39,9 @@ import com.esri.core.geometry.ogc.OGCGeometry;
 import javax.annotation.Nullable;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -125,13 +126,20 @@ public class MySqlTypeUtils {
     // The base length of a timestamp is 19, for example "2023-03-23 17:20:00".
     private static final int JDBC_TIMESTAMP_BASE_LENGTH = 19;
 
+    private static final String LEFT_BRACKETS = "(";
+    private static final String RIGHT_BRACKETS = ")";
+    private static final String COMMA = ",";
+
+    private static final List<String> HAVE_SCALE_LIST =
+            Arrays.asList(DECIMAL, NUMERIC, DOUBLE, REAL, FIXED);
+
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     public static DataType toDataType(String mysqlType) {
         return toDataType(
-                TypeUtil.getType(mysqlType),
-                TypeUtil.getPrecision(mysqlType),
-                TypeUtil.getScale(mysqlType));
+                MySqlTypeUtils.getShortType(mysqlType),
+                MySqlTypeUtils.getPrecision(mysqlType),
+                MySqlTypeUtils.getScale(mysqlType));
     }
 
     public static DataType toDataType(
@@ -279,24 +287,6 @@ public class MySqlTypeUtils {
         }
     }
 
-    public static boolean isEnumType(String type) {
-        switch (type.toUpperCase()) {
-            case ENUM:
-                return true;
-            default:
-                return false;
-        }
-    }
-
-    public static boolean isSetType(String type) {
-        switch (type.toUpperCase()) {
-            case SET:
-                return true;
-            default:
-                return false;
-        }
-    }
-
     public static String convertWkbArray(byte[] wkb) throws JsonProcessingException {
         String geoJson = OGCGeometry.fromBinary(ByteBuffer.wrap(wkb)).asGeoJson();
         JsonNode originGeoNode = objectMapper.readTree(geoJson);
@@ -315,5 +305,64 @@ public class MySqlTypeUtils {
         geometryInfo.put("srid", srid.orElse(0));
         ObjectWriter objectWriter = objectMapper.writer();
         return objectWriter.writeValueAsString(geometryInfo);
+    }
+
+    public static boolean isScaleType(String typeName) {
+        return HAVE_SCALE_LIST.stream()
+                .anyMatch(type -> getShortType(typeName).toUpperCase().startsWith(type));
+    }
+
+    public static boolean isEnumType(String typeName) {
+        return typeName.toUpperCase().startsWith(ENUM);
+    }
+
+    public static boolean isSetType(String typeName) {
+        return typeName.toUpperCase().startsWith(SET);
+    }
+
+    /* Get type after the brackets are removed.*/
+    public static String getShortType(String typeName) {
+
+        if (typeName.contains(LEFT_BRACKETS) && typeName.contains(RIGHT_BRACKETS)) {
+            return typeName.substring(0, typeName.indexOf(LEFT_BRACKETS)).trim()
+                    + typeName.substring(typeName.indexOf(RIGHT_BRACKETS) + 1);
+        } else {
+            return typeName;
+        }
+    }
+
+    public static int getPrecision(String typeName) {
+        if (typeName.contains(LEFT_BRACKETS)
+                && typeName.contains(RIGHT_BRACKETS)
+                && isScaleType(typeName)) {
+            return Integer.parseInt(
+                    typeName.substring(typeName.indexOf(LEFT_BRACKETS) + 1, typeName.indexOf(COMMA))
+                            .trim());
+        } else if ((typeName.contains(LEFT_BRACKETS)
+                && typeName.contains(RIGHT_BRACKETS)
+                && !isScaleType(typeName)
+                && !isEnumType(typeName)
+                && !isSetType(typeName))) {
+            return Integer.parseInt(
+                    typeName.substring(
+                                    typeName.indexOf(LEFT_BRACKETS) + 1,
+                                    typeName.indexOf(RIGHT_BRACKETS))
+                            .trim());
+        } else {
+            return 0;
+        }
+    }
+
+    public static int getScale(String typeName) {
+        if (typeName.contains(LEFT_BRACKETS)
+                && typeName.contains(RIGHT_BRACKETS)
+                && isScaleType(typeName)) {
+            return Integer.parseInt(
+                    typeName.substring(
+                                    typeName.indexOf(COMMA) + 1, typeName.indexOf(RIGHT_BRACKETS))
+                            .trim());
+        } else {
+            return 0;
+        }
     }
 }

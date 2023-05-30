@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -71,6 +72,8 @@ public class TestChangelogDataReadWrite {
             new RowType(singletonList(new DataField(0, "v", new BigIntType())));
     private static final Comparator<InternalRow> COMPARATOR =
             Comparator.comparingLong(o -> o.getLong(0));
+    private static final RecordEqualiser EQUALISER =
+            (RecordEqualiser) (row1, row2) -> row1.getLong(0) == row2.getLong(0);
     private static final KeyValueFieldsExtractor EXTRACTOR =
             new KeyValueFieldsExtractor() {
                 @Override
@@ -177,7 +180,7 @@ public class TestChangelogDataReadWrite {
                                 KEY_TYPE,
                                 VALUE_TYPE,
                                 () -> COMPARATOR,
-                                () -> COMPARATOR,
+                                () -> EQUALISER,
                                 DeduplicateMergeFunction.factory(),
                                 pathFactory,
                                 snapshotManager,

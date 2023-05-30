@@ -27,7 +27,6 @@ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 /** Test for {@link HiveTypeUtils}. */
 public class HiveTypeUtilsTest {
@@ -95,12 +94,8 @@ public class HiveTypeUtilsTest {
                                 new DataField(1, "name", new VarCharType(Integer.MAX_VALUE))));
         assertThat(rowTypeInfo.getTypeName()).isEqualTo("struct<id:int,name:string>");
 
-        assertThatExceptionOfType(UnsupportedOperationException.class)
-                .isThrownBy(
-                        () ->
-                                HiveTypeUtils.logicalTypeToTypeInfo(
-                                                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
-                                        .getTypeName())
-                .withMessage("Unsupported logical type TIMESTAMP(6) WITH LOCAL TIME ZONE");
+        TypeInfo timestampWithLocalZoneTypeInfo =
+                HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
+        assertThat(timestampWithLocalZoneTypeInfo.getTypeName()).isEqualTo("timestamp");
     }
 }

@@ -19,6 +19,7 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
@@ -29,7 +30,6 @@ import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,8 +44,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link LookupChangelogMergeFunctionWrapper}. */
 public class LookupChangelogMergeFunctionWrapperTest {
 
-    private static final Comparator<InternalRow> COMPARATOR =
-            Comparator.comparingInt(o -> o.getInt(0));
+    private static final RecordEqualiser EQUALISER =
+            (RecordEqualiser) (row1, row2) -> row1.getInt(0) == row2.getInt(0);
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
@@ -55,7 +55,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                 new LookupChangelogMergeFunctionWrapper(
                         LookupMergeFunction.wrap(DeduplicateMergeFunction.factory()),
                         highLevel::get,
-                        COMPARATOR,
+                        EQUALISER,
                         changelogRowDeduplicate);
 
         // Without level-0
@@ -209,7 +209,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                     new FieldSumAgg(DataTypes.INT())
                                                 })),
                         key -> null,
-                        COMPARATOR,
+                        EQUALISER,
                         changlogRowDeduplicate);
 
         // Without level-0

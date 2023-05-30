@@ -36,6 +36,8 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.InternalRowUtils;
 
+import javax.annotation.Nullable;
+
 /** Generate sequence number. */
 public class SequenceGenerator {
 
@@ -53,12 +55,29 @@ public class SequenceGenerator {
         generator = rowType.getTypeAt(index).accept(new SequenceGeneratorVisitor());
     }
 
+    public int index() {
+        return index;
+    }
+
+    @Nullable
+    public Long generateNullable(InternalRow row) {
+        return generator.generateNullable(row, index);
+    }
+
     public long generate(InternalRow row) {
         return generator.generate(row, index);
     }
 
     private interface Generator {
         long generate(InternalRow row, int i);
+
+        @Nullable
+        default Long generateNullable(InternalRow row, int i) {
+            if (row.isNullAt(i)) {
+                return null;
+            }
+            return generate(row, i);
+        }
     }
 
     private static class SequenceGeneratorVisitor extends DataTypeDefaultVisitor<Generator> {

@@ -18,23 +18,70 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.flink.memory.FlinkMemorySegmentPool;
+import org.apache.paimon.flink.memory.MemorySegmentAllocator;
+import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.options.Options;
+
+import org.apache.flink.core.memory.ManagedMemoryUseCase;
+import org.apache.flink.runtime.execution.Environment;
+import org.apache.flink.runtime.memory.MemoryManager;
+import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.runtime.tasks.StreamTask;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
 
-/** Prepare commit operator to emit {@link Committable}s. */
-public abstract class PrepareCommitOperator<T> extends AbstractStreamOperator<Committable>
-        implements OneInputStreamOperator<T, Committable>, BoundedOneInput {
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
 
+/** Prepare commit operator to emit {@link Committable}s. */
+public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOperator<OUT>
+        implements OneInputStreamOperator<IN, OUT>, BoundedOneInput {
+
+    @Nullable protected transient MemorySegmentPool memoryPool;
+    @Nullable private transient MemorySegmentAllocator memoryAllocator;
+    private final Options options;
     private boolean endOfInput = false;
 
-    public PrepareCommitOperator() {
+    public PrepareCommitOperator(Options options) {
+        this.options = options;
         setChainingStrategy(ChainingStrategy.ALWAYS);
+    }
+
+    @Override
+    public void setup(
+            StreamTask<?, ?> containingTask,
+            StreamConfig config,
+            Output<StreamRecord<OUT>> output) {
+        super.setup(containingTask, config, output);
+        if (options.get(SINK_USE_MANAGED_MEMORY)) {
+            MemoryManager memoryManager = containingTask.getEnvironment().getMemoryManager();
+            memoryAllocator = new MemorySegmentAllocator(containingTask, memoryManager);
+            memoryPool =
+                    new FlinkMemorySegmentPool(
+                            computeMemorySize(), memoryManager.getPageSize(), memoryAllocator);
+        }
+    }
+
+    /** Compute memory size from memory faction. */
+    private long computeMemorySize() {
+        final Environment environment = getContainingTask().getEnvironment();
+        return environment
+                .getMemoryManager()
+                .computeMemorySize(
+                        getOperatorConfig()
+                                .getManagedMemoryFractionOperatorUseCaseOfSlot(
+                                        ManagedMemoryUseCase.OPERATOR,
+                                        environment.getTaskManagerInfo().getConfiguration(),
+                                        environment.getUserCodeClassLoader().asClassLoader()));
     }
 
     @Override
@@ -51,11 +98,19 @@ public abstract class PrepareCommitOperator<T> extends AbstractStreamOperator<Co
         emitCommittables(true, Long.MAX_VALUE);
     }
 
+    @Override
+    public void close() throws Exception {
+        super.close();
+        if (memoryAllocator != null) {
+            memoryAllocator.release();
+        }
+    }
+
     private void emitCommittables(boolean doCompaction, long checkpointId) throws IOException {
         prepareCommit(doCompaction, checkpointId)
                 .forEach(committable -> output.collect(new StreamRecord<>(committable)));
     }
 
-    protected abstract List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
+    protected abstract List<OUT> prepareCommit(boolean doCompaction, long checkpointId)
             throws IOException;
 }

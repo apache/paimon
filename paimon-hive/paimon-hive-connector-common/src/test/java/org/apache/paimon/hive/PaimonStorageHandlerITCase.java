@@ -900,14 +900,21 @@ public class PaimonStorageHandlerITCase {
     public void testDateAndTimestamp() throws Exception {
         String path = folder.newFolder().toURI().toString();
         String tablePath = String.format("%s/default.db/hive_test_table", path);
+        ThreadLocalRandom random = ThreadLocalRandom.current();
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(
+                CoreOptions.FILE_FORMAT,
+                random.nextBoolean()
+                        ? CoreOptions.FileFormatType.ORC
+                        : CoreOptions.FileFormatType.PARQUET);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(
-                                new DataType[] {DataTypes.DATE(), DataTypes.TIMESTAMP(3)},
+                                new DataType[] {
+                                    DataTypes.DATE(), DataTypes.TIMESTAMP(random.nextInt(10))
+                                },
                                 new String[] {"dt", "ts"}),
                         Collections.emptyList(),
                         Collections.emptyList());

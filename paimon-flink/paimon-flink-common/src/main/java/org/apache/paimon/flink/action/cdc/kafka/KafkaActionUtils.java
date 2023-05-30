@@ -335,7 +335,7 @@ class KafkaActionUtils {
         }
 
         for (String pair : pairs) {
-            if (null == pair || pair.length() == 0 || !pair.contains(",")) {
+            if (null == pair || !pair.contains(",")) {
                 throw new ValidationException(validationExceptionMessage);
             }
 
