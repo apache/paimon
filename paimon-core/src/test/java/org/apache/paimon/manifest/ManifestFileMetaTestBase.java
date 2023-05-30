@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
@@ -40,6 +41,7 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/** base class for Test {@link ManifestFile}. */
 public abstract class ManifestFileMetaTestBase {
 
     protected final FileFormat avro = FileFormat.fromIdentifier("avro", new Options());
