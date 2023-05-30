@@ -90,12 +90,14 @@ public class WrappedManifestCommittableSerializer
             int keyLength = view.readInt();
             byte[] serializedKey = new byte[keyLength];
             view.read(serializedKey);
-            Identifier key = Identifier.fromString(new String(serializedKey));
+            Identifier key =
+                    Identifier.fromString(new String(serializedKey, StandardCharsets.UTF_8));
             int valueLength = view.readInt();
             byte[] serializedValue = new byte[valueLength];
             view.read(serializedValue);
             ManifestCommittable value =
-                    manifestCommittableSerializer.deserialize(version, serializedValue);
+                    manifestCommittableSerializer.deserialize(
+                            manifestCommittableSerializer.getVersion(), serializedValue);
             wrappedManifestCommittable.putManifestCommittable(key, value);
         }
 
