@@ -27,7 +27,7 @@ under the License.
 # CDC Ingestion
 
 Paimon supports a variety of ways to ingest data into Paimon tables with schema evolution. This means that the added
-columns are synchronized to the Paimon table in real time and the synchronization job is not restarted for this purpose.
+columns are synchronized to the Paimon table in real time and the synchronization job will not restarted for this purpose.
 
 We currently support the following sync ways:
 

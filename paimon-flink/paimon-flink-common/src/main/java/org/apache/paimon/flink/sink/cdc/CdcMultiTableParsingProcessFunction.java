@@ -62,15 +62,12 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     public void processElement(T raw, Context context, Collector<Void> collector) throws Exception {
         parser.setRawEvent(raw);
         String tableName = parser.parseTableName();
-
-        if (parser.isSchemaChange()) {
-            parser.parseNewSchema()
-                    .ifPresent(t -> context.output(getUpdatedDataFieldsOutputTag(tableName), t));
-        } else {
-            for (CdcRecord record : parser.parseRecords()) {
-                context.output(getRecordOutputTag(tableName), record);
-            }
+        List<DataField> schemaChange = parser.parseSchemaChange();
+        if (schemaChange.size() > 0) {
+            context.output(getUpdatedDataFieldsOutputTag(tableName), schemaChange);
         }
+        parser.parseRecords()
+                .forEach(record -> context.output(getRecordOutputTag(tableName), record));
     }
 
     private OutputTag<List<DataField>> getUpdatedDataFieldsOutputTag(String tableName) {

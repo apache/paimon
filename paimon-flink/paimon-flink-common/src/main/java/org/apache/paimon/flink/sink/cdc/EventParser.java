@@ -23,7 +23,6 @@ import org.apache.paimon.types.DataField;
 
 import java.io.Serializable;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * Parse a CDC change event to a list of {@link DataField}s or {@link CdcRecord}.
@@ -41,17 +40,18 @@ public interface EventParser<T> {
         throw new UnsupportedOperationException("Table name is not supported in this parser.");
     }
 
-    /** Is this event schema change. */
-    boolean isSchemaChange();
+    /**
+     * Parse new schema if this event contains schema change.
+     *
+     * @return empty if there is no schema change
+     */
+    List<DataField> parseSchemaChange();
 
     /**
-     * Parse new schema if this event is schema change.
+     * Parse records from event.
      *
-     * @return none if this schema change can be ignored.
+     * @return empty if there is no records
      */
-    Optional<List<DataField>> parseNewSchema();
-
-    /** Parse records from event if this event is not a schema change. */
     List<CdcRecord> parseRecords();
 
     /** Factory to create an {@link EventParser}. */

@@ -20,8 +20,10 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.types.DataField;
 
+import com.google.common.base.Objects;
+
+import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 
 /** Testing {@link EventParser} for {@link TestCdcEvent}. */
 public class TestCdcEventParser implements EventParser<TestCdcEvent> {
@@ -39,17 +41,12 @@ public class TestCdcEventParser implements EventParser<TestCdcEvent> {
     }
 
     @Override
-    public boolean isSchemaChange() {
-        return raw.updatedDataFields() != null;
-    }
-
-    @Override
-    public Optional<List<DataField>> parseNewSchema() {
-        return Optional.ofNullable(raw.updatedDataFields());
+    public List<DataField> parseSchemaChange() {
+        return Objects.firstNonNull(raw.updatedDataFields(), Collections.emptyList());
     }
 
     @Override
     public List<CdcRecord> parseRecords() {
-        return raw.records();
+        return Objects.firstNonNull(raw.records(), Collections.emptyList());
     }
 }

@@ -52,7 +52,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -141,16 +140,19 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         }
     }
 
-    @Override
-    public boolean isSchemaChange() {
+    private boolean isSchemaChange() {
         return payload.get("op") == null;
     }
 
     @Override
-    public Optional<List<DataField>> parseNewSchema() {
+    public List<DataField> parseSchemaChange() {
+        if (!isSchemaChange()) {
+            return Collections.emptyList();
+        }
+
         JsonNode historyRecord = payload.get("historyRecord");
         if (historyRecord == null) {
-            return Optional.empty();
+            return Collections.emptyList();
         }
 
         JsonNode columns;
@@ -165,10 +167,10 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             columns = tableChanges.get(0).get("table").get("columns");
         } catch (Exception e) {
             LOG.info("Failed to parse history record for schema changes", e);
-            return Optional.empty();
+            return Collections.emptyList();
         }
         if (columns == null) {
-            return Optional.empty();
+            return Collections.emptyList();
         }
 
         List<DataField> result = new ArrayList<>();
@@ -190,11 +192,15 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             String fieldName = column.get("name").asText();
             result.add(new DataField(i, caseSensitive ? fieldName : fieldName.toLowerCase(), type));
         }
-        return Optional.of(result);
+        return result;
     }
 
     @Override
     public List<CdcRecord> parseRecords() {
+        if (isSchemaChange()) {
+            return Collections.emptyList();
+        }
+
         List<CdcRecord> records = new ArrayList<>();
 
         Map<String, String> before = extractRow(payload.get("before"));

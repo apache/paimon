@@ -226,12 +226,7 @@ public class WriteCdcToTable {
                 }
 
                 @Override
-                public boolean isSchemaChange() {
-                    return event.startsWith("ALTER");
-                }
-
-                @Override
-                public Optional<List<DataField>> parseNewSchema() {
+                public List<DataField> parseSchemaChange() {
                     // parse from ADD (c INT)
                     return ...;
                 }
