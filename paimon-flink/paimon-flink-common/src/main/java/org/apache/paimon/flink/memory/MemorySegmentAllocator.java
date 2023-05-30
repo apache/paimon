@@ -19,12 +19,16 @@
 package org.apache.paimon.flink.memory;
 
 import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.utils.ReflectionUtils;
 
 import org.apache.flink.runtime.memory.MemoryManager;
 
+import java.lang.reflect.Field;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Allocate memory segment from memory manager in flink for paimon. */
 public class MemorySegmentAllocator {
@@ -32,12 +36,21 @@ public class MemorySegmentAllocator {
     private final MemoryManager memoryManager;
     private final List<org.apache.flink.core.memory.MemorySegment> allocatedSegments;
     private final List<org.apache.flink.core.memory.MemorySegment> segments;
+    private final Field offHeapBufferField;
 
     public MemorySegmentAllocator(Object owner, MemoryManager memoryManager) {
         this.owner = owner;
         this.memoryManager = memoryManager;
         this.allocatedSegments = new ArrayList<>();
         this.segments = new ArrayList<>(1);
+        try {
+            this.offHeapBufferField =
+                    org.apache.flink.core.memory.MemorySegment.class.getDeclaredField(
+                            "offHeapBuffer");
+            this.offHeapBufferField.setAccessible(true);
+        } catch (NoSuchFieldException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     /** Allocates a set of memory segments for memory pool. */
@@ -46,11 +59,12 @@ public class MemorySegmentAllocator {
         try {
             memoryManager.allocatePages(owner, segments, 1);
             org.apache.flink.core.memory.MemorySegment segment = segments.remove(0);
+            checkNotNull(segment, "Allocate null segment from memory manager for paimon.");
+            checkArgument(segment.isOffHeap(), "Segment is not off heap from memory manager.");
             allocatedSegments.add(segment);
             // TODO Use getOffHeapBuffer in MemorySegment after
             // https://issues.apache.org/jira/browse/FLINK-32213
-            return MemorySegment.wrapOffHeapMemory(
-                    ReflectionUtils.getField(segment, "offHeapBuffer"));
+            return MemorySegment.wrapOffHeapMemory((ByteBuffer) offHeapBufferField.get(segment));
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

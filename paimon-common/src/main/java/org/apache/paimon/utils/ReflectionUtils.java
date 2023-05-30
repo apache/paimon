@@ -18,7 +18,6 @@
 
 package org.apache.paimon.utils;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 
@@ -47,12 +46,5 @@ public class ReflectionUtils {
     public static <T> T invokeStaticMethod(Method method, Object... args)
             throws InvocationTargetException, IllegalAccessException {
         return (T) method.invoke(null, args);
-    }
-
-    public static <T, C> T getField(C obj, String field)
-            throws NoSuchFieldException, IllegalAccessException {
-        Field f = obj.getClass().getDeclaredField(field);
-        f.setAccessible(true);
-        return (T) f.get(obj);
     }
 }
