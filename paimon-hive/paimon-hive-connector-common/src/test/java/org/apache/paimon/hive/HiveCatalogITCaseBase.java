@@ -50,11 +50,10 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
+import java.util.stream.Collectors;
 
 /** IT cases for using Paimon {@link HiveCatalog} together with Paimon Hive connector. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -244,6 +243,24 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("DROP TABLE t").await();
         Path tablePath = new Path(path, "test_db.db/t");
         Assert.assertFalse(tablePath.getFileSystem().exists(tablePath));
+
+        // Create a table with field comments
+        tEnv.executeSql(
+                        "CREATE TABLE t1 ( a INT, b STRING comment 'Test 中文注释', c STRING comment 'The c field' ) WITH ( 'file.format' = 'avro' )")
+                .await();
+        Assertions.assertThat(hiveShell.executeQuery("DESC FORMATTED t1"))
+                .contains(
+                        "a\tint\tfrom deserializer",
+                        "b\tstring\tTest 中文注释",
+                        "c\tstring\tThe c field");
+        Assertions.assertThat(
+                        collect("DESC t1").stream()
+                                .map(Objects::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "+I[a, INT, true, null, null, null, null]",
+                        "+I[b, STRING, true, null, null, null, Test 中文注释]",
+                        "+I[c, STRING, true, null, null, null, The c field]");
     }
 
     @Test
@@ -433,17 +450,17 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("CREATE TABLE t2 (a INT)").await();
         tEnv.executeSql("INSERT INTO t1 SELECT 1");
         // the source table do not exist.
-        assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t3 RENAME TO t4"))
+        Assertions.assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t3 RENAME TO t4"))
                 .hasMessage(
                         "Table `my_hive`.`test_db`.`t3` doesn't exist or is a temporary table.");
 
         // the target table has existed.
-        assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t1 RENAME TO t2"))
+        Assertions.assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t1 RENAME TO t2"))
                 .hasMessage(
                         "Could not execute ALTER TABLE my_hive.test_db.t1 RENAME TO my_hive.test_db.t2");
 
         // the target table name has upper case.
-        assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t1 RENAME TO T1"))
+        Assertions.assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t1 RENAME TO T1"))
                 .hasMessage(
                         "Could not execute ALTER TABLE my_hive.test_db.t1 RENAME TO my_hive.test_db.T1");
 
@@ -461,7 +478,7 @@ public abstract class HiveCatalogITCaseBase {
 
         // TODO: the hiverunner (4.0) has a bug ,it can not rename the table path correctly ,
         // we should upgrade it to the 6.0 later ,and  update the test case for query.
-        assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM t3"))
+        Assertions.assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM t3"))
                 .hasMessageContaining("SQL validation failed. There is no paimond in");
     }
 
@@ -504,12 +521,12 @@ public abstract class HiveCatalogITCaseBase {
             thread.join();
         }
 
-        assertThat(count.get()).isEqualTo(100);
+        Assertions.assertThat(count.get()).isEqualTo(100);
     }
 
     @Test
     public void testUpperCase() {
-        assertThatThrownBy(
+        Assertions.assertThatThrownBy(
                         () ->
                                 tEnv.executeSql(
                                                 "CREATE TABLE T ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
@@ -518,7 +535,7 @@ public abstract class HiveCatalogITCaseBase {
                         String.format(
                                 "Table name[%s] cannot contain upper case in hive catalog", "T"));
 
-        assertThatThrownBy(
+        Assertions.assertThatThrownBy(
                         () ->
                                 tEnv.executeSql(
                                                 "CREATE TABLE t (A INT, b STRING, C STRING) WITH ( 'file.format' = 'avro')")

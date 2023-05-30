@@ -28,6 +28,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.commons.text.StringEscapeUtils;
 import org.apache.flink.table.api.Schema.UnresolvedColumn;
 import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.TableSchema;
@@ -575,7 +576,17 @@ public class FlinkCatalog extends AbstractCatalog {
     private static Map<String, String> getColumnComments(CatalogTable catalogTable) {
         return catalogTable.getUnresolvedSchema().getColumns().stream()
                 .filter(c -> c.getComment().isPresent())
-                .collect(Collectors.toMap(UnresolvedColumn::getName, c -> c.getComment().get()));
+                .collect(
+                        Collectors.toMap(
+                                UnresolvedColumn::getName,
+                                c -> {
+                                    String comment = c.getComment().get();
+                                    if (comment.toUpperCase().startsWith("U&'")) {
+                                        comment = comment.substring(3).replaceAll("\\\\", "\\\\u");
+                                        comment = StringEscapeUtils.unescapeJava(comment);
+                                    }
+                                    return comment;
+                                }));
     }
 
     private static List<DataField> addColumnComments(
