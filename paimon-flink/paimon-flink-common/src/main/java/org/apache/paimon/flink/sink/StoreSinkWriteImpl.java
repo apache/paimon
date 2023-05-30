@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -32,6 +33,8 @@ import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -47,6 +50,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     private final IOManager ioManager;
     private final boolean isOverwrite;
     private final boolean waitCompaction;
+    @Nullable private final MemorySegmentPool memoryPool;
 
     protected TableWriteImpl<?> write;
 
@@ -56,12 +60,14 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             StoreSinkWriteState state,
             IOManager ioManager,
             boolean isOverwrite,
-            boolean waitCompaction) {
+            boolean waitCompaction,
+            @Nullable MemorySegmentPool memoryPool) {
         this.commitUser = commitUser;
         this.state = state;
         this.ioManager = ioManager;
         this.isOverwrite = isOverwrite;
         this.waitCompaction = waitCompaction;
+        this.memoryPool = memoryPool;
         this.write = newTableWrite(table);
     }
 
@@ -72,9 +78,11 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                                 state.stateValueFilter().filter(table.name(), part, bucket))
                 .withIOManager(new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()))
                 .withMemoryPool(
-                        new HeapMemorySegmentPool(
-                                table.coreOptions().writeBufferSize(),
-                                table.coreOptions().pageSize()))
+                        memoryPool != null
+                                ? memoryPool
+                                : new HeapMemorySegmentPool(
+                                        table.coreOptions().writeBufferSize(),
+                                        table.coreOptions().pageSize()))
                 .withOverwrite(isOverwrite);
     }
 

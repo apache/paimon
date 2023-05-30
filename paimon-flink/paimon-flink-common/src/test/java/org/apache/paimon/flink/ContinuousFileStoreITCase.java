@@ -41,6 +41,7 @@ import java.util.List;
 import static org.apache.paimon.flink.FlinkConnectorOptions.STREAMING_READ_ATOMIC;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** SQL ITCase for continuous file store. */
 @ExtendWith(ParameterizedTestExtension.class)
@@ -326,5 +327,25 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 .hasCauseInstanceOf(ValidationException.class)
                 .hasRootCauseMessage(
                         "File store continuous reading does not support eventual consistency mode.");
+    }
+
+    @TestTemplate
+    public void testFlinkMemoryPool() {
+        // Check if the configuration is effective
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        "INSERT INTO %s /*+ OPTIONS('sink.use-managed-memory-allocator'='true', 'sink.managed.writer-buffer-memory'='0M') */ "
+                                                + "VALUES ('1', '2', '3'), ('4', '5', '6')",
+                                        "T1"))
+                .hasCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "Weights for operator scope use cases must be greater than 0.");
+
+        batchSql(
+                "INSERT INTO %s /*+ OPTIONS('sink.use-managed-memory-allocator'='true', 'sink.managed.writer-buffer-memory'='1M') */ "
+                        + "VALUES ('1', '2', '3'), ('4', '5', '6')",
+                "T1");
+        assertEquals(batchSql("SELECT * FROM T1").size(), 2);
     }
 }

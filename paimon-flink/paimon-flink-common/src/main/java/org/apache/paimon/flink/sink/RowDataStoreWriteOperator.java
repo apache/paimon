@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.log.LogWriteCallback;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
 
@@ -44,6 +45,8 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.List;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
+
 /** A {@link PrepareCommitOperator} to write {@link RowData}. Record schema is fixed. */
 public class RowDataStoreWriteOperator extends PrepareCommitOperator<RowData, Committable> {
 
@@ -67,6 +70,7 @@ public class RowDataStoreWriteOperator extends PrepareCommitOperator<RowData, Co
             @Nullable LogSinkFunction logSinkFunction,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
+        super(Options.fromMap(table.options()));
         this.table = table;
         this.logSinkFunction = logSinkFunction;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
@@ -105,12 +109,18 @@ public class RowDataStoreWriteOperator extends PrepareCommitOperator<RowData, Co
                                 channelComputer.channel(partition, bucket)
                                         == getRuntimeContext().getIndexOfThisSubtask());
 
+        Options options = Options.fromMap(table.options());
+        if (options.get(SINK_USE_MANAGED_MEMORY) && memoryPool == null) {
+            throw new RuntimeException("Memory pool must be initialized first.");
+        }
+
         write =
                 storeSinkWriteProvider.provide(
                         table,
                         commitUser,
                         state,
-                        getContainingTask().getEnvironment().getIOManager());
+                        getContainingTask().getEnvironment().getIOManager(),
+                        memoryPool);
 
         if (logSinkFunction != null) {
             StreamingFunctionUtils.restoreFunctionState(context, logSinkFunction);
