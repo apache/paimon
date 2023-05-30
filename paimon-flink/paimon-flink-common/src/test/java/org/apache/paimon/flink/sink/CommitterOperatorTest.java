@@ -235,7 +235,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     private OneInputStreamOperatorTestHarness<Committable, Committable>
             createRecoverableTestHarness(FileStoreTable table) throws Exception {
         CommitterOperator<Committable, ManifestCommittable> operator =
-                new CommitterOperator<Committable, ManifestCommittable>(
+                new CommitterOperator<>(
                         true,
                         initialCommitUser,
                         user ->
@@ -243,7 +243,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                         table.newStreamWriteBuilder()
                                                 .withCommitUser(user)
                                                 .newCommit()),
-                        new RestoreAndFailCommittableStateManager(
+                        new RestoreAndFailCommittableStateManager<>(
                                 () ->
                                         new VersionedSerializerWrapper<>(
                                                 new ManifestCommittableSerializer())));
@@ -253,7 +253,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     private OneInputStreamOperatorTestHarness<Committable, Committable> createLossyTestHarness(
             FileStoreTable table) throws Exception {
         CommitterOperator<Committable, ManifestCommittable> operator =
-                new CommitterOperator<Committable, ManifestCommittable>(
+                new CommitterOperator<>(
                         true,
                         initialCommitUser,
                         user ->
