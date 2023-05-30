@@ -32,7 +32,6 @@ public abstract class ManifestFileMetaTestBase {
         return makeEntry(isAdd, fileName, 0);
     }
 
-
     protected ManifestEntry makeEntry(boolean isAdd, String fileName, Integer partition) {
         BinaryRow binaryRow;
         if (partition != null) {
@@ -43,7 +42,6 @@ public abstract class ManifestFileMetaTestBase {
         } else {
             binaryRow = BinaryRow.EMPTY_ROW;
         }
-
 
         return new ManifestEntry(
                 isAdd ? FileKind.ADD : FileKind.DELETE,
@@ -107,17 +105,17 @@ public abstract class ManifestFileMetaTestBase {
         Path path = new Path(pathStr);
         FileIO fileIO = FileIOFinder.find(path);
         return new ManifestFile.Factory(
-                fileIO,
-                new SchemaManager(fileIO, path),
-                getPartitionType(),
-                avro,
-                new FileStorePathFactory(
-                        path,
+                        fileIO,
+                        new SchemaManager(fileIO, path),
                         getPartitionType(),
-                        "default",
-                        CoreOptions.FILE_FORMAT.defaultValue().toString()),
-                Long.MAX_VALUE,
-                null)
+                        avro,
+                        new FileStorePathFactory(
+                                path,
+                                getPartitionType(),
+                                "default",
+                                CoreOptions.FILE_FORMAT.defaultValue().toString()),
+                        Long.MAX_VALUE,
+                        null)
                 .create();
     }
 
@@ -150,22 +148,23 @@ public abstract class ManifestFileMetaTestBase {
             List<ManifestEntry> entrys = new ArrayList<>();
             for (int i = 0; i < 16; i++) {
                 Integer partition;
-                if (hasPartition){
-                    partition =j;
-                }else {
-                    partition =null;
+                if (hasPartition) {
+                    partition = j;
+                } else {
+                    partition = null;
                 }
-                entrys.add(makeEntry(true, String.format(manifestFileNameTemplate, j, i), partition));
+                entrys.add(
+                        makeEntry(true, String.format(manifestFileNameTemplate, j, i), partition));
             }
             input.add(makeManifest(entrys.toArray(new ManifestEntry[0])));
         }
         return input;
     }
 
-    protected void addDeltaManifests(List<ManifestFileMeta> input,boolean hasPartition) {
-        Integer parittion1 =null ;
-        if (hasPartition){
-            parittion1 =1;
+    protected void addDeltaManifests(List<ManifestFileMeta> input, boolean hasPartition) {
+        Integer parittion1 = null;
+        if (hasPartition) {
+            parittion1 = 1;
         }
         input.add(
                 makeManifest(
@@ -186,9 +185,9 @@ public abstract class ManifestFileMetaTestBase {
                         makeEntry(false, "D", parittion1),
                         makeEntry(false, "F", parittion1),
                         makeEntry(true, "G", parittion1)));
-        Integer partition2 =null ;
-        if (hasPartition){
-            partition2 =2;
+        Integer partition2 = null;
+        if (hasPartition) {
+            partition2 = 2;
         }
         input.add(
                 makeManifest(

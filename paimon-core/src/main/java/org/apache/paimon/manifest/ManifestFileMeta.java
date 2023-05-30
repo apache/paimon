@@ -258,7 +258,7 @@ public class ManifestFileMeta {
         }
 
         List<ManifestFileMeta> result = new ArrayList<>();
-        int j =0;
+        int j = 0;
         if (partitionType.getFieldCount() > 0) {
             Set<BinaryRow> deletePartitions = computeDeletePartitions(deltaMerged);
             Optional<Predicate> predicateOpt =
@@ -289,8 +289,7 @@ public class ManifestFileMeta {
         Map<ManifestEntry.Identifier, ManifestEntry> fullMerged = new LinkedHashMap<>();
         for (; j < base.size(); j++) {
             ManifestFileMeta manifestFileMeta = base.get(j);
-            ManifestEntry.mergeEntries(
-                    manifestFile.read(manifestFileMeta.fileName), fullMerged);
+            ManifestEntry.mergeEntries(manifestFile.read(manifestFileMeta.fileName), fullMerged);
         }
         ManifestEntry.mergeEntries(deltaMerged.values(), fullMerged);
 

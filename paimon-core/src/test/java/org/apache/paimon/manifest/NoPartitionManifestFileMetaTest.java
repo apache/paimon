@@ -9,12 +9,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.util.List;
 
 public class NoPartitionManifestFileMetaTest extends ManifestFileMetaTestBase {
-    private  final RowType noPartitionType = RowType.of();
+    private final RowType noPartitionType = RowType.of();
 
-    @TempDir
-    java.nio.file.Path tempDir;
+    @TempDir java.nio.file.Path tempDir;
     private ManifestFile manifestFile;
-
 
     @BeforeEach
     public void beforeEach() {
@@ -24,7 +22,7 @@ public class NoPartitionManifestFileMetaTest extends ManifestFileMetaTestBase {
     @RepeatedTest(3)
     public void testMerge() {
         List<ManifestFileMeta> input = createBaseManifestFileMetas(false);
-        addDeltaManifests(input,false);
+        addDeltaManifests(input, false);
 
         List<ManifestFileMeta> merged =
                 ManifestFileMeta.merge(input, manifestFile, 500, 3, 200, getPartitionType());
