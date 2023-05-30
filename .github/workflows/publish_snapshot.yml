@@ -65,7 +65,7 @@ jobs:
           
           mvn --settings $tmp_settings clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release
 
-          git checkout release-0.4
+          git checkout -b release-0.4 origin/release-0.4
 
           mvn --settings $tmp_settings clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release
 
