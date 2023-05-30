@@ -87,7 +87,7 @@ public class KafkaSchema {
             if (!success && retry == MAX_RETRY) {
                 throw new Exception("Could not get metadata from server,topic :" + topic);
             }
-            Thread.sleep(1000);
+            Thread.sleep(100);
             retry++;
         }
     }
