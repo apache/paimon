@@ -278,8 +278,7 @@ public class KafkaEventParserTest {
         dataFields.add(new DataField(3, "_geometrycollection", DataTypes.STRING()));
         dataFields.add(new DataField(4, "_set", DataTypes.ARRAY(DataTypes.STRING())));
         dataFields.add(new DataField(5, "_enum", DataTypes.STRING()));
-        List<DataField> updatedDataFields = parser.parseSchemaChange();
-        assert updatedDataFields == null;
+        assertThat(parser.parseSchemaChange()).isEmpty();
         List<GenericRow> result =
                 parser.parseRecords().stream()
                         .map(record -> toGenericRow(record, dataFields).get())
