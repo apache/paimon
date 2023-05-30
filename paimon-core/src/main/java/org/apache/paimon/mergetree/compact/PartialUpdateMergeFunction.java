@@ -200,6 +200,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
         @Override
         public AdjustedProjection adjustProjection(@Nullable int[][] projection) {
+            if (fieldSequences.isEmpty()) {
+                return new AdjustedProjection(projection, null);
+            }
             // TODO implement this, just keep required fields and adjust fieldSequences too.
             return new AdjustedProjection(null, projection);
         }
