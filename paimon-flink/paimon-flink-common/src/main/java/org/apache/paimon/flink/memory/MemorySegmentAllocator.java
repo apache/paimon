@@ -47,6 +47,8 @@ public class MemorySegmentAllocator {
             memoryManager.allocatePages(owner, segments, 1);
             org.apache.flink.core.memory.MemorySegment segment = segments.remove(0);
             allocatedSegments.add(segment);
+            // TODO Use getOffHeapBuffer in MemorySegment after
+            // https://issues.apache.org/jira/browse/FLINK-32213
             return MemorySegment.wrapOffHeapMemory(
                     ReflectionUtils.getField(segment, "offHeapBuffer"));
         } catch (Exception e) {
