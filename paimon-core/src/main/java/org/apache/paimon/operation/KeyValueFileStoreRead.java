@@ -32,6 +32,7 @@ import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.mergetree.compact.MergeFunctionFactory.AdjustedProjection;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.options.Options;
@@ -76,7 +77,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     @Nullable private List<Predicate> filtersForNonOverlappedSection;
 
-    @Nullable private int[][] valueProjection;
+    @Nullable private int[][] pushdownProjection;
+    @Nullable private int[][] outerProjection;
 
     public KeyValueFileStoreRead(
             FileIO fileIO,
@@ -113,8 +115,12 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     }
 
     public KeyValueFileStoreRead withValueProjection(int[][] projectedFields) {
-        this.valueProjection = projectedFields;
-        readerFactoryBuilder.withValueProjection(projectedFields);
+        AdjustedProjection projection = mfFactory.adjustProjection(projectedFields);
+        this.pushdownProjection = projection.pushdownProjection;
+        this.outerProjection = projection.outerProjection;
+        if (pushdownProjection != null) {
+            readerFactoryBuilder.withValueProjection(pushdownProjection);
+        }
         return this;
     }
 
@@ -155,6 +161,16 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     @Override
     public RecordReader<KeyValue> createReader(DataSplit split) throws IOException {
+        RecordReader<KeyValue> reader = createReaderWithoutOuterProjection(split);
+        if (outerProjection != null) {
+            ProjectedRow projectedRow = ProjectedRow.from(outerProjection);
+            reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
+        }
+        return reader;
+    }
+
+    private RecordReader<KeyValue> createReaderWithoutOuterProjection(DataSplit split)
+            throws IOException {
         if (split.isIncremental()) {
             KeyValueFileReaderFactory readerFactory =
                     readerFactoryBuilder.build(
@@ -190,7 +206,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
             List<ConcatRecordReader.ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
             MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
-                    new ReducerMergeFunctionWrapper(mfFactory.create(valueProjection));
+                    new ReducerMergeFunctionWrapper(mfFactory.create(pushdownProjection));
             for (List<SortedRun> section :
                     new IntervalPartition(split.files(), keyComparator).partition()) {
                 sectionReaders.add(

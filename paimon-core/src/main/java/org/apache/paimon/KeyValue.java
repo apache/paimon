@@ -73,6 +73,11 @@ public class KeyValue {
         return this;
     }
 
+    public KeyValue replaceValue(InternalRow value) {
+        this.value = value;
+        return this;
+    }
+
     public KeyValue replaceValueKind(RowKind valueKind) {
         this.valueKind = valueKind;
         return this;
