@@ -34,6 +34,7 @@ We currently support the following sync ways:
 1. MySQL Synchronizing Table: synchronize one or multiple tables from MySQL into one Paimon table.
 2. MySQL Synchronizing Database: synchronize the whole MySQL database into one Paimon database.
 3. [API Synchronizing Table]({{< ref "/api/flink-api#cdc-ingestion-table" >}}): synchronize your custom DataStream input into one Paimon table.
+4. Kafka Synchronizing Table: synchronize one Kafka topic's table into one Paimon table.
 
 ## MySQL
 

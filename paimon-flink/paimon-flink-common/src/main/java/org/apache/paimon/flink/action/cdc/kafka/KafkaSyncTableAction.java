@@ -25,8 +25,8 @@ import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.kafka.canal.CanalJsonEventParser;
+import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.EventParser;
-import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncTableSinkBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -180,8 +180,8 @@ public class KafkaSyncTableAction extends ActionBase {
             throw new UnsupportedOperationException("This format: " + format + " is not support.");
         }
 
-        FlinkCdcSyncTableSinkBuilder<String> sinkBuilder =
-                new FlinkCdcSyncTableSinkBuilder<String>()
+        CdcSinkBuilder<String> sinkBuilder =
+                new CdcSinkBuilder<String>()
                         .withInput(
                                 env.fromSource(
                                         source, WatermarkStrategy.noWatermarks(), "Kafka Source"))
