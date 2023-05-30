@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.toGenericRow;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -116,11 +117,10 @@ public class KafkaEventParserTest {
         dataFields.add(new DataField(3, "_geometrycollection", DataTypes.STRING()));
         dataFields.add(new DataField(4, "_set", DataTypes.ARRAY(DataTypes.STRING())));
         dataFields.add(new DataField(5, "_enum", DataTypes.STRING()));
-        List<DataField> updatedDataFields = parser.getUpdatedDataFields().orElse(null);
-        assert updatedDataFields == null;
+        assertThat(parser.parseSchemaChange()).isEmpty();
         List<GenericRow> result =
-                parser.getRecords().stream()
-                        .map(record -> record.toGenericRow(dataFields).get())
+                parser.parseRecords().stream()
+                        .map(record -> toGenericRow(record, dataFields).get())
                         .collect(Collectors.toList());
         BinaryString[] binaryStrings =
                 new BinaryString[] {BinaryString.fromString("a"), BinaryString.fromString("b")};
@@ -153,16 +153,15 @@ public class KafkaEventParserTest {
         expectDataFields.add(new DataField(4, "_set", DataTypes.ARRAY(DataTypes.STRING())));
         expectDataFields.add(new DataField(5, "_enum", DataTypes.STRING()));
         expectDataFields.add(new DataField(6, "v2", DataTypes.INT()));
-        List<DataField> updatedDataFields = parser.getUpdatedDataFields().orElse(null);
-        assert updatedDataFields == null;
+        assertThat(parser.parseSchemaChange()).isEmpty();
         parser.setRawEvent(CANAL_JSON_DDL_ADD_EVENT);
-        List<DataField> updatedDataFieldsAdd = parser.getUpdatedDataFields().orElse(null);
+        List<DataField> updatedDataFieldsAdd = parser.parseSchemaChange();
         assertThat(updatedDataFieldsAdd).isEqualTo(expectDataFields);
 
         expectDataFields.remove(2);
         expectDataFields.add(2, new DataField(2, "v1", DataTypes.VARCHAR(20)));
         parser.setRawEvent(CANAL_JSON_DDL_MODIFY_EVENT);
-        List<DataField> updatedDataFieldsModify = parser.getUpdatedDataFields().orElse(null);
+        List<DataField> updatedDataFieldsModify = parser.parseSchemaChange();
         assertThat(updatedDataFieldsModify).isEqualTo(expectDataFields);
         expectDataFields.remove(2);
         expectDataFields.add(2, new DataField(2, "v1", DataTypes.VARCHAR(30)));
@@ -174,10 +173,10 @@ public class KafkaEventParserTest {
         expectDataFields.add(new DataField(9, "v6", DataTypes.DECIMAL(5, 3)));
         expectDataFields.add(new DataField(10, "$% ^,& *(", DataTypes.VARCHAR(10)));
         parser.setRawEvent(CANAL_JSON_DDL_MULTI_ADD_EVENT);
-        List<DataField> updatedDataFieldsMulti = parser.getUpdatedDataFields().orElse(null);
+        List<DataField> updatedDataFieldsMulti = parser.parseSchemaChange();
         assertThat(updatedDataFieldsMulti).isEqualTo(expectDataFields);
         parser.setRawEvent(CANAL_JSON_DDL_DROP_EVENT);
-        List<DataField> updatedDataFieldsDrop = parser.getUpdatedDataFields().orElse(null);
+        List<DataField> updatedDataFieldsDrop = parser.parseSchemaChange();
         for (int i = 0; i < expectDataFields.size(); i++) {
             expectDataFields.set(
                     i,
@@ -187,7 +186,7 @@ public class KafkaEventParserTest {
         expectDataFields.remove(2);
         assertThat(updatedDataFieldsDrop).isEqualTo(expectDataFields);
         parser.setRawEvent(CANAL_JSON_DDL_CHANGE_EVENT);
-        List<DataField> updatedDataFieldsChange = parser.getUpdatedDataFields().orElse(null);
+        List<DataField> updatedDataFieldsChange = parser.parseSchemaChange();
         expectDataFields.remove(9);
         for (int i = 0; i < expectDataFields.size(); i++) {
             expectDataFields.set(
@@ -217,11 +216,10 @@ public class KafkaEventParserTest {
 
     @Test
     public void testCaseSensitive() {
-        boolean caseSensitive = false;
         EventParser<String> parserCaseInsensitive =
-                new CanalJsonEventParser(caseSensitive, new TableNameConverter(caseSensitive));
+                new CanalJsonEventParser(false, new TableNameConverter(false));
         EventParser<String> parserCaseSensitive =
-                new CanalJsonEventParser(!caseSensitive, new TableNameConverter(!caseSensitive));
+                new CanalJsonEventParser(true, new TableNameConverter(true));
         parserCaseInsensitive.setRawEvent(CANAL_JSON_EVENT);
         List<DataField> dataFields = new ArrayList<>();
         dataFields.add(new DataField(0, "pt", DataTypes.INT()));
@@ -230,12 +228,10 @@ public class KafkaEventParserTest {
         dataFields.add(new DataField(3, "_geometrycollection", DataTypes.STRING()));
         dataFields.add(new DataField(4, "_set", DataTypes.ARRAY(DataTypes.STRING())));
         dataFields.add(new DataField(5, "_enum", DataTypes.STRING()));
-        List<DataField> updatedDataFields =
-                parserCaseInsensitive.getUpdatedDataFields().orElse(null);
-        assert updatedDataFields == null;
+        assertThat(parserCaseInsensitive.parseSchemaChange()).isEmpty();
         List<GenericRow> result =
-                parserCaseInsensitive.getRecords().stream()
-                        .map(record -> record.toGenericRow(dataFields).get())
+                parserCaseInsensitive.parseRecords().stream()
+                        .map(record -> toGenericRow(record, dataFields).get())
                         .collect(Collectors.toList());
         BinaryString[] binaryStrings =
                 new BinaryString[] {BinaryString.fromString("a"), BinaryString.fromString("b")};
@@ -254,13 +250,13 @@ public class KafkaEventParserTest {
         assertThat(result).isEqualTo(expect);
         parserCaseSensitive.setRawEvent(CANAL_JSON_EVENT);
         Optional<GenericRow> genericRow =
-                parserCaseSensitive.getRecords().get(0).toGenericRow(dataFields);
+                toGenericRow(parserCaseSensitive.parseRecords().get(0), dataFields);
         assert !genericRow.isPresent();
         dataFields.remove(1);
         dataFields.add(1, new DataField(1, "_ID", DataTypes.INT()));
         List<GenericRow> resultCaseSensitive =
-                parserCaseSensitive.getRecords().stream()
-                        .map(record -> record.toGenericRow(dataFields).get())
+                parserCaseSensitive.parseRecords().stream()
+                        .map(record -> toGenericRow(record, dataFields).get())
                         .collect(Collectors.toList());
         assertThat(resultCaseSensitive).isEqualTo(expect);
     }
@@ -282,11 +278,10 @@ public class KafkaEventParserTest {
         dataFields.add(new DataField(3, "_geometrycollection", DataTypes.STRING()));
         dataFields.add(new DataField(4, "_set", DataTypes.ARRAY(DataTypes.STRING())));
         dataFields.add(new DataField(5, "_enum", DataTypes.STRING()));
-        List<DataField> updatedDataFields = parser.getUpdatedDataFields().orElse(null);
-        assert updatedDataFields == null;
+        assertThat(parser.parseSchemaChange()).isEmpty();
         List<GenericRow> result =
-                parser.getRecords().stream()
-                        .map(record -> record.toGenericRow(dataFields).get())
+                parser.parseRecords().stream()
+                        .map(record -> toGenericRow(record, dataFields).get())
                         .collect(Collectors.toList());
         BinaryString[] binaryStrings =
                 new BinaryString[] {BinaryString.fromString("a"), BinaryString.fromString("b")};

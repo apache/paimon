@@ -18,28 +18,41 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.types.DataField;
 
 import java.io.Serializable;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * Parse a CDC change event to a list of {@link DataField}s or {@link CdcRecord}.
  *
  * @param <T> CDC change event type
  */
+@Experimental
 public interface EventParser<T> {
 
+    /** Set current raw event to the parser. */
     void setRawEvent(T rawEvent);
 
-    String tableName();
+    /** Parse the table name from raw event. */
+    default String parseTableName() {
+        throw new UnsupportedOperationException("Table name is not supported in this parser.");
+    }
 
-    boolean isUpdatedDataFields();
+    /**
+     * Parse new schema if this event contains schema change.
+     *
+     * @return empty if there is no schema change
+     */
+    List<DataField> parseSchemaChange();
 
-    Optional<List<DataField>> getUpdatedDataFields();
-
-    List<CdcRecord> getRecords();
+    /**
+     * Parse records from event.
+     *
+     * @return empty if there is no records
+     */
+    List<CdcRecord> parseRecords();
 
     /** Factory to create an {@link EventParser}. */
     interface Factory<T> extends Serializable {
