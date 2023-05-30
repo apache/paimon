@@ -36,6 +36,7 @@ public interface MergeFunctionFactory<T> extends Serializable {
         return new AdjustedProjection(projection, null);
     }
 
+    /** Result of adjusted projection. */
     class AdjustedProjection {
 
         @Nullable public final int[][] pushdownProjection;
