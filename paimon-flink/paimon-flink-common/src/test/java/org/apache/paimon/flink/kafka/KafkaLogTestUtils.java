@@ -161,7 +161,7 @@ public class KafkaLogTestUtils {
                 origin, new ResolvedSchema(resolvedColumns, Collections.emptyList(), constraint));
     }
 
-    static DynamicTableFactory.Context testContext(
+    public static DynamicTableFactory.Context testContext(
             String servers, LogChangelogMode changelogMode, boolean keyed) {
         return testContext("table", servers, changelogMode, LogConsistency.TRANSACTIONAL, keyed);
     }
