@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.BigIntType;
@@ -46,7 +47,7 @@ public class SequenceGenerator {
     private final int index;
 
     private final Generator generator;
-    private final NanosGenerator nanosGenerator;
+    private final PaddingGenerator generatorWithPadding;
 
     public SequenceGenerator(String field, RowType rowType) {
         index = rowType.getFieldNames().indexOf(field);
@@ -56,8 +57,8 @@ public class SequenceGenerator {
                             "Can not find sequence field %s in table schema: %s", field, rowType));
         }
         generator = rowType.getTypeAt(index).accept(new SequenceGeneratorVisitor());
-        nanosGenerator =
-                rowType.getTypeAt(index).accept(new NanosSequenceGeneratorVisitor(generator));
+        generatorWithPadding =
+                rowType.getTypeAt(index).accept(new PaddingSequenceGeneratorVisitor(generator));
     }
 
     public int index() {
@@ -73,22 +74,30 @@ public class SequenceGenerator {
         return generator.generate(row, index);
     }
 
-    public long generateWithNanos(InternalRow row) {
-        return nanosGenerator.generateWithNanos(row, index);
+    public long generateWithPadding(InternalRow row, CoreOptions.SequenceAutoPadding autoPadding) {
+        switch (autoPadding) {
+            case SECOND_TO_MICRO:
+                return generatorWithPadding.generateWithPaddingOnSeconds(row, index);
+            case MILLS_TO_MICRO:
+                return generatorWithPadding.generateWithPaddingOnMillis(row, index);
+            default:
+                throw new UnsupportedOperationException(
+                        "Unknown sequence padding mode " + autoPadding.name());
+        }
     }
 
-    private static long getCurrentNanoOfMillis() {
+    private static long getCurrentMicroOfMillis() {
         long currentNanoTime = System.nanoTime();
         long mills = TimeUnit.MILLISECONDS.convert(currentNanoTime, TimeUnit.NANOSECONDS);
-        long nanosOfMillis = currentNanoTime - mills * 1_000_000;
-        return nanosOfMillis;
+        long microOfMillis = (currentNanoTime - mills * 1_000_000) / 1000;
+        return microOfMillis;
     }
 
-    private static long getCurrentNanoOfSeconds() {
+    private static long getCurrentMicroOfSeconds() {
         long currentNanoTime = System.nanoTime();
         long seconds = TimeUnit.SECONDS.convert(currentNanoTime, TimeUnit.NANOSECONDS);
-        long nanosOfSecs = currentNanoTime - seconds * 1_000_000_000;
-        return nanosOfSecs;
+        long microOfSecs = (currentNanoTime - seconds * 1_000_000_000) / 1000;
+        return microOfSecs;
     }
 
     private interface Generator {
@@ -178,43 +187,98 @@ public class SequenceGenerator {
         }
     }
 
-    private interface NanosGenerator {
-        long generateWithNanos(InternalRow row, int i);
+    private interface PaddingGenerator {
+        long generateWithPaddingOnSeconds(InternalRow row, int i);
+
+        long generateWithPaddingOnMillis(InternalRow row, int i);
     }
 
-    private static class NanosSequenceGeneratorVisitor
-            extends DataTypeDefaultVisitor<NanosGenerator> {
-
+    private static class DefaultPaddingGenerator implements PaddingGenerator {
         private Generator generator;
 
-        public NanosSequenceGeneratorVisitor(Generator generator) {
+        public DefaultPaddingGenerator(Generator generator) {
             this.generator = generator;
         }
 
         @Override
-        public NanosGenerator visit(TimestampType timestampType) {
-            return (row, i) -> {
-                int precision = timestampType.getPrecision();
-                Timestamp ts = row.getTimestamp(i, precision);
-                return getNanos(ts, precision);
+        public long generateWithPaddingOnSeconds(InternalRow row, int i) {
+            long second = generator.generate(row, i);
+            long secondWithMicro = second * 1_000_000 + getCurrentMicroOfSeconds();
+            return secondWithMicro;
+        }
+
+        @Override
+        public long generateWithPaddingOnMillis(InternalRow row, int i) {
+            long millis = generator.generate(row, i);
+            long millisWithMicro = millis * 1_000 + getCurrentMicroOfMillis();
+            return millisWithMicro;
+        }
+    }
+
+    private static class PaddingSequenceGeneratorVisitor
+            extends DataTypeDefaultVisitor<PaddingGenerator> {
+
+        private Generator generator;
+
+        public PaddingSequenceGeneratorVisitor(Generator generator) {
+            this.generator = generator;
+        }
+
+        @Override
+        public PaddingGenerator visit(TimestampType timestampType) {
+            return new DefaultPaddingGenerator(generator);
+//            return (row, i) -> {
+//                int precision = timestampType.getPrecision();
+//                Timestamp ts = row.getTimestamp(i, precision);
+//                return getNanos(ts, precision);
+//            };
+        }
+
+        @Override
+        public PaddingGenerator visit(LocalZonedTimestampType localZonedTimestampType) {
+            return new PaddingGenerator() {
+                @Override
+                public long generateWithPaddingOnSeconds(InternalRow row, int i) {
+//                    if (precision == 0) {
+//                        long nanos = ts.getMillisecond() / 1000 * 1_000_000_000 + getCurrentMicroOfSeconds();
+//                        return nanos;
+//                    } else if (precision == 3) {
+//                        long nanos = ts.getMillisecond() * 1_000_000 + getCurrentMicroOfMillis();
+//                        return nanos;
+//                    } else {
+//                        long millis = ts.getMillisecond();
+//                        return millis;
+//                    }
+                    long millis = generator.generate(row, i);
+                    long secondWithMicro = millis / 1000 * 1_000_000 + getCurrentMicroOfSeconds();
+                    return secondWithMicro;
+                }
+
+                @Override
+                public long generateWithPaddingOnMillis(InternalRow row, int i) {
+                    long millis = generator.generate(row, i);
+                    long millisWithMicro = millis * 1_000 + getCurrentMicroOfMillis();
+                    return millisWithMicro;
+                }
             };
         }
 
         @Override
-        public NanosGenerator visit(LocalZonedTimestampType localZonedTimestampType) {
-            return (row, i) -> {
-                int precision = localZonedTimestampType.getPrecision();
-                Timestamp ts = row.getTimestamp(i, precision);
-                return getNanos(ts, precision);
-            };
+        public PaddingGenerator visit(IntType intType) {
+            return new DefaultPaddingGenerator(generator);
+        }
+
+        @Override
+        public PaddingGenerator visit(BigIntType bigIntType) {
+            return new DefaultPaddingGenerator(generator);
         }
 
         private long getNanos(Timestamp ts, int precision) {
             if (precision == 0) {
-                long nanos = ts.getMillisecond() / 1000 * 1_000_000_000 + getCurrentNanoOfSeconds();
+                long nanos = ts.getMillisecond() / 1000 * 1_000_000_000 + getCurrentMicroOfSeconds();
                 return nanos;
             } else if (precision == 3) {
-                long nanos = ts.getMillisecond() * 1_000_000 + getCurrentNanoOfMillis();
+                long nanos = ts.getMillisecond() * 1_000_000 + getCurrentMicroOfMillis();
                 return nanos;
             } else {
                 long millis = ts.getMillisecond();
@@ -223,8 +287,9 @@ public class SequenceGenerator {
         }
 
         @Override
-        protected NanosGenerator defaultMethod(DataType dataType) {
-            return (row, i) -> generator.generate(row, i);
+        protected PaddingGenerator defaultMethod(DataType dataType) {
+//            return (row, i) -> generator.generate(row, i);
+            return new DefaultPaddingGenerator(generator);
         }
     }
 }

@@ -223,7 +223,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         .sequenceField()
                         .map(field -> new SequenceGenerator(field, schema().logicalRowType()))
                         .orElse(null);
-        final boolean sequenceNanos = store().options().sequenceNanos();
+        final CoreOptions.SequenceAutoPadding sequenceAutoPadding = store().options().sequenceAutoPadding();
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store().newWrite(commitUser, manifestFilter),
@@ -232,9 +232,9 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                     long sequenceNumber =
                             sequenceGenerator == null
                                     ? KeyValue.UNKNOWN_SEQUENCE
-                                    : sequenceNanos
-                                            ? sequenceGenerator.generateWithNanos(record.row())
-                                            : sequenceGenerator.generate(record.row());
+                                    : sequenceAutoPadding == CoreOptions.SequenceAutoPadding.NONE
+                                            ? sequenceGenerator.generate(record.row())
+                                            : sequenceGenerator.generateWithPadding(record.row(), sequenceAutoPadding);
                     return kv.replace(
                             record.primaryKey(),
                             sequenceNumber,

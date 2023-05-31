@@ -161,6 +161,31 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
+    public void testTimestampPrecision() throws Exception {
+        Timestamp ts1 = Timestamp.fromLocalDateTime(LocalDateTime.of(2023, 5, 23, 11, 22, 33, 0));
+        Timestamp ts2 = Timestamp.fromLocalDateTime(LocalDateTime.of(2023, 5, 23, 11, 22, 33, 123000));
+        Timestamp ts3 = Timestamp.fromLocalDateTime(LocalDateTime.of(2023, 5, 23, 11, 22, 33, 123456));
+        InternalRow row1 = GenericRow.of(1, 11, 100L, ts1, ts1, ts1);
+        InternalRow row2 = GenericRow.of(2, 12, 101L, ts2, ts2, ts2);
+        InternalRow row3 = GenericRow.of(3, 13, 102L, ts3, ts3, ts3);
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {},
+                        ROW_TYPE_WITH_TIMESTAMP);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        write.write(row1);
+        write.write(row2);
+        write.write(row3);
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
+        TableRead read = table.newRead();
+        List<String> result = getResult(read, splits, binaryRow(1), 0, ROW_WITH_TIMESTAMP_TO_STRING);
+        System.out.println(result);
+    }
+
+    @Test
     public void testNanosSequenceNumberOnTimestampSecond() throws Exception {
         Timestamp ts =
                 Timestamp.fromLocalDateTime(LocalDateTime.of(2023, 5, 23, 11, 22, 33, 123456000));
@@ -169,7 +194,6 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                 createFileStoreTable(
                         conf -> {
                             conf.set(CoreOptions.SEQUENCE_FIELD, "tm1");
-                            conf.set(CoreOptions.SEQUENCE_NANOS, true);
                         },
                         ROW_TYPE_WITH_TIMESTAMP);
         StreamTableWrite write = table.newWrite(commitUser);
@@ -206,7 +230,6 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                 createFileStoreTable(
                         conf -> {
                             conf.set(CoreOptions.SEQUENCE_FIELD, "tm2");
-                            conf.set(CoreOptions.SEQUENCE_NANOS, true);
                         },
                         ROW_TYPE_WITH_TIMESTAMP);
         StreamTableWrite write = table.newWrite(commitUser);
@@ -246,7 +269,6 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                 createFileStoreTable(
                         conf -> {
                             conf.set(CoreOptions.SEQUENCE_FIELD, "tm3");
-                            conf.set(CoreOptions.SEQUENCE_NANOS, true);
                         },
                         ROW_TYPE_WITH_TIMESTAMP);
         StreamTableWrite write = table.newWrite(commitUser);
@@ -276,7 +298,6 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                 createFileStoreTable(
                         conf -> {
                             conf.set(CoreOptions.SEQUENCE_FIELD, "b");
-                            conf.set(CoreOptions.SEQUENCE_NANOS, true);
                         },
                         ROW_TYPE_WITH_TIMESTAMP);
         StreamTableWrite write = table.newWrite(commitUser);
