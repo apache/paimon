@@ -138,6 +138,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 newScan(),
                 options.bucket(),
                 options.manifestTargetSize(),
+                options.manifestFullCompactionThresholdSize(),
                 options.manifestMergeMinCount(),
                 partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
                 newKeyComparator());

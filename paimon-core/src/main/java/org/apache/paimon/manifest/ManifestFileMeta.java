@@ -18,21 +18,33 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Metadata of a manifest file. */
 public class ManifestFileMeta {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ManifestFileMeta.class);
 
     private final String fileName;
     private final long fileSize;
@@ -128,7 +140,9 @@ public class ManifestFileMeta {
             List<ManifestFileMeta> metas,
             ManifestFile manifestFile,
             long suggestedMetaSize,
-            int suggestedMinMetaCount) {
+            int suggestedMinMetaCount,
+            long manifestFullCompactionSize,
+            RowType partitionType) {
         List<ManifestFileMeta> result = new ArrayList<>();
         // these are the newly created manifest files, clean them up if exception occurs
         List<ManifestFileMeta> newMetas = new ArrayList<>();
@@ -136,8 +150,16 @@ public class ManifestFileMeta {
         long totalSize = 0;
 
         try {
+            List<ManifestFileMeta> manifestFileMetas =
+                    tryFullCompaction(
+                            metas,
+                            newMetas,
+                            manifestFile,
+                            partitionType,
+                            suggestedMetaSize,
+                            manifestFullCompactionSize);
             // merge existing manifests first
-            for (ManifestFileMeta manifest : metas) {
+            for (ManifestFileMeta manifest : manifestFileMetas) {
                 totalSize += manifest.fileSize;
                 candidates.add(manifest);
                 if (totalSize >= suggestedMetaSize) {
@@ -184,5 +206,130 @@ public class ManifestFileMeta {
             result.addAll(merged);
             newMetas.addAll(merged);
         }
+    }
+
+    public static List<ManifestFileMeta> tryFullCompaction(
+            List<ManifestFileMeta> inputs,
+            List<ManifestFileMeta> newMetas,
+            ManifestFile manifestFile,
+            RowType partitionType,
+            long suggestedMetaSize,
+            long sizeTrigger) {
+        List<ManifestFileMeta> base = new ArrayList<>();
+        int totalManifestSize = 0;
+        int i;
+        for (i = 0; i < inputs.size(); i++) {
+            ManifestFileMeta manifestFileMeta = inputs.get(i);
+            if (manifestFileMeta.numDeletedFiles == 0
+                    && manifestFileMeta.fileSize >= suggestedMetaSize) {
+                base.add(manifestFileMeta);
+                totalManifestSize += manifestFileMeta.fileSize;
+            } else {
+                break;
+            }
+        }
+
+        List<ManifestFileMeta> delta = new ArrayList<>();
+        for (; i < inputs.size(); i++) {
+            ManifestFileMeta manifestFileMeta = inputs.get(i);
+            delta.add(manifestFileMeta);
+            totalManifestSize += manifestFileMeta.fileSize;
+        }
+
+        long deltaDeleteFileNum = 0;
+        long totalDeltaFileSize = 0;
+        for (ManifestFileMeta manifestFileMeta : delta) {
+            deltaDeleteFileNum += manifestFileMeta.numDeletedFiles();
+            totalDeltaFileSize += manifestFileMeta.fileSize();
+        }
+
+        if (totalDeltaFileSize < sizeTrigger) {
+            return inputs;
+        }
+
+        LOGGER.info(
+                "Start Manifest File Full Compaction,pick the number of delete file: {} ,total manifest file size: {}",
+                deltaDeleteFileNum,
+                totalManifestSize);
+
+        Map<ManifestEntry.Identifier, ManifestEntry> deltaMerged = new LinkedHashMap<>();
+        for (ManifestFileMeta manifest : delta) {
+            ManifestEntry.mergeEntries(manifestFile.read(manifest.fileName), deltaMerged);
+        }
+
+        List<ManifestFileMeta> result = new ArrayList<>();
+        int j = 0;
+        if (partitionType.getFieldCount() > 0) {
+            Set<BinaryRow> deletePartitions = computeDeletePartitions(deltaMerged);
+            Optional<Predicate> predicateOpt =
+                    convertPartitionToPredicate(partitionType, deletePartitions);
+
+            if (predicateOpt.isPresent()) {
+                Predicate predicate = predicateOpt.get();
+                FieldStatsArraySerializer fieldStatsArraySerializer =
+                        new FieldStatsArraySerializer(partitionType);
+                for (; j < base.size(); j++) {
+                    // todo  optimize this to binary search.
+                    ManifestFileMeta file = base.get(j);
+                    if (predicate.test(
+                            file.numAddedFiles + file.numDeletedFiles,
+                            file.partitionStats.fields(fieldStatsArraySerializer))) {
+                        break;
+                    } else {
+                        result.add(file);
+                    }
+                }
+            } else {
+                // There is no DELETE Entry in Delta,Base don't need compaction
+                j = base.size();
+                result.addAll(base);
+            }
+        }
+
+        Map<ManifestEntry.Identifier, ManifestEntry> fullMerged = new LinkedHashMap<>();
+        for (; j < base.size(); j++) {
+            ManifestFileMeta manifestFileMeta = base.get(j);
+            ManifestEntry.mergeEntries(manifestFile.read(manifestFileMeta.fileName), fullMerged);
+        }
+        ManifestEntry.mergeEntries(deltaMerged.values(), fullMerged);
+
+        if (!fullMerged.isEmpty()) {
+            List<ManifestFileMeta> merged =
+                    manifestFile.write(new ArrayList<>(fullMerged.values()));
+            result.addAll(merged);
+            newMetas.addAll(merged);
+        }
+
+        return result;
+    }
+
+    private static Set<BinaryRow> computeDeletePartitions(
+            Map<ManifestEntry.Identifier, ManifestEntry> deltaMerged) {
+        Set<BinaryRow> partitions = new HashSet<>();
+        for (ManifestEntry manifestEntry : deltaMerged.values()) {
+            if (manifestEntry.kind() == FileKind.DELETE) {
+                BinaryRow partition = manifestEntry.partition();
+                partitions.add(partition);
+            }
+        }
+        return partitions;
+    }
+
+    private static Optional<Predicate> convertPartitionToPredicate(
+            RowType partitionType, Set<BinaryRow> partitions) {
+        Optional<Predicate> predicateOpt;
+        if (!partitions.isEmpty()) {
+            RowDataToObjectArrayConverter rowDataToObjectArrayConverter =
+                    new RowDataToObjectArrayConverter(partitionType);
+
+            List<Predicate> predicateList =
+                    partitions.stream()
+                            .map(rowDataToObjectArrayConverter::createEqualPredicate)
+                            .collect(Collectors.toList());
+            predicateOpt = Optional.of(PredicateBuilder.or(predicateList));
+        } else {
+            predicateOpt = Optional.empty();
+        }
+        return predicateOpt;
     }
 }
