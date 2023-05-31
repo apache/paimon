@@ -210,3 +210,19 @@ All Flink data types are supported, except that
 
 * `MULTISET` is not supported.
 * `MAP` is not supported as primary keys.
+
+## Use Flink Managed Memory
+In order to improve the buffer pool for writers in Paimon tasks.Paimon tasks can create memory pools based on Executor Memory which will be managed by Executor, such as Managed Memory in Flink TaskManager. It will improve the stability and performance of sinks by managing writer buffers for multiple tasks through Executor.
+
+The following properties can be set if using the flink managed memory:
+
+| Option    | Default | Description                                                                                                                                                                    |
+|------------|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| sink.use-managed-memory-allocator | false | If true, flink sink will use managed memory for merge tree; otherwise, it will create an independent memory allocator.                   |
+| sink.managed.writer-buffer-memory | 256M  | Weight of writer buffer in managed memory, Flink will compute the memory size, for writer according to the weight, the actual memory used depends on the running environment. |
+
+**Use In SQL**
+Users can set memory weight in SQL for Flink Managed Memory, then Flink sink operator will get the memory pool size and create allocator for Paimon writer.
+```sql
+INSERT INTO paimon_table /*+ OPTIONS('sink.use-managed-memory-allocator'='true', 'sink.managed.writer-buffer-memory'='256M') */
+SELECT * FROM ....;
